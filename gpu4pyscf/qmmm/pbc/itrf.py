@@ -483,6 +483,47 @@ def add_mm_charges_grad(scf_grad, atoms_or_coords, a, charges, radii=None,
 # Define method mm_charge_grad for backward compatibility
 mm_charge_grad = add_mm_charges_grad
 
+def get_hcore_mm(scf_grad, mol=None):
+    '''
+    Nuclear gradients of the electronic energy, w.r.t atomic orbitals
+    '''
+    mm_mol = scf_grad.base.mm_mol
+    if mol is None:
+        mol = scf_grad.mol
+    g_qm = cp.zeros([3, mol.nao, mol.nao])
+    rcut_hcore = mm_mol.rcut_hcore
+    coords = cp.asarray(mm_mol.atom_coords())
+    charges = cp.asarray(mm_mol.atom_charges())
+
+    Ls = cp.asarray(mm_mol.get_lattice_Ls())
+
+    qm_center = cp.mean(cp.asarray(mol.atom_coords()), axis=0)
+    all_coords = (coords[None,:,:] + Ls[:,None,:]).reshape(-1,3)
+    all_charges = cp.hstack([charges] * len(Ls))
+    dist2 = all_coords - qm_center
+    dist2 = contract('ix,ix->i', dist2, dist2)
+
+    # charges within rcut_hcore exactly go into hcore
+    mask = dist2 <= rcut_hcore**2
+    charges = all_charges[mask]
+    coords = all_coords[mask]
+    nao = mol.nao
+    if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
+        expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
+        g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts)
+    elif mm_mol.charge_model == 'point' and len(coords) != 0:
+        raise RuntimeError("Not tested yet")
+        max_memory = self.max_memory - lib.current_memory()[0]
+        blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
+        blksize = max(blksize, 1)
+        coords = coords.get()
+        for i0, i1 in lib.prange(0, len(coords), blksize):
+            j3c = cp.asarray(mol.intor('int1e_grids_ip', grids=coords[i0:i1]))
+            g_qm += contract('ikpq,k->ipq', j3c, charges[i0:i1])
+    else: # len(coords) == 0
+        pass
+    return g_qm
+
 def qmmm_grad_for_scf(scf_grad):
     '''Add the potential of MM particles to SCF (HF and DFT) object and then
     generate the corresponding QM/MM gradients method for the total system.
@@ -978,6 +1019,8 @@ class QMMMGrad:
                    (mm_ewovrl_grad + mm_ewg_grad).get()
 
     def get_hcore(self, mol=None):
+        if mol is None:
+            mol = self.mol
         cput0 = (logger.process_clock(), logger.perf_counter())
         def calculate_h1e(self, h1_gpu):
             h1 = super().get_hcore(mol)
@@ -985,48 +1028,32 @@ class QMMMGrad:
             return
 
         g_qm_orig = cp.empty([3, mol.nao, mol.nao])
-        g_qm = cp.zeros_like(g_qm_orig)
         with lib.call_in_background(calculate_h1e) as calculate_hs:
             calculate_hs(self, g_qm_orig)
-            mm_mol = self.base.mm_mol
-            if mol is None:
-                mol = self.mol
-            rcut_hcore = mm_mol.rcut_hcore
-            coords = cp.asarray(mm_mol.atom_coords())
-            charges = cp.asarray(mm_mol.atom_charges())
+            g_qm = get_hcore_mm(self)
 
-            Ls = cp.asarray(mm_mol.get_lattice_Ls())
+        logger.timer(self, 'get_hcore', *cput0)
+        return g_qm_orig + g_qm
 
-            qm_center = cp.mean(cp.asarray(mol.atom_coords()), axis=0)
-            all_coords = (coords[None,:,:] + Ls[:,None,:]).reshape(-1,3)
-            all_charges = cp.hstack([charges] * len(Ls))
-            dist2 = all_coords - qm_center
-            dist2 = contract('ix,ix->i', dist2, dist2)
+    def get_hcore_no_ecp(self, mol=None):
+        if mol is None:
+            mol = self.mol
+        cput0 = (logger.process_clock(), logger.perf_counter())
+        def calculate_h1e(self, h1_gpu):
+            h1 = super().get_hcore_no_ecp(mol)
+            h1_gpu[:] = cp.asarray(h1)
+            return
 
-            # charges within rcut_hcore exactly go into hcore
-            mask = dist2 <= rcut_hcore**2
-            charges = all_charges[mask]
-            coords = all_coords[mask]
-            nao = mol.nao
-            if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
-                expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-                g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts)
-            elif mm_mol.charge_model == 'point' and len(coords) != 0:
-                raise RuntimeError("Not tested yet")
-                max_memory = self.max_memory - lib.current_memory()[0]
-                blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
-                blksize = max(blksize, 1)
-                coords = coords.get()
-                for i0, i1 in lib.prange(0, len(coords), blksize):
-                    j3c = cp.asarray(mol.intor('int1e_grids_ip', grids=coords[i0:i1]))
-                    g_qm += contract('ikpq,k->ipq', j3c, charges[i0:i1])
-            else: # len(coords) == 0
-                pass
+        g_qm_orig = cp.empty([3, mol.nao, mol.nao])
+        with lib.call_in_background(calculate_h1e) as calculate_hs:
+            calculate_hs(self, g_qm_orig)
+            g_qm = get_hcore_mm(self)
+
         logger.timer(self, 'get_hcore', *cput0)
         return g_qm_orig + g_qm
 
     def grad_hcore_mm(self, dm, mol=None):
-        '''Nuclear gradients of the electronic energy
+        '''Nuclear gradients of the electronic energy, w.r.t charges
         '''
         cput0 = (logger.process_clock(), logger.perf_counter())
         dm = cp.asarray(dm)
