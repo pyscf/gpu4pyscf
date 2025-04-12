@@ -167,11 +167,37 @@ def tag_array(a, **kwargs):
     return t
 
 def asarray(a, **kwargs):
-    '''Similar to cupy.asarray, when the object is an instance of
-    CPArrayWithTag, this function will remove the attributes within
-    the tagged array'''
-    if isinstance(a, CPArrayWithTag):
+    '''
+    Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
+    If the input object is an instance of `CPArrayWithTag`, this function will remove any
+    associated attributes from the tagged array during the transfer.
+
+    Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
+    host memory deallocation before transfer completion, this function
+    eliminates that buffer for efficiency.
+    '''
+    if isinstance(a, np.ndarray):
+        # CuPy always allocates pinned memory as a temporary buffer during array transfer.
+        # This leads to additional memory usage, and the buffer is not managed by CuPy's
+        # memory pool or Python's GC.
+        # See the `cdef _ndarray_base _array_default` function in 
+        # cupy/_core/core.pyx, where memory buffer is allocated via
+        # mem = _alloc_async_transfer_buffer(nbytes)
+
+        allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
+        # a must be C-contiguous or F-contiguous
+        if not a.flags.c_contiguous and not a.flags.f_contiguous:
+            allow_fast_transfer = False
+        if allow_fast_transfer:
+            out = cupy.empty_like(a)
+            out.set(a)
+            if kwargs.get('blocking', False):
+                cupy.cuda.get_current_stream().synchronize()
+            return out
+
+    elif isinstance(a, CPArrayWithTag):
         a = a.view(cupy.ndarray)
+
     return cupy.asarray(a, **kwargs)
 
 def to_cupy(a):
