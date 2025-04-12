@@ -378,6 +378,8 @@ def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
         2D mask array of shape (N,nbas), where N is the number of grids, nbas
         is the number of shells.
     '''
+    if isinstance(coords, cupy.ndarray):
+        coords = coords.get()
     return make_screen_index(mol, coords, shls_slice, cutoff)
 
 def argsort_group(group_ids, ngroup):
