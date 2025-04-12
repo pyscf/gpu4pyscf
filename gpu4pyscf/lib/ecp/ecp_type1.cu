@@ -127,7 +127,6 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
         rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
         //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
-    __syncthreads();
 
     for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
         const int i = n/(LIJ+1)/(LIJ+1);
@@ -279,9 +278,9 @@ void type1_cart(double *gctr,
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
     double fi[3*nfi];
-    cache_fac(fi, LI, rca);
+    cache_fac<LI>(fi, rca);
     double fj[3*nfj];
-    cache_fac(fj, LJ, rcb);
+    cache_fac<LJ>(fj, rcb);
 
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         const int mi = ij%nfi;
@@ -307,11 +306,11 @@ void type1_cart(double *gctr,
         for (int i1 = 0; i1 <= ix; i1++){
         for (int i2 = 0; i2 <= iy; i2++){
         for (int i3 = 0; i3 <= iz; i3++){
-            double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
+            const double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
             for (int j1 = 0; j1 <= jx; j1++){
             for (int j2 = 0; j2 <= jy; j2++){
             for (int j3 = 0; j3 <= jz; j3++){
-                double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
+                const double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
                 const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}

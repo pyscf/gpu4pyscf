@@ -91,9 +91,33 @@ void cache_fac(double *fx, int LI, double *ri){
     }
 }
 
+template <int LI> __device__
+void cache_fac(double *fx, double *ri){
+    constexpr int LI1 = LI + 1;
+    double xx[LI1], yy[LI1], zz[LI1];
+    xx[0] = 1; yy[0] = 1; zz[0] = 1;
+    for (int i = 1; i <= LI; i++){
+        xx[i] = xx[i-1] * ri[0];
+        yy[i] = yy[i-1] * ri[1];
+        zz[i] = zz[i-1] * ri[2];
+    }
+
+    constexpr int nfi = (LI1+1)*LI1/2;
+    double *fy = fx + nfi;
+    double *fz = fy + nfi;
+    for (int i = 0; i <= LI; i++){
+        const int ioffset = i*(i+1)/2;
+        for (int j = 0; j <= i; j++){
+            const double bfac = _binom[ioffset+j]; // binom(i,j)
+            fx[ioffset+j] = bfac * xx[i-j];
+            fy[ioffset+j] = bfac * yy[i-j];
+            fz[ioffset+j] = bfac * zz[i-j];
+        }
+    }
+}
+
 __device__
 void block_reduce(double val, double *d_out) {
-    __syncthreads();
     __shared__ double sdata[THREADS];
     unsigned int tid = threadIdx.x;
 

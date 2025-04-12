@@ -58,14 +58,14 @@ void type2_cart_unrolled_kernel(double *gctr,
     const double *ai = env + bas[PTR_EXP+ish*BAS_SLOTS];
     const double *ci = env + bas[PTR_COEFF+ish*BAS_SLOTS];
     const double dca = norm3d(rca[0], rca[1], rca[2]);
-    double radi[LIC1+orderi];
+    double radi[LIC1];
     type2_facs_rad<orderi>(radi, LI+LC, npi, dca, ci, ai);
 
     const int npj = bas[NPRIM_OF+jsh*BAS_SLOTS];
     const double *aj = env + bas[PTR_EXP+jsh*BAS_SLOTS];
     const double *cj = env + bas[PTR_COEFF+jsh*BAS_SLOTS];
     const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
-    double radj[LJC1+orderj];
+    double radj[LJC1];
     type2_facs_rad<orderj>(radj, LJ+LC, npj, dcb, cj, aj);
 
     double ur = 0.0;
@@ -101,7 +101,6 @@ void type2_cart_unrolled_kernel(double *gctr,
     for (int m = 0; m < 2*LC+1; m++){
         type2_ang<LI, LC>(angi, rca, omegai+m);
         type2_ang<LJ, LC>(angj, rcb, omegaj+m);
-        __syncthreads();
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
             const int i = ij%nfi;
             const int j = ij/nfi;
@@ -112,8 +111,8 @@ void type2_cart_unrolled_kernel(double *gctr,
                 double *pangj = angj + l*nfj*LJC1 + j*LJC1;
                 double *prad = rad_all + (k+l)*LIC1*LJC1;
 
-                double reg_angi[LIC1+orderi];
-                double reg_angj[LJC1+orderj];
+                double reg_angi[LIC1];
+                double reg_angj[LJC1];
                 for (int p = 0; p < LIC1; p++){reg_angi[p] = pangi[p];}
                 for (int q = 0; q < LJC1; q++){reg_angj[q] = pangj[q];}
                 for (int p = 0; p < LIC1; p++){
@@ -273,14 +272,12 @@ void type2_cart_ip1(double *gctr,
         buf, ish, jsh, ksh, 
         ecpbas, ecploc, 
         atm, bas, env);
-    __syncthreads();
     _li_down(gctr_smem, buf, LI, LJ);
     if constexpr (LI > 0){
         type2_cart_unrolled_kernel<0,0,LI-1,LJ,LC>(
             buf, ish, jsh, ksh, 
             ecpbas, ecploc, 
             atm, bas, env);
-        __syncthreads();
         _li_up(gctr_smem, buf, LI, LJ);
     }
 

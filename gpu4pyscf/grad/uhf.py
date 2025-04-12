@@ -20,6 +20,7 @@ import numpy
 from pyscf import lib, gto
 from pyscf.grad import uhf
 from pyscf.grad import rhf as rhf_grad_cpu
+from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
@@ -48,7 +49,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
     log = logger.Logger(mf_grad.stdout, mf_grad.verbose)
-    t0 = log.init_timer()
+    t0 = t1 = log.init_timer()
 
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
@@ -59,25 +60,25 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
 
-    s1 = mf_grad.get_ovlp(mol)
-
     if atmlst is None:
         atmlst = range(mol.natm)
     aoslices = mol.aoslice_by_atom()
     de = cupy.zeros((len(atmlst),3))
     
     # (\nabla i | hcore | j) - (\nabla i | j)
-    h1 = cupy.asarray(mf_grad.get_hcore(mol))
+    h1 = cupy.asarray(mf_grad.get_hcore_no_ecp(mol))
     s1 = cupy.asarray(mf_grad.get_ovlp(mol))
 
     # (i | \nabla hcore | j)
-    t3 = log.init_timer()
     dh1e = int3c2e.get_dh1e(mol, dm0_sf)
 
-    log.timer_debug1("get_dh1e", *t3)
     if mol.has_ecp():
-        dh1e += rhf_grad.get_dh1e_ecp(mol, dm0_sf)
-    t1 = log.timer_debug1('gradients of h1e', *t0)
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
+        h1 -= h1_ecp.sum(axis=0)
+
+        dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0_sf)
+    t1 = log.timer_debug1('gradients of h1e', *t1)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
     dvhf = mf_grad.get_veff(mol, dm0)
     
@@ -98,7 +99,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         g_disp = mf_grad.get_dispersion()
         mf_grad.grad_disp = g_disp
         mf_grad.grad_mf = de
-
+    log.timer_debug1('gradients of electronic part', *t0)
     return de.get()
 
 
@@ -109,6 +110,7 @@ class Gradients(rhf_grad.GradientsBase):
     device = utils.device
 
     grad_elec = grad_elec
+    get_hcore_no_ecp = rhf_grad.get_hcore_no_ecp
 
     def get_veff(self, mol, dm, verbose=None):
         '''

@@ -77,12 +77,12 @@ void type1_cart_unrolled_kernel(double *gctr,
         }
     }
 
-    constexpr int NFI_MAX = (LI+orderi+1)*(LI+orderi+2)/2;
-    constexpr int NFJ_MAX = (LJ+orderj+1)*(LJ+orderj+2)/2;
-    double fi[3*NFI_MAX];
-    cache_fac(fi, LI, rca);
-    double fj[3*NFJ_MAX];
-    cache_fac(fj, LJ, rcb);
+    constexpr int NFI = (LI+1)*(LI+2)/2;
+    constexpr int NFJ = (LJ+1)*(LJ+2)/2;
+    double fi[3*NFI];
+    cache_fac<LI>(fi, rca);
+    double fj[3*NFJ];
+    cache_fac<LJ>(fj, rcb);
 
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
@@ -110,11 +110,11 @@ void type1_cart_unrolled_kernel(double *gctr,
         for (int i1 = 0; i1 <= ix; i1++){
         for (int i2 = 0; i2 <= iy; i2++){
         for (int i3 = 0; i3 <= iz; i3++){
-            double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
+            const double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
             for (int j1 = 0; j1 <= jx; j1++){
             for (int j2 = 0; j2 <= jy; j2++){
             for (int j3 = 0; j3 <= jz; j3++){
-                double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
+                const double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
                 const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}
@@ -175,8 +175,8 @@ void type1_cart_kernel(double *gctr,
     for (int ip = 0; ip < npi; ip++){
         for (int jp = 0; jp < npj; jp++){
             double rij[3];
-            double ai_prim = ai[ip];
-            double aj_prim = aj[jp];
+            const double ai_prim = ai[ip];
+            const double aj_prim = aj[jp];
             rij[0] = ai_prim * rca[0] + aj_prim * rcb[0];
             rij[1] = ai_prim * rca[1] + aj_prim * rcb[1];
             rij[2] = ai_prim * rca[2] + aj_prim * rcb[2];
@@ -225,11 +225,11 @@ void type1_cart_kernel(double *gctr,
         for (int i1 = 0; i1 <= ix; i1++){
         for (int i2 = 0; i2 <= iy; i2++){
         for (int i3 = 0; i3 <= iz; i3++){
-            double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
+            const double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
             for (int j1 = 0; j1 <= jx; j1++){
             for (int j2 = 0; j2 <= jy; j2++){
             for (int j3 = 0; j3 <= jz; j3++){
-                double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
+                const double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
                 const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}
@@ -275,7 +275,6 @@ void type1_cart_ip1(double *gctr,
         buf, ish, jsh, ksh, 
         ecpbas, ecploc, 
         atm, bas, env);
-    __syncthreads();
     _li_down(gctr_smem, buf, LI, LJ);
 
     if constexpr (LI > 0){
@@ -283,7 +282,6 @@ void type1_cart_ip1(double *gctr,
             buf, ish, jsh, ksh, 
             ecpbas, ecploc, 
             atm, bas, env);
-        __syncthreads();
         _li_up(gctr_smem, buf, LI, LJ);
     }
 

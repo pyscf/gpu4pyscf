@@ -173,7 +173,6 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
         if constexpr (LI+LC >= 7)  {type2_ang_nuc_l<7>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
         if constexpr (LI+LC >= 9)  {type2_ang_nuc_l<9>(pomega, LC, i, j, k, unitr);  pomega+=(2*LC+1);}
     }
-    __syncthreads();
 }
 
 
@@ -238,7 +237,7 @@ void type2_ang(double * __restrict__ facs, double *rca, double *omega){
 
     constexpr int NF = (LI+1)*(LI+2)/2;
     double fi[NF*3];
-    cache_fac(fi, LI, rca);
+    cache_fac<LI>(fi, rca);
 
     // i,j,k,ijkmn->(i+j+k)pmn
     for (int pmn = threadIdx.x; pmn < nfi*LIC1; pmn+=blockDim.x){
@@ -357,7 +356,6 @@ void type2_cart(double * __restrict__ gctr,
         double *prad = rad_all + p*LIC1*LJC1;
         for (int i = 0; i <= LI+LC; i++){
         for (int j = 0; j <= LJ+LC; j++){
-            __syncthreads();
             block_reduce(radi[i]*radj[j]*ur, prad+i*LJC1+j);
         }}
         ur *= root;
