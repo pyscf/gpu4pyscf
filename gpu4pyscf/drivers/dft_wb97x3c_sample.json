@@ -20,6 +20,6 @@
     "with_gpu": true,
     "with_df": true,
     "with_grad": true,
-    "with_hess": false,
+    "with_hess": true,
     "save_density": false
 }]

@@ -513,7 +513,7 @@ def get_hcore_mm(scf_grad, mol=None):
         g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts)
     elif mm_mol.charge_model == 'point' and len(coords) != 0:
         raise RuntimeError("Not tested yet")
-        max_memory = self.max_memory - lib.current_memory()[0]
+        max_memory = scf_grad.max_memory - lib.current_memory()[0]
         blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
         blksize = max(blksize, 1)
         coords = coords.get()

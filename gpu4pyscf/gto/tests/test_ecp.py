@@ -65,19 +65,19 @@ def setUpModule():
 Na nelec 10
 Na ul
 2       1.0                   0.5
-#Na S
-#2      13.652203             732.2692
-#2       6.826101              26.484721
-#Na P
-#2      10.279868             299.489474
-#2       5.139934              26.466234
-#Na D
-#2       7.349859             124.457595
-#2       3.674929              14.035995
-#Na F
-#2       3.034072              21.531031
-#Na G
-#2       4.808857             -21.607597
+Na S
+2      13.652203             732.2692
+2       6.826101              26.484721
+Na P
+2      10.279868             299.489474
+2       5.139934              26.466234
+Na D
+2       7.349859             124.457595
+2       3.674929              14.035995
+Na F
+2       3.034072              21.531031
+Na G
+2       4.808857             -21.607597
                                          ''')})
 def tearDownModule():
     global mol1, mol2
@@ -95,14 +95,14 @@ class KnownValues(unittest.TestCase):
         h1_cpu = mol2.intor('ECPscalar_sph')
         h1_gpu = get_ecp(mol2)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    
+
     @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_cart_ip1(self):
         h1_cpu = mol1.intor('ECPscalar_iprinv_cart')
         h1_gpu = get_ecp_ip(mol1)
         h1_gpu = np.sum(h1_gpu, axis=0)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    
+
     @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_sph_iprinv(self):
         nao = mol2.nao
@@ -119,13 +119,13 @@ class KnownValues(unittest.TestCase):
         h1_cpu = mol2.intor('ECPscalar_ipnuc_sph')
         h1_gpu = get_ecp_ip(mol2).sum(axis=0)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    
+
     @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_cart_ipipv(self):
         h1_cpu = mol2.intor('ECPscalar_ipipnuc', comp=9)
         h1_gpu = get_ecp_ipip(mol2, 'ipipv').sum(axis=0)
         assert np.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-8
-    
+
     @unittest.skipIf(shm_size < 64*1024, "Not enough shared memory")
     def test_ecp_cart_ipvip_cart(self):
         h1_cpu = mol2.intor('ECPscalar_ipnucip', comp=9)
