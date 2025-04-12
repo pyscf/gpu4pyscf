@@ -292,8 +292,8 @@ class VHFOpt(_vhf.VHFOpt):
                 assert n == len(aux_idx)
                 indices = aux_idx
             else:
-                indices = np.arange(n)
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+                indices = slice(None)
+            idx_shape = shape_ones[:dim] + (n,) + shape_ones[dim+1:]
             fancy_index.append(indices.reshape(idx_shape))
         return mat[tuple(fancy_index)]
 
@@ -313,8 +313,8 @@ class VHFOpt(_vhf.VHFOpt):
                 assert n == len(aux_idx)
                 indices = aux_idx
             else:
-                indices = np.arange(n)
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+                indices = slice(None)
+            idx_shape = shape_ones[:dim] + (n,) + shape_ones[dim+1:]
             fancy_index.append(indices.reshape(idx_shape))
         mat = cupy.empty_like(sorted_mat)
         mat[tuple(fancy_index)] = sorted_mat

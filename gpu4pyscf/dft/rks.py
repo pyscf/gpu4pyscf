@@ -19,7 +19,7 @@ from pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 from pyscf import __config__
 
 __all__ = [
@@ -41,8 +41,8 @@ def initialize_grids(ks, mol=None, dm=None):
         t0 = logger.init_timer(ks)
         ks.grids.build()
         #ks.grids.build(with_non0tab=True)
-        ks.grids.weights = cupy.asarray(ks.grids.weights)
-        ks.grids.coords = cupy.asarray(ks.grids.coords)
+        ks.grids.weights = asarray(ks.grids.weights)
+        ks.grids.coords = asarray(ks.grids.coords)
         ground_state = getattr(dm, 'ndim', 0) == 2
         if ks.small_rho_cutoff > 1e-20 and ground_state:
             # Filter grids the first time setup grids
@@ -54,8 +54,8 @@ def initialize_grids(ks, mol=None, dm=None):
                 t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build()
-                ks.nlcgrids.weights = cupy.asarray(ks.nlcgrids.weights)
-                ks.nlcgrids.coords = cupy.asarray(ks.nlcgrids.coords)
+                ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
+                ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
                 if ks.small_rho_cutoff > 1e-20 and ground_state:
                     # Filter grids the first time setup grids
                     ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)

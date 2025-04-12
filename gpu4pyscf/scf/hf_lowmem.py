@@ -96,7 +96,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         mo_coeff = mo_occ = mo_energy = fock = None
         last_hf_e = e_tot
 
-        s1e = cp.asarray(mf.get_ovlp(mol))
+        s1e = asarray(mf.get_ovlp(mol))
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis) # on GPU
         t1 = log.timer_debug1('DIIS', *t0)
         mo_energy, mo_coeff = mf.eig(fock, s1e) # on GPU
@@ -219,7 +219,7 @@ class RHF(hf.RHF):
         vj = vk = None
         vhf = pack_tril(vhf[0])
         if vhf_last is not None:
-            vhf += cp.asarray(vhf_last)
+            vhf += asarray(vhf_last)
         log.timer('vj and vk', *cput0)
         return vhf.get()
 
@@ -255,14 +255,14 @@ class RHF(hf.RHF):
         '''Return Fock matrix in square storage'''
         if h1e is None: h1e = self.get_hcore()
         if vhf is None: vhf = self.get_veff(self.mol, dm_or_wfn)
-        if not isinstance(h1e, cp.ndarray): h1e = cp.asarray(h1e)
-        if not isinstance(vhf, cp.ndarray): vhf = cp.asarray(vhf)
+        if not isinstance(h1e, cp.ndarray): h1e = asarray(h1e)
+        if not isinstance(vhf, cp.ndarray): vhf = asarray(vhf)
         # h1e and vhf must be both in tril storage or square-matrix storage
         assert h1e.shape[-1] == vhf.shape[-1]
         assert h1e.ndim == vhf.ndim == 1
         nao = int((h1e.size*2)**.5)
         f = cp.empty((nao, nao))
-        f = unpack_tril(cp.asarray(h1e + vhf), out=f)
+        f = unpack_tril(asarray(h1e + vhf), out=f)
         if cycle < 0 and diis is None:  # Not inside the SCF iteration
             return f
 
@@ -273,8 +273,8 @@ class RHF(hf.RHF):
             dm = dm_or_wfn.make_rdm1()
         else:
             dm = dm_or_wfn
-        if not isinstance(s1e, cp.ndarray): s1e = cp.asarray(s1e)
-        if not isinstance(dm, cp.ndarray): dm = cp.asarray(dm)
+        if not isinstance(s1e, cp.ndarray): s1e = asarray(s1e)
+        if not isinstance(dm, cp.ndarray): dm = asarray(dm)
         # Ensure overlap in square-matrix format
         if s1e.shape[-1] != f.shape[-1]:
             s1e = unpack_tril(s1e)

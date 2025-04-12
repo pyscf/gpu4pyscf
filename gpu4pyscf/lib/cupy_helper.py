@@ -167,15 +167,47 @@ def tag_array(a, **kwargs):
     t.__dict__.update(kwargs)
     return t
 
-def asarray(a, **kwargs):
-    '''Similar to cupy.asarray, when the object is an instance of
-    CPArrayWithTag, this function will remove the attributes within
-    the tagged array'''
-    if isinstance(a, CPArrayWithTag):
+def asarray(a, synchronize=True, **kwargs):
+    '''
+    Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
+    If the input object is an instance of `CPArrayWithTag`, this function will remove any
+    associated attributes from the tagged array during the transfer.
+
+    Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
+    host memory deallocation before transfer completion, this function
+    eliminates that buffer for efficiency.
+
+    **Note**: The host memory may be freed before the transfer is complete.
+    Users must ensure proper synchronization and manage host memory deallocation
+    carefully to avoid undefined behavior.
+    '''
+    if isinstance(a, np.ndarray):
+        # CuPy always allocates pinned memory as a temporary buffer during array transfer.
+        # This leads to additional memory usage, and the buffer is not managed by CuPy's
+        # memory pool or Python's GC.
+        # See the `cdef _ndarray_base _array_default` function in 
+        # cupy/_core/core.pyx, where memory buffer is allocated via
+        # mem = _alloc_async_transfer_buffer(nbytes)
+
+        allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
+        # a must be C-contiguous or F-contiguous
+        if a.flags.c_contiguous:
+            order = kwargs.get('order', 'C')
+        elif a.flags.f_contiguous:
+            order = kwargs.get('order', 'F')
+        else:
+            allow_fast_transfer = False
+        if allow_fast_transfer:
+            out = cupy.empty_like(a.shape, dtype=dtype, order=order)
+            out.set(a)
+            if synchronize:
+                cupy.cuda.get_current_stream().synchronize()
+            return out
+
+    elif isinstance(a, CPArrayWithTag):
         a = a.view(cupy.ndarray)
-    if kwargs:
-        a = cupy.asarray(a, **kwargs)
-    return a
+
+    return cupy.asarray(a, **kwargs)
 
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''

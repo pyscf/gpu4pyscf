@@ -28,7 +28,8 @@ from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, transpose_sum, reduce_to_device, hermi_triu)
+    load_library, condense, transpose_sum, reduce_to_device, hermi_triu,
+    asarray)
 from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -348,7 +349,7 @@ class _VHFOpt:
         device_id = cp.cuda.Device().id
         if device_id not in self._q_cond:
             with cp.cuda.Device(device_id), _streams[device_id]:
-                self._q_cond[device_id] = cp.asarray(self.q_cond_cpu)
+                self._q_cond[device_id] = asarray(self.q_cond_cpu)
         return self._q_cond[device_id]
 
     @property
@@ -357,7 +358,7 @@ class _VHFOpt:
         if device_id not in self._tile_q_cond:
             with cp.cuda.Device(device_id), _streams[device_id]:
                 q_cpu = self._tile_q_cond_cpu
-                self._tile_q_cond[device_id] = cp.asarray(q_cpu)
+                self._tile_q_cond[device_id] = asarray(q_cpu)
         return self._tile_q_cond[device_id]
 
     @property
@@ -368,7 +369,7 @@ class _VHFOpt:
         if device_id not in self._rys_envs:
             with cp.cuda.Device(device_id), _streams[device_id]:
                 s_cpu = self.s_estimator_cpu
-                self._s_estimator[device_id] = cp.asarray(s_cpu)
+                self._s_estimator[device_id] = asarray(s_cpu)
         return self._s_estimator[device_id]
 
     @property
@@ -421,8 +422,7 @@ class _VHFOpt:
                 i_cartesian_offset += cart2sph.shape[0]
         assert len(self.ao_idx) == self.mol.nao
         coeff = self.unsort_orbitals(coeff, axis = [1])
-        coeff = cp.asarray(coeff)
-        return coeff
+        return asarray(coeff)
 
     def get_jk(self, dms, hermi, with_j, with_k, verbose):
         '''
@@ -591,12 +591,12 @@ class _VHFOpt:
                                      dms, 1, mol._atm, mol._bas, mol._env,
                                      shls_excludes=shls_excludes)
             if with_j and with_k:
-                vj1 = cp.asarray(vs_h[0])
-                vk1 = cp.asarray(vs_h[1])
+                vj1 = asarray(vs_h[0])
+                vk1 = asarray(vs_h[1])
             elif with_j:
-                vj1 = cp.asarray(vs_h[0])
+                vj1 = asarray(vs_h[0])
             else:
-                vk1 = cp.asarray(vs_h[0])
+                vk1 = asarray(vs_h[0])
             if with_j:
                 vj += hermi_triu(vj1)
             if with_k:
@@ -643,10 +643,10 @@ class _VHFOpt:
             stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
-            dm_xyz = cp.asarray(dm_xyz) # transfer to current device
-            dm_cond = cp.asarray(dm_cond)
+            dm_xyz = asarray(dm_xyz) # transfer to current device
+            dm_cond = asarray(dm_cond)
             vj_xyz = cp.zeros_like(dm_xyz)
-            pair_loc_on_gpu = cp.asarray(pair_loc)
+            pair_loc_on_gpu = asarray(pair_loc)
             _atm, _bas, _env, _ = self.rys_envs._env_ref_holder
             rys_envs = RysIntEnvVars(
                 mol.natm, mol.nbas,
@@ -752,7 +752,7 @@ class _VHFOpt:
         libvhf_rys.transform_xyz_to_cart(
             vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
             mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-        vj = transpose_sum(cp.asarray(vj))
+        vj = transpose_sum(asarray(vj))
         vj *= 2.
 
         h_shls = self.h_shls
@@ -764,7 +764,7 @@ class _VHFOpt:
             vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                      dms, 1, mol._atm, mol._bas, mol._env,
                                      shls_excludes=shls_excludes)
-            vj1 = cp.asarray(vs_h[0])
+            vj1 = asarray(vs_h[0])
             vj += hermi_triu(vj1)
         return vj
 
