@@ -127,6 +127,7 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
         rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
         //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
+    __syncthreads();
 
     for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
         const int i = n/(LIJ+1)/(LIJ+1);
@@ -146,6 +147,65 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
         rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
         //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
+    __syncthreads();
+}
+
+template <int LIJ> __device__
+void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac)
+{
+    double unitr[3];
+    if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
+        unitr[0] = 0;
+        unitr[1] = 0;
+        unitr[2] = 0;
+    } else {
+        double norm_r = -rnorm3d(r[0], r[1], r[2]);
+        unitr[0] = r[0] * norm_r;
+        unitr[1] = r[1] * norm_r;
+        unitr[2] = r[2] * norm_r;
+    }
+
+    // loop over i+j+k<=LIJ
+    // TODO: find a closed form?
+    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+        const int i = n/(LIJ+1)/(LIJ+1);
+        const int j = n/(LIJ+1)%(LIJ+1);
+        const int k = n%(LIJ+1);
+        if (i+j+k > LIJ || (i+j+k)%2 == 1){
+            continue;
+        }
+        // need_even to ensure (i+j+k+lmb) is even
+        double s = 0.0;
+        double *prad = rad_all + (i+j+k)*(LIJ+1);
+        if constexpr (LIJ >= 0) s += prad[0] * type1_ang_nuc_l<0>(i, j, k, unitr);
+        if constexpr (LIJ >= 2) s += prad[2] * type1_ang_nuc_l<2>(i, j, k, unitr);
+        if constexpr (LIJ >= 4) s += prad[4] * type1_ang_nuc_l<4>(i, j, k, unitr);
+        if constexpr (LIJ >= 6) s += prad[6] * type1_ang_nuc_l<6>(i, j, k, unitr);
+        if constexpr (LIJ >= 8) s += prad[8] * type1_ang_nuc_l<8>(i, j, k, unitr);
+        if constexpr (LIJ >= 10)s += prad[10]* type1_ang_nuc_l<10>(i, j, k, unitr);
+        rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
+        //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
+    }
+
+    for (int n = threadIdx.x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim.x){
+        const int i = n/(LIJ+1)/(LIJ+1);
+        const int j = n/(LIJ+1)%(LIJ+1);
+        const int k = n%(LIJ+1);
+        if (i+j+k > LIJ || (i+j+k)%2 == 0){
+            continue;
+        }
+        // need_even to ensure (i+j+k+lmb) is even
+        double s = 0.0;
+        double *prad = rad_all + (i+j+k)*(LIJ+1);
+        if constexpr (LIJ >= 1) s += prad[1] * type1_ang_nuc_l<1>(i, j, k, unitr);
+        if constexpr (LIJ >= 3) s += prad[3] * type1_ang_nuc_l<3>(i, j, k, unitr);
+        if constexpr (LIJ >= 5) s += prad[5] * type1_ang_nuc_l<5>(i, j, k, unitr);
+        if constexpr (LIJ >= 7) s += prad[7] * type1_ang_nuc_l<7>(i, j, k, unitr);
+        if constexpr (LIJ >= 9) s += prad[9] * type1_ang_nuc_l<9>(i, j, k, unitr);
+        rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
+        //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
+    }
+    __syncthreads();
 }
 
 template <int LI, int LJ> __global__
@@ -210,7 +270,8 @@ void type1_cart(double *gctr,
 
             const double eij = exp(-ai[ip]*r2ca - aj[jp]*r2cb);
             const double ceij = eij * ci[ip] * cj[jp];
-            type1_rad_ang(rad_ang, LI+LJ, rij, rad_all, fac*ceij);
+            type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all, fac*ceij);
+            //type1_rad_ang(rad_ang, LI+LJ, rij, rad_all, fac*ceij);
             __syncthreads();
         }
     }
@@ -218,8 +279,8 @@ void type1_cart(double *gctr,
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
     double fi[3*nfi];
-    double fj[3*nfj];
     cache_fac(fi, LI, rca);
+    double fj[3*nfj];
     cache_fac(fj, LJ, rcb);
 
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
@@ -346,8 +407,8 @@ void type1_cart(double *gctr,
     const int nfj = (LJ+1) * (LJ+2) / 2;
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
         double fi[3*NF_MAX];
-        double fj[3*NF_MAX];
         cache_fac(fi, LI, rca);
+        double fj[3*NF_MAX];
         cache_fac(fj, LJ, rcb);
 
         const int mi = ij%nfi;

@@ -93,6 +93,7 @@ void cache_fac(double *fx, int LI, double *ri){
 
 __device__
 void block_reduce(double val, double *d_out) {
+    __syncthreads();
     __shared__ double sdata[THREADS];
     unsigned int tid = threadIdx.x;
 
