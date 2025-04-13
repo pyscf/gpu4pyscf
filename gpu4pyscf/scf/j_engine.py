@@ -24,7 +24,8 @@ import cupy as cp
 import scipy.linalg
 from pyscf import lib
 from pyscf import __config__
-from gpu4pyscf.lib.cupy_helper import load_library, condense, sandwich_dot, transpose_sum
+from gpu4pyscf.lib.cupy_helper import (
+    load_library, condense, sandwich_dot, transpose_sum, asarray)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.lib import logger
@@ -89,10 +90,10 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
     libvhf_md.Et_dot_dm(
         dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
-    dm_xyz = cp.asarray(dm_xyz)
+    dm_xyz = asarray(dm_xyz)
     vj_xyz = cp.zeros_like(dm_xyz)
 
-    pair_loc_on_gpu = cp.asarray(pair_loc)
+    pair_loc_on_gpu = asarray(pair_loc)
     rys_envs = RysIntEnvVars(
         mol.natm, mol.nbas,
         vhfopt.rys_envs.atm, vhfopt.rys_envs.bas, vhfopt.rys_envs.env,

@@ -26,45 +26,41 @@
 #define TILEY   4
 
 extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ uint16_t c_Rt_offsets[];
+extern __constant__ int8_t c_Rt_tuv_fac[];
 
 #define ADDR(l, t, u, v) \
         ((l+1)*(l+2)*(l+3)/6 - ((l)-(t)+1)*((l)-(t)+2)*((l)-(t)+3)/6 + \
          ((l)-(t)+1)*((l)-(t)+2)/2 - ((l)-(t)-(u)+1)*((l)-(t)-(u)+2)/2 + (v))
 
 __device__
-static void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz,
-                      int l, int sq_id, int nsq_per_block)
+static void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l)
 {
-    uint16_t *p1 = c_Rt_idx + c_Rt_offsets[l];
+    int nsq_per_block = blockDim.x * blockDim.y;
+    int gout_id = threadIdx.z;
+    int gout_stride = blockDim.z;
+
+    int offsets = l*(l+1)*(l+2)*(l+3)/24;
+    uint16_t *p1 = c_Rt_idx + offsets - l;
     double *pout = out + nsq_per_block;
-    int k = 0;
-    for (int v = 0, i = 0; v < l; ++v) {
-        pout[sq_id+k*nsq_per_block] = rz * Rt[sq_id+i*nsq_per_block] + v * Rt[sq_id+p1[k]*nsq_per_block];
-        ++k; ++i;
+    __syncthreads();
+    for (int v = gout_id; v < l; v += gout_stride) {
+        pout[v*nsq_per_block] = rz * Rt[v*nsq_per_block] + v * Rt[p1[v]*nsq_per_block];
     }
-    for (int u = 0, i = 0; u < l; ++u) {
-        for (int v = 0; v < l-u; ++v) {
-            pout[sq_id+k*nsq_per_block] = ry * Rt[sq_id+i*nsq_per_block] + u * Rt[sq_id+p1[k]*nsq_per_block];
-            ++k; ++i;
-        }
+    pout += l * nsq_per_block;
+    p1 += l;
+    int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
+
+    int n2 = l * (l+1) / 2;
+    for (int i = gout_id; i < n2; i += gout_stride) {
+        pout[i*nsq_per_block] = ry * Rt[i*nsq_per_block] + tuv_fac[i] * Rt[p1[i]*nsq_per_block];
     }
-    //int nf3 = l*(l+1)*(l+2)/6;
-    //Fold3Index *fold3idx = c_i_in_fold3idx + (l-1)*nf3/4;;
-    //for (int i = 0; i < nf3; ++i) {
-    //    Fold3Index f3i = fold3idx[i];
-    //    int t = f3i.x;
-    //    pout[sq_id+(k+i)*nsq_per_block] = rx * Rt[sq_id+i*nsq_per_block]
-    //        + t * Rt[sq_id+p1[k+i]*nsq_per_block];
-    //}
-    for (int t = 0, i = 0; t < l; ++t) {
-        // corresponding to the nested loops
-        // for (u = 0; u < l-t; ++u) for (v = 0; v < l-t-u; ++v)
-        for (int uv = 0; uv < (l-t) * (l-t+1) / 2; ++uv) {
-            pout[sq_id+(k+i)*nsq_per_block] = rx * Rt[sq_id+i*nsq_per_block]
-                + t * Rt[sq_id+p1[k+i]*nsq_per_block];
-            ++i;
-        }
+    pout += n2 * nsq_per_block;
+    p1 += n2;
+    tuv_fac += n2;
+
+    int n3 = n2 * (l+2) / 3;
+    for (int i = gout_id; i < n3; i += gout_stride) {
+        pout[i*nsq_per_block] = rx * Rt[i*nsq_per_block] + tuv_fac[i] * Rt[p1[i]*nsq_per_block];
     }
 }
 
@@ -243,22 +239,30 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int dm_ij_pair0 = dm_pair_loc[pair_ij];
         int dm_kl_pair0 = dm_pair_loc[pair_kl];
         double *Rt, *buf;
+        if (order % 2 == 0) {
+            Rt = vj_kl_cache + nf3kl*bsizey + sq_id;
+            buf = Rt + nf3ijkl * nsq_per_block;
+        } else {
+            buf = vj_kl_cache + nf3kl*bsizey + sq_id;
+            Rt = buf + nf3ijkl * nsq_per_block;
+        }
+        __syncthreads();
+        double xij = Rp_cache[sq_ij+0*bsizex];
+        double yij = Rp_cache[sq_ij+1*bsizex];
+        double zij = Rp_cache[sq_ij+2*bsizex];
+        double aij = Rp_cache[sq_ij+3*bsizex];
+        double xkl = Rq_cache[sq_kl+0*bsizey];
+        double ykl = Rq_cache[sq_kl+1*bsizey];
+        double zkl = Rq_cache[sq_kl+2*bsizey];
+        double akl = Rq_cache[sq_kl+3*bsizey];
+        double fac = fac_sym / (aij*akl*sqrt(aij+akl));
+        double xpq = xij - xkl;
+        double ypq = yij - ykl;
+        double zpq = zij - zkl;
+        double rr = xpq*xpq + ypq*ypq + zpq*zpq;
+        double theta = aij * akl / (aij + akl);
+        double theta_rr = theta * rr;
         if (gout_id == 0) {
-            double xij = Rp_cache[sq_ij+0*bsizex];
-            double yij = Rp_cache[sq_ij+1*bsizex];
-            double zij = Rp_cache[sq_ij+2*bsizex];
-            double aij = Rp_cache[sq_ij+3*bsizex];
-            double xkl = Rq_cache[sq_kl+0*bsizey];
-            double ykl = Rq_cache[sq_kl+1*bsizey];
-            double zkl = Rq_cache[sq_kl+2*bsizey];
-            double akl = Rq_cache[sq_kl+3*bsizey];
-            double fac = fac_sym / (aij*akl*sqrt(aij+akl));
-            double xpq = xij - xkl;
-            double ypq = yij - ykl;
-            double zpq = zij - zkl;
-            double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-            double theta = aij * akl / (aij + akl);
-            double theta_rr = theta * rr;
             eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
             double a2 = -2. * theta;
             gamma_inc[sq_id] *= fac;
@@ -266,119 +270,66 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 fac *= a2;
                 gamma_inc[sq_id+i*nsq_per_block] *= fac;
             }
-            if (order % 2 == 0) {
-                Rt = vj_kl_cache + nf3kl*bsizey;
-                buf = Rt + nf3ijkl * nsq_per_block;
-            } else {
-                buf = vj_kl_cache + nf3kl*bsizey;
-                Rt = buf + nf3ijkl * nsq_per_block;
+            Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
+        }
+        for (int n = 1; n <= order; ++n) {
+            // swap input and output
+            double *tmp = buf;
+            buf = Rt;
+            Rt = tmp;
+            if (gout_id == 0) {
+                Rt[0] = gamma_inc[sq_id+(order-n)*nsq_per_block];
             }
-            Rt[sq_id] = gamma_inc[sq_id+order*nsq_per_block];
-            for (int n = 1; n <= order; ++n) {
-                // swap input and output
-                double *tmp = buf;
-                buf = Rt;
-                Rt = tmp;
-                Rt[sq_id] = gamma_inc[sq_id+(order-n)*nsq_per_block];
-                switch (n) {
-                case 1:
-                    Rt[sq_id+1*nsq_per_block] = zpq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+2*nsq_per_block] = ypq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+3*nsq_per_block] = xpq * buf[sq_id+0*nsq_per_block];
-                    break;
-                case 2:
-                    Rt[sq_id+1*nsq_per_block] = zpq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+2*nsq_per_block] = zpq * buf[sq_id+1*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+3*nsq_per_block] = ypq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+4*nsq_per_block] = ypq * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+5*nsq_per_block] = ypq * buf[sq_id+2*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+6*nsq_per_block] = xpq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+7*nsq_per_block] = xpq * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+8*nsq_per_block] = xpq * buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+9*nsq_per_block] = xpq * buf[sq_id+3*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    break;
-                case 3:
-                    Rt[sq_id+1*nsq_per_block] = zpq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+2*nsq_per_block] = zpq * buf[sq_id+1*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+3*nsq_per_block] = zpq * buf[sq_id+2*nsq_per_block] + 2 * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+4*nsq_per_block] = ypq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+5*nsq_per_block] = ypq * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+6*nsq_per_block] = ypq * buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+7*nsq_per_block] = ypq * buf[sq_id+3*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+8*nsq_per_block] = ypq * buf[sq_id+4*nsq_per_block] + buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+9*nsq_per_block] = ypq * buf[sq_id+5*nsq_per_block] + 2 * buf[sq_id+3*nsq_per_block];
-                    Rt[sq_id+10*nsq_per_block] = xpq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+11*nsq_per_block] = xpq * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+12*nsq_per_block] = xpq * buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+13*nsq_per_block] = xpq * buf[sq_id+3*nsq_per_block];
-                    Rt[sq_id+14*nsq_per_block] = xpq * buf[sq_id+4*nsq_per_block];
-                    Rt[sq_id+15*nsq_per_block] = xpq * buf[sq_id+5*nsq_per_block];
-                    Rt[sq_id+16*nsq_per_block] = xpq * buf[sq_id+6*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+17*nsq_per_block] = xpq * buf[sq_id+7*nsq_per_block] + buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+18*nsq_per_block] = xpq * buf[sq_id+8*nsq_per_block] + buf[sq_id+3*nsq_per_block];
-                    Rt[sq_id+19*nsq_per_block] = xpq * buf[sq_id+9*nsq_per_block] + 2 * buf[sq_id+6*nsq_per_block];
-                    break;
-                case 4:
-                    Rt[sq_id+1*nsq_per_block] = zpq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+2*nsq_per_block] = zpq * buf[sq_id+1*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+3*nsq_per_block] = zpq * buf[sq_id+2*nsq_per_block] + 2 * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+4*nsq_per_block] = zpq * buf[sq_id+3*nsq_per_block] + 3 * buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+5*nsq_per_block] = ypq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+6*nsq_per_block] = ypq * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+7*nsq_per_block] = ypq * buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+8*nsq_per_block] = ypq * buf[sq_id+3*nsq_per_block];
-                    Rt[sq_id+9*nsq_per_block] = ypq * buf[sq_id+4*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+10*nsq_per_block] = ypq * buf[sq_id+5*nsq_per_block] + buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+11*nsq_per_block] = ypq * buf[sq_id+6*nsq_per_block] + buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+12*nsq_per_block] = ypq * buf[sq_id+7*nsq_per_block] + 2 * buf[sq_id+4*nsq_per_block];
-                    Rt[sq_id+13*nsq_per_block] = ypq * buf[sq_id+8*nsq_per_block] + 2 * buf[sq_id+5*nsq_per_block];
-                    Rt[sq_id+14*nsq_per_block] = ypq * buf[sq_id+9*nsq_per_block] + 3 * buf[sq_id+7*nsq_per_block];
-                    Rt[sq_id+15*nsq_per_block] = xpq * buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+16*nsq_per_block] = xpq * buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+17*nsq_per_block] = xpq * buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+18*nsq_per_block] = xpq * buf[sq_id+3*nsq_per_block];
-                    Rt[sq_id+19*nsq_per_block] = xpq * buf[sq_id+4*nsq_per_block];
-                    Rt[sq_id+20*nsq_per_block] = xpq * buf[sq_id+5*nsq_per_block];
-                    Rt[sq_id+21*nsq_per_block] = xpq * buf[sq_id+6*nsq_per_block];
-                    Rt[sq_id+22*nsq_per_block] = xpq * buf[sq_id+7*nsq_per_block];
-                    Rt[sq_id+23*nsq_per_block] = xpq * buf[sq_id+8*nsq_per_block];
-                    Rt[sq_id+24*nsq_per_block] = xpq * buf[sq_id+9*nsq_per_block];
-                    Rt[sq_id+25*nsq_per_block] = xpq * buf[sq_id+10*nsq_per_block] + buf[sq_id+0*nsq_per_block];
-                    Rt[sq_id+26*nsq_per_block] = xpq * buf[sq_id+11*nsq_per_block] + buf[sq_id+1*nsq_per_block];
-                    Rt[sq_id+27*nsq_per_block] = xpq * buf[sq_id+12*nsq_per_block] + buf[sq_id+2*nsq_per_block];
-                    Rt[sq_id+28*nsq_per_block] = xpq * buf[sq_id+13*nsq_per_block] + buf[sq_id+4*nsq_per_block];
-                    Rt[sq_id+29*nsq_per_block] = xpq * buf[sq_id+14*nsq_per_block] + buf[sq_id+5*nsq_per_block];
-                    Rt[sq_id+30*nsq_per_block] = xpq * buf[sq_id+15*nsq_per_block] + buf[sq_id+7*nsq_per_block];
-                    Rt[sq_id+31*nsq_per_block] = xpq * buf[sq_id+16*nsq_per_block] + 2 * buf[sq_id+10*nsq_per_block];
-                    Rt[sq_id+32*nsq_per_block] = xpq * buf[sq_id+17*nsq_per_block] + 2 * buf[sq_id+11*nsq_per_block];
-                    Rt[sq_id+33*nsq_per_block] = xpq * buf[sq_id+18*nsq_per_block] + 2 * buf[sq_id+13*nsq_per_block];
-                    Rt[sq_id+34*nsq_per_block] = xpq * buf[sq_id+19*nsq_per_block] + 3 * buf[sq_id+16*nsq_per_block];
-                    break;
-                default: iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, sq_id, nsq_per_block);
+            switch (n) {
+            case 1:
+                if (gout_id == 0) {
+                    Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
+                    Rt[2*nsq_per_block] = ypq * buf[0*nsq_per_block];
+                    Rt[3*nsq_per_block] = xpq * buf[0*nsq_per_block];
                 }
+                break;
+            case 2:
+                if (gout_id == 0) {
+                    Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
+                    Rt[2*nsq_per_block] = zpq * buf[1*nsq_per_block] + buf[0*nsq_per_block];
+                    Rt[3*nsq_per_block] = ypq * buf[0*nsq_per_block];
+                    Rt[4*nsq_per_block] = ypq * buf[1*nsq_per_block];
+                    Rt[5*nsq_per_block] = ypq * buf[2*nsq_per_block] + buf[0*nsq_per_block];
+                    Rt[6*nsq_per_block] = xpq * buf[0*nsq_per_block];
+                    Rt[7*nsq_per_block] = xpq * buf[1*nsq_per_block];
+                    Rt[8*nsq_per_block] = xpq * buf[2*nsq_per_block];
+                    Rt[9*nsq_per_block] = xpq * buf[3*nsq_per_block] + buf[0*nsq_per_block];
+                }
+                break;
+            case 3:
+                if (gout_id == 0) {
+                    Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
+                    Rt[2*nsq_per_block] = zpq * buf[1*nsq_per_block] + buf[0*nsq_per_block];
+                    Rt[3*nsq_per_block] = zpq * buf[2*nsq_per_block] + 2 * buf[1*nsq_per_block];
+                    Rt[4*nsq_per_block] = ypq * buf[0*nsq_per_block];
+                    Rt[5*nsq_per_block] = ypq * buf[1*nsq_per_block];
+                    Rt[6*nsq_per_block] = ypq * buf[2*nsq_per_block];
+                    Rt[7*nsq_per_block] = ypq * buf[3*nsq_per_block] + buf[0*nsq_per_block];
+                    Rt[8*nsq_per_block] = ypq * buf[4*nsq_per_block] + buf[1*nsq_per_block];
+                    Rt[9*nsq_per_block] = ypq * buf[5*nsq_per_block] + 2 * buf[3*nsq_per_block];
+                    Rt[10*nsq_per_block] = xpq * buf[0*nsq_per_block];
+                    Rt[11*nsq_per_block] = xpq * buf[1*nsq_per_block];
+                    Rt[12*nsq_per_block] = xpq * buf[2*nsq_per_block];
+                    Rt[13*nsq_per_block] = xpq * buf[3*nsq_per_block];
+                    Rt[14*nsq_per_block] = xpq * buf[4*nsq_per_block];
+                    Rt[15*nsq_per_block] = xpq * buf[5*nsq_per_block];
+                    Rt[16*nsq_per_block] = xpq * buf[6*nsq_per_block] + buf[0*nsq_per_block];
+                    Rt[17*nsq_per_block] = xpq * buf[7*nsq_per_block] + buf[1*nsq_per_block];
+                    Rt[18*nsq_per_block] = xpq * buf[8*nsq_per_block] + buf[3*nsq_per_block];
+                    Rt[19*nsq_per_block] = xpq * buf[9*nsq_per_block] + 2 * buf[6*nsq_per_block];
+                }
+                break;
+            default: iter_Rt_n(Rt, buf, xpq, ypq, zpq, n);
             }
         }
 
         Rt = vj_kl_cache + nf3kl*bsizey;
         double *vj_cache = Rt + nf3ijkl * nsq_per_block;
-        //for (k = 0, e = 0; e <= l1; ++e) {
-        //for (f = 0; f <= l1-e; ++f) {
-        //for (g = 0; g <= l1-e-f; ++g, ++k) {
-        //    double rho_kl_val = rho_kl[k];
-        //    double jvec_kl_val = 0.;
-        //    double fac = 1;
-        //    if ((e + f + g) % 2 != 0) {
-        //        fac = -1;
-        //    }
-        //    for (i = 0, t = 0; t <= l2; ++t) {
-        //    for (u = 0; u <= l2-t; ++u) {
-        //    for (v = 0; v <= l2-t-u; ++v, ++i) {
-        //        s = fac * R[e+t,f+u,g+v]
-        //        jvec_kl_val += s * rho_ij[i];
-        //        jvec_ij[i]  += s * rho_kl_val;
-        //    } } }
-        //    jvec_kl[k] += jvec_kl_val;
-        //} } }
         for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
             __syncthreads();
             double vj_kl = 0.;
@@ -394,7 +345,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 for (int i = 0, t = 0; t <= lij; ++t) {
                 for (int u = 0; u <= lij-t; ++u) {
                 for (int v = 0; v <= lij-t-u; ++v, ++i) {
-                    //double s = Rt[sq_id+ADDR(order,e+t,f+u,g+v)*nsq_per_block];
                     int ix = order-e-t;
                     int xoffset = ix*(ix+1)*(ix+2)/6;
                     int iy = ix-f-u;
@@ -402,7 +352,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                     double s = Rt[sq_id+(nf3ijkl-xoffset-i2y+g+v)*nsq_per_block];
                     vj_kl += fac * s * dm[dm_ij_pair0+i];
                 } } }
-                //atomicAdd(vj+dm_kl_pair0+k, vj_kl);
             }
             vj_cache[t_id] = vj_kl;
             for (int stride = threadsx/2; stride > 0; stride /= 2) {
@@ -428,7 +377,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 for (int k = 0, e = 0; e <= lkl; ++e) {
                 for (int f = 0; f <= lkl-e; ++f) {
                 for (int g = 0; g <= lkl-e-f; ++g, ++k) {
-                    //double s = Rt[sq_id+ADDR(order,e+t,f+u,g+v)*nsq_per_block];
                     int ix = order-e-t;
                     int xoffset = ix*(ix+1)*(ix+2)/6;
                     int iy = ix-f-u;
@@ -441,7 +389,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                         vj_ij -= s * d;
                     }
                 } } }
-                //atomicAdd(vj+dm_ij_pair0+i, vj_ij);
             }
             vj_cache[t_id] = vj_ij;
             for (int stride = threadsy/2; stride > 0; stride /= 2) {

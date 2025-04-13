@@ -198,7 +198,7 @@ def asarray(a, synchronize=True, **kwargs):
         else:
             allow_fast_transfer = False
         if allow_fast_transfer:
-            out = cupy.empty_like(a.shape, dtype=dtype, order=order)
+            out = cupy.empty_like(a)
             out.set(a)
             if synchronize:
                 cupy.cuda.get_current_stream().synchronize()
