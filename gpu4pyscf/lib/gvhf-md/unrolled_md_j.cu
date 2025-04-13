@@ -5006,8 +5006,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
     }
 }
 
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    int *scheme, int workers, double omega)
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int workers)
 {
     int li = bounds->li;
     int lj = bounds->lj;

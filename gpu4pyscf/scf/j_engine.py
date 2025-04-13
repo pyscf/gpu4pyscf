@@ -40,25 +40,19 @@ __all__ = [
 PTR_BAS_COORD = 7
 LMAX = 4
 SHM_SIZE = shm_size - 1024
-THREADS = 256
+THREADS = 512
 
 libvhf_md = load_library('libgvhf_md')
 libvhf_md.MD_build_j.restype = ctypes.c_int
 libvhf_md.init_mdj_constant.restype = ctypes.c_int
 
-def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
+def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     '''Compute J matrix
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
-        with mol.with_range_coulomb(omega):
-            groupsize = None
-            if num_devices > 1:                
-                groupsize = jk.GROUP_SIZE
-            vhfopt = _VHFOpt(mol).build(group_size=groupsize)
-    if omega is None:
-        omega = mol.omega
+        vhfopt = _VHFOpt(mol).build()
 
     mol = vhfopt.sorted_mol
     nbas = mol.nbas
@@ -144,12 +138,12 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
                     kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
                                l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
                     tile_kl_mapping = tile_mappings[k,l]
-                    scheme = _md_j_engine_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+                    scheme = _md_j_engine_quartets_scheme(uniq_l_ctr[[i, j, k, l], 0])
                     err = kern(
                         ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        rys_envs, (ctypes.c_int*3)(*scheme),
+                        rys_envs, (ctypes.c_int*5)(*scheme),
                         (ctypes.c_int*8)(*ij_shls, *kl_shls),
                         ctypes.c_int(tile_ij_mapping.size),
                         ctypes.c_int(tile_kl_mapping.size),
@@ -161,7 +155,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, omega=None, verbose=None):
                         lib.c_null_ptr(),
                         ctypes.c_float(log_cutoff-log_max_dm),
                         ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers), ctypes.c_double(omega),
+                        ctypes.c_int(workers),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
                     if err != 0:
@@ -207,8 +201,7 @@ class _VHFOpt(jk._VHFOpt):
         self.decontract_coeff = jk_coeff.dot(cp.asarray(decontract_coeff))
         return self
 
-def _md_j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
-    ls = l_ctr_pattern[:,0]
+def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
     lij = li + lj
@@ -217,18 +210,30 @@ def _md_j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nf3kl = (lkl+1)*(lkl+2)*(lkl+3)//6
     unit = order+1 + (order+1)*(order+2)*(2*order+3)//6
     counts = shm_size // (unit*8)
-    if counts >= THREADS:
-        nsq = THREADS
+    threads = THREADS
+    if counts >= threads:
+        nsq = threads
     else:
         nsq = _nearest_power2(counts)
     ij = _nearest_power2(int(nsq**.5))
     kl = nsq // ij
-    tilex, tiley = 2, 4
+
+    # guess tilex and tiley, tiley ~= tilex * (nf3ij / nf3kl)
+    tilex = tiley = 1
+    if nf3ij >= nf3kl:
+        tiley = _nearest_power2(int(nf3ij//nf3kl), return_leq=False)
+    else:
+        tilex = _nearest_power2(int(nf3kl//nf3ij), return_leq=False)
     cache_size = ij*tilex * (4+nf3ij) + kl*tiley * (4+nf3kl)
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2
         ij = _nearest_power2(int(nsq**.5))
         kl = nsq // ij
         cache_size = ij*tilex * (4+nf3ij) + kl*tiley * (4+nf3kl)
-    gout_stride = THREADS // nsq
-    return ij, kl, gout_stride
+    gout_stride = threads // nsq
+
+    tilex_max = _nearest_power2((shm_size//8-nsq*unit)//cache_size)
+    if tilex_max > 1:
+        tilex *= tilex_max
+        tiley *= tilex_max
+    return ij, kl, gout_stride, tilex, tiley

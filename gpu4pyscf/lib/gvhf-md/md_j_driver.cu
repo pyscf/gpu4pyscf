@@ -21,15 +21,12 @@
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 
-#define TILEX   2
-#define TILEY   4
-
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
 
-extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds);
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                  int *scheme, int workers, double omega);
+extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                                   int threadsx, int threadsy, int tilex, int tiley);
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int workers);
 void set_md_j_unrolled_shm_size();
 
 extern "C" {
@@ -38,7 +35,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
                 int ntile_ij_pairs, int ntile_kl_pairs,
                 int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
                 float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                uint32_t *batch_head, int workers, double omega,
+                uint32_t *batch_head, int workers,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -57,16 +54,18 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 
-    if (!md_j_unrolled(&envs, &jk, &bounds, scheme, workers, omega)) {
+    if (!md_j_unrolled(&envs, &jk, &bounds, workers)) {
         int lij = li + lj;
         int lkl = lk + ll;
         int threads_ij = scheme[0];
         int threads_kl = scheme[1];
-        int bsizex = threads_ij * TILEX;
-        int bsizey = threads_kl * TILEY;
-        int nsq_per_block = threads_ij * threads_kl;
         int gout_stride = scheme[2];
-        dim3 threads(threads_ij, threads_kl, gout_stride);
+        int tilex = scheme[3];
+        int tiley = scheme[4];
+        int bsizex = threads_ij * tilex;
+        int bsizey = threads_kl * tiley;
+        int nsq_per_block = threads_ij * threads_kl;
+        int threads = threads_ij * threads_kl * gout_stride;
         int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
         int buflen = (order+1) * nsq_per_block
@@ -76,7 +75,8 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         int blocks_ij = (ntile_ij_pairs + bsizex - 1) / bsizex;
         int blocks_kl = (ntile_kl_pairs + bsizey - 1) / bsizey;
         dim3 blocks(blocks_ij, blocks_kl);
-        md_j_kernel<<<blocks, threads, buflen*sizeof(double)>>>(envs, jk, bounds);
+        md_j_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
+            envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
