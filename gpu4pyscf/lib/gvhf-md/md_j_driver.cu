@@ -27,7 +27,6 @@ __constant__ Fold3Index c_i_in_fold3idx[495];
 extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int workers);
-void set_md_j_unrolled_shm_size();
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int nao,
@@ -109,7 +108,6 @@ int init_mdj_constant(int shm_size)
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(md_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    set_md_j_unrolled_shm_size();
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

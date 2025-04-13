@@ -125,7 +125,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
     __syncthreads();
     for (int n = t_id; n < bsizex; n += threads) {
-        int task_ij = blockIdx.x * bsizex + t_id;
+        int task_ij = blockIdx.x * bsizex + n;
         if (task_ij < npairs_ij) {
             int pair_ij = pair_ij_mapping[task_ij];
             int ish = pair_ij / nbas;
@@ -147,7 +147,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
     for (int n = t_id; n < bsizey; n += threads) {
-        int task_kl = blockIdx.y * bsizey + t_id;
+        int task_kl = blockIdx.y * bsizey + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
