@@ -36,8 +36,8 @@ extern __device__ uint16_t Rt2_ij_kl[];
          ((l)-(t)+1)*((l)-(t)+2)/2 - ((l)-(t)-(u)+1)*((l)-(t)-(u)+2)/2 + (v))
 
 __device__
-static void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
-                      int nsq_per_block, int gout_id, int gout_stride)
+static inline iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
+                        int nsq_per_block, int gout_id, int gout_stride)
 {
 
     int offsets = l*(l+1)*(l+2)*(l+3)/24;

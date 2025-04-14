@@ -167,7 +167,7 @@ def tag_array(a, **kwargs):
     t.__dict__.update(kwargs)
     return t
 
-def asarray(a, synchronize=True, **kwargs):
+def asarray(a, **kwargs):
     '''
     Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
     If the input object is an instance of `CPArrayWithTag`, this function will remove any
@@ -176,10 +176,6 @@ def asarray(a, synchronize=True, **kwargs):
     Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
     host memory deallocation before transfer completion, this function
     eliminates that buffer for efficiency.
-
-    **Note**: The host memory may be freed before the transfer is complete.
-    Users must ensure proper synchronization and manage host memory deallocation
-    carefully to avoid undefined behavior.
     '''
     if isinstance(a, np.ndarray):
         # CuPy always allocates pinned memory as a temporary buffer during array transfer.
@@ -196,7 +192,7 @@ def asarray(a, synchronize=True, **kwargs):
         if allow_fast_transfer:
             out = cupy.empty_like(a)
             out.set(a)
-            if synchronize:
+            if kwargs.get('blocking', False):
                 cupy.cuda.get_current_stream().synchronize()
             return out
 
