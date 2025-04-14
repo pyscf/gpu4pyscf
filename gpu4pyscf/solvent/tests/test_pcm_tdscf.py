@@ -172,10 +172,7 @@ class KnownValues(unittest.TestCase):
         $end
         """
         mf = self.mf
-        td = mf.TDHF()
-        td._scf.with_solvent.tdscf = True
-        td._scf.with_solvent.eps = 1.78
-        td._scf.with_solvent.build()
+        td = mf.TDHF(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-75.61072291, -75.54419399, -75.51949191, -75.45219025, -75.40975027])
@@ -185,7 +182,7 @@ class KnownValues(unittest.TestCase):
         es_get_ab = diagonalize(a, b)[0]
         assert np.linalg.norm(es_get_ab - es) < 1e-10
 
-        td = mf.TDA()
+        td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-75.60864828, -75.54169327, -75.51738767, -75.44915784, -75.40839714])
@@ -196,10 +193,7 @@ class KnownValues(unittest.TestCase):
 
     def test_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf
-        td = mf.TDDFT()
-        td._scf.with_solvent.tdscf = True
-        td._scf.with_solvent.eps = 1.78
-        td._scf.with_solvent.build()
+        td = mf.TDDFT(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06898428, -75.99630982, -75.98765186, -75.91045133, -75.84783748])
@@ -209,7 +203,7 @@ class KnownValues(unittest.TestCase):
         es_get_ab = diagonalize(a, b)[0]
         assert np.linalg.norm(es_get_ab - es) < 1e-10
 
-        td = mf.TDA()
+        td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06789176, -75.99609709, -75.98589720, -75.90894600, -75.84699115])
@@ -220,10 +214,7 @@ class KnownValues(unittest.TestCase):
 
     def test_b3lyp_IEFPCM(self):
         mf = self.mf_b3lyp_nodf_iefpcm
-        td = mf.TDDFT()
-        td._scf.with_solvent.tdscf = True
-        td._scf.with_solvent.eps = 1.78
-        td._scf.with_solvent.build()
+        td = mf.TDDFT(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06881645, -75.99631929, -75.98713725, -75.91015704, -75.84668800])
@@ -233,7 +224,7 @@ class KnownValues(unittest.TestCase):
         es_get_ab = diagonalize(a, b)[0]
         assert np.linalg.norm(es_get_ab - es) < 1e-10
 
-        td = mf.TDA()
+        td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.06773319, -75.99610928, -75.98534912, -75.90861455, -75.84576041])
@@ -244,10 +235,7 @@ class KnownValues(unittest.TestCase):
 
     def test_unrestricted_hf_CPCM(self):
         mf = self.mfu
-        td = mf.TDHF()
-        td._scf.with_solvent.tdscf = True
-        td._scf.with_solvent.eps = 1.78
-        td._scf.with_solvent.build()
+        td = mf.TDHF(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-75.64482315, -75.61072291, -75.57156784, -75.56769949, -75.54419399])
@@ -259,10 +247,7 @@ class KnownValues(unittest.TestCase):
 
     def test_unrestricted_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf_u
-        td = mf.TDDFT()
-        td._scf.with_solvent.tdscf = True
-        td._scf.with_solvent.eps = 1.78
-        td._scf.with_solvent.build()
+        td = mf.TDDFT(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
         ref = np.array([-76.09301571, -76.06898428, -76.01822101, -76.01369024, -75.99630982])

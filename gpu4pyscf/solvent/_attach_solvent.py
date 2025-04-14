@@ -137,29 +137,21 @@ class SCFWithSolvent(_Solvation):
         grad_method = super().nuc_grad_method()
         return self.with_solvent.nuc_grad_method(grad_method)
 
-    def TDA(self):
-        # if isinstance(self, dft.rks.RKS):
-        #     tda_method = 
+    def TDA(self, equilibrium_solvation, eps_optical=1.78):
         tda_method = super().TDA()
-        return self.with_solvent.TDA(tda_method)
+        return self.with_solvent.TDA(tda_method, eps_optical, equilibrium_solvation)
 
-    def TDDFT(self):
-        # if isinstance(self, dft.rks.RKS):
-        #     tda_method = 
+    def TDDFT(self, equilibrium_solvation, eps_optical=1.78):
         tda_method = super().TDDFT()
-        return self.with_solvent.TDDFT(tda_method)
+        return self.with_solvent.TDDFT(tda_method, eps_optical, equilibrium_solvation)
     
-    def TDHF(self):
-        # if isinstance(self, dft.rks.RKS):
-        #     tda_method =
+    def TDHF(self, equilibrium_solvation, eps_optical=1.78):
         tda_method = super().TDHF()
-        return self.with_solvent.TDHF(tda_method)
+        return self.with_solvent.TDHF(tda_method, eps_optical, equilibrium_solvation)
     
-    def CasidaTDDFT(self):
-        # if isinstance(self, dft.rks.RKS):
-        #     tda_method =
+    def CasidaTDDFT(self, equilibrium_solvation, eps_optical=1.78):
         tda_method = super().CasidaTDDFT()
-        return self.with_solvent.CasidaTDDFT(tda_method)
+        return self.with_solvent.CasidaTDDFT(tda_method, eps_optical, equilibrium_solvation)
 
     Gradients = nuc_grad_method
 
@@ -175,21 +167,12 @@ class SCFWithSolvent(_Solvation):
         singlet = singlet or singlet is None
         def vind_with_solvent(dm1):
             v = vind(dm1)
-            if self.with_solvent.tdscf:
+            if self.with_solvent.equilibrium_solvation:
                 if is_uhf:
                     v_solvent = self.with_solvent._B_dot_x(dm1)
                     v += v_solvent[0] + v_solvent[1]
                 elif singlet:
                     v += self.with_solvent._B_dot_x(dm1)
-                else:
-                    logger.warn(self, 'Singlet-Triplet has no LR-PCM contribution!')         
-            else:
-                if self.with_solvent.equilibrium_solvation:
-                    if is_uhf:
-                        v_solvent = self.with_solvent._B_dot_x(dm1)
-                        v += v_solvent[0] + v_solvent[1]
-                    elif singlet:
-                        v += self.with_solvent._B_dot_x(dm1)
             return v
         return vind_with_solvent
 

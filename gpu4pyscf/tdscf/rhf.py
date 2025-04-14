@@ -36,7 +36,7 @@ __all__ = [
 ]
 
 
-def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
+def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     r'''A and B matrices for TDDFT response function.
 
     A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
@@ -44,8 +44,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
     Ref: Chem Phys Lett, 256, 454
     '''
-    # if getattr(mf, 'with_solvent', None):
-    #     raise NotImplementedError("PCM is not supported for get_ab")
+
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:
@@ -147,8 +146,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
             a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
             b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
 
-    if getattr(mf, 'with_solvent', None):
-        pcmobj = mf.with_solvent
+    if getattr(td, 'with_solvent', None):
+        pcmobj = td.with_solvent
         add_solvent_(a, b, pcmobj)
 
     if isinstance(mf, scf.hf.KohnShamDFT):
@@ -281,7 +280,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
 
     return a.get(), b.get()
 
-def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute A x
     '''
     assert fock_ao is None
@@ -299,7 +298,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
     hdiag = hdiag.ravel()
-    vresp = mf.gen_response(singlet=singlet, hermi=0)
+    vresp = td.gen_response(singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
     def vind(zs):
@@ -342,10 +341,15 @@ class TDBase(lib.StreamObject):
     _finalize = tdhf_cpu.TDBase._finalize
 
     gen_vind = NotImplemented
+
+    def gen_response(self, singlet=True, hermi=0):
+        '''Generate function to compute A x'''
+        return self._scf.gen_response(singlet=singlet, hermi=hermi)
+    
     def get_ab(self, mf=None):
         if mf is None:
             mf = self._scf
-        return get_ab(mf, singlet=self.singlet)
+        return get_ab(self, mf, singlet=self.singlet)
 
     def get_precond(self, hdiag):
         threshold_t=1.0e-4
@@ -444,7 +448,7 @@ class TDA(TDBase):
         '''Generate function to compute Ax'''
         if mf is None:
             mf = self._scf
-        return gen_tda_operation(mf, singlet=self.singlet)
+        return gen_tda_operation(self, mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         '''
@@ -522,7 +526,7 @@ class TDA(TDBase):
 CIS = TDA
 
 
-def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute
 
     [ A   B ][X]
@@ -540,7 +544,7 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     orbo = mo_coeff[:,occidx]
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
-    vresp = mf.gen_response(singlet=singlet, hermi=0)
+    vresp = td.gen_response(singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
     def vind(zs):
@@ -574,7 +578,7 @@ class TDHF(TDBase):
     def gen_vind(self, mf=None):
         if mf is None:
             mf = self._scf
-        return gen_tdhf_operation(mf, singlet=self.singlet)
+        return gen_tdhf_operation(self, mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         assert not return_symmetry

@@ -245,7 +245,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v', 'tdscf'
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -264,7 +264,6 @@ class PCM(lib.StreamObject):
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
-        self.tdscf = False
 
         self.max_cycle = 20
         self.conv_tol = 1e-7
@@ -275,6 +274,7 @@ class PCM(lib.StreamObject):
 
         self.e = None
         self.v = None
+        self.v_grids_n = None
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
@@ -468,29 +468,29 @@ class PCM(lib.StreamObject):
         else:
             raise RuntimeError('Only SCF gradient is supported')
         
-    def TDA(self, td):
+    def TDA(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         if self.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
     
-    def TDHF(self, td):
+    def TDHF(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         if self.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
     
-    def TDDFT(self, td):
+    def TDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         if self.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
     
-    def CasidaTDDFT(self, td):
+    def CasidaTDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         if self.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess

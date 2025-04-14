@@ -40,21 +40,14 @@ mf.kernel() # -76.476456106979
 
 # Compute TDDFT and TDA excitation energy
 print('------------------- vertical exitation TDA -----------------------------')
-td = mf.TDDFT().set(nstates=5)
-td._scf.with_solvent.tdscf = True
-td._scf.with_solvent.eps = 1.78
-td._scf.with_solvent.build()
-e_tddft = td.kernel()[0] # [ 8.03553827 10.07361783 10.20203523 12.36009792 13.83374455]
+td = mf.TDDFT(equilibrium_solvation=False).set(nstates=5)
+e_tddft = td.kernel()[0] # [ 8.03553836 10.073618   10.20203543 12.36009825 13.83374465]
 # print('5 TDDFT excitation energy by GPU4PySCF')
 # print(e_tddft)
 
 print('------------------- adiabatic excitation TDA -----------------------------')
-td = mf.TDA().set(nstates=5)
-td._scf.with_solvent.tdscf = True
-td._scf.with_solvent.eps = 78.0
-td._scf.with_solvent.equilibrium_solvation = True 
-td._scf.with_solvent.build()
-e_tda = td.kernel()[0] # [ 7.99456759 10.0632959  10.08523494 12.30675282 13.64298125]
+td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+e_tda = td.kernel()[0] # [ 7.99456768 10.06329607 10.08523514 12.30675317 13.64298135]
 # print('5 TDA excitation energy by GPU4PySCF')
 # print(e_tda)
 
@@ -64,8 +57,8 @@ g.kernel()
 """
 --------- PCMTDA gradients for state 1 ----------
          x                y                z
-0 O    -0.0000000000     0.0000000000    -0.0836461430
-1 H     0.0601539533    -0.0000000000     0.0418232965
-2 H    -0.0601539533    -0.0000000000     0.0418232965
+0 O    -0.0000000000     0.0000000000    -0.0836461563
+1 H     0.0601539524    -0.0000000000     0.0418233032
+2 H    -0.0601539524    -0.0000000000     0.0418233032
 ----------------------------------------------
 """

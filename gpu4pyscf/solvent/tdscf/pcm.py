@@ -18,20 +18,25 @@ TD of PCM family solvent model
 
 import cupy as cp
 from pyscf import lib
-from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
+from gpu4pyscf.solvent.pcm import PCM
 from gpu4pyscf.solvent.grad.pcm import grad_nuc, grad_qv, grad_solver
-from gpu4pyscf.solvent.grad.pcm import left_multiply_dS, right_multiply_dS, get_dF_dA, get_dSii, get_dD_dS
-from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf import scf
-from gpu4pyscf.gto import int3c1e
 
 
-def make_tdscf_object(tda_method):
+class TDPCM(PCM):
+    def __init__(self, mfpcmobj, eps_optical=1.78, equilium_solvation=False):
+        self.__dict__.update(mfpcmobj.__dict__)
+        self.equilibrium_solvation = equilium_solvation
+        if not equilium_solvation:
+            self.eps = eps_optical
+        
+
+def make_tdscf_object(tda_method, eps_optical=1.78, equilibrium_solvation=False):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
-    return lib.set_class(WithSolventTDSCF(tda_method),
+    return lib.set_class(WithSolventTDSCF(tda_method, eps_optical, equilibrium_solvation),
                          (WithSolventTDSCF, tda_method.__class__), name)
 
 
@@ -46,8 +51,33 @@ def make_tdscf_gradient_object(tda_grad_method):
 class WithSolventTDSCF:
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    def __init__(self, tda_method):
+    _keys = {'with_solvent'}
+
+    def gen_response(self, *args, **kwargs):
+        pcmobj = self.with_solvent
+        mf = self._scf
+        vind = super().gen_response(*args, **kwargs)
+        is_uhf = isinstance(mf, scf.uhf.UHF)
+        # singlet=None is orbital hessian or CPHF type response function
+        singlet = kwargs.get('singlet', True)
+        singlet = singlet or singlet is None
+        def vind_with_solvent(dm1):
+            v = vind(dm1)
+            if is_uhf:
+                v_solvent = pcmobj._B_dot_x(dm1)
+                v += v_solvent[0] + v_solvent[1]
+            elif singlet:
+                v += pcmobj._B_dot_x(dm1)
+            else:
+                logger.warn(pcmobj, 'Singlet-Triplet has no LR-PCM contribution!')    
+            return v     
+        return vind_with_solvent
+
+    def __init__(self, tda_method, eps_optical=1.78, equilibrium_solvation=False):
         self.__dict__.update(tda_method.__dict__)
+        self.with_solvent = TDPCM(tda_method._scf.with_solvent, eps_optical, equilibrium_solvation)
+        if not self.with_solvent.equilibrium_solvation:
+            self.with_solvent.build()
 
     def undo_solvent(self):
         cls = self.__class__
@@ -57,6 +87,11 @@ class WithSolventTDSCF:
     
     def _finalize(self):
         super()._finalize()
+        if self.with_solvent.equilibrium_solvation:
+            logger.info(self.with_solvent, 'equilibrium solvation NOT for vertical excitation')
+        else:
+            logger.info(self.with_solvent, 'Not equilibrium solvation NOT for vertical excitation,\n\
+                        eps_optical = %s', self.with_solvent.eps)
 
     def nuc_grad_method(self):
         grad_method = super().nuc_grad_method()
@@ -70,12 +105,12 @@ class WithSolventTDSCFGradient:
         self.__dict__.update(tda_grad_method.__dict__)
 
     def solvent_response(self, dm):
-        return self.base._scf.with_solvent._B_dot_x(dm)*2.0 
+        return self.base.with_solvent._B_dot_x(dm)*2.0 
         
     def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.INFO):
         de = super().grad_elec(xy, singlet, atmlst, verbose) 
 
-        assert self.base._scf.with_solvent.equilibrium_solvation
+        assert self.base.with_solvent.equilibrium_solvation
 
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
@@ -83,7 +118,7 @@ class WithSolventTDSCFGradient:
         # TODO: add unrestricted case support
         dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
         dmxpy = self.dmxpy + self.dmxpy.T
-        pcmobj = self.base._scf.with_solvent
+        pcmobj = self.base.with_solvent
         de += grad_qv(pcmobj, dm)
         de += grad_solver(pcmobj, dm)
         de += grad_nuc(pcmobj, dm)

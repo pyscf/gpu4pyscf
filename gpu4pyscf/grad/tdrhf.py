@@ -98,7 +98,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     wvo += contract("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
 
     # set singlet=None, generate function for CPHF type response kernel
-    vresp = mf.gen_response(singlet=None, hermi=1)
+    vresp = td_grad.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):  # For singlet, closed shell ground state
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))  # 2 for double occupancy

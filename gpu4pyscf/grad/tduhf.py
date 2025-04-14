@@ -127,7 +127,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     wvoa += contract("ac,ai->ci", veff0moma[nocca:, nocca:], xmya) * 2
     wvob += contract("ac,ai->ci", veff0momb[noccb:, noccb:], xmyb) * 2
 
-    vresp = mf.gen_response(hermi=1)
+    vresp = td_grad.base.gen_response(hermi=1)
 
     def fvind(x):
         dm1 = cp.empty((2, nao, nao))
