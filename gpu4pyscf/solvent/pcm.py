@@ -245,7 +245,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v', 'tdscf', 'state_specific'
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n', 'state_specific'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -264,7 +264,6 @@ class PCM(lib.StreamObject):
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
-        self.tdscf = False
         self.state_specific = False
 
         self.max_cycle = 20
@@ -276,6 +275,7 @@ class PCM(lib.StreamObject):
 
         self.e = None
         self.v = None
+        self.v_grids_n = None
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
@@ -469,29 +469,21 @@ class PCM(lib.StreamObject):
         else:
             raise RuntimeError('Only SCF gradient is supported')
         
-    def TDA(self, td):
+    def TDA(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
     
-    def TDHF(self, td):
+    def TDHF(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
     
-    def TDDFT(self, td):
+    def TDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
     
-    def CasidaTDDFT(self, td):
+    def CasidaTDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        return pcm_td.make_tdscf_object(td)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess
@@ -517,7 +509,7 @@ class PCM(lib.StreamObject):
         out_shape = dms.shape
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
-        
+
         v_grids = -self._get_v(dms)
 
         b = self.left_multiply_R(v_grids.T)
@@ -534,9 +526,8 @@ class PCM(lib.StreamObject):
     def if_method_in_CPCM_category(self):
         return self.method.upper() in ['C-PCM', 'CPCM', "COSMO"]
 
-    def left_multiply_R(self, right_vector, f_epsilon = None, R_transpose = False):
-        if f_epsilon is None:
-            f_epsilon = self._intermediates['f_epsilon']
+    def left_multiply_R(self, right_vector, R_transpose = False):
+        f_epsilon = self._intermediates['f_epsilon']
         if self.if_method_in_CPCM_category:
             # R = -f_epsilon * cupy.eye(K.shape[0])
             return -f_epsilon * right_vector
@@ -549,11 +540,9 @@ class PCM(lib.StreamObject):
                 DA = DA.T
             return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
 
-    def left_solve_K(self, right_vector, K_LU = None, K_LU_pivot = None, K_transpose = False):
+    def left_solve_K(self, right_vector, K_transpose = False):
         ''' K^{-1} @ right_vector '''
-        if K_LU is None:
-            K_LU       = self._intermediates['K_LU']
-        if K_LU_pivot is None:
-            K_LU_pivot = self._intermediates['K_LU_pivot']
+        K_LU       = self._intermediates['K_LU']
+        K_LU_pivot = self._intermediates['K_LU_pivot']
         return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
 

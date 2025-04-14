@@ -32,7 +32,7 @@ __all__ = [
     'TDA', 'CIS', 'TDHF', 'TDUHF', 'TDBase'
 ]
 
-def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
+def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     r'''A and B matrices for TDDFT response function.
 
     A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
@@ -200,8 +200,8 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
         a_ab += cp.einsum('iabj->iajb', eri_ab[:nocc_a,nocc_a:,nocc_b:,:nocc_b])
         b_ab += cp.einsum('iajb->iajb', eri_ab[:nocc_a,nocc_a:,:nocc_b,nocc_b:])
 
-    if getattr(mf, 'with_solvent', None):
-        pcmobj = mf.with_solvent
+    if getattr(td, 'with_solvent', None):
+        pcmobj = td.with_solvent
         add_solvent_(a, b, pcmobj)
 
     if isinstance(mf, scf.hf.KohnShamDFT):
@@ -400,7 +400,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
 
 REAL_EIG_THRESHOLD = tdhf_cpu.REAL_EIG_THRESHOLD
 
-def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
+def gen_tda_operation(td, mf, fock_ao=None, wfnsym=None):
     '''A x
     '''
     assert fock_ao is None
@@ -433,7 +433,7 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
     nocca, nvira = e_ia_a.shape
     noccb, nvirb = e_ia_b.shape
 
-    vresp = mf.gen_response(hermi=0)
+    vresp = td.gen_response(hermi=0)
 
     def vind(zs):
         nz = len(zs)
@@ -461,9 +461,13 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
 
 class TDBase(tdhf_gpu.TDBase):
 
+    def gen_response(self, mo_coeff=None, mo_occ=None, hermi=0):
+        '''Generate function to compute A x'''
+        return self._scf.gen_response(mo_coeff=None, mo_occ=None, hermi=hermi)
+
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
-        return get_ab(mf)
+        return get_ab(self, mf)
 
     def nuc_grad_method(self):
         if getattr(self._scf, 'with_df', None):
@@ -512,7 +516,7 @@ class TDA(TDBase):
         '''Generate function to compute Ax'''
         if mf is None:
             mf = self._scf
-        return gen_tda_operation(mf)
+        return gen_tda_operation(self, mf)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         if mf is None: mf = self._scf
@@ -771,7 +775,7 @@ class SpinFlipTDA(TDBase):
         return self.e, self.xy
 
 
-def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute
 
     [ A   B ][X]
@@ -805,7 +809,7 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     nocca, nvira = e_ia_a.shape
     noccb, nvirb = e_ia_b.shape
 
-    vresp = mf.gen_response(hermi=0)
+    vresp = td.gen_response(hermi=0)
 
     def vind(zs):
         nz = len(zs)
@@ -854,7 +858,7 @@ class TDHF(TDBase):
     def gen_vind(self, mf=None):
         if mf is None:
             mf = self._scf
-        return gen_tdhf_operation(mf, singlet=self.singlet)
+        return gen_tdhf_operation(self, mf, singlet=self.singlet)
 
     get_precond = tdhf_gpu.TDHF.get_precond
 

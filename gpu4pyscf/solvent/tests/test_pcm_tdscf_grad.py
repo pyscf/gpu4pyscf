@@ -117,7 +117,6 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
         atmlst = range(mol.natm)
         e_diag, xy_diag = diagonalize_tda(a)
         x = xy_diag[:, 0].reshape(nocc, nvir)*np.sqrt(0.5)
-        # de_td = grad_elec(tdgrad, (x, 0))
         de_td = grad_elec((x, 0))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
     else:
@@ -131,7 +130,6 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
         x = x.reshape(nocc, nvir)
         y = y.reshape(nocc, nvir)
     
-        # de_td = grad_elec(tdgrad, (x, y))
         de_td = grad_elec((x, y))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
@@ -179,7 +177,6 @@ def cal_analytic_gradient_u(mol, td, tdgrad, nocc_a, nvir_a, nocc_b, nvir_b, gra
 
 
 def cal_td(td, tda, unrestrict):
-    td._scf.with_solvent.tdscf = True
     a, b = td.get_ab()
     if unrestrict:
         if tda:
@@ -210,8 +207,6 @@ def cal_mf(mol, xc, solvent, unrestrict):
             mf.grids.atom_grid = (99,590)
             mf.grids.prune = None
     mf.with_solvent.method = solvent
-    mf.with_solvent.tdscf = True
-    mf.with_solvent.equilibrium_solvation = True
     mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
     mf.with_solvent.eps = 78
     mf.run()
@@ -230,14 +225,14 @@ def get_new_mf(mol, coords, i, j, factor, delta, xc, solvent, unrestrict):
 def get_td(mf, tda, xc):
     if xc == 'hf':
         if tda:
-            td = mf.TDA()
+            td = mf.TDA(equilibrium_solvation=True)
         else:
-            td = mf.TDHF()
+            td = mf.TDHF(equilibrium_solvation=True)
     else:
         if tda:
-            td = mf.TDA()
+            td = mf.TDA(equilibrium_solvation=True)
         else:
-            td = mf.TDDFT()
+            td = mf.TDDFT(equilibrium_solvation=True)
 
     return td
 

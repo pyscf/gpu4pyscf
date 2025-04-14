@@ -178,7 +178,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         veff0moma = cp.zeros((nmoa, nmoa))
         veff0momb = cp.zeros((nmob, nmob))
 
-    vresp = mf.gen_response(hermi=1)
+    vresp = td_grad.base.gen_response(hermi=1)
 
     def fvind(x):
         dm1 = cp.empty((2, nao, nao))

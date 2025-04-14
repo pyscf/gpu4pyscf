@@ -284,9 +284,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_hf(self):
         mf = self.mf_uhf
-        a, b = tdscf.uks.TDDFT(mf).get_ab()
-        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
-        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        td = tdscf.uks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(td, mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(td, mf)[0]
         nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
         nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
         nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
@@ -330,9 +331,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_lda(self):
         mf = self.mf_lda_nodf
-        a, b = tdscf.uks.TDDFT(mf).get_ab()
-        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
-        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        td = tdscf.uks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(td, mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(td, mf)[0]
         nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
         nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
         nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
@@ -376,9 +378,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_lda_df(self):
         mf = self.mf_lda
-        a, b = tdscf.uks.TDDFT(mf).get_ab()
-        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
-        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        td = tdscf.uks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(td, mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(td, mf)[0]
         nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
         nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
         nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
@@ -422,9 +425,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_b3lyp(self):
         mf = self.mf_b3lyp_nodf
-        a, b = tdscf.uks.TDDFT(mf).get_ab()
-        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
-        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        td = tdscf.uks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(td, mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(td, mf)[0]
         nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
         nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
         nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
@@ -468,9 +472,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_b3lyp_df(self):
         mf = self.mf_b3lyp
-        a, b = tdscf.uks.TDDFT(mf).get_ab()
-        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
-        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        td = tdscf.uks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(td, mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(td, mf)[0]
         nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
         nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
         nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
@@ -514,9 +519,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_mgga(self):
         mf = self.mf_m06l_nodf
-        a, b = tdscf.uks.TDDFT(mf).get_ab()
-        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
-        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        td = tdscf.uks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(td, mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(td, mf)[0]
         nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
         nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
         nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))
@@ -560,9 +566,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_mgga_df(self):
         mf = self.mf_m06l
-        a, b = tdscf.uks.TDDFT(mf).get_ab()
-        ftda = tdscf.uhf.gen_tda_operation(mf)[0]
-        ftdhf = tdscf.uhf.gen_tdhf_operation(mf)[0]
+        td = tdscf.uks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = tdscf.uhf.gen_tda_operation(td, mf)[0]
+        ftdhf = tdscf.uhf.gen_tdhf_operation(td, mf)[0]
         nocc_a = int(np.count_nonzero(mf.mo_occ[0] == 1))
         nvir_a = int(np.count_nonzero(mf.mo_occ[0] == 0))
         nocc_b = int(np.count_nonzero(mf.mo_occ[1] == 1))

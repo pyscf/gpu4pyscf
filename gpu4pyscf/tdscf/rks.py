@@ -69,7 +69,7 @@ class CasidaTDDFT(TDDFT):
         d_ia = e_ia ** .5
         ed_ia = e_ia * d_ia
         hdiag = e_ia.ravel() ** 2
-        vresp = mf.gen_response(singlet=singlet, hermi=1)
+        vresp = self.gen_response(singlet=singlet, hermi=1)
         nocc, nvir = e_ia.shape
 
         def vind(zs):
