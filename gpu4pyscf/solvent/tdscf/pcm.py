@@ -32,11 +32,11 @@ class TDPCM(PCM):
             self.eps = eps_optical
         
 
-def make_tdscf_object(tda_method, eps_optical=1.78, equilibrium_solvation=False):
+def make_tdscf_object(tda_method, eps_optical=1.78, equilibrium_solvation=False, linear_resposne=True):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
-    return lib.set_class(WithSolventTDSCF(tda_method, eps_optical, equilibrium_solvation),
+    return lib.set_class(WithSolventTDSCF(tda_method, eps_optical, equilibrium_solvation, linear_resposne),
                          (WithSolventTDSCF, tda_method.__class__), name)
 
 
@@ -48,19 +48,20 @@ def make_tdscf_gradient_object(tda_grad_method):
                          (WithSolventTDSCFGradient, tda_grad_method.__class__), name)
 
 
-def add_prefix(prefix):  
-    def decorator(func): 
-        def wrapper(*args, ​**kwargs):  
-            original_result = func(*args, **kwargs)  
-            return f"[{prefix}] {original_result}"  
-        return wrapper
-    return decorator
+
+# def add_prefix(prefix):  
+#     def decorator(func): 
+#         def wrapper(*args, ​**kwargs):  
+#             original_result = func(*args, **kwargs)  
+#             return f"[{prefix}] {original_result}"  
+#         return wrapper
+#     return decorator
 
 
-def state_specific(td, x0=None, nstates=None):
-    td.kernel(x0=x0, nstates=nstates)
-    for icyc in range(50):
-        pass
+# def state_specific(td, x0=None, nstates=None):
+#     td.kernel(x0=x0, nstates=nstates)
+#     for icyc in range(50):
+#         pass
     # A.a = decorator(A.a)
 
 

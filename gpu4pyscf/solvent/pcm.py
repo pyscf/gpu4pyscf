@@ -469,21 +469,21 @@ class PCM(lib.StreamObject):
         else:
             raise RuntimeError('Only SCF gradient is supported')
         
-    def TDA(self, td, equilibrium_solvation=False, eps_optical=1.78):
+    def TDA(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
     
-    def TDHF(self, td, equilibrium_solvation=False, eps_optical=1.78):
+    def TDHF(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
     
-    def TDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
+    def TDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
     
-    def CasidaTDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
+    def CasidaTDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess
@@ -526,7 +526,7 @@ class PCM(lib.StreamObject):
     def if_method_in_CPCM_category(self):
         return self.method.upper() in ['C-PCM', 'CPCM', "COSMO"]
 
-    def left_multiply_R(self, right_vector, R_transpose = False):
+    def left_multiply_R(self, right_vector, f_epsilon = None, R_transpose = False):
         f_epsilon = self._intermediates['f_epsilon']
         if self.if_method_in_CPCM_category:
             # R = -f_epsilon * cupy.eye(K.shape[0])
