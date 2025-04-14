@@ -70,6 +70,12 @@ class WithSolventTDSCF:
 
     _keys = {'with_solvent'}
 
+    def __init__(self, tda_method, eps_optical=1.78, equilibrium_solvation=False):
+        self.__dict__.update(tda_method.__dict__)
+        self.with_solvent = TDPCM(tda_method._scf.with_solvent, eps_optical, equilibrium_solvation)
+        if not self.with_solvent.equilibrium_solvation:
+            self.with_solvent.build()
+
     def gen_response(self, *args, **kwargs):
         pcmobj = self.with_solvent
         mf = self._scf
@@ -89,12 +95,6 @@ class WithSolventTDSCF:
                 logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
             return v     
         return vind_with_solvent
-
-    def __init__(self, tda_method, eps_optical=1.78, equilibrium_solvation=False):
-        self.__dict__.update(tda_method.__dict__)
-        self.with_solvent = TDPCM(tda_method._scf.with_solvent, eps_optical, equilibrium_solvation)
-        if not self.with_solvent.equilibrium_solvation:
-            self.with_solvent.build()
 
     def undo_solvent(self):
         cls = self.__class__
