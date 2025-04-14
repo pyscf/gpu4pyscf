@@ -211,7 +211,7 @@ C    D
     omega = 0.3
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(cell, auxcell, omega=omega)
     nao = cell.nao
-    i, j = divmod(idx, nao)
+    i, j, diag = idx
     naux = auxcell.nao
     out = cp.zeros((naux,nao,nao))
     out[:,j,i] = dat
