@@ -183,6 +183,7 @@ void type1_cart_kernel(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai_prim + aj_prim;
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
+            __syncthreads();
 
             const double eij = exp(-ai_prim*r2ca - aj_prim*r2cb);
             const double eaij = eij * pow(-2.0*ai_prim, orderi) * pow(-2.0*aj_prim, orderj);
@@ -236,7 +237,6 @@ void type1_cart_kernel(double *gctr,
         }}}
         gctr[ij] = tmp;
     }
-    return;
 }
 
 // Unrolling case
@@ -284,6 +284,7 @@ void type1_cart_ip1(double *gctr,
             buf, ish, jsh, ksh,
             ecpbas, ecploc,
             atm, bas, env);
+        __syncthreads();
         _li_up(gctr_smem, buf, LI, LJ);
         __syncthreads();
     }

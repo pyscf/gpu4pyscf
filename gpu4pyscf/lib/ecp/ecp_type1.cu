@@ -145,7 +145,6 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
         rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
         //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
-    __syncthreads();
 }
 
 template <int LIJ> __device__

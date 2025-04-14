@@ -197,7 +197,7 @@ int ECP_ip_cart(double *gctr,
             cudaError_t err = cudaFuncSetAttribute(
                 type2_cart_ip1_general,
                 cudaFuncAttributeMaxDynamicSharedMemorySize,
-                (dynamic_smem_size+1024)*sizeof(double));
+                dynamic_smem_size*sizeof(double));
 
             if (err != cudaSuccess) {
                 fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
@@ -272,7 +272,7 @@ int ECP_ipipv_cart(double *gctr,
 
         cudaError_t err = cudaFuncSetAttribute(type2_cart_ipipv,
                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                         (dynamic_smem_size+1024)*sizeof(double));
+                                         dynamic_smem_size*sizeof(double));
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
             return 1;
@@ -345,7 +345,7 @@ int ECP_ipvip_cart(double *gctr,
         cudaError_t err = cudaFuncSetAttribute(
             type2_cart_ipvip,
             cudaFuncAttributeMaxDynamicSharedMemorySize,
-            (dynamic_smem_size+1024)*sizeof(double));
+            dynamic_smem_size*sizeof(double));
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
             return 1;
