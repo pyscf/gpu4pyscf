@@ -59,17 +59,18 @@ def build_cderi(cell, auxcell, kpts=None, j_only=False,
                 omega=None, linear_dep_threshold=LINEAR_DEP_THR):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
-    if cell.omega != 0:
-        assert cell.omega < 0
-        omega = abs(cell.omega)
-        with_long_range = False
-    else:
+    with_long_range = cell.omega == 0
+    if with_long_range:
         if omega is None:
             cell_exps, cs = extract_pgto_params(cell, 'diffused')
             omega = cell_exps.min()**.5
             logger.debug(cell, 'omega guess in rsdf_builder = %g', omega)
         omega = abs(omega)
-        with_long_range = True
+    else:
+        assert cell.omega < 0
+        # Not supporting a custom omega for SR CDERI
+        assert omega is None or omega == abs(cell.omega)
+        omega = abs(cell.omega)
 
     if kpts is None or is_zero(kpts):
         return build_cderi_gamma_point(

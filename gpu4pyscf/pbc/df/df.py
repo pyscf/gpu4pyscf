@@ -100,8 +100,18 @@ class GDF(lib.StreamObject):
 
         t1 = (logger.process_clock(), logger.perf_counter())
         if self.is_gamma_point:
+            with_long_range = cell.omega == 0
+            if with_long_range:
+                cell_exps, cs = rsdf_builder.extract_pgto_params(cell, 'diffused')
+                omega = cell_exps.min()**.5
+                logger.debug(cell, 'omega guess for rsdf_builder = %g', omega)
+            else:
+                assert cell.omega < 0
+                omega = abs(cell.omega)
             cderi, self._cderip, self._cderi_idx = \
-                rsdf_builder.compressed_cderi_gamma_point(cell, auxcell)
+                rsdf_builder.compressed_cderi_gamma_point(
+                    cell, auxcell, omega, with_long_range,
+                    self.linear_dep_threshold)
             self._cderi = [None] * num_devices
             self.nao = cell.nao
             if num_devices == 1:
@@ -123,7 +133,8 @@ class GDF(lib.StreamObject):
                         self._cderi[dev_id] = copy_array(tmp)
         else:
             self._cderi, self._cderip = rsdf_builder.build_cderi(
-                cell, auxcell, self.kpts, j_only=j_only)
+                cell, auxcell, self.kpts, j_only=j_only,
+                linear_dep_threshold=self.linear_dep_threshold)
         t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
 

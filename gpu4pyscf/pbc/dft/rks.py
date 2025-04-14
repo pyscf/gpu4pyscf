@@ -203,7 +203,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
             if isinstance(self.grids, gen_grid.UniformGrids):
                 cell = self.cell
                 logger.warn(cell, 'Uniform grids are used for the BPC GDF method. '
-                            'Note: this differs from PySCF default settings using Becke grids.')
+                            'Note: this differs from PySCF default settings which employ the Becke grids.')
                 ngrids = np.prod(cell.mesh)
                 if ngrids > 150000 * cell.natm:
                     logger.warn(cell, '''

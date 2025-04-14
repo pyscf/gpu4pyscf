@@ -80,6 +80,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
+    def test_rsh_gdf(self):
+        mf = pbcdft.UKS(cell, xc='camb3lyp').density_fit().run()
+        mf_ref = mf.to_cpu().run()
+        assert abs(mf.e_tot - mf_ref.e_tot) < 1e-6
+
     def test_lda_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random(3)
