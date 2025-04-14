@@ -30,7 +30,7 @@ void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
     for (int ip = 0; ip < np; ip++){
         const double ka = 2.0 * ai[ip] * rca;
         const double ar2 = ai[ip] * r2;
-        
+
         double buf[AO_LMAX+ECP_LMAX+order+1];
         if (ar2 > EXPCUTOFF + 6.0){
             for (int j = 0; j <= LIC; j++){
@@ -205,7 +205,7 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
         for (int i = 0; i < AO_LMAX_IP+1; i++){
             ang_pmn[i] = 0.0;
         }
-        
+
         for (int i = 0; i <= ix; i++){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
@@ -224,7 +224,6 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
             facs[i*nfi*LIC1 + p*LIC1 + m] = ang_pmn[i];
         }
     }
-    __syncthreads();
 }
 
 template <int LI, int LC> __device__
@@ -256,7 +255,7 @@ void type2_ang(double * __restrict__ facs, double *rca, double *omega){
         for (int i = 0; i < LI+1; i++){
             ang_pmn[i] = 0.0;
         }
-        
+
         for (int i = 0; i <= ix; i++){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
@@ -275,7 +274,6 @@ void type2_ang(double * __restrict__ facs, double *rca, double *omega){
             facs[i*nfi*LIC1 + p*LIC1 + m] = ang_pmn[i];
         }
     }
-    __syncthreads();
 }
 
 template <int LI, int LJ, int LC> __global__
@@ -334,7 +332,7 @@ void type2_cart(double * __restrict__ gctr,
     const double dca = norm3d(rca[0], rca[1], rca[2]);
     double radi[LIC1];
     type2_facs_rad<0>(radi, LI+LC, npi, dca, ci, ai);
-    
+
     const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
     double radj[LJC1];
     type2_facs_rad<0>(radj, LJ+LC, npj, dcb, cj, aj);
@@ -347,7 +345,7 @@ void type2_cart(double * __restrict__ gctr,
     for (int kbas = ecploc[ksh]; kbas < ecploc[ksh+1]; kbas++){
         ur += rad_part(kbas, ecpbas, env);
     }
-    
+
     double root = 0.0;
     if (threadIdx.x < NGAUSS){
         root = r128[threadIdx.x];
@@ -474,7 +472,7 @@ void type2_cart(double * __restrict__ gctr,
     double radi[AO_LMAX+ECP_LMAX+1];
     const double dca = norm3d(rca[0], rca[1], rca[2]);
     type2_facs_rad<0>(radi, LI+LC, npi, dca, ci, ai);
-    
+
     double radj[AO_LMAX+ECP_LMAX+1];
     const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
     type2_facs_rad<0>(radj, LJ+LC, npj, dcb, cj, aj);
@@ -512,7 +510,7 @@ void type2_cart(double * __restrict__ gctr,
         type2_ang(angi, LI, LC, rca, omegai+m);
         type2_ang(angj, LJ, LC, rcb, omegaj+m);
         __syncthreads();
-        
+
         for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
             const int i = ij%nfi;
             const int j = ij/nfi;
@@ -537,7 +535,7 @@ void type2_cart(double * __restrict__ gctr,
         }
         __syncthreads();
     }
-    
+
     const int ioff = ao_loc[ish];
     const int joff = ao_loc[jsh];
     double *gctr_ij = gctr + ioff + joff*nao;
@@ -551,6 +549,6 @@ void type2_cart(double * __restrict__ gctr,
             atomicAdd(gctr_ji + i*nao + j, tmp);
         }
     }
-    
+
     return;
 }

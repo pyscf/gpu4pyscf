@@ -64,9 +64,10 @@ void type1_cart_unrolled_kernel(double *gctr,
             rij[2] = ai_prim * rca[2] + aj_prim * rcb[2];
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai_prim + aj_prim;
-            
+
             __shared__ double rad_all[LIJ1*LIJ1];
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
+            __syncthreads();
 
             const double eij = exp(-ai_prim*r2ca - aj_prim*r2cb);
             const double eaij = eij * pow(-2.0*ai_prim, orderi) * pow(-2.0*aj_prim, orderj);
@@ -121,7 +122,6 @@ void type1_cart_unrolled_kernel(double *gctr,
         }}}
         gctr[ij] = tmp;
     }
-    return;
 }
 
 
@@ -272,17 +272,20 @@ void type1_cart_ip1(double *gctr,
     __shared__ double buf[nfi1*nfj];
 
     type1_cart_unrolled_kernel<1,0,LI+1,LJ>(
-        buf, ish, jsh, ksh, 
-        ecpbas, ecploc, 
+        buf, ish, jsh, ksh,
+        ecpbas, ecploc,
         atm, bas, env);
+    __syncthreads();
     _li_down(gctr_smem, buf, LI, LJ);
+    __syncthreads();
 
     if constexpr (LI > 0){
         type1_cart_unrolled_kernel<0,0,LI-1,LJ>(
-            buf, ish, jsh, ksh, 
-            ecpbas, ecploc, 
+            buf, ish, jsh, ksh,
+            ecpbas, ecploc,
             atm, bas, env);
         _li_up(gctr_smem, buf, LI, LJ);
+        __syncthreads();
     }
 
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
@@ -330,21 +333,23 @@ void type1_cart_ip1_general(double *gctr,
     __shared__ double buf[nfi_max*nfj_max];
 
     type1_cart_kernel<1,0>(
-        buf, LI+1, LJ, 
-        ish, jsh, ksh, 
-        ecpbas, ecploc, 
+        buf, LI+1, LJ,
+        ish, jsh, ksh,
+        ecpbas, ecploc,
         atm, bas, env);
     __syncthreads();
     _li_down(gctr_smem, buf, LI, LJ);
+    __syncthreads();
 
     if (LI > 0){
         type1_cart_kernel<0,0>(
-            buf, LI-1, LJ, 
-            ish, jsh, ksh, 
-            ecpbas, ecploc, 
+            buf, LI-1, LJ,
+            ish, jsh, ksh,
+            ecpbas, ecploc,
             atm, bas, env);
         __syncthreads();
         _li_up(gctr_smem, buf, LI, LJ);
+        __syncthreads();
     }
 
     const int nfi = (LI+1) * (LI+2) / 2;

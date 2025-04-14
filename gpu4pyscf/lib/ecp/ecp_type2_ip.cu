@@ -169,7 +169,7 @@ void type2_cart_kernel(double *gctr,
 
     const double dca = norm3d(rca[0], rca[1], rca[2]);
     const double dcb = norm3d(rcb[0], rcb[1], rcb[2]);
-    
+
     double radi[AO_LMAX+ECP_LMAX+orderi+1];
     type2_facs_rad<orderi>(radi, LI+LC, npi, dca, ci, ai);
     double radj[AO_LMAX+ECP_LMAX+orderj+1];
@@ -269,16 +269,20 @@ void type2_cart_ip1(double *gctr,
     constexpr int nfi1 = (LI+2) * (LI+3)/2;
     __shared__ double buf[nfi1*nfj];
     type2_cart_unrolled_kernel<1,0,LI+1,LJ,LC>(
-        buf, ish, jsh, ksh, 
-        ecpbas, ecploc, 
+        buf, ish, jsh, ksh,
+        ecpbas, ecploc,
         atm, bas, env);
+    __syncthreads();
     _li_down(gctr_smem, buf, LI, LJ);
+    __syncthreads();
     if constexpr (LI > 0){
         type2_cart_unrolled_kernel<0,0,LI-1,LJ,LC>(
-            buf, ish, jsh, ksh, 
-            ecpbas, ecploc, 
+            buf, ish, jsh, ksh,
+            ecpbas, ecploc,
             atm, bas, env);
+        __syncthreads();
         _li_up(gctr_smem, buf, LI, LJ);
+        __syncthreads();
     }
 
     for (int ij = threadIdx.x; ij < nfi*nfj; ij+=blockDim.x){
@@ -326,20 +330,22 @@ void type2_cart_ip1_general(double *gctr,
     constexpr int NFJ_MAX = (AO_LMAX+1)*(AO_LMAX+2)/2;
     __shared__ double buf[NFI_MAX*NFJ_MAX];
     type2_cart_kernel<1,0>(
-        buf, LI+1, LJ, LC, 
-        ish, jsh, ksh, 
-        ecpbas, ecploc, 
+        buf, LI+1, LJ, LC,
+        ish, jsh, ksh,
+        ecpbas, ecploc,
         atm, bas, env);
     __syncthreads();
     _li_down(gctr_smem, buf, LI, LJ);
+    __syncthreads();
     if (LI > 0){
         type2_cart_kernel<0,0>(
-            buf, LI-1, LJ, LC, 
-            ish, jsh, ksh, 
-            ecpbas, ecploc, 
+            buf, LI-1, LJ, LC,
+            ish, jsh, ksh,
+            ecpbas, ecploc,
             atm, bas, env);
         __syncthreads();
         _li_up(gctr_smem, buf, LI, LJ);
+        __syncthreads();
     }
 
     const int nfi = (LI+1) * (LI+2) / 2;

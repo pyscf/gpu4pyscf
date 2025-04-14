@@ -50,7 +50,6 @@ void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, doubl
             block_reduce(rur*bval[i], rad_all+lab*LIJ1+i);
         }
     }
-    __syncthreads();
 }
 /*
 template <int l> __device__
@@ -204,7 +203,6 @@ void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac
         rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
         //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
     }
-    __syncthreads();
 }
 
 template <int LI, int LJ> __global__
@@ -266,6 +264,7 @@ void type1_cart(double *gctr,
 
             __shared__ double rad_all[LIJ1*LIJ1];
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
+            __syncthreads();
 
             const double eij = exp(-ai[ip]*r2ca - aj[jp]*r2cb);
             const double ceij = eij * ci[ip] * cj[jp];
@@ -389,6 +388,7 @@ void type1_cart(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai_prim + aj_prim;
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
+            __syncthreads();
 
             const double eij = exp(-ai_prim*r2ca - aj_prim*r2cb);
             const double ceij = eij * ci[ip] * cj[jp];
