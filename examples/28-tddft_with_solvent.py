@@ -39,19 +39,19 @@ mf.grids.level = 5
 mf.kernel() # -76.476456106979
 
 # Compute TDDFT and TDA excitation energy
-print('------------------- vertical exitation TDA -----------------------------')
+print('------------------- vertical exitation TDA (non-equilibrium solvent)-----------------------------')
 td = mf.TDDFT(equilibrium_solvation=False).set(nstates=5)
 e_tddft = td.kernel()[0] # [ 8.03553836 10.073618   10.20203543 12.36009825 13.83374465]
 # print('5 TDDFT excitation energy by GPU4PySCF')
 # print(e_tddft)
 
-print('------------------- adiabatic excitation TDA -----------------------------')
+print('------------------- vertical excitation TDA (equilibrium solvent)-----------------------------')
 td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
 e_tda = td.kernel()[0] # [ 7.99456768 10.06329607 10.08523514 12.30675317 13.64298135]
 # print('5 TDA excitation energy by GPU4PySCF')
 # print(e_tda)
 
-print('The gradient of first TDA excitation energy by GPU4PySCF')
+print('The gradient of first TDA excitation energy by GPU4PySCF with equilibrium solvent')
 g = td.nuc_grad_method()
 g.kernel()
 """
@@ -62,3 +62,7 @@ g.kernel()
 2 H    -0.0601539524    -0.0000000000     0.0418233032
 ----------------------------------------------
 """
+
+# ValueError: equilibrium_solvation must be specified
+# td = mf.TDA().set(nstates=5)
+# e_tda = td.kernel()[0]

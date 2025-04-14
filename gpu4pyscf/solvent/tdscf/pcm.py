@@ -69,7 +69,7 @@ class WithSolventTDSCF:
             elif singlet:
                 v += pcmobj._B_dot_x(dm1)
             else:
-                logger.warn(pcmobj, 'Singlet-Triplet has no LR-PCM contribution!')    
+                logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
             return v     
         return vind_with_solvent
 
@@ -88,9 +88,9 @@ class WithSolventTDSCF:
     def _finalize(self):
         super()._finalize()
         if self.with_solvent.equilibrium_solvation:
-            logger.info(self.with_solvent, 'equilibrium solvation NOT for vertical excitation')
+            logger.info(self.with_solvent, 'equilibrium solvation NOT suitable for vertical excitation')
         else:
-            logger.info(self.with_solvent, 'Not equilibrium solvation NOT for vertical excitation,\n\
+            logger.info(self.with_solvent, 'Non equilibrium solvation NOT suitable for adiabatic excitation,\n\
                         eps_optical = %s', self.with_solvent.eps)
 
     def nuc_grad_method(self):
@@ -111,11 +111,12 @@ class WithSolventTDSCFGradient:
         de = super().grad_elec(xy, singlet, atmlst, verbose) 
 
         assert self.base.with_solvent.equilibrium_solvation
+        if self.base.with_solvent.frozen:
+            raise RuntimeError('Frozen solvent model is not supported')
 
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        # TODO: add unrestricted case support
         dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
         dmxpy = self.dmxpy + self.dmxpy.T
         pcmobj = self.base.with_solvent
