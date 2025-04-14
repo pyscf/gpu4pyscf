@@ -191,11 +191,7 @@ def asarray(a, synchronize=True, **kwargs):
 
         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
         # a must be C-contiguous or F-contiguous
-        if a.flags.c_contiguous:
-            order = kwargs.get('order', 'C')
-        elif a.flags.f_contiguous:
-            order = kwargs.get('order', 'F')
-        else:
+        if not a.flags.c_contiguous and not a.flags.f_contiguous:
             allow_fast_transfer = False
         if allow_fast_transfer:
             out = cupy.empty_like(a)
