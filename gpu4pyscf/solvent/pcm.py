@@ -469,21 +469,21 @@ class PCM(lib.StreamObject):
         else:
             raise RuntimeError('Only SCF gradient is supported')
         
-    def TDA(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
+    def TDA(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_response=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
     
-    def TDHF(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
+    def TDHF(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_response=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
     
-    def TDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
+    def TDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_response=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
     
-    def CasidaTDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_resposne=True):
+    def CasidaTDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78, linear_response=True):
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_resposne)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess

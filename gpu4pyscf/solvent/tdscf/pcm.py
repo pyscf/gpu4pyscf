@@ -32,11 +32,11 @@ class TDPCM(PCM):
             self.eps = eps_optical
         
 
-def make_tdscf_object(tda_method, eps_optical=1.78, equilibrium_solvation=False, linear_resposne=True):
+def make_tdscf_object(tda_method, eps_optical=1.78, equilibrium_solvation=False, linear_response=True):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
-    return lib.set_class(WithSolventTDSCF(tda_method, eps_optical, equilibrium_solvation, linear_resposne),
+    return lib.set_class(WithSolventTDSCF(tda_method, eps_optical, equilibrium_solvation, linear_response),
                          (WithSolventTDSCF, tda_method.__class__), name)
 
 
@@ -68,12 +68,13 @@ def make_tdscf_gradient_object(tda_grad_method):
 class WithSolventTDSCF:
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'with_solvent'}
+    _keys = {'with_solvent', 'linear_response'}
 
-    def __init__(self, tda_method, eps_optical=1.78, equilibrium_solvation=False):
+    def __init__(self, tda_method, eps_optical=1.78, equilibrium_solvation=False, linear_response=True):
         self.__dict__.update(tda_method.__dict__)
         self.with_solvent = TDPCM(tda_method._scf.with_solvent, eps_optical, equilibrium_solvation)
-        if not self.with_solvent.equilibrium_solvation:
+        self.linear_response = linear_response
+        if not self.with_solvent.equilibrium_solvation and linear_response:
             self.with_solvent.build()
 
     def gen_response(self, *args, **kwargs):
@@ -86,13 +87,14 @@ class WithSolventTDSCF:
         singlet = singlet or singlet is None
         def vind_with_solvent(dm1):
             v = vind(dm1)
-            if is_uhf:
-                v_solvent = pcmobj._B_dot_x(dm1)
-                v += v_solvent[0] + v_solvent[1]
-            elif singlet:
-                v += pcmobj._B_dot_x(dm1)
-            else:
-                logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
+            if self.linear_response:
+                if is_uhf:
+                    v_solvent = pcmobj._B_dot_x(dm1)
+                    v += v_solvent[0] + v_solvent[1]
+                elif singlet:
+                    v += pcmobj._B_dot_x(dm1)
+                else:
+                    logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
             return v     
         return vind_with_solvent
 

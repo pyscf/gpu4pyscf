@@ -137,29 +137,29 @@ class SCFWithSolvent(_Solvation):
         grad_method = super().nuc_grad_method()
         return self.with_solvent.nuc_grad_method(grad_method)
 
-    def TDA(self, equilibrium_solvation=None, eps_optical=1.78, linear_resposne=True):
+    def TDA(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
         tda_method = super().TDA()
-        return self.with_solvent.TDA(tda_method, eps_optical, equilibrium_solvation, linear_resposne)
+        return self.with_solvent.TDA(tda_method, eps_optical, equilibrium_solvation, linear_response)
 
-    def TDDFT(self, equilibrium_solvation=None, eps_optical=1.78, linear_resposne=True):
+    def TDDFT(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
         tda_method = super().TDDFT()
-        return self.with_solvent.TDDFT(tda_method, eps_optical, equilibrium_solvation, linear_resposne)
+        return self.with_solvent.TDDFT(tda_method, eps_optical, equilibrium_solvation, linear_response)
     
-    def TDHF(self, equilibrium_solvation=None, eps_optical=1.78, linear_resposne=True):
+    def TDHF(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
         tda_method = super().TDHF()
-        return self.with_solvent.TDHF(tda_method, eps_optical, equilibrium_solvation, linear_resposne)
+        return self.with_solvent.TDHF(tda_method, eps_optical, equilibrium_solvation, linear_response)
     
-    def CasidaTDDFT(self, equilibrium_solvation=None, eps_optical=1.78, linear_resposne=True):
+    def CasidaTDDFT(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
         tda_method = super().CasidaTDDFT()
-        return self.with_solvent.CasidaTDDFT(tda_method, eps_optical, equilibrium_solvation, linear_resposne)
+        return self.with_solvent.CasidaTDDFT(tda_method, eps_optical, equilibrium_solvation, linear_response)
 
     Gradients = nuc_grad_method
 
