@@ -107,7 +107,7 @@ class WithSolventTDSCF:
     def kernel(self, *args, **kwargs):
         pcmobj = self._scf.with_solvent
         if pcmobj.state_specific:
-            pass
+            return super().kernel(*args, **kwargs)
         else:
             return super().kernel(*args, **kwargs)
     
