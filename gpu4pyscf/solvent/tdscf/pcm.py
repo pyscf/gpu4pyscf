@@ -156,12 +156,12 @@ class WithSolventTDSCFGradient:
         de += grad_qv(pcmobj, dm, q_sym = qE_sym_dmP)
         de += grad_nuc(pcmobj, dm, q_sym = qE_sym_dmP.get())
         de += grad_qv(pcmobj, dmP, q_sym = q_sym_dm)
-        v_grids_1 = pcmobj._get_vgrids(dmP, with_nuc = False)
-        de += grad_solver(pcmobj, dm, v_grids_1 = v_grids_1) * 2.0
+        v_grids_l = pcmobj._get_vgrids(dmP, with_nuc = False)
+        de += grad_solver(pcmobj, dm, v_grids_l = v_grids_l) * 2.0
         de += grad_qv(pcmobj, dmxpy, q_sym = qE_sym_dmxpy) * 2.0
         v_grids = pcmobj._get_vgrids(dmxpy, with_nuc = False)
         q = pcmobj._get_qsym(dmxpy, with_nuc = False)[1]
-        de += grad_solver(pcmobj, dmxpy, v_grids=v_grids, v_grids_1=v_grids, q=q) * 2.0
+        de += grad_solver(pcmobj, dmxpy, v_grids=v_grids, v_grids_l=v_grids, q=q) * 2.0
         
         return de
 
