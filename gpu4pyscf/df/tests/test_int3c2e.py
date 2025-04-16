@@ -1,26 +1,32 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import pyscf
-from pyscf import df
+from pyscf import df, gto
 from pyscf.gto.moleintor import getints, make_cintopt
 from pyscf.df.grad.rhf import _int3c_wrapper
 import numpy as np
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as cp
+    from gpu4pyscf.lib.cupy_helper import load_library
+else:
+    import dpnp as cp
+    from gpu4pyscf.lib.dpnp_helper import load_library
 import unittest
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import load_library
 
 libgint = load_library('libgint')
 
@@ -74,7 +80,10 @@ class KnownValues(unittest.TestCase):
     def test_int3c2e(self):
         get_int3c = _int3c_wrapper(mol, auxmol, 'int3c2e', 's1')
         int3c_pyscf = get_int3c((0, mol.nbas, 0, mol.nbas, 0, auxmol.nbas))
-        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym='s1').get()
+        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True).get()
+        assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-8
+        
+        int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=False).get()
         assert np.linalg.norm(int3c_gpu - int3c_pyscf) < 1e-8
 
     def test_int3c2e_omega(self):
@@ -143,6 +152,48 @@ class KnownValues(unittest.TestCase):
             mol.set_rinv_origin(coords[i])
             h1ao = mol.intor('int1e_iprinvip', comp=9) # <\nabla|1/r|>
             assert np.linalg.norm(int3c[:,:,:,i] - h1ao) < 1e-7
+
+    def test_int1e_edge_case(self):
+        mol = gto.M(
+            atom =
+            """
+            H 0 0 0
+            H -1 0.0 0
+            """,
+            basis =
+            """
+            H    S
+                0.1612777588       1.0000000
+            """)
+        mol.build()
+
+        xs = np.arange(-3.01, 3.00, 5.0)
+        ys = np.arange(-3.02, 3.00, 10.0)
+        zs = np.arange(-3.03, 3.00, 10.0)
+        grid_points = pyscf.lib.cartesian_prod([xs, ys, zs])
+
+        nao = mol.nao
+        ngrids = grid_points.shape[0]
+        dm = np.ones((nao, nao))
+        charges = np.ones(ngrids)
+
+        int3c2e_ip2 = mol._add_suffix('int3c2e_ip2')
+        cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip2)
+        fakemol = gto.fakemol_for_charges(grid_points)
+        q_nj = df.incore.aux_e2(mol, fakemol, intor=int3c2e_ip2, aosym='s1', cintopt=cintopt)
+        dq_cpu = np.einsum('xijk,ij,k->xk', q_nj, dm, charges)
+
+        dm = cp.asarray(dm)
+        charges = cp.asarray(charges)
+        intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
+        intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
+        coeff = intopt.coeff
+        dm_cart = coeff @ dm @ coeff.T
+        dq_gpu, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', charges, None, dm_cart)
+
+        #ABB 03/20/25: here cupy is used for assert. numpy has this but not dpnp need to
+        # figure out ??
+        cp.testing.assert_allclose(dq_cpu, dq_gpu, atol = 1e-10)
 
 if __name__ == "__main__":
     print("Full Tests for int3c")

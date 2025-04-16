@@ -1,316 +1,80 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import time
-import copy
-import ctypes
-import contextlib
-import numpy 
-import scipy.linalg
+import numpy as np
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import (
+        eigh, tag_array, return_gpunp_array, cond, asarray, get_avail_mem)
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import (
+        eigh, tag_array, return_gpunp_array, cond, asarray, get_avail_mem)
+    from dpctl._sycl_queue_manager import get_device_cached_queue
+import h5py
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
-from pyscf.scf import hf, jk, _vhf
+from pyscf.scf import hf as hf_cpu
+from pyscf.scf import chkfile
 from gpu4pyscf import lib
-from gpu4pyscf.scf import diis
+from gpu4pyscf.lib import utils
+from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
-from importlib.util import find_spec
-
-has_dpctl = find_spec("dpctl")
-
-if not has_dpctl:
-    import cupy as np
-    from gpu4pyscf.lib.cupy_helper import (eigh, load_library, tag_array,
-                                       return_cupy_array, cond)
-else:
-    import dpnp as np
-    from gpu4pyscf.lib.dpnp_helper import (eigh, load_library, tag_array,
-                                       return_np_array, cond)
 
 __all__ = [
     'get_jk', 'get_occ', 'get_grad', 'damping', 'level_shift', 'get_fock',
-    'energy_elec', 'RHF'
+    'energy_elec', 'RHF', 'SCF'
 ]
-
-LMAX_ON_GPU = 4
-FREE_CUPY_CACHE = True
-BINSIZE = 128   # TODO bug for 256
-libgvhf = load_library('libgvhf')
 
 def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
            verbose=None):
     '''Compute J, K matrices with CPU-GPU hybrid algorithm
     '''
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    if hermi != 1:
-        raise NotImplementedError('JK-builder only supports hermitian density matrix')
-    if omega is None:
-        omega = 0.0
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol, 'int2e').build()
-    out_cupy = isinstance(dm, np.ndarray)
-    if not isinstance(dm, np.ndarray): dm = np.asarray(dm)
-    coeff = np.asarray(vhfopt.coeff)
-    nao, nao0 = coeff.shape
-    dm0 = dm
-    dms = dm0.reshape(-1,nao0,nao0)
-    dms = np.einsum('pi,xij,qj->xpq', coeff, dms, coeff.conj())
-    dms = np.asarray(dms, order='C')
-    n_dm = dms.shape[0]
-    scripts = []
-    vj = vk = None
-    vj_ptr = vk_ptr = pyscf_lib.c_null_ptr()
-    if with_j:
-        vj = np.zeros(dms.shape).transpose(0, 2, 1)
-        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
-        scripts.append('ji->s2kl')
-    if with_k:
-        vk = np.zeros(dms.shape).transpose(0, 2, 1)
-        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
-        if hermi == 1:
-            scripts.append('jk->s2il')
-        else:
-            scripts.append('jk->s1il')
-
-    l_symb = pyscf_lib.param.ANGULAR
-    log_qs = vhfopt.log_qs
-    direct_scf_tol = vhfopt.direct_scf_tol
-    cp_idx, cp_jdx = numpy.tril_indices(len(vhfopt.uniq_l_ctr))
-    l_ctr_shell_locs = vhfopt.l_ctr_offsets
-    l_ctr_ao_locs = vhfopt.mol.ao_loc[l_ctr_shell_locs]
-    dm_ctr_cond = numpy.max(
-        [pyscf_lib.condense('absmax', x, l_ctr_ao_locs) for x in dms.get()], axis=0)
-
-    dm_shl = np.zeros([n_dm, l_ctr_shell_locs[-1], l_ctr_shell_locs[-1]])
-    assert dms.flags.c_contiguous
-    size_l = numpy.array([1,3,6,10,15,21,28])
-    l_ctr = vhfopt.uniq_l_ctr[:,0]
-    r = 0
-    for i, li in enumerate(l_ctr):
-        i0 = l_ctr_ao_locs[i]
-        i1 = l_ctr_ao_locs[i+1]
-        ni_shls = (i1-i0)//size_l[li]
-        c = 0
-        for j, lj in enumerate(l_ctr):
-            j0 = l_ctr_ao_locs[j]
-            j1 = l_ctr_ao_locs[j+1]
-            nj_shls = (j1-j0)//size_l[lj]
-            for idm in range(n_dm):
-                sub_dm = dms[idm][i0:i1,j0:j1].reshape([ni_shls, size_l[li], nj_shls, size_l[lj]])
-                dm_shl[idm, r:r+ni_shls, c:c+nj_shls] = np.max(np.abs(sub_dm), axis=[1,3])
-            c += nj_shls
-        r += ni_shls
-    dm_shl = np.max(dm_shl, axis=0)
-    dm_shl = np.log(dm_shl)
-    nshls = dm_shl.shape[1]
-    if hermi != 1:
-        dm_ctr_cond = (dm_ctr_cond + dm_ctr_cond.T) * .5
-    fn = libgvhf.GINTbuild_jk
-    for cp_ij_id, log_q_ij in enumerate(log_qs):
-        cpi = cp_idx[cp_ij_id]
-        cpj = cp_jdx[cp_ij_id]
-        li = vhfopt.uniq_l_ctr[cpi,0]
-        lj = vhfopt.uniq_l_ctr[cpj,0]
-        if li > LMAX_ON_GPU or lj > LMAX_ON_GPU or log_q_ij.size == 0:
-            continue
-
-        for cp_kl_id, log_q_kl in enumerate(log_qs[:cp_ij_id+1]):
-            cpk = cp_idx[cp_kl_id]
-            cpl = cp_jdx[cp_kl_id]
-            lk = vhfopt.uniq_l_ctr[cpk,0]
-            ll = vhfopt.uniq_l_ctr[cpl,0]
-            if lk > LMAX_ON_GPU or ll > LMAX_ON_GPU or log_q_kl.size == 0:
-                continue
-
-            # TODO: determine cutoff based on the relevant maximum value of dm blocks?
-            sub_dm_cond = max(dm_ctr_cond[cpi,cpj], dm_ctr_cond[cpk,cpl],
-                              dm_ctr_cond[cpi,cpk], dm_ctr_cond[cpj,cpk],
-                              dm_ctr_cond[cpi,cpl], dm_ctr_cond[cpj,cpl])
-            if sub_dm_cond < direct_scf_tol * 1e3:
-                continue
-
-            #log_cutoff = numpy.log(direct_scf_tol / sub_dm_cond)
-            log_cutoff = numpy.log(direct_scf_tol)
-            sub_dm_cond = numpy.log(sub_dm_cond)
-
-            bins_locs_ij = vhfopt.bins[cp_ij_id]
-            bins_locs_kl = vhfopt.bins[cp_kl_id]
-
-            log_q_ij = np.asarray(log_q_ij, dtype=numpy.float64)
-            log_q_kl = np.asarray(log_q_kl, dtype=numpy.float64)
-
-            bins_floor_ij = vhfopt.bins_floor[cp_ij_id]
-            bins_floor_kl = vhfopt.bins_floor[cp_kl_id]
-            #if li + lj + lk + ll < 8:
-            #    continue
-            nbins_ij = len(bins_locs_ij) - 1
-            nbins_kl = len(bins_locs_kl) - 1
-            err = fn(vhfopt.bpcache, vj_ptr, vk_ptr,
-                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                     ctypes.c_int(nao), ctypes.c_int(n_dm),
-                     bins_locs_ij.ctypes.data_as(ctypes.c_void_p),
-                     bins_locs_kl.ctypes.data_as(ctypes.c_void_p),
-                     bins_floor_ij.ctypes.data_as(ctypes.c_void_p),
-                     bins_floor_kl.ctypes.data_as(ctypes.c_void_p),
-                     ctypes.c_int(nbins_ij),
-                     ctypes.c_int(nbins_kl),
-                     ctypes.c_int(cp_ij_id),
-                     ctypes.c_int(cp_kl_id),
-                     ctypes.c_double(omega),
-                     ctypes.c_double(log_cutoff),
-                     ctypes.c_double(sub_dm_cond),
-                     ctypes.cast(dm_shl.data.ptr, ctypes.c_void_p),
-                     ctypes.c_int(nshls),
-                     ctypes.cast(log_q_ij.data.ptr, ctypes.c_void_p),
-                     ctypes.cast(log_q_kl.data.ptr, ctypes.c_void_p)
-                     )
-            if err != 0:
-                detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
-                raise RuntimeError(detail)
-            #log.debug1('(%s%s|%s%s) on GPU %.3fs',
-            #           l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
-            #           time.perf_counter() - t0)
-            #print(li, lj, lk, ll, time.perf_counter() - t0)
-            #exit()
-
-    if with_j:
-        vj_ao = []
-        #vj = [np.einsum('pi,pq,qj->ij', coeff, x, coeff) for x in vj]
-        for x in vj:
-            #x = np.einsum('pi,pq->iq', coeff, x)
-            #x = np.einsum('iq,qj->ij', x, coeff)
-            x = coeff.T @ x @ coeff
-            vj_ao.append(2.0*(x + x.T))
-        vj = vj_ao
-
-    if with_k:
-        vk_ao = []
-        for x in vk:
-            #x = np.einsum('pi,pq->iq', coeff, x)
-            #x = np.einsum('iq,qj->ij', x, coeff)
-            x = coeff.T @ x @ coeff
-            vk_ao.append(x + x.T)
-        vk = vk_ao
-
-    cput0 = log.timer_debug1('get_jk pass 1 on gpu', *cput0)
-    h_shls = vhfopt.h_shls
-    if h_shls:
-        log.debug3('Integrals for %s functions on CPU', l_symb[LMAX_ON_GPU+1])
-        pmol = vhfopt.mol
-        shls_excludes = [0, h_shls[0]] * 4
-        vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
-                                 dms.get(), 1, pmol._atm, pmol._bas, pmol._env,
-                                 vhfopt=vhfopt, shls_excludes=shls_excludes)
-        coeff = vhfopt.coeff
-        idx, idy = numpy.tril_indices(nao, -1)
-        if with_j and with_k:
-            vj1 = vs_h[0].reshape(n_dm,nao,nao)
-            vk1 = vs_h[1].reshape(n_dm,nao,nao)
-        elif with_j:
-            vj1 = vs_h[0].reshape(n_dm,nao,nao)
-        else:
-            vk1 = vs_h[0].reshape(n_dm,nao,nao)
-
-        if with_j:
-            vj1[:,idy,idx] = vj1[:,idx,idy]
-            vj1 = np.asarray(vj1)
-            for i, v in enumerate(vj1):
-                vj[i] += coeff.T.dot(v).dot(coeff)
-        if with_k:
-            if hermi:
-                vk1[:,idy,idx] = vk1[:,idx,idy]
-            vk1 = np.asarray(vk1)
-            for i, v in enumerate(vk1):
-                vk[i] += coeff.T.dot(v).dot(coeff)
-        cput0 = log.timer_debug1('get_jk pass 2 for l>4 basis on cpu', *cput0)
-
-    if FREE_CUPY_CACHE: #vama pending
-        coeff = dms = None
-        np.get_default_memory_pool().free_all_blocks()
-
-    if dm0.ndim == 2:
-        if with_j:
-            vj = vj[0]
-        if with_k:
-            vk = vk[0]
-    else:
-        if with_j:
-            vj = np.asarray(vj).reshape(dm0.shape)
-        if with_k:
-            vk = np.asarray(vk).reshape(dm0.shape)
-    if out_cupy:
-        return vj, vk
-    else:
-        if with_j:
-            vj = vj.get()
-        if with_k:
-            vk = vk.get()
-        return vj, vk
+    with mol.with_range_coulomb(omega):
+        vj, vk = jk.get_jk(mol, dm, hermi, vhfopt, with_j, with_k, verbose)
+    if not isinstance(dm, gpunp.ndarray):
+        if with_j: vj = vj.get()
+        if with_k: vk = vk.get()
+    return vj, vk
 
 def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
             omega=None):
-    if omega is not None:
-        assert omega >= 0
+    vhfopt = mf._opt_gpu.get(omega)
+    if vhfopt is None:
+        with mol.with_range_coulomb(omega):
+            vhfopt = mf._opt_gpu[omega] = jk._VHFOpt(mol, mf.direct_scf_tol).build()
 
-    log = logger.new_logger(mf)
-    cput0 = log.init_timer()
-    log.debug3('apply get_jk on gpu')
-    if omega is None:
-        if hasattr(mf, '_opt_gpu'):
-            vhfopt = mf._opt_gpu
-        else:
-            vhfopt = _VHFOpt(mol, getattr(mf.opt, '_intor', 'int2e'),
-                            getattr(mf.opt, 'prescreen', 'CVHFnrs8_prescreen'),
-                            getattr(mf.opt, '_qcondname', 'CVHFsetnr_direct_scf'),
-                            getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
-            vhfopt.build(mf.direct_scf_tol)
-            mf._opt_gpu = vhfopt
-    else:
-        if hasattr(mf, '_opt_gpu_omega'):
-            vhfopt = mf._opt_gpu_omega
-        else:
-            with mol.with_range_coulomb(omega):
-                vhfopt = _VHFOpt(mol, getattr(mf.opt, '_intor', 'int2e'),
-                                getattr(mf.opt, 'prescreen', 'CVHFnrs8_prescreen'),
-                                getattr(mf.opt, '_qcondname', 'CVHFsetnr_direct_scf'),
-                                getattr(mf.opt, '_dmcondname', 'CVHFsetnr_direct_scf_dm'))
-                vhfopt.build(mf.direct_scf_tol)
-                mf._opt_gpu_omega = vhfopt
-    vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega, verbose=log)
-    log.timer('vj and vk on gpu', *cput0)
+    vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk
 
-def make_rdm1(mf, mo_coeff=None, mo_occ=None, **kwargs):
-    if mo_occ is None: mo_occ = mf.mo_occ
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
-    mo_coeff = np.asarray(mo_coeff)
-    mo_occ = np.asarray(mo_occ)
+def make_rdm1(mo_coeff, mo_occ):
+    mo_coeff = gpunp.asarray(mo_coeff)
+    mo_occ = gpunp.asarray(mo_occ)
     is_occ = mo_occ > 0
     mocc = mo_coeff[:, is_occ]
-    dm = np.dot(mocc*mo_occ[is_occ], mocc.conj().T)
-    occ_coeff = mo_coeff[:, mo_occ>1.0]
+    dm = gpunp.dot(mocc*mo_occ[is_occ], mocc.conj().T)
+    occ_coeff = mo_coeff[:, is_occ]
     return tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
 def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mo_energy is None: mo_energy = mf.mo_energy
-    e_idx = np.argsort(mo_energy)
+    e_idx = gpunp.argsort(mo_energy)
     nmo = mo_energy.size
-    mo_occ = np.zeros(nmo)
+    mo_occ = gpunp.zeros(nmo)
     nocc = mf.mol.nelectron // 2
     mo_occ[e_idx[:nocc]] = 2
     return mo_occ
@@ -321,41 +85,41 @@ def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=No
         vj, vk = mf.get_jk(mol, dm, hermi)
         return vj - vk * .5
     else:
-        ddm = np.asarray(dm) - np.asarray(dm_last)
+        ddm = gpunp.asarray(dm) - gpunp.asarray(dm_last)
         vj, vk = mf.get_jk(mol, ddm, hermi)
         return vj - vk * .5 + vhf_last
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
     viridx = ~occidx
-    g = reduce(np.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
+    g = reduce(gpunp.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
                            mo_coeff[:,occidx])) * 2
     return g.ravel()
 
 def damping(s, d, f, factor):
-    dm_vir = np.eye(s.shape[0]) - np.dot(s, d)
-    f0 = reduce(np.dot, (dm_vir, f, d, s))
+    dm_vir = gpunp.eye(s.shape[0]) - gpunp.dot(s, d)
+    f0 = reduce(gpunp.dot, (dm_vir, f, d, s))
     f0 = (f0+f0.conj().T) * (factor/(factor+1.))
     return f - f0
 
 def level_shift(s, d, f, factor):
-    dm_vir = s - reduce(np.dot, (s, d, s))
+    dm_vir = s - reduce(gpunp.dot, (s, d, s))
     return f + dm_vir * factor
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
-    if s1e is None: s1e = mf.get_ovlp()
-    if dm is None: dm = mf.make_rdm1()
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    if not isinstance(s1e, np.ndarray): s1e = np.asarray(s1e)
-    if not isinstance(dm, np.ndarray): dm = np.asarray(dm)
-    if not isinstance(h1e, np.ndarray): h1e = np.asarray(h1e)
-    if not isinstance(vhf, np.ndarray): vhf = np.asarray(vhf)
+    h1e = gpunp.asarray(h1e)
+    vhf = gpunp.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
 
+    if s1e is None: s1e = mf.get_ovlp()
+    if dm is None: dm = mf.make_rdm1()
+    s1e = gpunp.asarray(s1e)
+    dm = gpunp.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -367,6 +131,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = damping(s1e, dm*.5, f, damp_factor)
     if diis is not None and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f, mf, h1e, vhf)
+
     if abs(level_shift_factor) > 1e-4:
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
     return f
@@ -378,8 +143,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if dm is None: dm = self.make_rdm1()
     if h1e is None: h1e = self.get_hcore()
     if vhf is None: vhf = self.get_veff(self.mol, dm)
-    e1 = np.einsum('ij,ji->', h1e, dm).real
-    e_coul = np.einsum('ij,ji->', vhf, dm).real * .5
+    e1 = gpunp.einsum('ij,ji->', h1e, dm).real
+    e_coul = gpunp.einsum('ij,ji->', vhf, dm).real * .5
     e1 = e1.get()[()]
     e_coul = e_coul.get()[()]
     self.scf_summary['e1'] = e1
@@ -398,25 +163,35 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         conv_tol_grad = conv_tol**.5
         logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
 
-    if(dm0 is None):
+    if dm0 is None:
         dm0 = mf.get_init_guess(mol, mf.init_guess)
 
-    dm = np.asarray(dm0, order='C')
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
         if dm0.ndim == 2:
-            mo_coeff = np.asarray(dm0.mo_coeff)
-            mo_occ = np.asarray(dm0.mo_occ)
-            occ_coeff = np.asarray(mo_coeff[:,mo_occ>0])
-            dm = tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
+            mo_coeff = gpunp.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
+            mo_occ = gpunp.asarray(dm0.mo_occ[dm0.mo_occ>0])
+            dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
+        else:
+            # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
+            dm0 = asarray(dm0, order='C')
 
-    h1e = np.asarray(mf.get_hcore(mol))
-    s1e = np.asarray(mf.get_ovlp(mol))
-    
+    dm, dm0 = asarray(dm0, order='C'), None
+    h1e = gpunp.asarray(mf.get_hcore(mol))
+    s1e = gpunp.asarray(mf.get_ovlp(mol))
+
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     logger.info(mf, 'init E= %.15g', e_tot)
     t1 = log.timer_debug1('total prep', *t0)
     scf_conv = False
+
+    # Skip SCF iterations. Compute only the total energy of the initial density
+    if mf.max_cycle <= 0:
+        fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
+        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        mo_occ = mf.get_occ(mo_energy, mo_coeff)
+        return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
+
     if isinstance(mf.diis, lib.diis.DIIS):
         mf_diis = mf.diis
     elif mf.diis:
@@ -424,64 +199,54 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
-        fock = mf.get_fock(h1e, s1e, vhf, dm)
-        _, mf_diis.Corth = mf.eig(fock, s1e)
     else:
         mf_diis = None
-    
+
+    dump_chk = dump_chk and mf.chkfile is not None
+    if dump_chk:
+        # Explicit overwrite the mol object in chkfile
+        # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
+        chkfile.save_mol(mol, mf.chkfile)
+
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
+        mo_coeff = mo_occ = mo_energy = fock = None
         dm_last = dm
         last_hf_e = e_tot
 
-        f = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
+        fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
         t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = mf.eig(f, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        fock = None
         t1 = log.timer_debug1('eig', *t1)
+
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm = mf.make_rdm1(mo_coeff, mo_occ)
-        t1 = log.timer_debug1('dm', *t1)
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
+        dm = asarray(dm) # Remove the attached attributes
         t1 = log.timer_debug1('veff', *t1)
-        e_tot = mf.energy_tot(dm, h1e, vhf)
-        t1 = log.timer_debug1('energy', *t1)
 
-        norm_ddm = np.linalg.norm(dm-dm_last)
+        fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
+        norm_gorb = gpunp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
+        e_tot = mf.energy_tot(dm, h1e, vhf)
+
+        norm_ddm = gpunp.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
         logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
                     cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+
+        if dump_chk:
+            mf.dump_chk(locals())
+
         e_diff = abs(e_tot-last_hf_e)
-        norm_gorb = np.linalg.norm(mf.get_grad(mo_coeff, mo_occ, f))
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
             scf_conv = True
             break
-
-    if(cycle == mf.max_cycle):
-        logger.warn("SCF failed to converge")
+    else:
+        logger.warn(mf, "SCF failed to converge")
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
-
-def _quad_moment(mf, mol=None, dm=None, unit='Debye-Ang'):
-    from pyscf.data import nist
-    if mol is None: mol = mf.mol
-    if dm is None: dm = mf.make_rdm1()
-    nao = mol.nao
-    with mol.with_common_orig((0,0,0)):
-        ao_quad = mol.intor_symmetric('int1e_rr').reshape(3,3,nao,nao)
-
-    el_quad = numpy.einsum('xyij,ji->xy', ao_quad, dm).real
-
-    # Nuclear contribution
-    charges = mol.atom_charges()
-    coords  = mol.atom_coords()
-    nucl_quad = numpy.einsum('i,ix,iy->xy', charges, coords, coords)
-
-    mol_quad = nucl_quad - el_quad
-
-    if unit.upper() == 'DEBYE-ANG':
-        mol_quad *= nist.AU2DEBYE * nist.BOHR
-    return mol_quad
 
 def energy_tot(mf, dm=None, h1e=None, vhf=None):
     r'''Total Hartree-Fock energy, electronic part plus nuclear repulstion
@@ -492,7 +257,7 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
     '''
     nuc = mf.energy_nuc()
     e_tot = mf.energy_elec(dm, h1e, vhf)[0] + nuc
-    if mf.disp is not None:
+    if mf.do_disp():
         if 'dispersion' in mf.scf_summary:
             e_tot += mf.scf_summary['dispersion']
         else:
@@ -500,7 +265,7 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
             mf.scf_summary['dispersion'] = e_disp
             e_tot += e_disp
     mf.scf_summary['nuc'] = nuc.real
-    if isinstance(e_tot, np.ndarray):
+    if isinstance(e_tot, gpunp.ndarray):
         e_tot = e_tot.get()
     return e_tot
 
@@ -509,6 +274,10 @@ def scf(mf, dm0=None, **kwargs):
 
     mf.dump_flags()
     mf.build(mf.mol)
+
+    if dm0 is None and mf.mo_coeff is not None and mf.mo_occ is not None:
+        # Initial guess from existing wavefunction
+        dm0 = mf.make_rdm1()
 
     if mf.max_cycle > 0 or mf.mo_coeff is None:
         mf.converged, mf.e_tot, \
@@ -527,6 +296,27 @@ def scf(mf, dm0=None, **kwargs):
     logger.timer(mf, 'SCF', *cput0)
     mf._finalize()
     return mf.e_tot
+
+def canonicalize(mf, mo_coeff, mo_occ, fock=None):
+    '''Canonicalization diagonalizes the Fock matrix within occupied, open,
+    virtual subspaces separatedly (without change occupancy).
+    '''
+    if fock is None:
+        dm = mf.make_rdm1(mo_coeff, mo_occ)
+        fock = mf.get_fock(dm=dm)
+    coreidx = mo_occ == 2
+    viridx = mo_occ == 0
+    openidx = ~(coreidx | viridx)
+    mo = gpunp.empty_like(mo_coeff)
+    mo_e = gpunp.empty(mo_occ.size)
+    for idx in (coreidx, openidx, viridx):
+        if gpunp.any(idx) > 0:
+            orb = mo_coeff[:,idx]
+            f1 = orb.conj().T.dot(fock).dot(orb)
+            e, c = gpunp.linalg.eigh(f1)
+            mo[:,idx] = orb.dot(c)
+            mo_e[idx] = e
+    return mo_e, mo
 
 def as_scanner(mf):
     if isinstance(mf, pyscf_lib.SinglePointScanner):
@@ -556,10 +346,10 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
             dm0 = None
         else:
             dm0 = None
-            if np.array_equal(self._last_mol_fp, mol.ao_loc):
+            if gpunp.array_equal(self._last_mol_fp, mol.ao_loc):
                 dm0 = self.make_rdm1()
-            else:
-                raise NotImplementedError
+            elif self.chkfile and h5py.is_hdf5(self.chkfile):
+                dm0 = self.from_chk(self.chkfile)
         self.mo_coeff = None  # To avoid last mo_coeff being used by SOSCF
         e_tot = self.kernel(dm0=dm0, **kwargs)
         self._last_mol_fp = mol.ao_loc
@@ -568,149 +358,201 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
 class SCF(pyscf_lib.StreamObject):
 
     # attributes
-    conv_tol            = hf.SCF.conv_tol
-    conv_tol_grad       = hf.SCF.conv_tol_grad
-    max_cycle           = hf.SCF.max_cycle
-    init_guess          = hf.SCF.init_guess
+    conv_tol            = hf_cpu.SCF.conv_tol
+    conv_tol_grad       = hf_cpu.SCF.conv_tol_grad
+    max_cycle           = hf_cpu.SCF.max_cycle
+    init_guess          = hf_cpu.SCF.init_guess
+    conv_tol_cpscf      = 1e-6   # TODO: reuse the default value in PySCF
 
     disp                = None
-    DIIS                = hf.SCF.DIIS
-    diis                = hf.SCF.diis
-    diis_space          = hf.SCF.diis_space
-    diis_damp           = hf.SCF.diis_damp
-    diis_start_cycle    = hf.SCF.diis_start_cycle
-    diis_file           = hf.SCF.diis_file
-    diis_space_rollback = hf.SCF.diis_space_rollback
-    damp                = hf.SCF.damp
-    level_shift         = hf.SCF.level_shift
-    direct_scf          = hf.SCF.direct_scf
-    direct_scf_tol      = hf.SCF.direct_scf_tol
-    conv_check          = hf.SCF.conv_check
-    callback            = hf.SCF.callback
-    _keys               = hf.SCF._keys
+    DIIS                = diis.SCF_DIIS
+    diis                = hf_cpu.SCF.diis
+    diis_space          = hf_cpu.SCF.diis_space
+    diis_damp           = hf_cpu.SCF.diis_damp
+    diis_start_cycle    = hf_cpu.SCF.diis_start_cycle
+    diis_file           = hf_cpu.SCF.diis_file
+    diis_space_rollback = hf_cpu.SCF.diis_space_rollback
+    damp                = hf_cpu.SCF.damp
+    level_shift         = hf_cpu.SCF.level_shift
+    direct_scf          = hf_cpu.SCF.direct_scf
+    direct_scf_tol      = hf_cpu.SCF.direct_scf_tol
+    conv_check          = hf_cpu.SCF.conv_check
+    callback            = hf_cpu.SCF.callback
+    _keys               = hf_cpu.SCF._keys
 
     # methods
-    __init__                 = hf.SCF.__init__
+    def __init__(self, mol):
+        if not mol._built:
+            mol.build()
+        self.mol = mol
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
+        self.stdout = mol.stdout
+
+        # The chkfile part is different from pyscf, we turn off chkfile by default.
+        self.chkfile = None
+
+##################################################
+# don't modify the following attributes, they are not input options
+        self.mo_energy = None
+        self.mo_coeff = None
+        self.mo_occ = None
+        self.e_tot = 0
+        self.converged = False
+        self.scf_summary = {}
+
+        self._opt_gpu = {None: None}
+        self._eri = None # Note: self._eri requires large amount of memory
+
+    __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
+        excludes=('_opt_gpu', '_eri', '_numint'))
 
     def check_sanity(self):
         s1e = self.get_ovlp()
-        if isinstance(s1e, np.ndarray) and s1e.ndim == 2:
+        if isinstance(s1e, gpunp.ndarray) and s1e.ndim == 2:
             c = cond(s1e)
         else:
-            c = np.asarray([cond(xi) for xi in s1e])
+            c = gpunp.asarray([cond(xi) for xi in s1e])
         logger.debug(self, 'cond(S) = %s', c)
-        if np.max(c)*1e-17 > self.conv_tol:
+        if gpunp.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
-                        'SCF may be inaccurate and hard to converge.', np.max(c))
+                        'SCF may be inaccurate and hard to converge.', gpunp.max(c))
         return super().check_sanity()
 
-    build                    = hf.SCF.build
+    build                    = hf_cpu.SCF.build
     opt                      = NotImplemented
-    dump_flags               = hf.SCF.dump_flags
-    get_fock                 = hf.SCF.get_fock
-    get_occ                  = hf.SCF.get_occ
-    get_grad                 = hf.SCF.get_grad
-    dump_chk                 = NotImplemented
-    init_guess_by_minao      = hf.SCF.init_guess_by_minao
-    init_guess_by_atom       = hf.SCF.init_guess_by_atom
-    init_guess_by_huckel     = hf.SCF.init_guess_by_huckel
-    init_guess_by_mod_huckel = hf.SCF.init_guess_by_mod_huckel
-    init_guess_by_1e         = hf.SCF.init_guess_by_1e
-    init_guess_by_chkfile    = NotImplemented
-    from_chk                 = NotImplemented
-    get_init_guess           = hf.SCF.get_init_guess
-    make_rdm1                = hf.SCF.make_rdm1
-    make_rdm2                = hf.SCF.make_rdm2
-    energy_elec              = hf.SCF.energy_elec
-    energy_tot               = hf.SCF.energy_tot
-    energy_nuc               = hf.SCF.energy_nuc
+    dump_flags               = hf_cpu.SCF.dump_flags
+    get_hcore                = return_gpunp_array(hf_cpu.SCF.get_hcore)
+    get_ovlp                 = return_gpunp_array(hf_cpu.SCF.get_ovlp)
+    get_fock                 = get_fock
+    get_occ                  = get_occ
+    get_grad                 = staticmethod(get_grad)
+    init_guess_by_minao      = hf_cpu.SCF.init_guess_by_minao
+    init_guess_by_atom       = hf_cpu.SCF.init_guess_by_atom
+    init_guess_by_huckel     = hf_cpu.SCF.init_guess_by_huckel
+    init_guess_by_mod_huckel = hf_cpu.SCF.init_guess_by_mod_huckel
+    init_guess_by_1e         = hf_cpu.SCF.init_guess_by_1e
+    init_guess_by_chkfile    = hf_cpu.SCF.init_guess_by_chkfile
+    from_chk                 = hf_cpu.SCF.from_chk
+    get_init_guess           = return_gpunp_array(hf_cpu.SCF.get_init_guess)
+    make_rdm2                = NotImplemented
+    energy_elec              = energy_elec
+    energy_tot               = energy_tot
+    energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
     _eigh                    = staticmethod(eigh)
-    eig                      = hf.SCF.eig
-
-    scf                      = hf.SCF.scf
-    as_scanner               = hf.SCF.as_scanner
-    _finalize                = hf.SCF._finalize
-    init_direct_scf          = hf.SCF.init_direct_scf
-    get_jk                   = hf.SCF.get_jk
-    get_j                    = hf.SCF.get_j
-    get_k                    = hf.SCF.get_k
-    get_veff                 = hf.SCF.get_veff
-    analyze                  = hf.SCF.analyze
-    mulliken_meta            = hf.SCF.mulliken_meta
-    pop                      = hf.SCF.pop
-    dip_moment               = hf.SCF.dip_moment
+    eig                      = hf_cpu.SCF.eig
+    do_disp                  = hf_cpu.SCF.do_disp
+    get_dispersion           = hf_cpu.SCF.get_dispersion
+    kernel = scf             = scf
+    as_scanner               = hf_cpu.SCF.as_scanner
+    _finalize                = hf_cpu.SCF._finalize
+    init_direct_scf          = NotImplemented
+    get_jk                   = _get_jk
+    get_j                    = hf_cpu.SCF.get_j
+    get_k                    = hf_cpu.SCF.get_k
+    get_veff                 = NotImplemented
+    mulliken_meta            = hf_cpu.SCF.mulliken_meta
+    pop                      = hf_cpu.SCF.pop
     _is_mem_enough           = NotImplemented
     density_fit              = NotImplemented
-    sfx2c1e                  = NotImplemented
-    x2c1e                    = NotImplemented
-    x2c                      = NotImplemented
     newton                   = NotImplemented
-    remove_soscf             = NotImplemented
+    x2c = x2c1e = sfx2c1e    = NotImplemented
     stability                = NotImplemented
     nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
-    istype                   = hf.SCF.istype
+    istype                   = hf_cpu.SCF.istype
+    to_rhf                   = NotImplemented
+    to_uhf                   = NotImplemented
+    to_ghf                   = NotImplemented
+    to_rks                   = NotImplemented
+    to_uks                   = NotImplemented
+    to_gks                   = NotImplemented
+    to_ks                    = NotImplemented
+    canonicalize             = NotImplemented
+    mulliken_pop             = NotImplemented
+    mulliken_meta            = NotImplemented
+
+    def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
+        if mo_occ is None: mo_occ = self.mo_occ
+        if mo_coeff is None: mo_coeff = self.mo_coeff
+        return make_rdm1(mo_coeff, mo_occ)
+
+    def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
+                   verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        return hf_cpu.dip_moment(mol, dm.get(), unit, origin, verbose)
+
+    def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
+                    verbose=logger.NOTE):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        return hf_cpu.quad_moment(mol, dm.get(), unit, origin, verbose)
+
+    def remove_soscf(self):
+        lib.logger.warn('remove_soscf has no effect in current version')
+        return self
+
+    def analyze(self, *args, **kwargs):
+        return self.to_cpu().analyze()
 
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
-        self._opt_gpu = None
-        self._opt_gpu_omega = None
+        self._opt_gpu = {None: None}
         self.scf_summary = {}
         return self
+
+    def dump_chk(self, envs):
+        assert isinstance(envs, dict)
+        if self.chkfile:
+            chkfile.dump_scf(
+                self.mol, self.chkfile, envs['e_tot'],
+                gpunp.asnumpy(envs['mo_energy']), gpunp.asnumpy(envs['mo_coeff']),
+                gpunp.asnumpy(envs['mo_occ']), overwrite_mol=False)
 
 class KohnShamDFT:
     '''
     A mock DFT base class, to be compatible with PySCF
     '''
 
-from gpu4pyscf.lib import utils
 class RHF(SCF):
 
     to_gpu = utils.to_gpu
     device = utils.device
 
-    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'screen_tol', 'conv_tol_cpscf', 'disp_with_3body'}
+    _keys = {'e_disp', 'h1e', 's1e', 'e_mf', 'conv_tol_cpscf', 'disp_with_3body'}
 
-    screen_tol = 1e-14
-    conv_tol_cpscf = 1e-6
-    DIIS = diis.SCF_DIIS
-    get_jk = _get_jk
-    _eigh = staticmethod(eigh)
-    make_rdm1 = make_rdm1
-    energy_elec = energy_elec
-    get_fock = get_fock
-    get_occ = get_occ
     get_veff = get_veff
-    get_grad = staticmethod(get_grad)
-    quad_moment = _quad_moment
-    energy_tot = energy_tot
+    canonicalize = canonicalize
 
-    get_hcore = return_np_array(hf.RHF.get_hcore)
-    get_ovlp = return_np_array(hf.RHF.get_ovlp)
-    get_init_guess = return_np_array(hf.RHF.get_init_guess)
-    init_direct_scf = NotImplemented
-    make_rdm2 = NotImplemented
-    dump_chk = NotImplemented
-    newton = NotImplemented
-    x2c = x2c1e = sfx2c1e = NotImplemented
-    to_rhf = NotImplemented
-    to_uhf = NotImplemented
-    to_ghf = NotImplemented
-    to_rks = NotImplemented
-    to_uks = NotImplemented
-    to_gks = NotImplemented
-    to_ks = NotImplemented
-    canonicalize = NotImplemented
-    # TODO: Enable followings after testing
-    analyze = NotImplemented
-    stability = NotImplemented
-    mulliken_pop = NotImplemented
-    mulliken_meta = NotImplemented
+    def check_sanity(self):
+        mol = self.mol
+        if mol.nelectron != 1 and mol.spin != 0:
+            logger.warn(self, 'Invalid number of electrons %d for RHF method.',
+                        mol.nelectron)
+        mem = get_avail_mem()
+        nao = mol.nao
+        if nao**2*20*8 > mem:
+            logger.warn(self, 'GPU memory may be insufficient for SCF of this system. '
+                        'It is recommended to use the scf.LRHF or dft.LRKS class for this system.')
+        return SCF.check_sanity(self)
 
-    scf = scf
-    kernel = scf
+    def energy_elec(self, dm=None, h1e=None, vhf=None):
+        '''
+        electronic energy
+        '''
+        if dm is None: dm = self.make_rdm1()
+        if h1e is None: h1e = self.get_hcore()
+        if vhf is None: vhf = self.get_veff(self.mol, dm)
+        assert dm.dtype == np.float64
+        e1 = float(h1e.ravel().dot(dm.ravel()))
+        e_coul = float(vhf.ravel().dot(dm.ravel())) * .5
+        self.scf_summary['e1'] = e1
+        self.scf_summary['e2'] = e_coul
+        logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
+        return e1+e_coul, e_coul
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf
@@ -720,310 +562,11 @@ class RHF(SCF):
         import gpu4pyscf.df.df_jk
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
 
+    def newton(self):
+        from gpu4pyscf.scf.soscf import newton
+        return newton(self)
+
     def to_cpu(self):
-        mf = hf.RHF(self.mol)
+        mf = hf_cpu.RHF(self.mol)
         utils.to_cpu(self, out=mf)
         return mf
-
-class _VHFOpt:
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
-
-    def __init__(self, mol, intor, prescreen='CVHFnoscreen',
-                 qcondname='CVHFsetnr_direct_scf', dmcondname=None):
-        self.mol, self.coeff = basis_seg_contraction(mol)
-        self.coeff = np.asarray(self.coeff)
-        # Note mol._bas will be sorted in .build() method. VHFOpt should be
-        # initialized after mol._bas updated.
-        self._intor = intor
-        self._prescreen = prescreen
-        self._qcondname = qcondname
-        self._dmcondname = dmcondname
-
-    def build(self, cutoff=1e-13, group_size=None, diag_block_with_triu=False):
-        mol = self.mol
-        cput0 = logger.init_timer(mol)
-        # Sort basis according to angular momentum and contraction patterns so
-        # as to group the basis functions to blocks in GPU kernel.
-        l_ctrs = mol._bas[:,[gto.ANG_OF, gto.numpy.IM_OF]]
-        uniq_l_ctr, _, inv_idx, l_ctr_counts = numpy.unique(
-            l_ctrs, return_index=True, return_inverse=True, return_counts=True, axis=0)
-
-        # Limit the number of AOs in each group
-        if group_size is not None:
-            uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
-                uniq_l_ctr, l_ctr_counts, group_size)
-
-        if mol.verbose >= logger.DEBUG:
-            logger.debug1(mol, 'Number of shells for each [l, nctr] group')
-            for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
-                logger.debug(mol, '    %s : %s', l_ctr, n)
-
-        sorted_idx = numpy.argsort(inv_idx, kind='stable').astype(np.int32)
-        # Sort contraction coefficients before updating self.mol
-        ao_loc = mol.ao_loc_nr(cart=True)
-        nao = ao_loc[-1]
-        # Some addressing problems in GPU kernel code
-        assert nao < 32768
-        ao_idx = numpy.array_split(np.arange(nao), ao_loc[1:-1])
-        ao_idx = numpy.hstack([ao_idx[i] for i in sorted_idx])
-        self.coeff = self.coeff[ao_idx]
-        # Sort basis inplace
-        mol._bas = mol._bas[sorted_idx]
-
-        # Initialize vhfopt after reordering mol._bas
-        _vhf.VHFOpt.__init__(self, mol, self._intor, self._prescreen,
-                             self._qcondname, self._dmcondname)
-        self.direct_scf_tol = cutoff
-
-        lmax = uniq_l_ctr[:,0].max()
-        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
-        l_slices = numpy.append(0, np.cumsum(nbas_by_l))
-        if lmax >= LMAX_ON_GPU:
-            self.g_shls = l_slices[LMAX_ON_GPU:LMAX_ON_GPU+2].tolist()
-        else:
-            self.g_shls = []
-        if lmax > LMAX_ON_GPU:
-            self.h_shls = l_slices[LMAX_ON_GPU+1:].tolist()
-        else:
-            self.h_shls = []
-
-        # TODO: is it more accurate to filter with overlap_cond (or exp_cond)?
-        q_cond = self.get_q_cond()
-        cput1 = logger.timer(mol, 'Initialize q_cond', *cput0)
-        log_qs = []
-        pair2bra = []
-        pair2ket = []
-        bins = []
-        bins_floor = []
-        l_ctr_offsets = numpy.append(0, np.cumsum(l_ctr_counts))
-        for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
-            if uniq_l_ctr[i,0] > LMAX_ON_GPU:
-                # no integrals with h functions should be evaluated on GPU
-                continue
-
-            for q0, q1 in zip(l_ctr_offsets[:i], l_ctr_offsets[1:i+1]):
-                q_sub = q_cond[p0:p1,q0:q1]
-                idx = numpy.argwhere(q_sub > cutoff)
-                q_sub = q_sub[idx[:,0], idx[:,1]]
-                log_q = numpy.log(q_sub)
-                log_q[log_q > 0] = 0
-                nbins = (len(log_q) + BINSIZE)//BINSIZE
-                s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
-
-                ishs = idx[:,0]
-                jshs = idx[:,1]
-                idx = numpy.lexsort((ishs, jshs, s_index), axis=-1)
-                ishs = ishs[idx]
-                jshs = jshs[idx]
-                s_index = s_index[idx]
-
-                ishs += p0
-                jshs += q0
-                pair2bra.append(ishs)
-                pair2ket.append(jshs)
-                bins.append(_make_bins(s_index, nbins=nbins))
-                bins_floor.append(bin_floor)
-                log_qs.append(np.asarray(log_q[idx]))
-
-            q_sub = q_cond[p0:p1,p0:p1]
-            idx = numpy.argwhere(q_sub > cutoff)
-            if not diag_block_with_triu:
-                # Drop the shell pairs in the upper triangle for diagonal blocks
-                mask = idx[:,0] >= idx[:,1]
-                idx = idx[mask,:]
-
-            q_sub = q_sub[idx[:,0], idx[:,1]]
-            log_q = numpy.log(q_sub)
-            log_q[log_q > 0] = 0
-            nbins = (len(log_q) + BINSIZE)//BINSIZE
-            s_index, bin_floor = _make_s_index(log_q, nbins=nbins, cutoff=cutoff)
-            ishs = idx[:,0]
-            jshs = idx[:,1]
-            idx = numpy.lexsort((ishs, jshs, s_index), axis=-1)
-            ishs = ishs[idx]
-            jshs = jshs[idx]
-            s_index = s_index[idx]
-
-            ishs += p0
-            jshs += p0
-            pair2bra.append(ishs)
-            pair2ket.append(jshs)
-            bins.append(_make_bins(s_index, nbins=nbins))
-            bins_floor.append(bin_floor)
-            log_qs.append(np.asarray(log_q[idx]))
-
-        # TODO
-        self.pair2bra = pair2bra
-        self.pair2ket = pair2ket
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = l_ctr_offsets
-        self.bas_pair2shls = numpy.hstack(
-            pair2bra + pair2ket).astype(numpy.int32).reshape(2,-1)
-
-        self.bas_pairs_locs = numpy.append(
-            0, numpy.cumsum([x.size for x in pair2bra])).astype(np.int32)
-        self.bins = bins
-        self.bins_floor = bins_floor
-        self.log_qs = log_qs
-        ao_loc = mol.ao_loc_nr(cart=True)
-        ncptype = len(log_qs)
-        self.bpcache = ctypes.POINTER(BasisProdCache)()
-        if diag_block_with_triu:
-            scale_shellpair_diag = 1.
-        else:
-            scale_shellpair_diag = 0.5
-        libgvhf.GINTinit_basis_prod(
-            ctypes.byref(self.bpcache), ctypes.c_double(scale_shellpair_diag),
-            ao_loc.ctypes.data_as(ctypes.c_void_p),
-            self.bas_pair2shls.ctypes.data_as(ctypes.c_void_p),
-            self.bas_pairs_locs.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ncptype),
-            mol._atm.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.natm),
-            mol._bas.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(mol.nbas),
-            mol._env.ctypes.data_as(ctypes.c_void_p))
-        logger.timer(mol, 'Initialize GPU cache', *cput1)
-        return self
-
-    init_cvhf_direct = _vhf.VHFOpt.init_cvhf_direct
-    get_q_cond       = _vhf.VHFOpt.get_q_cond
-    set_dm           = _vhf.VHFOpt.set_dm
-
-    def clear(self):
-        _vhf.VHFOpt.__del__(self)
-        libgvhf.GINTdel_basis_prod(ctypes.byref(self.bpcache))
-        return self
-
-    def __del__(self):
-        try:
-            self.clear()
-        except AttributeError:
-            pass
-
-class BasisProdCache(ctypes.Structure):
-    pass
-
-def basis_seg_contraction(mol, allow_replica=False):
-    '''transform generally contracted basis to segment contracted basis
-    Kwargs:
-        allow_replica:
-            transform the generally contracted basis to replicated
-            segment-contracted basis
-    '''
-    bas_templates = {}
-    _bas = []
-    _env = mol._env.copy()
-    contr_coeff = []
-    aoslices = mol.aoslice_by_atom()
-    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-        key = tuple(mol._bas[ib0:ib1,gto.PTR_EXP])
-        if key in bas_templates:
-            bas_of_ia, coeff = bas_templates[key]
-            bas_of_ia = bas_of_ia.copy()
-            bas_of_ia[:,gto.ATOM_OF] = ia
-        else:
-            # Generate the template for decontracted basis
-            coeff = []
-            bas_of_ia = []
-            for shell in mol._bas[ib0:ib1]:
-                l = shell[gto.ANG_OF]
-                nf = (l + 1) * (l + 2) // 2
-                nctr = shell[gto.NCTR_OF]
-                if nctr == 1:
-                    bas_of_ia.append(shell)
-                    coeff.append(numpy.eye(nf))
-                    continue
-                # Only basis with nctr > 1 needs to be decontracted
-                numpy.im = shell[gto.NPRIM_OF]
-                pcoeff = shell[gto.PTR_COEFF]
-                if allow_replica:
-                    coeff.extend([numpy.eye(nf)] * nctr)
-                    bs = numpy.repeat(shell[np.newaxis], nctr, axis=0)
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_COEFF] = numpy.arange(pcoeff, pcoeff+nprim*nctr, nprim)
-                    bas_of_ia.append(bs)
-                else:
-                    pexp = shell[gto.PTR_EXP]
-                    exps = _env[pexp:pexp+numpy.im]
-                    norm = gto.gto_norm(l, exps)
-                    # remove normalization from contraction coefficients
-                    c = _env[pcoeff:pcoeff+numpy.im*nctr].reshape(nctr,nprim)
-                    c = numpy.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
-                    coeff.append(c.reshape(nf*nctr, nf*numpy.im).T)
-
-                    _env[pcoeff:pcoeff+numpy.im] = norm
-                    bs = numpy.repeat(shell[np.newaxis], nprim, axis=0)
-                    bs[:,gto.numpy.IM_OF] = 1
-                    bs[:,gto.NCTR_OF] = 1
-                    bs[:,gto.PTR_EXP] = numpy.arange(pexp, pexp+nprim)
-                    bs[:,gto.PTR_COEFF] = numpy.arange(pcoeff, pcoeff+nprim)
-                    bas_of_ia.append(bs)
-
-            bas_of_ia = numpy.vstack(bas_of_ia)
-            bas_templates[key] = (bas_of_ia, coeff)
-
-        _bas.append(bas_of_ia)
-        contr_coeff.extend(coeff)
-
-    pmol = copy.copy(mol)
-    pmol.cart = True
-    pmol._bas = numpy.asarray(np.vstack(_bas), dtype=np.int32)
-    pmol._env = _env
-    contr_coeff = scipy.linalg.block_diag(*contr_coeff)
-
-    if not mol.cart:
-        contr_coeff = contr_coeff.dot(mol.cart2sph_coeff())
-    return pmol, contr_coeff
-
-def _make_s_index_offsets(log_q, nbins=10, cutoff=1e-12):
-    '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
-    scale = nbins / numpy.log(min(cutoff, .1))
-    s_index = numpy.floor(scale * log_q).astype(np.int32)
-    bins = numpy.bincount(s_index)
-    if bins.size < nbins:
-        bins = numpy.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
-    else:
-        bins = bins[:nbins]
-    assert bins.max() < 65536 * 8
-    return numpy.append(0, np.cumsum(bins)).astype(np.int32)
-
-def _make_s_index(log_q, nbins=10, cutoff=1e-12):
-    '''Divides the shell pairs to "nbins" collections down to "cutoff"'''
-    scale = nbins / numpy.log(min(cutoff, .1))
-    s_index = numpy.floor(scale * log_q).astype(np.int32)
-    bins_floor = numpy.arange(nbins) / scale
-    return s_index, bins_floor
-
-def _make_bins(s_index, nbins=10):
-    bins = numpy.bincount(s_index)
-    if bins.size < nbins:
-        bins = numpy.append(bins, np.zeros(nbins-bins.size, dtype=np.int32))
-    else:
-        bins = bins[:nbins]
-    assert bins.max() < 65536 * 8
-    return numpy.append(0, np.cumsum(bins)).astype(np.int32)
-
-def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size):
-    '''Splits l_ctr patterns into small groups with group_size the maximum
-    number of AOs in each group
-    '''
-    l = uniq_l_ctr[:,0]
-    nf = l * (l + 1) // 2
-    _l_ctrs = []
-    _l_ctr_counts = []
-    for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
-        l = l_ctr[0]
-        nf = (l + 1) * (l + 2) // 2
-        max_shells = max(group_size // nf, 2)
-        if l > LMAX_ON_GPU or counts <= max_shells:
-            _l_ctrs.append(l_ctr)
-            _l_ctr_counts.append(counts)
-            continue
-
-        nsubs, rests = counts.__divmod__(max_shells)
-        _l_ctrs.extend([l_ctr] * nsubs)
-        _l_ctr_counts.extend([max_shells] * nsubs)
-        if rests > 0:
-            _l_ctrs.append(l_ctr)
-            _l_ctr_counts.append(rests)
-    uniq_l_ctr = numpy.vstack(_l_ctrs)
-    l_ctr_counts = numpy.hstack(_l_ctr_counts)
-    return uniq_l_ctr, l_ctr_counts

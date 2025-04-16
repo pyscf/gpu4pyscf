@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy
@@ -281,9 +280,9 @@ H -0.595 -0.476 -0.824
     '''
         _check_smd(atom, 2.1279, solvent='water')
         _check_smd(atom, -0.9778, solvent='toluene')
-
-    # TODO: SMD18 updated radii for Br
     """
+    # TODO: SMD18 updated radii for Br
+    
     def test_Br(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -323,6 +322,7 @@ H -0.646 -0.464 -0.804
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for SMDs")
     unittest.main()

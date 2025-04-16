@@ -1,20 +1,17 @@
 /*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * Copyright (C) 2023 Qiming Sun
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -23,9 +20,14 @@
 
 #include "gvhf.h"
 
+#ifdef USE_SYCL
+#include "gint/sycl_alloc.hpp"
+#else
+#include "gint/cuda_alloc.cuh"
+#endif
+
 #include "gint/gint.h"
 #include "gint/config.h"
-#include "gint/cuda_alloc.cuh"
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
@@ -48,6 +50,52 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
   assert(ntasks_kl < 65536*THREADSY);
   int type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
 
+#ifdef USE_SYCL
+  sycl::range<2> threads(THREADSY, THREADSX);
+  sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+  switch (nrys_roots) {
+    case 1:
+      switch (type_ijkl) {
+        case 0b0000: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel_0000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); }); break;
+        default:
+          fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
+      }
+      break;
+
+    case 2:
+      switch (type_ijkl) {
+        case (0<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0010(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0011(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0020(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1000(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1010(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1100(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel2000(*envs, *jk, *offsets); }); break;
+        default:
+          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
+      }
+      break;
+
+    case 3:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<3, NABLAGSIZE3> (*envs, *jk, *offsets); });
+      break;
+    case 4:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<4, NABLAGSIZE4> (*envs, *jk, *offsets); });
+      break;
+    case 5:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<5, NABLAGSIZE5> (*envs, *jk, *offsets); });
+      break;
+    case 6:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<6, NABLAGSIZE6> (*envs, *jk, *offsets); });
+      break;
+    case 7:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<7, NABLAGSIZE7> (*envs, *jk, *offsets); });
+      break;
+    default:
+      fprintf(stderr, "rys roots %d\n", nrys_roots);
+      return 1;
+  }
+#else // USE_SYCL
   dim3 threads(THREADSX, THREADSY);
   dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
   switch (nrys_roots) {
@@ -99,6 +147,7 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
     fprintf(stderr, "CUDA Error of GINTint2e_jk_kernel_nabla1i: %s\n", cudaGetErrorString(err));
     return 1;
   }
+#endif // USE_SYCL
   return 0;
 }
 

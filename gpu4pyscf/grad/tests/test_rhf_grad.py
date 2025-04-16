@@ -1,24 +1,32 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import pyscf
 import numpy as np
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as cp
+else:
+    import dpnp as cp
 import unittest
 import pytest
+import pyscf
+from pyscf import lib
 from pyscf import scf as cpu_scf
 from gpu4pyscf import scf as gpu_scf
+from pyscf.grad import rhf as rhf_grad_cpu
+from gpu4pyscf.grad import rhf as rhf_grad_gpu
 from packaging import version
 
 atom = '''
@@ -33,15 +41,11 @@ bas0='cc-pvtz'
 
 def setUpModule():
     global mol_sph, mol_cart
-    mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000)
-    mol_sph.output = '/dev/null'
-    mol_sph.build()
-    mol_sph.verbose = 1
+    mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000,
+                      output='/dev/null', verbose=1)
 
-    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1)
-    mol_cart.output = '/dev/null'
-    mol_cart.build()
-    mol_cart.verbose = 1
+    mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1,
+                       output='/dev/null', verbose=1)
 
 def tearDownModule():
     global mol_sph, mol_cart
@@ -89,6 +93,32 @@ class KnownValues(unittest.TestCase):
         cpu_gradient = gpu_gradient.to_cpu()
         g_cpu = cpu_gradient.kernel()
         assert np.linalg.norm(g_gpu - g_cpu) < 1e-5
+
+    def test_jk_energy_per_atom(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        np.random.seed(9)
+        nao = mol.nao
+        dm = np.random.rand(nao, nao) - .5
+        dm = cp.asarray(dm.dot(dm.T))
+        ejk = rhf_grad_gpu._jk_energy_per_atom(mol, dm).get()
+        self.assertAlmostEqual(ejk.sum(), 0, 9)
+        self.assertAlmostEqual(lib.fp(ejk), 2710.490337642, 9)
+
+        dm = dm.get()
+        vj, vk = rhf_grad_cpu.get_jk(mol, dm)
+        veff = vj - vk * .5
+        ref = np.empty_like(ejk)
+        for n, (i0, i1) in enumerate(mol.aoslice_by_atom()[:,2:]):
+            ref[n] = np.einsum('xpq,pq->x', veff[:,i0:i1], dm[i0:i1])
+        self.assertAlmostEqual(abs(ejk - ref).max(), 0, 9)
 
 if __name__ == "__main__":
     print("Full Tests for RHF Gradient")

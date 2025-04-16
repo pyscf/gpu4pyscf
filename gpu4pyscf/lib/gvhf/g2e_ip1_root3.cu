@@ -1,21 +1,22 @@
 /*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * Copyright (C) 2023 Qiming Sun
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#endif
 
 __global__
 static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
@@ -23,8 +24,14 @@ static void GINTint2e_ip1_jk_kernel_0021(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -539,8 +546,14 @@ static void GINTint2e_ip1_jk_kernel_0022(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1366,8 +1379,14 @@ static void GINTint2e_ip1_jk_kernel_0030(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -1764,8 +1783,14 @@ static void GINTint2e_ip1_jk_kernel_0031(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -2513,8 +2538,14 @@ static void GINTint2e_ip1_jk_kernel_1011(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -3170,8 +3201,14 @@ static void GINTint2e_ip1_jk_kernel_1020(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -3705,8 +3742,14 @@ static void GINTint2e_ip1_jk_kernel_1021(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -4804,8 +4847,14 @@ static void GINTint2e_ip1_jk_kernel_1030(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -5584,8 +5633,14 @@ static void GINTint2e_ip1_jk_kernel_1110(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -6246,8 +6301,14 @@ static void GINTint2e_ip1_jk_kernel_1111(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -7702,8 +7763,14 @@ static void GINTint2e_ip1_jk_kernel_1120(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -8808,8 +8875,14 @@ static void GINTint2e_ip1_jk_kernel_2010(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -9352,8 +9425,14 @@ static void GINTint2e_ip1_jk_kernel_2011(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -10471,8 +10550,14 @@ static void GINTint2e_ip1_jk_kernel_2020(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -11360,8 +11445,14 @@ static void GINTint2e_ip1_jk_kernel_2100(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -11921,8 +12012,14 @@ static void GINTint2e_ip1_jk_kernel_2110(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -13044,8 +13141,14 @@ static void GINTint2e_ip1_jk_kernel_2200(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -13977,8 +14080,14 @@ static void GINTint2e_ip1_jk_kernel_3000(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -14403,8 +14512,14 @@ static void GINTint2e_ip1_jk_kernel_3010(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }
@@ -15205,8 +15320,14 @@ static void GINTint2e_ip1_jk_kernel_3100(GINTEnvVars envs, JKMatrix jk,
 {
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         return;
     }

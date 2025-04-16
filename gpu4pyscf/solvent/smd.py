@@ -1,30 +1,33 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 '''
 SMD solvent model
 '''
 
 import numpy as np
-import cupy
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+else:
+    import dpnp as gpunp
 from pyscf import lib, gto
 from pyscf.data import radii
 from pyscf.dft import gen_grid
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
-from gpu4pyscf.df import int3c2e
+from gpu4pyscf.gto import int3c1e
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -252,7 +255,7 @@ def smd_radii(alpha):
     return radii_table/radii.BOHR
 
 import ctypes
-from gpu4pyscf.lib.cupy_helper import load_library
+from gpu4pyscf.lib.dpnp_helper import load_library
 libsolvent = load_library('libsolvent')
 def get_cds_legacy(smdobj):
     mol = smdobj.mol
@@ -374,16 +377,16 @@ class SMD(pcm.PCM):
         epsilon = self.eps
         f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
         DA = D*A
-        DAS = cupy.dot(DA, S)
+        DAS = gpunp.dot(DA, S)
         K = S - f_epsilon/(2.0*np.pi) * DAS
-        R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
+        R = -f_epsilon * (gpunp.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
 
         intermediates = {
-            'S': cupy.asarray(S),
-            'D': cupy.asarray(D),
-            'A': cupy.asarray(A),
-            'K': cupy.asarray(K),
-            'R': cupy.asarray(R),
+            'S': gpunp.asarray(S),
+            'D': gpunp.asarray(D),
+            'A': gpunp.asarray(A),
+            'K': gpunp.asarray(K),
+            'R': gpunp.asarray(R),
             'f_epsilon': f_epsilon
         }
         self._intermediates.update(intermediates)
@@ -394,16 +397,16 @@ class SMD(pcm.PCM):
         atom_charges = mol.atom_charges()
 
         # Move this to GPU
-        auxmol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
-        intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-        intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
+        intopt = int3c1e.VHFOpt(mol)
+        intopt.build(1e-14)
         self.intopt = intopt
 
         int2c2e = mol._add_suffix('int2c2e')
+        fakemol_charge = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
         fakemol_nuc = gto.fakemol_for_charges(atom_coords)
-        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, auxmol)
+        v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol_charge)
         v_grids_n = np.dot(atom_charges, v_ng)
-        self.v_grids_n = cupy.asarray(v_grids_n)
+        self.v_grids_n = gpunp.asarray(v_grids_n)
 
     def get_cds(self):
         return get_cds_legacy(self)[0]

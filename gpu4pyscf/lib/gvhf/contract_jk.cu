@@ -1,20 +1,17 @@
 /*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * Copyright (C) 2022 Qiming Sun
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -48,14 +45,21 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
     double *vk = jk.vk;
     double* __restrict__ dm = jk.dm;
 
-    int nf = envs.nf;
-    int16_t *idx = c_idx4c;
-    if (nf > NFffff){
-        idx = envs.idx;
-    }
-    int16_t *idy = idx + nf;
-    int16_t *idz = idx + nf * 2;
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
     
+    const int li = envs.i_l;
+    const int lj = envs.j_l;
+    const int lk = envs.k_l;
+    const int ll = envs.l_l;
+
+    int di = envs.stride_i;
+    int dj = envs.stride_j;
+    int dk = envs.stride_k;
+    int dl = envs.stride_l;
+    const int g_size = envs.g_size;
+
     if (vk == NULL) {
         for (i_dm = 0; i_dm < n_dm; ++i_dm) {
             int ngout = 0;
@@ -66,9 +70,15 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
                     for (n = 0, j = j0; j < j1; ++j) {
                         for (i = i0; i < i1; ++i, ++n) {
                             int ng = n + ngout;
-                            int ix = idx[ng];
-                            int iy = idy[ng];
-                            int iz = idz[ng];
+                            const int loc_l = c_l_locs[ll] + (l-l0);
+                            const int loc_k = c_l_locs[lk] + (k-k0);
+                            const int loc_j = c_l_locs[lj] + (j-j0);
+                            const int loc_i = c_l_locs[li] + (i-i0);
+
+                            int ix = dl * idx[loc_l] + dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+                            int iy = dl * idy[loc_l] + dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+                            int iz = dl * idz[loc_l] + dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
                             double s = 0.0;
 #pragma unroll
                             for (int r = 0; r < NROOTS; r++){
@@ -100,9 +110,15 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
                         for (i = i0; i < i1; ++i, ++n) {
                             int ip = i - i0;
                             int ng = n + ngout;
-                            int ix = idx[ng];
-                            int iy = idy[ng];
-                            int iz = idz[ng];
+                            const int loc_l = c_l_locs[ll] + (l-l0);
+                            const int loc_k = c_l_locs[lk] + (k-k0);
+                            const int loc_j = c_l_locs[lj] + (j-j0);
+                            const int loc_i = c_l_locs[li] + (i-i0);
+
+                            int ix = dl * idx[loc_l] + dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+                            int iy = dl * idy[loc_l] + dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+                            int iz = dl * idz[loc_l] + dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
                             double s = 0.0;
                             for (int r = 0; r < NROOTS; r++){
                                 s += g[ix+r] * g[iy+r] * g[iz+r];
@@ -184,9 +200,15 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
                     for (i = i0; i < i1; ++i, ++n) {
                         int ip = i - i0;
                         int ng = n + ngout;
-                        int ix = idx[ng];
-                        int iy = idy[ng];
-                        int iz = idz[ng];
+                        const int loc_l = c_l_locs[ll] + (l-l0);
+                        const int loc_k = c_l_locs[lk] + (k-k0);
+                        const int loc_j = c_l_locs[lj] + (j-j0);
+                        const int loc_i = c_l_locs[li] + (i-i0);
+
+                        int ix = dl * idx[loc_l] + dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+                        int iy = dl * idy[loc_l] + dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+                        int iz = dl * idz[loc_l] + dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
                         double s = 0.0;
                         for (int r = 0; r < NROOTS; r++){
                             s += g[ix+r] * g[iy+r] * g[iz+r];

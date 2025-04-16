@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy as np
@@ -31,15 +30,11 @@ bas='def2tzvpp'
 
 def setUpModule():
     global mol_sph, mol_cart
-    mol_sph = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=0)
-    mol_sph.output = '/dev/null'
-    mol_sph.build()
-    mol_sph.verbose = 1
+    mol_sph = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=0,
+                      output='/dev/null', verbose=1)
 
-    mol_cart = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=1)
-    mol_cart.output = '/dev/null'
-    mol_cart.build()
-    mol_cart.verbose = 1
+    mol_cart = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=1,
+                       output='/dev/null', verbose=1)
 
 def tearDownModule():
     global mol_sph, mol_cart
@@ -112,7 +107,7 @@ class KnownValues(unittest.TestCase):
 
     def test_rks_b3lyp_d4(self):
         print('-------- B3LYP with D4 ---------------')
-        e_tot = run_dft('B3LYP', mol_sph, disp='D4')
+        e_tot = run_dft('B3LYP', mol_sph, disp='d4')
         e_qchem = -76.4669915146 # w/o D3(BJ) -76.4666819950
         print(f'diff from qchem {e_tot - e_qchem}')
         assert np.abs(e_tot - e_qchem) < 1e-5
@@ -136,9 +131,16 @@ class KnownValues(unittest.TestCase):
     def test_rks_cart(self):
         print('-------- B3LYP (CART) -------------')
         e_tot = run_dft('B3LYP', mol_cart)
-        e_qchem = -76.46723795965626 # data from PySCF
-        print(f'diff from pyscf {e_tot - e_qchem}')
-        assert np.abs(e_tot - e_qchem) < 1e-5
+        e_ref = -76.46723795965626 # data from PySCF
+        print(f'diff from PySCF {e_tot - e_ref}')
+        assert np.abs(e_tot - e_ref) < 1e-5
+
+    def test_rks_wb97m_d3bj(self):
+        print('-------- wB97m-d3bj -------------')
+        e_tot = run_dft('wb97m-d3bj', mol_sph)
+        e_ref = -76.47679432135077
+        print(f'diff from PySCF {e_tot - e_ref}')
+        assert np.abs(e_tot - e_ref) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for restricted Kohn-Sham")

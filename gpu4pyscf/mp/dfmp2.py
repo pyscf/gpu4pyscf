@@ -1,29 +1,59 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import cupy
 from pyscf.mp import mp2 as mp2_pyscf
 from gpu4pyscf import df
 from gpu4pyscf.mp import mp2
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, reduce_to_device
+from gpu4pyscf.__config__ import _streams, num_devices
 from pyscf import __config__
 
 WITH_T2 = getattr(__config__, 'mp_dfmp2_with_t2', True)
 _einsum = cupy.einsum
+
+def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id=0):
+    with cupy.cuda.Device(device_id), _streams[device_id]:
+        mo_energy = cupy.asarray(mo_energy)
+        mo_coeff = cupy.asarray(mo_coeff)
+        
+        nocc = mp.nocc
+        nvir = mp.nmo - nocc
+
+        _cderi = mp.with_df._cderi[device_id]
+        naux_slice = _cderi.shape[0]
+        Lov = cupy.empty((naux_slice, nocc*nvir))
+        p1 = 0
+        for istep, qov in enumerate(mp.loop_ao2mo(mo_coeff, nocc)):
+            logger.debug(mp, 'Load cderi step %d', istep)
+            p0, p1 = p1, p1 + qov.shape[0]
+            Lov[p0:p1] = qov.reshape([p1-p0,nocc*nvir])
+    return Lov
+
+def get_occ_blk(Lov_dist, i, nocc, nvir):
+    occ_blk_dist = [None] * num_devices
+    for device_id in range(num_devices):
+        with cupy.cuda.Device(device_id), _streams[device_id]:
+            Lov = Lov_dist[device_id]
+            mat = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
+                            Lov).reshape(nvir,nocc,nvir)
+            occ_blk_dist[device_id] = mat
+    occ_blk = reduce_to_device(occ_blk_dist)
+    return occ_blk
 
 def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
            verbose=logger.NOTE):
@@ -37,31 +67,31 @@ def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
     if mo_coeff is None:  mo_coeff = eris.mo_coeff
     mo_energy = cupy.asarray(mo_energy)
     mo_coeff = cupy.asarray(mo_coeff)
+    
+    if mp.with_df.naux is None:
+        mp.with_df.build()
+
+    # Submit tasks to different devices
+    futures = []
+    with ThreadPoolExecutor(max_workers=num_devices) as executor:
+        for device_id in range(num_devices):
+            future = executor.submit(_dfmp2_tasks, mp, mo_coeff, mo_energy, 
+                                     device_id=device_id)
+            futures.append(future)
+
+    Lov_dist = [future.result() for future in futures]
 
     nocc = mp.nocc
     nvir = mp.nmo - nocc
-    if mp.with_df.naux is None:
-        mp.with_df.build()
-    naux = mp.with_df.naux
     eia = mo_energy[:nocc,None] - mo_energy[None,nocc:]
-
     if with_t2:
         t2 = cupy.empty((nocc,nocc,nvir,nvir), dtype=mo_coeff.dtype)
     else:
         t2 = None
-
-    Lov = cupy.empty((naux, nocc*nvir))
-    p1 = 0
-    for istep, qov in enumerate(mp.loop_ao2mo(mo_coeff, nocc)):
-        logger.debug(mp, 'Load cderi step %d', istep)
-        p0, p1 = p1, p1 + qov.shape[0]
-        Lov[p0:p1] = qov.reshape([p1-p0,nocc*nvir])
-
+    
     emp2_ss = emp2_os = 0
-
     for i in range(nocc):
-        buf = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
-                        Lov).reshape(nvir,nocc,nvir)
+        buf = get_occ_blk(Lov_dist, i, nocc, nvir)
         gi = cupy.array(buf, copy=False)
         gi = gi.reshape(nvir,nocc,nvir).transpose(1,0,2)
         #lib.direct_sum('jb+a->jba', eia, eia[i])
@@ -100,8 +130,7 @@ class DFMP2(mp2.MP2):
         mo_coeff = cupy.asarray(mo_coeff, order='C')
         Lov = None
         with_df = self.with_df
-        ao_idx = with_df.intopt.ao_idx
-        mo_coeff = mo_coeff[ao_idx]
+        mo_coeff = with_df.intopt.sort_orbitals(mo_coeff, axis=[0])
         orbo = mo_coeff[:,:nocc]
         orbv = mo_coeff[:,nocc:]
         blksize = with_df.get_blksize()

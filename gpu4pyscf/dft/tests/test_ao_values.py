@@ -1,24 +1,28 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy as np
 import pyscf
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import tag_array
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import tag_array
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf.dft import numint
 
@@ -28,16 +32,24 @@ def setUpModule():
 C  -0.65830719,  0.61123287, -0.00800148
 C   0.73685281,  0.61123287, -0.00800148
 '''
+
+    basis = ('ccpvqz', 
+             [[5, [1.2, 1.]], 
+               [6, [1.2, 1.]], 
+               [7, [1.6, 1.]],
+               [8, [1.3, 1.]]
+               ])
+    
     mol_sph = pyscf.M(
         atom=atom,
-        basis='ccpvqz',
+        basis=basis,
         spin=None,
         cart = 0,
         output = '/dev/null')
 
     mol_cart = pyscf.M(
         atom=atom,
-        basis='ccpvqz',
+        basis=basis,
         spin=None,
         cart=1,
         output = '/dev/null')
@@ -54,83 +66,74 @@ class KnownValues(unittest.TestCase):
     def test_ao_sph_deriv0(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv0', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=0)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
-
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_sph, coords, deriv=0)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        
     def test_ao_sph_deriv1(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv1', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=1)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_sph, coords, deriv=1)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv2(self):
         coords = np.random.random((4,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv2', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=2)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_sph, coords, deriv=2)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv3(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv3', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=3)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_sph, coords, deriv=3)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv4(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv4', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_sph, coords, deriv=4)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_sph, coords, deriv=4)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     # cart mol
     def test_ao_cart_deriv0(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv0', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=0)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_cart, coords, deriv=0)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv1(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv1', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=1)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_cart, coords, deriv=1)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv2(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv2', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=2)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_cart, coords, deriv=2)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv3(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv3', coords)
-        ao_cpu = cupy.asarray(ao)
+        ao_cpu = gpunp.asarray(ao)
         ni = NumInt()
         ao_gpu = ni.eval_ao(mol_cart, coords, deriv=3)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv4(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv4', coords)
-        ao_cpu = cupy.asarray(ao)
-        ni = NumInt()
-        ao_gpu = numint.eval_ao(ni, mol_cart, coords, deriv=4)
-        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = gpunp.asarray(ao)
+        ao_gpu = numint.eval_ao(mol_cart, coords, deriv=4)
+        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

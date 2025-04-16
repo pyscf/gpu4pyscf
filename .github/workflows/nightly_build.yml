@@ -12,10 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-
-    runs-on: self-hosted
-
+  test_rks:
+    runs-on: [self-hosted, Linux, X64, v100]
     steps:
     - uses: actions/checkout@v3
     - name: Install dependencies
@@ -23,20 +21,65 @@ jobs:
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
         python3 -m pip install --upgrade pip
         pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
+        pip3 install pytest-benchmark
         pip3 install pyscf --upgrade
         pip3 install numpy --upgrade
         pip3 install scipy --upgrade
         pip3 install cupy-cuda12x --upgrade
         pip3 install gpu4pyscf-libxc-cuda12x --upgrade
         git config --global core.compression 9
-    - name: Build GPU4PySCF
+    - name: Run RKS tests
       run: |
         export CUDA_HOME=/usr/local/cuda
         export PATH=${CUDA_HOME}/bin:${PATH}
         export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
         sh build.sh
-    - name: Smoke Test
+        pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
+  
+  test_uks:
+    runs-on: [self-hosted, Linux, X64, v100]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
       run: |
-        echo $GITHUB_WORKSPACE
-        export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest --durations=0
+        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+        python3 -m pip install --upgrade pip
+        pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
+        pip3 install pytest-benchmark
+        pip3 install pyscf --upgrade
+        pip3 install numpy --upgrade
+        pip3 install scipy --upgrade
+        pip3 install cupy-cuda12x --upgrade
+        pip3 install gpu4pyscf-libxc-cuda12x --upgrade
+        git config --global core.compression 9
+    - name: Run UKS tests
+      run: |
+        export CUDA_HOME=/usr/local/cuda
+        export PATH=${CUDA_HOME}/bin:${PATH}
+        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+        sh build.sh
+        pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
+  
+  test_tddft:
+    runs-on: [self-hosted, Linux, X64, v100]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+        python3 -m pip install --upgrade pip
+        pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
+        pip3 install pytest-benchmark
+        pip3 install pyscf --upgrade
+        pip3 install numpy --upgrade
+        pip3 install scipy --upgrade
+        pip3 install cupy-cuda12x --upgrade
+        pip3 install gpu4pyscf-libxc-cuda12x --upgrade
+        git config --global core.compression 9
+    - name: Run TDDFT tests
+      run: |
+        export CUDA_HOME=/usr/local/cuda
+        export PATH=${CUDA_HOME}/bin:${PATH}
+        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+        sh build.sh
+        pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/

@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# Copyright 2014-2020 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -146,7 +145,7 @@ class DIIS(object):
             else:
                 self._diisfile[key] = value
 # to avoid "Unable to find a valid file signature" error when reload the hdf5
-# file from a crashed claculation
+# file from a crashed calculation
             self._diisfile.flush()
 
     def push_err_vec(self, xerr):

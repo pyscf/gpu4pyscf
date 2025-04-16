@@ -1,25 +1,24 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import numpy as np
 import cupy
 from pyscf.data import nist
-from pyscf.scf import _vhf, jk
+from pyscf.scf import _vhf
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import contract, take_last2d, add_sparse
-from gpu4pyscf.scf import cphf
+from gpu4pyscf.lib.cupy_helper import contract, sandwich_dot, add_sparse
+from gpu4pyscf.scf import cphf, jk
 
 def gen_vind(mf, mo_coeff, mo_occ):
     """get the induced potential. This is the same as contract the mo1 with the kernel.
@@ -37,23 +36,20 @@ def gen_vind(mf, mo_coeff, mo_occ):
     mvir = mo_coeff[:, mo_occ == 0]
     nocc = mocc.shape[1]
     nvir = nmo - nocc
-    omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(
-            mf.xc, spin=mf.mol.spin)
+    omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
+    assert omega == 0, "The module of NMR shielding does not support range-separated functional yet."
 
     def fx(mo1):
         mo1 = mo1.reshape(-1, nvir, nocc)  # * the saving pattern
         mo1_mo_real = contract('nai,ua->nui', mo1, mvir)
         dm1 = 2*contract('nui,vi->nuv', mo1_mo_real, mocc.conj())
-        dm1 -= dm1.transpose(0, 2, 1)
+        dm1 = dm1 - dm1.transpose(0, 2, 1)
         if hasattr(mf,'with_df'):
-            v1 = cupy.empty((3, nao, nao))
-            for i in range(3):
-                v1[i] =+mf.get_jk(mf.mol, dm1[i], hermi=2, with_j=False)[1]*0.5*hyb
+            vk = mf.get_jk(mf.mol, dm1, hermi=2, with_j=False)[1]
         else:
-            v1 = np.empty((3, nao, nao))
-            for i in range(3):
-                v1[i] = -jk.get_jk(mf.mol, dm1[i].get(), 'ijkl,jk->il')*0.5*hyb
-            v1 = cupy.array(v1)
+            #vk = cupy.array(jk.get_jk(mf.mol, dm1.get(), ['ijkl,jk->il']*3))
+            vk = jk.get_jk(mf.mol, dm1, with_j=False)[1]
+        v1 = -.5*hyb * vk
         tmp = contract('nuv,vi->nui', v1, mocc)
         v1vo = contract('nui,ua->nai', tmp, mvir.conj())
 
@@ -68,7 +64,7 @@ def nr_rks(ni, mol, grids, xc_code, dms):
     mo_coeff = getattr(dms, 'mo_coeff', None)
     mo_occ = getattr(dms, 'mo_occ', None)
     nao = mo_coeff.shape[1]
-    
+
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
@@ -77,9 +73,8 @@ def nr_rks(ni, mol, grids, xc_code, dms):
 
     coeff = cupy.asarray(opt.coeff)
     nao, nao0 = coeff.shape
-    dms = cupy.asarray(dms).reshape(-1,nao0,nao0)
-    dms = take_last2d(dms, opt.ao_idx)
-    mo_coeff = mo_coeff[opt.ao_idx]
+    dms = sandwich_dot(cupy.asarray(dms).reshape(-1,nao0,nao0), coeff.T)
+    mo_coeff = coeff.dot(mo_coeff)
 
     vmat = cupy.zeros((3, nao, nao))
     if xctype == 'LDA':
@@ -97,10 +92,10 @@ def nr_rks(ni, mol, grids, xc_code, dms):
             giao = cupy.array(giao)
             giao_aux = giao[:,:,index]
             for idirect in range(3):
-                vtmp = contract('pu,p,vp->uv', giao_aux[idirect], wv, ao)
+                vtmp = contract('pu,vp->uv', giao_aux[idirect], wv*ao)
                 vtmp = cupy.ascontiguousarray(vtmp)
                 add_sparse(vmat[idirect], vtmp, index)
-            
+
         elif xctype == 'GGA':
             wv = vxc * weight
             giao = _sorted_mol.eval_gto('GTOval_ig', coords.get(), comp=3)
@@ -133,7 +128,7 @@ def nr_rks(ni, mol, grids, xc_code, dms):
 
         ao = None
 
-    vmat = take_last2d(vmat, opt.rev_ao_idx)
+    vmat = sandwich_dot(vmat, coeff)
 
     if numint.FREE_CUPY_CACHE:
         dms = None
@@ -164,8 +159,8 @@ def get_vxc(mf, dm0):
         vk = None
         vxc += vj
     else:
-        omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(
-            mf.xc, spin=mf.mol.spin)
+        omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
+        assert omega == 0, "The module of NMR shielding does not support range-separated functional yet."
         vxc += vj - vk*hyb*0.5
     return vxc
 
@@ -183,7 +178,15 @@ def get_h1ao(mf):
 
 
 def eval_shielding(mf):
+    ''' Main driver of NMR shielding
 
+    Args:
+        mf: mean field object
+
+    Returns:
+        dia-magnetic of NMR shielding: in PPM
+        para-magnetic of NMR shielding: in PPM
+    '''
     mo_coeff = mf.mo_coeff
     mo_occ = mf.mo_occ
     mo_energy = mf.mo_energy
@@ -211,19 +214,16 @@ def eval_shielding(mf):
     s1jk = -contract('xiq,qj->xij', tmp, mocc)*0.5
     tmp = contract('nai,ua->nui', s1jk, mocc)
     s1jkdm1 = contract('nui,vi->nuv', tmp, mocc.conj())*2
-    s1jkdm1 -= s1jkdm1.transpose(0, 2, 1)
-    omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(
-            mf.xc, spin=mf.mol.spin)
+    s1jkdm1 = s1jkdm1 - s1jkdm1.transpose(0, 2, 1)
+    omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
+    assert omega == 0.0, "The module of NMR shielding does not support range-separated functional yet."
+
     if hasattr(mf,'with_df'):
-        vk2 = cupy.empty((3, nao, nao))
-        for i in range(3):
-            vk2[i] = +mf.get_jk(mf.mol, s1jkdm1[i], hermi=2, with_j=False)[1]*0.5*hyb
-    
+        vk = mf.get_jk(mf.mol, s1jkdm1, hermi=2, with_j=False)[1]
     else:
-        vk2 = np.empty((3, nao, nao))
-        for i in range(3):
-            vk2[i] = -jk.get_jk(mf.mol, s1jkdm1[i].get(), 'ijkl,jk->il')*0.5*hyb
-        vk2 = cupy.array(vk2)
+        #vk = cupy.array(jk.get_jk(mf.mol, s1jkdm1.get(), ['ijkl,jk->il']*3))
+        vk = jk.get_jk(mf.mol, s1jkdm1, with_j=False)[1]
+    vk2 = -.5*hyb * vk
     h1ao += vk2
     tmp = contract('xuv,ua->xav', h1ao, mvir)
     veff_ai = contract('xav,vi->xai', tmp, mocc)

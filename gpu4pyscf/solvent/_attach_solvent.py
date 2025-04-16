@@ -1,22 +1,26 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import cupy
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import tag_array
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import tag_array
 from pyscf import lib
 from pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf import scf
 
 def _for_scf(mf, solvent_obj, dm=None):
@@ -85,6 +89,7 @@ class SCFWithSolvent(_Solvation):
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1,
                  diis=None, diis_start_cycle=None,
                  level_shift_factor=None, damp_factor=None, fock_last=None):
+        if dm is None: dm = self.make_rdm1()
         # DIIS was called inside oldMF.get_fock. v_solvent, as a function of
         # dm, should be extrapolated as well. To enable it, v_solvent has to be
         # added to the fock matrix before DIIS was called.
@@ -101,10 +106,10 @@ class SCFWithSolvent(_Solvation):
 
         e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
         e_solvent = vhf.e_solvent
-        if isinstance(e_solvent, cupy.ndarray):
+        if isinstance(e_solvent, gpunp.ndarray):
             e_solvent = e_solvent.get()[()]
         e_tot += e_solvent
-        self.scf_summary['e_solvent'] = vhf.e_solvent.real
+        self.scf_summary['e_solvent'] = e_solvent
 
         if (hasattr(self.with_solvent, 'method') and self.with_solvent.method.upper() == 'SMD'):
             if self.with_solvent.e_cds is None:
@@ -112,7 +117,7 @@ class SCFWithSolvent(_Solvation):
                 self.with_solvent.e_cds = e_cds
             else:
                 e_cds = self.with_solvent.e_cds
-            if isinstance(e_cds, cupy.ndarray):
+            if isinstance(e_cds, gpunp.ndarray):
                 e_cds = e_cds.get()[()]
             e_tot += e_cds
             self.scf_summary['e_cds'] = e_cds

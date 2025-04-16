@@ -1,37 +1,36 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80 --ptxas-options=-v")
+
+set(GPU_SRCS
+  nr_eval_gto.cu
+  contract_rho.cu
+  gen_grids.cu
+  nr_numint_sparse.cu
+  vv10.cu
+  libxc.cu
+)
 
 if (USE_SYCL)
-  add_library(gdft SHARED
-    nr_eval_gto.cpp
-    contract_rho.cpp
-    gen_grids.cpp
-    nr_numint_sparse.cpp
-    vv10.cpp
-  )
-else()
-    add_library(gdft SHARED
-  # nr_eval_gto.cu
-  #   contract_rho.cu
-  #   gen_grids.cu
-  #   nr_numint_sparse.cu
-    # vv10.cu
-  )
+  file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
+  set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
 
-# set_target_properties(gdft PROPERTIES
-#   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-endif()
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+else(USE_SYCL)
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
+endif (USE_SYCL)
+
+add_library(gdft SHARED ${GPU_SRCS})
+set_target_properties(gdft PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})

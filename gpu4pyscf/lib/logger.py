@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import sys
 import time
@@ -24,9 +23,13 @@ else:
     import dpnp as gpunp
 from pyscf import lib
 
+<<<<<<< HEAD
 from pyscf.lib import parameters as param
 import pyscf.__config__
 
+=======
+INFO = lib.logger.INFO
+>>>>>>> origin/master
 NOTE = lib.logger.NOTE
 WARN = lib.logger.WARN
 DEBUG = lib.logger.DEBUG
@@ -35,16 +38,14 @@ DEBUG2= lib.logger.DEBUG2
 TIMER_LEVEL = lib.logger.TIMER_LEVEL
 flush = lib.logger.flush
 
-if sys.version_info < (3, 0):
-    process_clock = time.clock
-    perf_counter = time.time
-else:
-    process_clock = time.process_time
-    perf_counter = time.perf_counter
+process_clock = time.process_time
+perf_counter = time.perf_counter
 
 
 def init_timer(rec):
+    wall = e0 = None
     if rec.verbose >= TIMER_LEVEL:
+<<<<<<< HEAD
         if not has_dpctl:
             e0 = cupy.cuda.Event()
             e0.record()
@@ -57,49 +58,81 @@ def init_timer(rec):
         return (process_clock(), perf_counter())
     else:
         return process_clock(),
+=======
+        e0 = cupy.cuda.Event()
+        e0.record()
+        wall = perf_counter()
+    return (process_clock(), wall, e0)
+>>>>>>> origin/master
 
 def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):
-    if cpu0 is None:
-        cpu0 = rec._t0
-    if wall0 and gpu0:
-        rec._t0, rec._w0, rec._e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+    if gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
         if rec.verbose >= TIMER_LEVEL:
+<<<<<<< HEAD
             rec._e0.record()
             rec._e0.synchronize()
 
             flush(rec, '    CPU time for %50s %9.2f sec, wall time %9.2f sec, GPU time for %9.2f ms'
                   % (msg, rec._t0-cpu0, rec._w0-wall0, cupy.cuda.get_elapsed_time(gpu0,rec._e0)))
         return rec._t0, rec._w0, rec._e0
+=======
+            e0.synchronize()
+            flush(rec, '    CPU time for %-50s %9.2f sec, wall time %9.2f sec, GPU time %9.2f ms'
+                  % (msg, t0-cpu0, w0-wall0, cupy.cuda.get_elapsed_time(gpu0,e0)))
+        return t0, w0, e0
+>>>>>>> origin/master
     elif wall0:
-        rec._t0, rec._w0 = process_clock(), perf_counter()
+        t0, w0 = process_clock(), perf_counter()
         if rec.verbose >= TIMER_LEVEL:
+<<<<<<< HEAD
             flush(rec, '    CPU time for %50s %9.2f sec, wall time %9.2f sec'
                   % (msg, rec._t0-cpu0, rec._w0-wall0))
         return rec._t0, rec._w0
+=======
+            flush(rec, '    CPU time for %s %9.2f sec, wall time %9.2f sec'
+                  % (msg, t0-cpu0, w0-wall0))
+        return t0, w0
+>>>>>>> origin/master
     else:
-        rec._t0 = process_clock()
+        t0 = process_clock()
         if rec.verbose >= TIMER_LEVEL:
+<<<<<<< HEAD
             flush(rec, '    CPU time for %50s %9.2f sec' % (msg, rec._t0-cpu0))
         return rec._t0,
+=======
+            flush(rec, '    CPU time for %s %9.2f sec' % (msg, t0-cpu0))
+        return t0,
+>>>>>>> origin/master
 
 def _timer_debug1(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
     if rec.verbose >= DEBUG1:
         return timer(rec, msg, cpu0, wall0, gpu0)
-    elif wall0 and gpu0:
-        rec._t0, rec._w0, rec._e0 = process_clock(), perf_counter(), cupy.cuda.Event()
-        rec._e0.record()
-        return rec._t0, rec._w0, rec._e0
+    elif gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
+        return t0, w0, e0
     elif wall0:
-        rec._t0, rec._w0 = process_clock(), perf_counter()
-        return rec._t0, rec._w0
+        t0, w0 = process_clock(), perf_counter()
+        return t0, w0
     else:
-        rec._t0 = process_clock()
-        return rec._t0,
+        t0 = process_clock()
+        return t0,
 
 def _timer_debug2(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
     if rec.verbose >= DEBUG2:
         return timer(rec, msg, cpu0, wall0, gpu0)
-    return cpu0, wall0, gpu0
+    elif gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
+        return t0, w0, e0
+    elif wall0:
+        t0, w0 = process_clock(), perf_counter()
+        return t0, w0
+    else:
+        t0 = process_clock()
+        return t0,
 
 info = lib.logger.info
 note = lib.logger.note

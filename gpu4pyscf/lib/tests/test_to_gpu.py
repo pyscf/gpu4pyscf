@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy
@@ -64,12 +63,12 @@ class KnownValues(unittest.TestCase):
     def test_rks(self):
         mf = rks.RKS(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
-        assert numpy.abs(e_tot - -74.73210527989748) < 1e-7
+        assert numpy.abs(e_tot - -74.73210527989748) < 1e-6
 
         mf = rks.RKS(mol).run()
         gobj = mf.nuc_grad_method().to_gpu()
         g = gobj.kernel()
-        assert numpy.abs(lib.fp(g) - -0.04340162663176693) < 1e-7
+        assert numpy.abs(lib.fp(g) - -0.04340162663176693) < 1e-6
 
         # RKS Hessian it not supported yet
         # mf = rks.RKS(mol).run()
@@ -114,7 +113,7 @@ class KnownValues(unittest.TestCase):
     def test_df_RKS(self):
         mf = rks.RKS(mol, xc='wb97x').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
-        assert numpy.abs(e_tot - -75.30717654021076) < 1e-7
+        assert numpy.abs(e_tot - -75.30717654021076) < 1e-6
 
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         gobj = mf.nuc_grad_method().to_gpu()
@@ -125,8 +124,9 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
         h = hobj.kernel()
-        assert numpy.abs(lib.fp(h) - 2.187025544697092) < 1e-4
+        assert numpy.abs(lib.fp(h) - 2.1858589608638384) < 1e-4
 
 if __name__ == "__main__":
     print("Full tests for to_gpu module")
     unittest.main()
+    

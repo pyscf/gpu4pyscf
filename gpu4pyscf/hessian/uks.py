@@ -1,37 +1,33 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 '''
 Non-relativistic UKS analytical Hessian
 '''
 
 
-import numpy
 import cupy
+import cupy as cp
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import uhf as uhf_hess
-from gpu4pyscf.hessian import uks as uks_hess
+from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse, take_last2d
+from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem)
 from gpu4pyscf.lib import logger
-
-# import pyscf.grad.rks to activate nuc_grad_method method
-from gpu4pyscf.grad import rks  # noqa
-from gpu4pyscf.hessian import rhf as rhf_hess_gpu
+from gpu4pyscf.hessian import jk
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -40,138 +36,137 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     mol = hessobj.mol
     mf = hessobj.base
+    ni = mf._numint
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    if atmlst is None: atmlst = range(mol.natm)
 
-    nao, nmo = mo_coeff.shape
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = cupy.dot(mocc, mocc.T) * 2
+    mocca = mo_coeff[0][:,mo_occ[0]>0]
+    moccb = mo_coeff[1][:,mo_occ[1]>0]
+    dm0a = mocca.dot(mocca.T)
+    dm0b = moccb.dot(moccb.T)
+    dm0 = cp.asarray((dm0a, dm0b))
 
-    if mf.nlc != '':
-        raise NotImplementedError
-    #enabling range-separated hybrids
-    omega, alpha, beta = mf._numint.rsh_coeff(mf.xc)
-    if abs(omega) > 1e-10:
-        hyb = alpha + beta
-    else:
-        hyb = mf._numint.hybrid_coeff(mf.xc, spin=mol.spin)
-    de2, ej, ek = rhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
-                                             atmlst, max_memory, verbose,
-                                             abs(hyb) > 1e-10)
-    de2 += ej - hyb * ek  # (A,B,dR_A,dR_B)
+    if mf.do_nlc():
+        raise NotImplementedError("2nd derivative of NLC is not implemented.")
+
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+    j_factor = 1.
+    k_factor = 0.
+    if with_k:
+        if omega == 0:
+            k_factor = hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            pass
+        elif hyb == 0: # SR=0, only LR exchange
+            k_factor = alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = alpha
+    de2, ejk = uhf_hess._partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
+                                          atmlst, max_memory, verbose,
+                                          j_factor, k_factor)
+    de2 += ejk  # (A,B,dR_A,dR_B)
+    if with_k and omega != 0:
+        j_factor = 0.
+        omega = -omega # Prefer computing the SR part
+        if alpha == 0: # LR=0, only SR exchange
+            k_factor = hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            # full range exchange was computed in the previous step
+            k_factor = -alpha
+        else: # SR and LR exchange with different ratios
+            k_factor = hyb - alpha # =beta
+        vhfopt = mf._opt_gpu.get(omega, None)
+        with mol.with_range_coulomb(omega):
+            de2 += rhf_hess._partial_ejk_ip2(
+                mol, dm0, vhfopt, j_factor, k_factor, verbose=verbose)
 
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
-    veff_diag = _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
-    if abs(omega) > 1e-10:
-        with mol.with_range_coulomb(omega):
-            vk1 = rhf_hess._get_jk(mol, 'int2e_ipip1', 9, 's2kl',
-                                   ['jk->s1il', dm0])[0]
-        veff_diag -= (alpha-hyb)*.5 * vk1.reshape(3,3,nao,nao)
-    vk1 = None
+    veffa_diag, veffb_diag = _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
     t1 = log.timer_debug1('contracting int2e_ipip1', *t1)
 
     aoslices = mol.aoslice_by_atom()
-    vxc = _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+    vxca_dm, vxcb_dm = _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+    if atmlst is None:
+        atmlst = range(mol.natm)
     for i0, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = aoslices[ia]
-
-        shls_slice = (shl0, shl1) + (0, mol.nbas)*3
-        veff = vxc[ia]
-        if abs(omega) > 1e-10:
-            with mol.with_range_coulomb(omega):
-                vk1, vk2 = rhf_hess._get_jk(mol, 'int2e_ip1ip2', 9, 's1',
-                                            ['li->s1kj', dm0[:,p0:p1],  # vk1
-                                             'lj->s1ki', dm0         ], # vk2
-                                            shls_slice=shls_slice)
-            veff -= (alpha-hyb)*.5 * vk1.reshape(3,3,nao,nao)
-            veff[:,:,:,p0:p1] -= (alpha-hyb)*.5 * vk2.reshape(3,3,nao,p1-p0)
-            t1 = log.timer_debug1('range-separated int2e_ip1ip2 for atom %d'%ia, *t1)
-            with mol.with_range_coulomb(omega):
-                vk1 = rhf_hess._get_jk(mol, 'int2e_ipvip1', 9, 's2kl',
-                                       ['li->s1kj', dm0[:,p0:p1]], # vk1
-                                       shls_slice=shls_slice)[0]
-            veff -= (alpha-hyb)*.5 * vk1.transpose(0,2,1).reshape(3,3,nao,nao)
-            t1 = log.timer_debug1('range-separated int2e_ipvip1 for atom %d'%ia, *t1)
-            vk1 = vk2 = None
-        de2[i0,i0] += contract('xypq,pq->xy', veff_diag[:,:,p0:p1], dm0[p0:p1])*2
+        p0, p1 = aoslices[ia,2:]
+        veffa_dm = vxca_dm[ia]
+        veffb_dm = vxcb_dm[ia]
+        de2[i0,i0] += contract('xypq,pq->xy', veffa_diag[:,:,p0:p1], dm0a[p0:p1])*2
+        de2[i0,i0] += contract('xypq,pq->xy', veffb_diag[:,:,p0:p1], dm0b[p0:p1])*2
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
-            de2[i0,j0] += contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
-
+            de2[i0,j0] += 2.0 * veffa_dm[:,:,q0:q1].sum(axis=2)
+            de2[i0,j0] += 2.0 * veffb_dm[:,:,q0:q1].sum(axis=2)
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
 
-    log.timer('RKS partial hessian', *time0)
+    log.timer('UKS partial hessian', *time0)
     return de2
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
-    if atmlst is None:
-        atmlst = range(mol.natm)
-    if isinstance(mo_coeff, cupy.ndarray):
-        mo_coeff = mo_coeff.get()
-    if isinstance(mo_occ, cupy.ndarray):
-        mo_occ = mo_occ.get()
-
-    nao, nmo = mo_coeff.shape
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
-    hcore_deriv = hessobj.base.nuc_grad_method().hcore_generator(mol)
+    natm = mol.natm
+    assert atmlst is None or atmlst == range(natm)
+    mo_a, mo_b = mo_coeff
+    mocca = mo_a[:,mo_occ[0]>0]
+    moccb = mo_b[:,mo_occ[1]>0]
+    dm0a = mocca.dot(mocca.T)
+    dm0b = moccb.dot(moccb.T)
+    avail_mem = get_avail_mem()
+    max_memory = avail_mem * .8e-6
+    h1moa, h1mob = _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    grad_obj = hessobj.base.Gradients()
+    h1moa += rhf_grad.get_grad_hcore(grad_obj, mo_a, mo_occ[0])
+    h1mob += rhf_grad.get_grad_hcore(grad_obj, mo_b, mo_occ[1])
 
     mf = hessobj.base
     ni = mf._numint
-    ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
-    mem_now = lib.current_memory()[0]
-    max_memory = max(2000, mf.max_memory*.9-mem_now)
-    h1ao = _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory).get()
-    aoslices = mol.aoslice_by_atom()
-    for i0, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = aoslices[ia]
-        shls_slice = (shl0, shl1) + (0, mol.nbas)*3
-        if abs(hyb) > 1e-10:
-            vj1, vj2, vk1, vk2 = \
-                    rhf_hess._get_jk(mol, 'int2e_ip1', 3, 's2kl',
-                                     ['ji->s2kl', -dm0[:,p0:p1],  # vj1
-                                      'lk->s1ij', -dm0         ,  # vj2
-                                      'li->s1kj', -dm0[:,p0:p1],  # vk1
-                                      'jk->s1il', -dm0         ], # vk2
-                                     shls_slice=shls_slice)
-            veff = vj1 - hyb * .5 * vk1
-            veff[:,p0:p1] += vj2 - hyb * .5 * vk2
-            if abs(omega) > 1e-10:
-                with mol.with_range_coulomb(omega):
-                    vk1, vk2 = \
-                        rhf_hess._get_jk(mol, 'int2e_ip1', 3, 's2kl',
-                                         ['li->s1kj', -dm0[:,p0:p1],  # vk1
-                                          'jk->s1il', -dm0         ], # vk2
-                                         shls_slice=shls_slice)
-                veff -= (alpha-hyb) * .5 * vk1
-                veff[:,p0:p1] -= (alpha-hyb) * .5 * vk2
+    # Estimate the size of intermediate variables
+    # dm, vj, and vk in [natm,3,nao_cart,nao_cart]
+    nao_cart = mol.nao_cart()
+    avail_mem -= 8 * (h1moa.size + h1mob.size)
+    slice_size = int(avail_mem*0.5) // (8*3*nao_cart*nao_cart*6)
+    for atoms_slice in lib.prange(0, natm, slice_size):
+        vja, vka = rhf_hess._get_jk_ip1(mol, dm0a, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)
+        vjb, vkb = rhf_hess._get_jk_ip1(mol, dm0b, with_k=with_k, atoms_slice=atoms_slice, verbose=verbose)
+        vj = vja + vjb
+        if with_k:
+            #:veffa = vja + vjb - hyb * vka
+            #:veffb = vja + vjb - hyb * vkb
+            veffa = vka
+            veffb = vkb
+            veffa *= -hyb
+            veffb *= -hyb
+            veffa += vj
+            veffb += vj
         else:
-            vj1, vj2 = rhf_hess._get_jk(mol, 'int2e_ip1', 3, 's2kl',
-                                        ['ji->s2kl', -dm0[:,p0:p1],  # vj1
-                                         'lk->s1ij', -dm0         ], # vj2
-                                        shls_slice=shls_slice)
-            veff = vj1
-            veff[:,p0:p1] += vj2
+            veffa = vj
+            veffb = vj.copy()
+        vj = vja = vjb = vka = vkb = None
+        if abs(omega) > 1e-10 and abs(alpha-hyb) > 1e-10:
+            with mol.with_range_coulomb(omega):
+                vka_lr = rhf_hess._get_jk_ip1(mol, dm0a, with_j=False, atoms_slice=atoms_slice, verbose=verbose)[1]
+                vkb_lr = rhf_hess._get_jk_ip1(mol, dm0b, with_j=False, atoms_slice=atoms_slice, verbose=verbose)[1]
+                vka_lr *= (alpha-hyb)
+                vkb_lr *= (alpha-hyb)
+                veffa -= vka_lr
+                veffb -= vkb_lr
+                vka_lr = vkb_lr = None
 
-        veff = hcore_deriv(ia) + veff + veff.transpose(0,2,1)
-        veff = numpy.einsum('xij,ip,jq->xpq', veff, mo_coeff, mocc)
-        #h1ao[ia] += veff + veff.transpose(0,2,1)
-        #h1ao[ia] += hcore_deriv(ia)
-        h1ao[ia] += veff
-
-    if chkfile is None:
-        return h1ao
-    else:
-        for ia in atmlst:
-            lib.chkfile.save(chkfile, 'scf_f1ao/%d'%ia, h1ao[ia])
-        return chkfile
+        atom0, atom1 = atoms_slice
+        for i, ia in enumerate(range(atom0, atom1)):
+            for ix in range(3):
+                h1moa[ia,ix] += mo_a.T.dot(veffa[i,ix].dot(mocca))
+                h1mob[ia,ix] += mo_b.T.dot(veffb[i,ix].dot(moccb))
+        veffa = veffb = None
+    return h1moa, h1mob
 
 XX, XY, XZ = 4, 5, 6
 YX, YY, YZ = 5, 7, 8
@@ -205,8 +200,7 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
         opt = ni.gdftopt
     _sorted_mol = opt._sorted_mol
 
-    coeff = cupy.asarray(opt.coeff)
-    mo_coeff = contract('nij,pi->npj', mo_coeff, coeff)
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
     nao = mo_coeff.shape[1]
     # TODO: check mol in opt?
     vmata = cupy.zeros((6,nao,nao))
@@ -326,10 +320,10 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
     vmatb = vmatb[[0,1,2,
                  1,3,4,
                  2,4,5]]
-    vmata = contract('npq,qj->npj', vmata, coeff)
-    vmata = contract('pi,npj->nij', coeff, vmata).reshape(3,3,nao_sph,nao_sph)
-    vmatb = contract('npq,qj->npj', vmatb, coeff)
-    vmatb = contract('pi,npj->nij', coeff, vmatb).reshape(3,3,nao_sph,nao_sph)
+    vmata = opt.unsort_orbitals(vmata, axis=[1,2])
+    vmata = vmata.reshape(3,3,nao_sph,nao_sph)
+    vmatb = opt.unsort_orbitals(vmatb, axis=[1,2])
+    vmatb = vmatb.reshape(3,3,nao_sph,nao_sph)
     return vmata, vmatb
 
 def _make_dR_rho1(ao, ao_dm0, atm_id, aoslices, xctype):
@@ -392,6 +386,7 @@ def _d1d2_dot_(vmat, mol, ao1, ao2, mask, ao_loc, dR1_on_bra=True):
         #vmat += contract('yig,xjg->xyij', ao1, ao2)
 
 def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
+    '''Partially contracted vxc*dm'''
     mol = hessobj.mol
     mf = hessobj.base
     log = logger.new_logger(mol, mol.verbose)
@@ -421,8 +416,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
     coeff = cupy.asarray(opt.coeff)
     dm0a, dm0b = mf.make_rdm1(mo_coeff, mo_occ)
-    dm0a_sorted = take_last2d(dm0a, opt.ao_idx)
-    dm0b_sorted = take_last2d(dm0b, opt.ao_idx)
+    dm0a_sorted = opt.sort_orbitals(dm0a, axis=[0,1])
+    dm0b_sorted = opt.sort_orbitals(dm0b, axis=[0,1])
     vmata_dm = cupy.zeros((mol.natm,3,3,nao))
     vmatb_dm = cupy.zeros((mol.natm,3,3,nao))
     ipipa = cupy.zeros((3,3,nao,nao))
@@ -444,8 +439,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             _d1d2_dot_(ipipa, mol, aowa, ao[1:4], mask, ao_loc, False)
             aowb = [numint._scale_ao(ao[i], wv[1]) for i in range(1, 4)]
             _d1d2_dot_(ipipb, mol, aowb, ao[1:4], mask, ao_loc, False)
-            dm0a_mask = dm0a_sorted[numpy.ix_(mask, mask)]
-            dm0b_mask = dm0b_sorted[numpy.ix_(mask, mask)]
+            dm0a_mask = dm0a_sorted[mask[:,None], mask]
+            dm0b_mask = dm0b_sorted[mask[:,None], mask]
 
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
@@ -470,10 +465,10 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmatb_dm[ia][:,:,mask] += contract('yjg,xjg->xyj', ao_mask[1:4], aow)
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
+        vmata_dm = opt.unsort_orbitals(vmata_dm, axis=[3])
+        vmatb_dm = opt.unsort_orbitals(vmatb_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
             p0, p1 = aoslices[ia][2:]
-            vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
-            vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmatb_dm[ia] += contract('xypq,pq->xyp', ipipb[:,:,:,p0:p1], dm0b[:,p0:p1])
     elif xctype == 'GGA':
@@ -497,8 +492,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
-            dm0a_mask = dm0a_sorted[numpy.ix_(mask, mask)]
-            dm0b_mask = dm0b_sorted[numpy.ix_(mask, mask)]
+            dm0a_mask = dm0a_sorted[mask[:,None], mask]
+            dm0b_mask = dm0b_sorted[mask[:,None], mask]
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
             ao_dmb_mask = contract('nig,ij->njg', ao_mask[:4], dm0b_mask)
             vmata_dm_tmp = cupy.empty([3,3,nao_non0])
@@ -527,9 +522,9 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmatb_dm[ia][:,:,mask] += vmatb_dm_tmp
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
+        vmata_dm = opt.unsort_orbitals(vmata_dm, axis=[3])
+        vmatb_dm = opt.unsort_orbitals(vmatb_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
-            vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
-            vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
             p0, p1 = aoslices[ia][2:]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmata_dm[ia] += contract('yxqp,pq->xyp', ipipa[:,:,p0:p1], dm0a[:,p0:p1])
@@ -567,8 +562,8 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             _d1d2_dot_(ipipb, mol, [aow[1], aow[3], aow[4]], [ao[YX], ao[YY], ao[YZ]], mask, ao_loc, False)
             _d1d2_dot_(ipipb, mol, [aow[2], aow[4], aow[5]], [ao[ZX], ao[ZY], ao[ZZ]], mask, ao_loc, False)
 
-            dm0a_mask = dm0a_sorted[numpy.ix_(mask, mask)]
-            dm0b_mask = dm0b_sorted[numpy.ix_(mask, mask)]
+            dm0a_mask = dm0a_sorted[mask[:,None], mask]
+            dm0b_mask = dm0b_sorted[mask[:,None], mask]
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dma_mask = contract('nig,ij->njg', ao_mask[:4], dm0a_mask)
@@ -642,9 +637,9 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
                 vmata_dm[ia][:,:,mask] += vmata_dm_tmp
                 vmatb_dm[ia][:,:,mask] += vmatb_dm_tmp
             t1 = log.timer_debug2('integration', *t1)
+        vmata_dm = opt.unsort_orbitals(vmata_dm, axis=[3])
+        vmatb_dm = opt.unsort_orbitals(vmatb_dm, axis=[3])
         for ia in range(_sorted_mol.natm):
-            vmata_dm[ia] = vmata_dm[ia][:,:,opt.rev_ao_idx]
-            vmatb_dm[ia] = vmatb_dm[ia][:,:,opt.rev_ao_idx]
             p0, p1 = aoslices[ia][2:]
             vmata_dm[ia] += contract('xypq,pq->xyp', ipipa[:,:,:,p0:p1], dm0a[:,p0:p1])
             vmata_dm[ia] += contract('yxqp,pq->xyp', ipipa[:,:,p0:p1], dm0a[:,p0:p1])
@@ -673,6 +668,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     noccb = moccb.shape[1]
 
     nao, nmo = mo_coeff[0].shape
+    natm = mol.natm
     ni = mf._numint
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()
@@ -689,8 +685,8 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     vipa = cupy.zeros((3,nao,nao))
     vipb = cupy.zeros((3,nao,nao))
-    vmata = cupy.zeros((_sorted_mol.natm,3,nao,nocca))
-    vmatb = cupy.zeros((_sorted_mol.natm,3,nao,noccb))
+    vmata = cupy.zeros((natm,3,nao,nocca))
+    vmatb = cupy.zeros((natm,3,nao,noccb))
     max_memory = None
     if xctype == 'LDA':
         ao_deriv = 1
@@ -713,7 +709,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = numint._dot_ao_dm(mol, ao[0], dm0a, mask, shls_slice, ao_loc)
             ao_dm0b = numint._dot_ao_dm(mol, ao[0], dm0b, mask, shls_slice, ao_loc)
             wf = weight * fxc[:,0,:,0]
-            for ia in range(_sorted_mol.natm):
+            for ia in range(natm):
                 p0, p1 = aoslices[ia][2:]
 # First order density = rho1 * 2.  *2 is not applied because + c.c. in the end
                 rho1a = contract('xig,ig->xg', ao[1:,p0:p1,:], ao_dm0a[p0:p1,:])
@@ -753,7 +749,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc)
                       for i in range(4)]
             wf = weight * fxc
-            for ia in range(_sorted_mol.natm):
+            for ia in range(natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -797,7 +793,7 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = [numint._dot_ao_dm(mol, ao[i], dm0a, mask, shls_slice, ao_loc) for i in range(4)]
             ao_dm0b = [numint._dot_ao_dm(mol, ao[i], dm0b, mask, shls_slice, ao_loc) for i in range(4)]
             wf = weight * fxc
-            for ia in range(_sorted_mol.natm):
+            for ia in range(natm):
                 dR_rho1a = _make_dR_rho1(ao, ao_dm0a, ia, aoslices, xctype)
                 dR_rho1b = _make_dR_rho1(ao, ao_dm0b, ia, aoslices, xctype)
                 wv = contract('xbyg,sxg->bsyg', wf[0], dR_rho1a)
@@ -827,27 +823,74 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
 
-    vmata = -contract("kxiq,ip->kxpq", vmata, mo_coeff[0])
-    vmatb = -contract("kxiq,ip->kxpq", vmatb, mo_coeff[1])
-
-    for ia in range(_sorted_mol.natm):
+    va_mo = cupy.ndarray((natm,3,nmo,nocca), dtype=vmata.dtype, memptr=vmata.data)
+    vb_mo = cupy.ndarray((natm,3,nmo,noccb), dtype=vmatb.dtype, memptr=vmatb.data)
+    vmat_tmp = cupy.empty([3,nao,nao])
+    for ia in range(natm):
         p0, p1 = aoslices[ia][2:]
-        vmat_tmp = cupy.zeros([3,nao,nao])
+        vmat_tmp[:] = 0.
         vmat_tmp[:,p0:p1] += vipa[:,p0:p1]
         vmat_tmp[:,:,p0:p1] += vipa[:,p0:p1].transpose(0,2,1)
+        tmp = contract('xij,jq->xiq', vmat_tmp, mocca)
+        tmp += vmata[ia]
+        contract('xiq,ip->xpq', tmp, mo_coeff[0], alpha=-1., out=va_mo[ia])
 
-        vmat_tmp = contract('xij,jq->xiq', vmat_tmp, mocca)
-        vmat_tmp = contract('xiq,ip->xpq', vmat_tmp, mo_coeff[0])
-        vmata[ia] -= vmat_tmp
-
-        vmat_tmp = cupy.zeros([3,nao,nao])
+        vmat_tmp[:] = 0.
         vmat_tmp[:,p0:p1] += vipb[:,p0:p1]
         vmat_tmp[:,:,p0:p1] += vipb[:,p0:p1].transpose(0,2,1)
+        tmp = contract('xij,jq->xiq', vmat_tmp, moccb)
+        tmp += vmatb[ia]
+        contract('xiq,ip->xpq', tmp, mo_coeff[1], alpha=-1., out=vb_mo[ia])
+    return va_mo, vb_mo
 
-        vmat_tmp = contract('xij,jq->xiq', vmat_tmp, moccb)
-        vmat_tmp = contract('xiq,ip->xpq', vmat_tmp, mo_coeff[1])
-        vmatb[ia] -= vmat_tmp
-    return vmata, vmatb
+def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
+    mol = hessobj.mol
+    mf = hessobj.base
+    grids = getattr(mf, 'cphf_grids', None)
+    if grids is not None:
+        logger.info(mf, 'Secondary grids defined for CPHF in Hessian')
+    else:
+        # If cphf_grids is not defined, e.g object defined from CPU
+        grids = getattr(mf, 'grids', None)
+        logger.info(mf, 'Primary grids is used for CPHF in Hessian')
+
+    if grids and grids.coords is None:
+        grids.build(mol=mol, with_non0tab=False, sort_grids=True)
+
+    nao, nmoa = mo_coeff[0].shape
+    nao, nmob = mo_coeff[1].shape
+    mocca = mo_coeff[0][:,mo_occ[0]>0]
+    moccb = mo_coeff[1][:,mo_occ[1]>0]
+    nocca = mocca.shape[1]
+    noccb = moccb.shape[1]
+
+    ni = mf._numint
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    assert not mf.do_nlc()
+    hermi = 1
+
+    rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
+                                        mo_coeff, mo_occ, 1)
+    v1 = ni.nr_uks_fxc(mol, grids, mf.xc, None, dms, 0, hermi,
+                        rho0, vxc, fxc, max_memory=None)
+    nset = dms.shape[1]
+    v1vo = cupy.empty([nset, nmoa*nocca+nmob*noccb])
+    v1vo[:,:nmoa*nocca] = jk._ao2mo(v1[0], mocca, mo_coeff[0]).reshape(-1,nmoa*nocca)
+    v1vo[:,nmoa*nocca:] = jk._ao2mo(v1[1], moccb, mo_coeff[1]).reshape(-1,nmob*noccb)
+    if hybrid:
+        vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
+        vk *= hyb
+        if omega > 1e-10:
+            _, vk_lr = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
+                                         hermi, with_j=False, omega=omega)
+            vk_lr *= (alpha-hyb)
+            vk += vk_lr
+        v1vo += vj - vk
+    else:
+        v1vo += hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
+                                  hermi=1, with_k=False)[0]
+    return v1vo
 
 
 class Hessian(rhf_hess.HessianBase):
@@ -863,8 +906,9 @@ class Hessian(rhf_hess.HessianBase):
     solve_mo1 = uhf_hess.Hessian.solve_mo1
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
-    kernel = NotImplemented
-    hess = NotImplemented
+    gen_vind = uhf_hess.gen_vind
+    get_jk_mo = rhf_hess._get_jk_mo
+    get_veff_resp_mo = get_veff_resp_mo
 
 from gpu4pyscf import dft
 dft.uks.UKS.Hessian = lib.class_as_method(Hessian)

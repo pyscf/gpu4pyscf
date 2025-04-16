@@ -1,29 +1,35 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import numpy
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import contract, tag_array    
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import contract, tag_array
+    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
+    from dpctl._sycl_queue_manager import get_device_cached_queue
 from pyscf import lib
 from gpu4pyscf.grad import uks as uks_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.df.grad.uhf import get_jk
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
 
-def get_veff(ks_grad, mol=None, dm=None):
+def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     '''
     First order derivative of DFT effective potential matrix (wrt electron coordinates)
 
@@ -33,7 +39,7 @@ def get_veff(ks_grad, mol=None, dm=None):
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
     t0 = (logger.process_clock(), logger.perf_counter())
-    
+
     mf = ks_grad.base
     ni = mf._numint
     if ks_grad.grids is not None:
@@ -45,7 +51,7 @@ def get_veff(ks_grad, mol=None, dm=None):
         grids.build(sort_grids=True)
 
     nlcgrids = None
-    if mf.nlc or ni.libxc.is_nlc(mf.xc):
+    if mf.do_nlc():
         if ks_grad.nlcgrids is not None:
             nlcgrids = ks_grad.nlcgrids
         else:
@@ -60,12 +66,12 @@ def get_veff(ks_grad, mol=None, dm=None):
         exc, vxc_tmp = uks_grad.get_vxc_full_response(ni, mol, grids, mf.xc, dm,
                                          max_memory=max_memory,
                                          verbose=ks_grad.verbose)
-        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+        if mf.do_nlc():
             raise NotImplementedError
     else:
         exc, vxc_tmp = uks_grad.get_vxc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
-        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+        if mf.do_nlc():
             if ni.libxc.is_nlc(mf.xc):
                 xc = mf.xc
             else:
@@ -79,8 +85,8 @@ def get_veff(ks_grad, mol=None, dm=None):
 
     mo_coeff_alpha = mf.mo_coeff[0]
     mo_coeff_beta = mf.mo_coeff[1]
-    occ_coeff0 = cupy.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
-    occ_coeff1 = cupy.asarray(mo_coeff_beta[:, mf.mo_occ[1]>0.5], order='C')
+    occ_coeff0 = gpunp.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
+    occ_coeff1 = gpunp.asarray(mo_coeff_beta[:, mf.mo_occ[1]>0.5], order='C')
     tmp = contract('nij,jk->nik', vxc_tmp[0], occ_coeff0)
     vxc = contract('nik,ik->ni', tmp, occ_coeff0)
     tmp = contract('nij,jk->nik', vxc_tmp[1], occ_coeff1)
@@ -88,7 +94,7 @@ def get_veff(ks_grad, mol=None, dm=None):
 
     aoslices = mol.aoslice_by_atom()
     vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    vxc = cupy.asarray(vxc)
+    vxc = gpunp.asarray(vxc)
 
     if not ni.libxc.is_hybrid_xc(mf.xc):
         mo_a, mo_b = ks_grad.base.mo_coeff
@@ -130,8 +136,8 @@ def get_veff(ks_grad, mol=None, dm=None):
     else:
         e1_aux = None
 
-    vxc = tag_array(vxc, aux=e1_aux)
-    
+    vxc = tag_array(vxc, aux=e1_aux, exc1_grid=exc)
+
     return vxc
 
 

@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_30 -rdc=true")
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
@@ -19,28 +18,16 @@
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_50 --ptxas-options=-v -maxrregcount=255")
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
-if (USE_SYCL)
-  add_library(gint SHARED 
-    g2e.c
-    pair_data.c
-    bpcache.cpp
-    constant.cpp
-    nr_fill_ao_ints.cpp
-    nr_fill_ao_int3c2e.cpp
-    nr_fill_ao_int3c2e_ip1.cpp
-    nr_fill_ao_int3c2e_ip2.cpp
-    nr_fill_ao_int3c2e_ipip1.cpp
-    nr_fill_ao_int3c2e_ipip2.cpp
-    nr_fill_ao_int3c2e_ip1ip2.cpp
-    nr_fill_ao_int3c2e_ipvip1.cpp
-  )
-else()
-  add_library(gint SHARED 
+
+set(GPU_SRCS
     g2e.c
     pair_data.c
     bpcache.cu
     constant.cu
     nr_fill_ao_ints.cu
+    nr_fill_ao_int3c1e.cu
+    nr_fill_ao_int3c1e_ip.cu
+    nr_fill_ao_int3c1e_ipip.cu
     nr_fill_ao_int3c2e.cu
     nr_fill_ao_int3c2e_ip1.cu
     nr_fill_ao_int3c2e_ip2.cu
@@ -48,16 +35,31 @@ else()
     nr_fill_ao_int3c2e_ipip2.cu
     nr_fill_ao_int3c2e_ip1ip2.cu
     nr_fill_ao_int3c2e_ipvip1.cu
+    j_engine_matrix_reorder.c
+    rys_roots_dat.cu
   )
 
+if (USE_SYCL)
+  # set_source_files_properties(
+  #   path/to/header1.cuh
+  #   path/to/header2.cuh
+  #   PROPERTIES
+  #   LANGUAGE CXX
+  # )
+  file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
+  set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
+
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+else()
   set_target_properties(gint PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
     CUDA_SEPARABLE_COMPILATION ON)
 endif()
-  
+
+add_library(gint SHARED ${GPU_SRCS})
+
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
 #option(ENABLE_STATIC "Enforce static library build" 0)
 #if(ENABLE_STATIC)
 #  set(BUILD_SHARED_LIBS 0)
 #endif()
-

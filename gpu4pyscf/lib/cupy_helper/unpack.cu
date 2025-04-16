@@ -1,58 +1,85 @@
-/* Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 
 #include <cuda_runtime.h>
 #include <stdio.h>
-#include "cublas_v2.h"
 #define THREADS       32
 #define BDIM 32
 
-__global__
-void _unpack_tril(const double *eri_tril, double *eri, int nao){
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+__global__ static
+void _pack_tril(double *a_tril, double *a, int n)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int p = blockIdx.z;
+    int stride = ((n + 1) * n) / 2;
+
+    if (i >= n || j >= n || i < j) {
+        return;
+    }
+    int ptr = i*(i+1)/2 + j;
+    a_tril[ptr + p*stride] = a[p*n*n + i*n + j];
+}
+
+__global__ static
+void _unpack_tril(double *eri_tril, double *eri, int nao)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
     int stride = ((nao + 1) * nao) / 2;
 
-    if(i >= nao || j >= nao || i < j){
+    if (i >= nao || j >= nao || i < j) {
         return;
     }
-    int ptr = j + (i+1)*i/2;
-    eri[p*nao*nao + j*nao + i] = eri_tril[ptr + p*stride];
+    int ptr = i*(i+1)/2 + j;
+    eri[p*nao*nao + i*nao + j] = eri_tril[ptr + p*stride];
 }
 
-__global__
-void _unpack_triu(const double *eri_tril, double *eri, int nao){
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
+__global__ static
+void _fill_triu_sym(double *eri, int nao)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
-    int stride = ((nao + 1) * nao) / 2;
-
-    if(i >= nao || j >= nao || i > j){
+    if (i >= nao || j >= nao || i >= j) {
         return;
     }
-    int ptr = i + (j+1)*j/2;
-
-    eri[p*nao*nao + j*nao + i] = eri_tril[ptr + p*stride];
+    int off = p * nao * nao;
+    eri[off + i*nao + j] = eri[off + j*nao + i];
 }
 
-__global__
+__global__ static
+void _fill_triu_antisym(double *eri, int nao)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int p = blockIdx.z;
+    if (i >= nao || j >= nao || i >= j) {
+        return;
+    }
+    int off = p * nao * nao;
+    eri[off + i*nao + j] = -eri[off + j*nao + i];
+}
+
+__global__ static
 void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col,
-                    double *out, int nao, int nij, int stride_sparse, int p0, int p1){
+                    double *out, int nao, int nij, int stride_sparse, int p0, int p1)
+{
     int ij = blockIdx.x * blockDim.x + threadIdx.x;
     int k = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -69,13 +96,51 @@ void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col
 }
 
 extern "C" {
-int unpack_tril(cudaStream_t stream, const double *eri_tril, double *eri, int nao, int blk_size){
+int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi)
+{
+    dim3 threads(THREADS, THREADS);
+    int nx = (n + threads.x - 1) / threads.x;
+    int ny = (n + threads.y - 1) / threads.y;
+    dim3 blocks(nx, ny, counts);
+    if (hermi == 1) {
+        _fill_triu_sym<<<blocks, threads, 0, stream>>>(a, n);
+    } else if (hermi == 2) {
+        _fill_triu_antisym<<<blocks, threads, 0, stream>>>(a, n);
+    }
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
+{
+    dim3 threads(THREADS, THREADS);
+    int nx = (n + threads.x - 1) / threads.x;
+    int ny = (n + threads.y - 1) / threads.y;
+    dim3 blocks(nx, ny, counts);
+    _pack_tril<<<blocks, threads, 0, stream>>>(a_tril, a, n);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
+                int nao, int blk_size, int hermi)
+{
     dim3 threads(THREADS, THREADS);
     int nx = (nao + threads.x - 1) / threads.x;
     int ny = (nao + threads.y - 1) / threads.y;
     dim3 blocks(nx, ny, blk_size);
     _unpack_tril<<<blocks, threads, 0, stream>>>(eri_tril, eri, nao);
-    _unpack_triu<<<blocks, threads, 0, stream>>>(eri_tril, eri, nao);
+    if (hermi == 1) {
+        _fill_triu_sym<<<blocks, threads, 0, stream>>>(eri, nao);
+    } else if (hermi == 2) {
+        _fill_triu_antisym<<<blocks, threads, 0, stream>>>(eri, nao);
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -84,7 +149,8 @@ int unpack_tril(cudaStream_t stream, const double *eri_tril, double *eri, int na
 }
 
 int unpack_sparse(cudaStream_t stream, const double *cderi_sparse, const long *row, const long *col,
-                double *eri, int nao, int nij, int naux, int p0, int p1){
+                double *eri, int nao, int nij, int naux, int p0, int p1)
+{
     int blockx = (nij + THREADS - 1) / THREADS;
     int blocky = (p1 - p0 + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);

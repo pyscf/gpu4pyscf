@@ -1,19 +1,16 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import sys
 import functools
@@ -110,3 +107,48 @@ def device(obj):
         return 'gpu'
     else:
         return 'cpu'
+<<<<<<< HEAD
+=======
+
+#@patch_cpu_kernel(lib.misc.format_sys_info)
+def format_sys_info():
+    '''Format a list of system information for printing.'''
+    from cupyx._runtime import get_runtime_info
+    from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
+
+    pyscf_info = lib.repo_info(pyscf.__file__)
+    gpu4pyscf_info = lib.repo_info(os.path.join(__file__, '..', '..'))
+    cuda_version = cupy.cuda.runtime.runtimeGetVersion()
+    cuda_version = f"{cuda_version // 1000}.{(cuda_version % 1000) // 10}"
+
+    runtime_info = get_runtime_info()
+    result = [
+        f'System: {platform.uname()}  Threads {lib.num_threads()}',
+        f'Python {sys.version}',
+        f'numpy {numpy.__version__}  scipy {scipy.__version__}  '
+        f'h5py {h5py.__version__}',
+        f'Date: {time.ctime()}',
+        f'PySCF version {pyscf.__version__}',
+        f'PySCF path  {pyscf_info["path"]}',
+        'CUDA Environment',
+        f'    CuPy {runtime_info.cupy_version}',
+        f'    CUDA Path {runtime_info.cuda_path}',
+        f'    CUDA Build Version {runtime_info.cuda_build_version}',
+        f'    CUDA Driver Version {runtime_info.cuda_driver_version}',
+        f'    CUDA Runtime Version {runtime_info.cuda_runtime_version}',
+        'CUDA toolkit',
+        f'    cuSolver {runtime_info.cusolver_version}',
+        f'    cuBLAS {runtime_info.cublas_version}',
+        f'    cuTENSOR {runtime_info.cutensor_version}',
+        'Device info',
+        f'    Device name {device_props["name"]}',
+        f'    Device global memory {device_props["totalGlobalMem"] / 1024**3:.2f} GB',
+        f'    CuPy memory fraction {mem_fraction}',
+        f'    Num. Devices {num_devices}',
+        f'GPU4PySCF {gpu4pyscf.__version__}',
+        f'GPU4PySCF path  {gpu4pyscf_info["path"]}'
+    ]
+    if 'git' in pyscf_info:
+        result.append(pyscf_info['git'])
+    return result
+>>>>>>> origin/master

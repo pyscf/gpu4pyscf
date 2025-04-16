@@ -1,24 +1,29 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy as np
 import pyscf
 from pyscf import lib
+from pyscf.dft import rks as rks_cpu
 from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.properties import ir
+
+try:
+    from pyscf.prop import infrared
+except Exception:
+    infrared = None
 
 lib.num_threads(8)
 
@@ -52,6 +57,24 @@ def run_dft_df_if(xc):
     h.auxbasis_response = 2 
     freq, intensity = ir.eval_ir_freq_intensity(mf, h)
     return e_dft, freq, intensity
+
+def _vs_cpu(xc):
+    mf = rks.RKS(mol, xc=xc)
+    mf.grids.level = grids_level
+    mf.conv_tol = 1e-13
+    mf.conv_tol_cpscf = 1e-7
+    e_gpu = mf.kernel()
+    h = mf.Hessian()
+    freq, intensity_gpu = ir.eval_ir_freq_intensity(mf, h)
+    
+    mf_cpu = rks_cpu.RKS(mol, xc=xc)
+    mf.grids.level = grids_level
+    mf_cpu.conv_tol = 1e-13
+    mf_cpu.conv_tol_cpscf = 1e-7
+    e_cpu = mf_cpu.kernel()
+    mf_ir = infrared.rks.Infrared(mf_cpu).run()
+    assert np.abs(e_gpu - e_cpu) < 1e-5
+    assert np.linalg.norm(mf_ir.ir_inten - intensity_gpu.get()) < 1e-2
 
 
 class KnownValues(unittest.TestCase):
@@ -90,11 +113,12 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(e_tot, -76.4666819537)
         qchem_freq = np.array([1630.86, 3850.08, 3949.35])
         qchem_intensity = np.array([69.334, 4.675, 47.943])
-        print(freq, intensity)
         assert np.allclose(freq, qchem_freq, rtol=1e-03)
         assert np.allclose(intensity, qchem_intensity, rtol=1e-02)
 
-
+    @unittest.skipIf(infrared is None, "Skipping test if pyscf.properties is not installed")
+    def test_cpu(self):
+        _vs_cpu('b3lyp')
 
 if __name__ == "__main__":
     print("Full Tests for ir intensity")

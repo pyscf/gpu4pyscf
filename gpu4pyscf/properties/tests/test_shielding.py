@@ -1,24 +1,29 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy as np
 import pyscf
 from pyscf import lib
+from pyscf.dft import rks as rks_cpu
 from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.properties import shielding
+
+try:
+    from pyscf.prop import nmr
+except Exception:
+    nmr = None
 
 lib.num_threads(8)
 
@@ -57,6 +62,21 @@ def run_dft_df_nmr_shielding(xc):
     tensor = shielding.eval_shielding(mf)
     return e_dft, tensor
 
+def _vs_cpu(xc):
+    mf = rks.RKS(mol, xc=xc)
+    mf.grids.level = grids_level
+    mf.conv_tol = 1e-12
+    e_gpu = mf.kernel()
+    msc_d, msc_p = shielding.eval_shielding(mf)
+    msc = (msc_d + msc_p).get()
+
+    mf_cpu = rks_cpu.RKS(mol, xc=xc)
+    mf_cpu.conv_tol = 1e-12
+    e_cpu = mf_cpu.kernel()
+    msc_cpu = nmr.RKS(mf_cpu).kernel()
+
+    assert np.abs(e_gpu - e_cpu) < 1e-5
+    assert np.linalg.norm(msc - msc_cpu) < 1e-3
 
 class KnownValues(unittest.TestCase):
     '''
@@ -114,6 +134,15 @@ class KnownValues(unittest.TestCase):
    Atom H     3      31.39160966       19.36647972
     
     '''
+    def test_rks_lda(self):
+        print('-------- RKS LDA -------------')
+        e_tot, tensor = run_dft_nmr_shielding('LDA,vwn5')
+        nmr_total = tensor[0].get()+tensor[1].get()
+        isotropic_pyscf = np.array([nmr_total[0].trace()/3, nmr_total[1].trace()/3, nmr_total[2].trace()/3])
+        isotropic_qchem = np.array([338.70405899, 31.07348461, 31.07259871])
+        assert np.allclose(e_tot, -75.90464078)
+        assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
+
     def test_rks_b3lyp(self):
         print('-------- RKS B3LYP -------------')
         e_tot, tensor = run_dft_nmr_shielding('B3LYP')
@@ -121,6 +150,15 @@ class KnownValues(unittest.TestCase):
         isotropic_pyscf = np.array([nmr_total[0].trace()/3, nmr_total[1].trace()/3, nmr_total[2].trace()/3])
         isotropic_qchem = np.array([332.07586444, 31.39150070, 31.39060707])
         assert np.allclose(e_tot, -76.4666494276)
+        assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
+
+    def test_rks_lda_df(self):
+        print('-------- RKS density fitting LDA -------------')
+        e_tot, tensor = run_dft_df_nmr_shielding('LDA,vwn5')
+        nmr_total = tensor[0].get()+tensor[1].get()
+        isotropic_pyscf = np.array([nmr_total[0].trace()/3, nmr_total[1].trace()/3, nmr_total[2].trace()/3])
+        isotropic_qchem = np.array([338.71137749, 31.07428641, 31.07339795])
+        assert np.allclose(e_tot, -75.90467665)
         assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
 
     def test_rks_b3lyp_df(self):
@@ -132,7 +170,10 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(e_tot, -76.4666819553)
         assert np.allclose(isotropic_pyscf, isotropic_qchem, rtol=1.0E-4)
 
+    @unittest.skipIf(nmr is None, "Skipping test if pyscf.properties is not installed")
+    def test_cpu(self):
+        _vs_cpu('b3lyp')
 
 if __name__ == "__main__":
-    print("Full Tests for nmr shielding constants")
+    print("Full Tests for NMR Shielding Constants")
     unittest.main()

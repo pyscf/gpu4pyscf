@@ -1,17 +1,16 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 '''
 references:
@@ -23,7 +22,7 @@ from scipy.spatial import distance_matrix
 import cupy
 from pyscf import gto
 from pyscf.data import radii
-from gpu4pyscf.df import int3c2e
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib.cupy_helper import dist_matrix
 
 #modified_Bondi = radii.VDW.copy()
@@ -89,7 +88,7 @@ def vdw_surface(mol, scales=[1.0], density=1.0*radii.BOHR**2, rad=R_VDW):
     Generate vdw surface of molecules, in Bohr
     '''
     coords = mol.atom_coords(unit='B')
-    charges = mol.atom_charges()
+    charges = [gto.charge(sym) for sym in mol.elements]
     atom_radii = rad[charges]
 
     surface_points = []
@@ -137,10 +136,7 @@ def build_ab(mol, dm,
     A[:natm, :natm] = rinv.dot(rinv.T)
     
     # For right hand side B
-    auxmol = gto.fakemol_for_charges(surface_points)
-    intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=False, aosym=True, group_size=256)
-    v_grids_e = 2.0*int3c2e.get_j_int3c2e_pass1(intopt, dm, sort_j=False)
+    v_grids_e = int1e_grids(mol, surface_points, dm=dm, direct_scf_tol=1e-14)
     v_grids_n = cupy.dot(charges, rinv)
     
     B = cupy.empty([dim])
@@ -200,7 +196,7 @@ def resp_solve(mol, dm, grid_density=1.0*radii.BOHR**2,
     q[u] = q[v] = q[w]
     '''
 
-    charges = mol.atom_charges()
+    charges = np.asarray([gto.charge(sym) for sym in mol.elements])
     natm = mol.natm
     is_restraint = charges > 1
     is_restraint[charges == 1] = not hfree

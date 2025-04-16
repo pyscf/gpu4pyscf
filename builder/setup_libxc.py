@@ -27,15 +27,19 @@ from setuptools.command.build_py import build_py
 from distutils.util import get_platform
 
 NAME = 'gpu4pyscf-libxc'
-AUTHOR = 'Qiming Sun'
-AUTHOR_EMAIL = 'osirpt.sun@gmail.com'
-DESCRIPTION = 'GPU extensions for PySCF'
-LICENSE = 'GPLv3'
+AUTHOR = 'PySCF developers'
+AUTHOR_EMAIL = None
+DESCRIPTION = 'Customized LibXC for GPU4PySCF'
+LICENSE = 'Apache-2.0'
 URL = None
 DOWNLOAD_URL = None
 CLASSIFIERS = None
 PLATFORMS = None
+<<<<<<< HEAD
 VERSION = '0.4'
+=======
+VERSION = '0.7'
+>>>>>>> origin/master
 
 def get_cuda_version():
     nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')

@@ -1,3 +1,19 @@
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -46,7 +62,7 @@ int RYS_count_jk_tasks(double *vj, double *vk, double *dm, int n_dm, int nao,
                  RysIntEnvVars envs, int *scheme, int *shls_slice,
                  int ntile_ij_pairs, int ntile_kl_pairs,
                  int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
-                 float *q_cond, float *dm_cond, float cutoff,
+                 float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
                  ShellQuartet *pool, uint32_t *batch_head, int workers,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
@@ -76,7 +92,7 @@ int RYS_count_jk_tasks(double *vj, double *vk, double *dm, int n_dm, int nao,
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfk, nfij, nfkl,
         nroots, stride_j, stride_k, stride_l, iprim, jprim, kprim, lprim,
         ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
-        q_cond, dm_cond, cutoff};
+        q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
 
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));

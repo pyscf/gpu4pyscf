@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from functools import reduce
 from pyscf.hessian import thermo
@@ -21,21 +20,24 @@ from pyscf.data import elements, nist
 from scipy.constants import physical_constants
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.scf.hf import RHF
 
 LINDEP_THRESHOLD = 1e-7
 
 
 def eval_ir_freq_intensity(mf, hessian_obj):
-    """main function to calculate the polarizability
+    '''Main driver of infrared spectra intensity
 
     Args:
         mf: mean field object
-        unit (str, optional): the unit of the polarizability. Defaults to 'au'.
+        hessian_obj: hessian object
 
     Returns:
-        polarizability (numpy.array): polarizability
-    """
+        frequency mode: in cm^-1
+        infrared spectra intensity: in km/mol
+    '''
     log = logger.new_logger(hessian_obj, mf.mol.verbose)
+    assert isinstance(mf, RHF)
     hessian = hessian_obj.kernel()
     hartree_kj = nist.HARTREE2J*1e3
     unit2cm = ((hartree_kj * nist.AVOGADRO)**.5 / (nist.BOHR*1e-10)
@@ -54,7 +56,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     TR = thermo._get_TR(mass.get(), mf.mol.atom_coords())
     TRspace = []
     TRspace.append(TR[:3])
-    
+
     rot_const = thermo.rotation_const(mass.get(), mf.mol.atom_coords())
     rotor_type = thermo._get_rotor_type(rot_const)
     if rotor_type == 'ATOM':
@@ -73,7 +75,7 @@ def eval_ir_freq_intensity(mf, hessian_obj):
         h = reduce(cupy.dot, (bvec.T, hessian_mass.transpose(0,2,1,3).reshape(3*natm,3*natm), bvec))
         e, mode = cupy.linalg.eigh(h)
         mode = bvec.dot(mode)
-    
+
     c = contract('ixn,i->ixn', mode.reshape(natm, 3, -1),
                   1/np.sqrt(mass)).reshape(3*natm, -1)
     freq = cupy.sign(e)*cupy.sqrt(cupy.abs(e))*unit2cm
@@ -91,10 +93,12 @@ def eval_ir_freq_intensity(mf, hessian_obj):
     h1ao = hessian_obj.make_h1(mo_coeff, mo_occ, None, atmlst)
     # TODO: compact with hessian method, which can save one time cphf solve.
     # ! Different from PySCF, mo1 is all in mo!
+    fx = hessian_obj.gen_vind(mo_coeff, mo_occ)
     mo1, mo_e1 = hessian_obj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao,
-                                       None, atmlst, hessian_obj.max_memory, log)  
+                                       fx, atmlst, hessian_obj.max_memory, log)  
+    mo1 = cupy.asarray(mo1)
+    mo_e1 = cupy.asarray(mo_e1)
 
-    
     tmp = cupy.empty((3, 3, natm))  # dipole moment, x,y,z
     aoslices = mf.mol.aoslice_by_atom()
     with mf.mol.with_common_orig((0, 0, 0)):

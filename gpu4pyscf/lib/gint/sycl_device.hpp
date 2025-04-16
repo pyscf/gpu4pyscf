@@ -10,24 +10,55 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#if __has_include(<sycl/sycl.hpp>)
- #include <sycl/sycl.hpp>
-#else
- #include <CL/sycl.hpp>
- namespace sycl = cl::sycl;
-#endif
+#include <sycl/sycl.hpp>
 
+#define __global__ __attribute__((always_inline))
+#define __device__ __attribute__((always_inline))
+#define __host__ __attribute__((always_inline))
+#define __constant__ static constexpr
 
-#ifdef SYCL_EXT_ONEAPI_DEVICE_GLOBAL
-template <class T>
-using sycl_device_global = sycl::ext::oneapi::experimental::device_global<T>;
-#else
+#define sqrt sycl::sqrt
+#define min sycl::min
+#define max sycl::max
+#define exp sycl::exp
+#define fabs sycl::fabs
+#define erf sycl::erf
+
+static inline void cudaMemset(void* ptr, int val, size_t size) {
+  sycl_get_queue()->memset(ptr, val, size).wait();
+}
+static inline void cudaMemcpyToSymbol(const char* symbol, const void* src, size_t count) {
+  sycl_get_queue()->memcpy(symbol, src, count).wait();
+}
+
+// #ifdef __SYCL_DEVICE_ONLY__
+// #include <sycl/sycl.hpp>
+// extern sycl::nd_item<3> __syncthreads_item_ref;
+// #define __syncthreads() __syncthreads_item_ref.barrier(sycl::access::fence_space::local_space)
+// #endif
+
+static inline double atomicAdd(double* addr, const double val) { return sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(*addr).fetch_add( val ); }
+static inline double atomicOr(double* addr, const double val) { return sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(*addr).fetch_or( val ); }
+
+// #ifdef SYCL_EXT_ONEAPI_DEVICE_GLOBAL
+// template <class T>
+// using sycl_device_global = sycl::ext::oneapi::experimental::device_global<T>;
+// #else
 template <class T>
 using sycl_device_global = sycl::ext::oneapi::experimental::device_global<
     T,
     decltype(sycl::ext::oneapi::experimental::properties(
         sycl::ext::oneapi::experimental::device_image_scope))>;
+// #endif
+
+
+#if defined(__INTEL_LLVM_COMPILER) && __INTEL_LLVM_COMPILER >= 20230200
+#define GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(accessor) \
+  accessor.get_multi_ptr<sycl::access::decorated::yes>()
+#else
+#define GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(accessor) accessor.get_pointer()
 #endif
+
 
 auto asyncHandler = [](sycl::exception_list exceptions) {
   for (std::exception_ptr const &e : exceptions) {

@@ -1,17 +1,16 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # Author: Chenghan Li <lch004218@gmail.com>
 
@@ -26,10 +25,10 @@ from pyscf.lib import logger
 import cupy as cp
 from gpu4pyscf import scf
 from gpu4pyscf.qmmm.pbc import mm_mole
-from gpu4pyscf.df import int3c2e
-from gpu4pyscf.df.df import ALIGNED, MIN_BLK_SIZE
 from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.qmmm.pbc.tools import get_multipole_tensors_pp, get_multipole_tensors_pg
+from gpu4pyscf.gto.int3c1e import int1e_grids
+from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 
 contract = cupy_helper.contract
 
@@ -210,14 +209,7 @@ class QMMMSCF(QMMM):
         logger.note(self, '%d MM charges see directly QM density'%charges.shape[0])
         if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-            # FIXME slice mm coords when memory not enough
-            fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
-
-            intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-            intopt.build(self.direct_scf_tol, diag_block_with_triu=False, aosym=True, 
-                         group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-            h1e += int3c2e.get_j_int3c2e_pass2(intopt, -charges)
-            intopt = None
+            h1e += int1e_grids(mol, coords, charges = -charges, charge_exponents = expnts)
         elif mm_mol.charge_model != 'point' and len(coords) != 0:
             # TODO test this block
             raise RuntimeError("Not tested yet")
@@ -1017,17 +1009,9 @@ class QMMMGrad:
             nao = mol.nao
             if mm_mol.charge_model == 'gaussian' and len(coords) != 0:
                 expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-                fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
-
-                intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-                intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
-                             group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-
-                v = cp.zeros_like(g_qm)
-                for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip1'):
-                    v[:,i0:i1,j0:j1] += contract('xkji,k->xij', j3c, charges[k0:k1])
-                g_qm += cupy_helper.take_last2d(v, intopt.rev_ao_idx)
+                g_qm += int1e_grids_ip1(mol, coords, charges = charges, charge_exponents = expnts)
             elif mm_mol.charge_model == 'point' and len(coords) != 0:
+                raise RuntimeError("Not tested yet")
                 max_memory = self.max_memory - lib.current_memory()[0]
                 blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
                 blksize = max(blksize, 1)
@@ -1071,19 +1055,8 @@ class QMMMGrad:
 
         g = cp.zeros_like(all_coords)
         if len(coords) != 0:
-            g_ = cp.zeros_like(coords)
             expnts = cp.hstack([mm_mol.get_zetas()] * len(Ls))[mask]
-            fakemol = gto.fakemol_for_charges(coords.get(), expnts.get())
-
-            intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-            intopt.build(self.base.direct_scf_tol, diag_block_with_triu=True, aosym=False, 
-                         group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-
-            dm_ = cupy_helper.take_last2d(dm, intopt.sph_ao_idx)
-            for i0,i1,j0,j1,k0,k1,j3c in int3c2e.loop_int3c2e_general(intopt, ip_type='ip2'):
-                j3c = contract('xkji,k->xkji', j3c, charges[k0:k1])
-                g_[k0:k1] += contract('xkji,ij->kx', j3c, dm_[i0:i1,j0:j1])
-            g[mask] = g_
+            g[mask] = int1e_grids_ip2(mol, coords, dm = dm, charges = charges, charge_exponents = expnts).T
         g = g.reshape(len(Ls), -1, 3)
         g = np.sum(g, axis=0)
 

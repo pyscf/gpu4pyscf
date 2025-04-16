@@ -21,7 +21,6 @@
 
 #include "gint.h"
 #include "sycl_device.hpp"
-#include <sycl/sycl.hpp>
 // #include "constant.hpp"
 
 

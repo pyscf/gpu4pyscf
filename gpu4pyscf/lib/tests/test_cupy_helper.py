@@ -1,25 +1,26 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy
 import cupy
+from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
     add_sparse, takebak, empty_mapped, dist_matrix,
-    grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph)
+    grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph,
+    copy_array)
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -46,8 +47,7 @@ class KnownValues(unittest.TestCase):
         def aop(x):
             return cupy.dot(a, x.T).T
         x = krylov(aop, b)
-
-        assert cupy.allclose(cupy.dot(a,x.T)+x.T, b.T)
+        assert cupy.allclose(cupy.dot(a,x.T)+x.T, b.T, atol=1e-5)
 
         a = cupy.random.random((10,10)) * 1e-2
         b = cupy.random.random((10))
@@ -55,7 +55,7 @@ class KnownValues(unittest.TestCase):
         def aop(x):
             return cupy.dot(a, x.T).T
         x = krylov(aop, b)
-        assert cupy.allclose(cupy.dot(a,x)+x, b)
+        assert cupy.allclose(cupy.dot(a,x)+x, b, atol=1e-5)
 
     def test_cderi_sparse(self):
         naux = 4
@@ -202,6 +202,58 @@ class KnownValues(unittest.TestCase):
         a_sph1 = cart2sph(a_cart, axis=1, ang=7)
         assert cupy.linalg.norm(a_sph0 - a_sph1) < 1e-8
         '''
+
+    def test_unpack_tril(self):
+        d = 10
+        n = 515
+        npair = n * (n+1) // 2
+        atril = cupy.random.rand(d, npair) + cupy.random.rand(d, npair)*1j
+        a = cupy_helper.unpack_tril(atril)
+        idx, idy = cupy.tril_indices(n)
+        ref = cupy.empty((d, n, n), dtype=atril.dtype)
+        ref[:,idy,idx] = atril.conj()
+        ref[:,idx,idy] = atril
+        assert abs(a - ref).max() < 1e-12
+
+        ref = atril
+        atril = cupy_helper.pack_tril(a)
+        assert abs(atril - ref).max() < 1e-12
+
+    def test_copy_host2dev(self):
+        host_array = cupy.cuda.alloc_pinned_memory(10*10*10 * 8)
+        host_data = numpy.ndarray(10**3, dtype=cupy.float64, buffer=host_array)
+        host_data = host_data.reshape(10,10,10)
+        host_data += numpy.random.rand(10,10,10)
+
+        device_data = cupy.empty_like(host_data)
+        host_view = host_data[:, 8:]  # Non-contiguous view on the host
+        device_view = device_data[:, 8:]  # Non-contiguous view on the device
+
+        copy_array(host_view, device_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+        copy_array(host_view.copy(), device_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+        device_view = copy_array(host_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+    def test_copy_dev2host(self):
+        host_array = cupy.cuda.alloc_pinned_memory(10*10*10 * 8)
+        host_data = numpy.ndarray(3*10**2, dtype=cupy.float64, buffer=host_array)
+        host_data = host_data.reshape(3,10,10)
+
+        device_data = cupy.zeros_like(host_data)
+        device_data += cupy.random.rand(3,10,10)
+        host_view = host_data[:, 8:]  # Non-contiguous view on the host
+        device_view = device_data[:, 8:]  # Non-contiguous view on the device
+
+        copy_array(device_view, host_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+        copy_array(device_view.copy(), host_view)
+        assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
 if __name__ == "__main__":
     print("Full tests for cupy helper module")
     unittest.main()

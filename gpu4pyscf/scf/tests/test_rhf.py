@@ -1,23 +1,26 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
+import tempfile
 import numpy as np
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+else:
+    import dpnp as gpunp
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
@@ -181,7 +184,7 @@ class KnownValues(unittest.TestCase):
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
         mf = scf.RHF(mol1)
-        vj, vk = mf.get_jk(mol1, cupy.asarray(dm), hermi=0)
+        vj, vk = mf.get_jk(mol1, gpunp.asarray(dm), hermi=0)
         self.assertAlmostEqual(lib.fp(vj.get()), 89.57263277687994, 7)
         self.assertAlmostEqual(lib.fp(vk.get()),-26.36969769724246, 7)
 
@@ -264,11 +267,23 @@ class KnownValues(unittest.TestCase):
         e_ref = -151.09634038447925
         assert np.abs(e_tot - e_ref) < 1e-5
 
+    def test_chkfile(self):
+        ftmp = tempfile.NamedTemporaryFile(dir = pyscf.lib.param.TMPDIR)
+        mf = scf.RHF(mol)
+        mf.chkfile = ftmp.name
+        mf.kernel()
+        dm_stored = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
+        dm_stored = gpunp.asnumpy(dm_stored)
+
+        mf_copy = scf.RHF(mol)
+        mf_copy.chkfile = ftmp.name
+        dm_loaded = mf_copy.init_guess_by_chkfile()
+        # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
+        assert np.allclose(dm_stored, dm_loaded, atol = 1e-14) 
     # TODO:
     #test analyze
     #test mulliken_pop
     #test mulliken_meta
-    #test chkfile
     #test stability
     #test newton
     #test x2c

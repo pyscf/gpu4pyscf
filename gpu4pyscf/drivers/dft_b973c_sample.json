@@ -1,0 +1,26 @@
+[{
+    "input_dir": "./",
+    "output_dir": "./",
+    "molecules": [
+        "h2o.xyz",
+        "h2o.xyz",
+        "h2o.xyz",
+        "h2o.xyz",
+        "h2o.xyz"
+    ],
+    "xc": "b973c",
+    "auxbasis": "def2-universal-JFIT",
+    "verbose": 6,
+    "with_solvent": false,
+    "with_thermo": false,
+    "solvent": {
+        "eps": 78.3553,
+        "solvent": "water",
+        "method": "SMD"
+    },
+    "with_gpu": true,
+    "with_df": true,
+    "with_grad": true,
+    "with_hess": true,
+    "save_density": true
+}]

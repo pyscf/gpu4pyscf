@@ -21,7 +21,9 @@ import functools
 import ctypes
 import numpy as np
 import dpnp
-import dpctl
+from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
+from dpctl._sycl_queue_manager import get_device_cached_queue
+import dpctl, dpctl.utils
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import mole
@@ -71,18 +73,18 @@ def release_gpu_stack():
     # dpnp.cuda.runtime.deviceSetLimit(0x00, 128)
 
 def print_mem_info():
-    dev = dpctl.SyclDevice()
+    dev = get_default_cached_device()
     dev.print_device_info()
     descr = dpctl.utils.intel_device_info(dev)
-    mem_avail = descr.free_memory
+    mem_avail = descr['free_memory']
     total_mem = dev.global_mem_size
     GB = 1024 * 1024 * 1024
     print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB')
 
 def get_avail_mem():
-    dev = dpctl.SyclDevice()
+    dev = get_default_cached_device()
     descr = dpctl.utils.intel_device_info(dev)
-    return descr.free_memory
+    return descr['free_memory']
 
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
@@ -128,7 +130,7 @@ def to_dpnp(a):
         return dpnp.asarray(a)
     return a
 
-def return_np_array(fn):
+def return_gpunp_array(fn):
     '''Ensure that arrays in returns are dpnp objects'''
     @functools.wraps(fn)
     def filter_ret(*args, **kwargs):

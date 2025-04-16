@@ -1,20 +1,17 @@
 /*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * Copyright (C) 2022 Qiming Sun
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -22,15 +19,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <cuda_runtime.h>
 #include "gint/gint.h"
-#include "gint/cuda_alloc.cuh"
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
 
-#define NG_PER_BLOCK       256
+#ifdef USE_SYCL
+#include "gint/sycl_alloc.hpp"
+#else
+#include <cuda_runtime.h>
+#include "gint/cuda_alloc.cuh"
+#endif
+
+#define NG_PER_BLOCK      256
 #define LMAX            8
-#define GTO_MAX_CART     15
 
 #define MIN(X,Y)        ((X)<(Y)?(X):(Y))
 #define MAX(X,Y)        ((X)>(Y)?(X):(Y))
@@ -38,13 +39,12 @@
 template <int ANG> __device__
 static void _nabla1(double *fx1, double *fy1, double *fz1,
                     double *fx0, double *fy0, double *fz0, double a){
-    int i;
     double a2 = -2 * a;
     fx1[0] = a2*fx0[1];
     fy1[0] = a2*fy0[1];
     fz1[0] = a2*fz0[1];
 #pragma unroll
-    for (i = 1; i <= ANG; i++) {
+    for (int i = 1; i <= ANG; i++) {
         fx1[i] = i*fx0[i-1] + a2*fx0[i+1];
         fy1[i] = i*fy0[i-1] + a2*fy0[i+1];
         fz1[i] = i*fz0[i-1] + a2*fz0[i+1];
@@ -52,26 +52,55 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
 }
 
 __global__
-void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, double *coords, int ngrids){
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (grid_id >= ngrids){
-        return;
-    }
+static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, double *coords, int ngrids, int bas_offset
+			  #ifdef USE_SYCL
+			  , sycl::nd_item<2> &item
+			  #endif
+    ){
+#ifdef USE_SYCL
+    int grid_id = item.get_global_id(1);
+    int ish = item.get_group(0) + bas_offset;
+    sycl::group thread_block = item.get_group();
+    using tile_t = double[NG_PER_BLOCK];
+    tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    const int blockDim_x = item.get_group_range(1);
+    const int threadIdx_x = item.get_local_id(1);
+#else
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #endif
+    int ish = blockIdx.y + bas_offset;
+    __shared__ int sdata[NG_PER_BLOCK];
+    const int blockDim_x = blockDim.x;
+    const int threadIdx_x = threadIdx.x;
+#endif
+    const bool active = grid_id < ngrids;
+
     int natm = c_envs.natm;
-    int atm_id = c_bas_atom[ish];
+    int atm_id = c_envs.bas_atom[ish];
     double* atm_coords = c_envs.atom_coordx;
-
-    double gridx = coords[3*grid_id + 0];
-    double gridy = coords[3*grid_id + 1];
-    double gridz = coords[3*grid_id + 2];
-
+    double gridx, gridy, gridz;
+    if (active) {
+        gridx = coords[0*ngrids + grid_id];
+        gridy = coords[1*ngrids + grid_id];
+        gridz = coords[2*ngrids + grid_id];
+    } else {
+        gridx = 0.0;
+        gridy = 0.0;
+        gridz = 0.0;
+    }
     double rx = gridx - atm_coords[atm_id + 0*natm];
     double ry = gridy - atm_coords[atm_id + 1*natm];
     double rz = gridz - atm_coords[atm_id + 2*natm];
     double rr = rx * rx + ry * ry + rz * rz;
+    double r = sqrt(rr);
 
-    double *exps = c_envs.env + c_bas_exp[ish];
-    double *coeffs = c_envs.env + c_bas_coeff[ish];
+    double *exps = c_envs.env + c_envs.bas_exp[ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[ish];
+    /*
     double maxc = 0.0;
     double min_exp = 1e9;
     for (int ip = 0; ip < nprim; ++ip) {
@@ -80,11 +109,31 @@ void _screen_index(int *non0shl_idx, double cutoff, int l, int ish, int nprim, d
     }
     double gto_sup = -min_exp * rr + .5 * log(rr) * l + log(maxc);
     int is_large = gto_sup > log(cutoff);
-    atomicOr(non0shl_idx + ish, is_large);
+    */
+    double gto_sup = 0.0;
+    for (int ip = 0; ip < nprim; ++ip) {
+        gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
+    }
+    gto_sup *= pow(r,ang);
+    int is_large = fabs(gto_sup) > cutoff;
+
+    // Reduce and write to global memory
+    unsigned int tx = threadIdx_x;
+    sdata[tx] = active ? is_large : 0;
+    __syncthreads();
+    for (unsigned int s = blockDim_x / 2; s > 0; s >>= 1) {
+        if (tx < s) {
+            sdata[tx] = sdata[tx] || sdata[tx + s];
+        }
+        __syncthreads();
+    }
+    if (tx == 0 && active){
+        atomicOr(non0shl_idx + ish, sdata[0]);
+    }
 }
 
 template <int ANG> __device__
-static void _cart2sph(double g_cart[GTO_MAX_CART], double *g_sph, int stride, int grid_id){
+static void _cart2sph(double *g_cart, double *g_sph, int stride, int grid_id){
     if (ANG == 0) {
         g_sph[grid_id           ] += g_cart[0];
     } else if (ANG == 1){
@@ -115,92 +164,155 @@ static void _cart2sph(double g_cart[GTO_MAX_CART], double *g_sph, int stride, in
         g_sph[grid_id + 6*stride] += 2.838524087272680054 * (g_cart[5] - g_cart[12]) + 0.473087347878780009 * (g_cart[10]- g_cart[0]);
         g_sph[grid_id + 7*stride] += 1.770130769779930531 * g_cart[2] - 5.310392309339791590 * g_cart[7];
         g_sph[grid_id + 8*stride] += 0.625835735449176134 * (g_cart[0] + g_cart[10]) - 3.755014412695056800 * g_cart[3];
+    } else if (ANG == 5) {
+        g_sph[grid_id           ] += 3.2819102842008507*g_cart[1] + -6.563820568401701*g_cart[6] + 0.6563820568401701*g_cart[15];
+        g_sph[grid_id +   stride] += 8.302649259524165*g_cart[4] + -8.302649259524165*g_cart[11];
+        g_sph[grid_id + 2*stride] += -1.467714898305751*g_cart[1] + -0.9784765988705008*g_cart[6] + 11.741719186446009*g_cart[8] + 0.4892382994352504*g_cart[15] + -3.913906395482003*g_cart[17];
+        g_sph[grid_id + 3*stride] += -4.793536784973324*g_cart[4] + -4.793536784973324*g_cart[11] + 9.587073569946648*g_cart[13];
+        g_sph[grid_id + 4*stride] += 0.45294665119569694*g_cart[1] + 0.9058933023913939*g_cart[6] + -5.435359814348363*g_cart[8] + 0.45294665119569694*g_cart[15] + -5.435359814348363*g_cart[17] + 3.6235732095655755*g_cart[19];
+        g_sph[grid_id + 5*stride] += 1.754254836801354*g_cart[2] + 3.508509673602708*g_cart[7] + -4.678012898136944*g_cart[9] + 1.754254836801354*g_cart[16] + -4.678012898136944*g_cart[18] + 0.9356025796273888*g_cart[20];
+        g_sph[grid_id + 6*stride] += 0.45294665119569694*g_cart[0] + 0.9058933023913939*g_cart[3] + -5.435359814348363*g_cart[5] + 0.45294665119569694*g_cart[10] + -5.435359814348363*g_cart[12] + 3.6235732095655755*g_cart[14];
+        g_sph[grid_id + 7*stride] += -2.396768392486662*g_cart[2] + 4.793536784973324*g_cart[9] + 2.396768392486662*g_cart[16] + -4.793536784973324*g_cart[18];
+        g_sph[grid_id + 8*stride] += -0.4892382994352504*g_cart[0] + 0.9784765988705008*g_cart[3] + 3.913906395482003*g_cart[5] + 1.467714898305751*g_cart[10] + -11.741719186446009*g_cart[12];
+        g_sph[grid_id + 9*stride] += 2.075662314881041*g_cart[2] + -12.453973889286248*g_cart[7] + 2.075662314881041*g_cart[16];
+        g_sph[grid_id +10*stride] += 0.6563820568401701*g_cart[0] + -6.563820568401701*g_cart[3] + 3.2819102842008507*g_cart[10];
+        /*
+        // Generated by ChatGPT
+        g_sph[0]  = (3.2819102842008507 * g_cart[1]) + (-6.563820568401701 * g_cart[6]) + (0.6563820568401701 * g_cart[15]);
+        g_sph[1]  = 8.302649259524165 * (g_cart[4] - g_cart[11]);
+        g_sph[2]  = (-1.467714898305751 * g_cart[1]) + (-0.9784765988705008 * g_cart[6]) + (11.741719186446009 * g_cart[8]) + (0.4892382994352504 * g_cart[15]) + (-3.913906395482003 * g_cart[17]);
+        g_sph[3]  = -4.793536784973324 * (g_cart[4] + g_cart[11]) + 9.587073569946648 * g_cart[13];
+        g_sph[4]  = (0.45294665119569694 * (g_cart[1] + g_cart[15])) + (0.9058933023913939 * g_cart[6]) + (-5.435359814348363 * (g_cart[8] + g_cart[17])) + (3.6235732095655755 * g_cart[19]);
+        g_sph[5]  = 1.754254836801354 * (g_cart[2] + g_cart[16]) + 3.508509673602708 * g_cart[7] + (-4.678012898136944 * (g_cart[9] + g_cart[18])) + (0.9356025796273888 * g_cart[20]);
+        g_sph[6]  = (0.45294665119569694 * (g_cart[0] + g_cart[10])) + (0.9058933023913939 * g_cart[3]) + (-5.435359814348363 * (g_cart[5] + g_cart[12])) + (3.6235732095655755 * g_cart[14]);
+        g_sph[7]  = -2.396768392486662 * (g_cart[2] - g_cart[16]) + 4.793536784973324 * (g_cart[9] - g_cart[18]);
+        g_sph[8]  = (-0.4892382994352504 * g_cart[0]) + (0.9784765988705008 * g_cart[3]) + (3.913906395482003 * g_cart[5]) + (1.467714898305751 * g_cart[10]) + (-11.741719186446009 * g_cart[12]);
+        g_sph[9]  = 2.075662314881041 * (g_cart[2] + g_cart[16]) - 12.453973889286248 * g_cart[7];
+        g_sph[10] = (0.6563820568401701 * g_cart[0]) + (-6.563820568401701 * g_cart[3]) + (3.2819102842008507 * g_cart[10]);
+        */
+    } else if (ANG == 6) {
+        g_sph[grid_id           ] += 4.099104631151486*g_cart[1] + -13.663682103838289*g_cart[6] + 4.099104631151486*g_cart[15];
+        g_sph[grid_id + 1*stride] += 11.833095811158763*g_cart[4] + -23.666191622317527*g_cart[11] + 2.3666191622317525*g_cart[22];
+        g_sph[grid_id + 2*stride] += -2.0182596029148963*g_cart[1] + 20.182596029148968*g_cart[8] + 2.0182596029148963*g_cart[15] + -20.182596029148968*g_cart[17];
+        g_sph[grid_id + 3*stride] += -8.29084733563431*g_cart[4] + -5.527231557089541*g_cart[11] + 22.108926228358165*g_cart[13] + 2.7636157785447706*g_cart[22] + -7.369642076119389*g_cart[24];
+        g_sph[grid_id + 4*stride] += 0.9212052595149236*g_cart[1] + 1.8424105190298472*g_cart[6] + -14.739284152238778*g_cart[8] + 0.9212052595149236*g_cart[15] + -14.739284152238778*g_cart[17] + 14.739284152238778*g_cart[19];
+        g_sph[grid_id + 5*stride] += 2.913106812593657*g_cart[4] + 5.826213625187314*g_cart[11] + -11.652427250374627*g_cart[13] + 2.913106812593657*g_cart[22] + -11.652427250374627*g_cart[24] + 4.6609709001498505*g_cart[26];
+        g_sph[grid_id + 6*stride] += -0.3178460113381421*g_cart[0] + -0.9535380340144264*g_cart[3] + 5.721228204086558*g_cart[5] + -0.9535380340144264*g_cart[10] + 11.442456408173117*g_cart[12] + -7.628304272115411*g_cart[14] + -0.3178460113381421*g_cart[21] + 5.721228204086558*g_cart[23] + -7.628304272115411*g_cart[25] + 1.0171072362820548*g_cart[27];
+        g_sph[grid_id + 7*stride] += 2.913106812593657*g_cart[2] + 5.826213625187314*g_cart[7] + -11.652427250374627*g_cart[9] + 2.913106812593657*g_cart[16] + -11.652427250374627*g_cart[18] + 4.6609709001498505*g_cart[20];
+        g_sph[grid_id + 8*stride] += 0.4606026297574618*g_cart[0] + 0.4606026297574618*g_cart[3] + -7.369642076119389*g_cart[5] + -0.4606026297574618*g_cart[10] + 7.369642076119389*g_cart[14] + -0.4606026297574618*g_cart[21] + 7.369642076119389*g_cart[23] + -7.369642076119389*g_cart[25];
+        g_sph[grid_id + 9*stride] += -2.7636157785447706*g_cart[2] + 5.527231557089541*g_cart[7] + 7.369642076119389*g_cart[9] + 8.29084733563431*g_cart[16] + -22.108926228358165*g_cart[18];
+        g_sph[grid_id +10*stride] += -0.5045649007287241*g_cart[0] + 2.52282450364362*g_cart[3] + 5.045649007287242*g_cart[5] + 2.52282450364362*g_cart[10] + -30.273894043723452*g_cart[12] + -0.5045649007287241*g_cart[21] + 5.045649007287242*g_cart[23];
+        g_sph[grid_id +11*stride] += 2.3666191622317525*g_cart[2] + -23.666191622317527*g_cart[7] + 11.833095811158763*g_cart[16];
+        g_sph[grid_id +12*stride] += 0.6831841051919144*g_cart[0] + -10.247761577878716*g_cart[3] + 10.247761577878716*g_cart[10] + -0.6831841051919144*g_cart[21];
+        /*
+        // Generated by ChatGPT
+        g_sph[0]  = 4.099104631151486 * (g_cart[1] + g_cart[15]) - 13.663682103838289 * g_cart[6];
+        g_sph[1]  = 11.833095811158763 * (g_cart[4] - 2 * g_cart[11]) + 2.3666191622317525 * g_cart[22];
+        g_sph[2]  = -2.0182596029148963 * (g_cart[1] - g_cart[15]) + 20.182596029148968 * (g_cart[8] - g_cart[17]);
+        g_sph[3]  = -8.29084733563431 * g_cart[4] - 5.527231557089541 * g_cart[11] + 22.108926228358165 * g_cart[13] + 2.7636157785447706 * g_cart[22] - 7.369642076119389 * g_cart[24];
+        g_sph[4]  = 0.9212052595149236 * (g_cart[1] + g_cart[15]) + 1.8424105190298472 * g_cart[6] - 14.739284152238778 * (g_cart[8] + g_cart[17] - g_cart[19]);
+        g_sph[5]  = 2.913106812593657 * (g_cart[4] + g_cart[22]) + 5.826213625187314 * g_cart[11] - 11.652427250374627 * (g_cart[13] + g_cart[24]) + 4.6609709001498505 * g_cart[26];
+        g_sph[6]  = -0.3178460113381421 * (g_cart[0] + g_cart[21]) - 0.9535380340144264 * (g_cart[3] + g_cart[10]) + 5.721228204086558 * (g_cart[5] + g_cart[23]) + 11.442456408173117 * g_cart[12] - 7.628304272115411 * (g_cart[14] + g_cart[25]) + 1.0171072362820548 * g_cart[27];
+        g_sph[7]  = 2.913106812593657 * (g_cart[2] + g_cart[16]) + 5.826213625187314 * g_cart[7] - 11.652427250374627 * (g_cart[9] + g_cart[18]) + 4.6609709001498505 * g_cart[20];
+        g_sph[8]  = 0.4606026297574618 * (g_cart[0] + g_cart[3] - g_cart[10] - g_cart[21]) - 7.369642076119389 * (g_cart[5] - g_cart[14] + g_cart[23] - g_cart[25]);
+        g_sph[9]  = -2.7636157785447706 * g_cart[2] + 5.527231557089541 * g_cart[7] + 7.369642076119389 * g_cart[9] + 8.29084733563431 * g_cart[16] - 22.108926228358165 * g_cart[18];
+        g_sph[10] = -0.5045649007287241 * (g_cart[0] + g_cart[21]) + 5.045649007287242 * (g_cart[5] + g_cart[23]) + 2.52282450364362 * (g_cart[3] + g_cart[10]) - 30.273894043723452 * g_cart[12];
+        g_sph[11] = 2.3666191622317525 * (g_cart[2] + g_cart[16]) - 23.666191622317527 * g_cart[7];
+        g_sph[12] = 0.6831841051919144 * (g_cart[0] - g_cart[21]) - 10.247761577878716 * (g_cart[3] - g_cart[10]);
+        */
+    } else if(ANG == 7) {
+        g_sph[grid_id           ] += 4.950139127672174*g_cart[1] + -24.75069563836087*g_cart[6] + 14.850417383016522*g_cart[15] + -0.7071627325245963*g_cart[28];
+        g_sph[grid_id +   stride] += 15.8757639708114*g_cart[4] + -52.919213236038004*g_cart[11] + 15.8757639708114*g_cart[22];
+        g_sph[grid_id + 2*stride] += -2.594577893601302*g_cart[1] + 2.594577893601302*g_cart[6] + 31.134934723215622*g_cart[8] + 4.670240208482344*g_cart[15] + -62.269869446431244*g_cart[17] + -0.5189155787202604*g_cart[28] + 6.226986944643125*g_cart[30];
+        g_sph[grid_id + 3*stride] += -12.45397388928625*g_cart[4] + 41.51324629762083*g_cart[13] + 12.45397388928625*g_cart[22] + -41.51324629762083*g_cart[24];
+        g_sph[grid_id + 4*stride] += 1.4081304047606462*g_cart[1] + 2.3468840079344107*g_cart[6] + -28.162608095212924*g_cart[8] + 0.4693768015868821*g_cart[15] + -18.77507206347528*g_cart[17] + 37.55014412695057*g_cart[19] + -0.4693768015868821*g_cart[28] + 9.38753603173764*g_cart[30] + -12.516714708983523*g_cart[32];
+        g_sph[grid_id + 5*stride] += 6.637990386674741*g_cart[4] + 13.275980773349483*g_cart[11] + -35.402615395598616*g_cart[13] + 6.637990386674741*g_cart[22] + -35.402615395598616*g_cart[24] + 21.241569237359172*g_cart[26];
+        g_sph[grid_id + 6*stride] += -0.4516580379125866*g_cart[1] + -1.35497411373776*g_cart[6] + 10.839792909902078*g_cart[8] + -1.35497411373776*g_cart[15] + 21.679585819804156*g_cart[17] + -21.679585819804156*g_cart[19] + -0.4516580379125866*g_cart[28] + 10.839792909902078*g_cart[30] + -21.679585819804156*g_cart[32] + 5.781222885281109*g_cart[34];
+        g_sph[grid_id + 7*stride] += -2.389949691920173*g_cart[2] + -7.169849075760519*g_cart[7] + 14.339698151521036*g_cart[9] + -7.169849075760519*g_cart[16] + 28.679396303042072*g_cart[18] + -11.47175852121683*g_cart[20] + -2.389949691920173*g_cart[29] + 14.339698151521036*g_cart[31] + -11.47175852121683*g_cart[33] + 1.092548430592079*g_cart[35];
+        g_sph[grid_id + 8*stride] += -0.4516580379125866*g_cart[0] + -1.35497411373776*g_cart[3] + 10.839792909902078*g_cart[5] + -1.35497411373776*g_cart[10] + 21.679585819804156*g_cart[12] + -21.679585819804156*g_cart[14] + -0.4516580379125866*g_cart[21] + 10.839792909902078*g_cart[23] + -21.679585819804156*g_cart[25] + 5.781222885281109*g_cart[27];
+        g_sph[grid_id + 9*stride] += 3.3189951933373707*g_cart[2] + 3.3189951933373707*g_cart[7] + -17.701307697799308*g_cart[9] + -3.3189951933373707*g_cart[16] + 10.620784618679586*g_cart[20] + -3.3189951933373707*g_cart[29] + 17.701307697799308*g_cart[31] + -10.620784618679586*g_cart[33];
+        g_sph[grid_id +10*stride] += 0.4693768015868821*g_cart[0] + -0.4693768015868821*g_cart[3] + -9.38753603173764*g_cart[5] + -2.3468840079344107*g_cart[10] + 18.77507206347528*g_cart[12] + 12.516714708983523*g_cart[14] + -1.4081304047606462*g_cart[21] + 28.162608095212924*g_cart[23] + -37.55014412695057*g_cart[25];
+        g_sph[grid_id +11*stride] += -3.1134934723215624*g_cart[2] + 15.567467361607811*g_cart[7] + 10.378311574405208*g_cart[9] + 15.567467361607811*g_cart[16] + -62.269869446431244*g_cart[18] + -3.1134934723215624*g_cart[29] + 10.378311574405208*g_cart[31];
+        g_sph[grid_id +12*stride] += -0.5189155787202604*g_cart[0] + 4.670240208482344*g_cart[3] + 6.226986944643125*g_cart[5] + 2.594577893601302*g_cart[10] + -62.269869446431244*g_cart[12] + -2.594577893601302*g_cart[21] + 31.134934723215622*g_cart[23];
+        g_sph[grid_id +13*stride] += 2.6459606618019*g_cart[2] + -39.6894099270285*g_cart[7] + 39.6894099270285*g_cart[16] + -2.6459606618019*g_cart[29];
+        g_sph[grid_id +14*stride] += 0.7071627325245963*g_cart[0] + -14.850417383016522*g_cart[3] + 24.75069563836087*g_cart[10] + -4.950139127672174*g_cart[21];
+        /*
+        // Generated by ChatGPT
+        g_sph[0]  = 4.950139127672174 * g_cart[1] - 24.75069563836087 * g_cart[6] + 14.850417383016522 * g_cart[15] - 0.7071627325245963 * g_cart[28];
+        g_sph[1]  = 15.8757639708114 * (g_cart[4] + g_cart[22]) - 52.919213236038004 * g_cart[11];
+        g_sph[2]  = (-2.594577893601302 * (g_cart[1] - g_cart[6])) + (31.134934723215622 * g_cart[8]) + (4.670240208482344 * g_cart[15]) - (62.269869446431244 * g_cart[17]) - (0.5189155787202604 * g_cart[28]) + (6.226986944643125 * g_cart[30]);
+        g_sph[3]  = -12.45397388928625 * (g_cart[4] - g_cart[22]) + 41.51324629762083 * (g_cart[13] - g_cart[24]);
+        g_sph[4]  = (1.4081304047606462 * g_cart[1]) + (2.3468840079344107 * g_cart[6]) - (28.162608095212924 * g_cart[8]) + (0.4693768015868821 * (g_cart[15] - g_cart[28])) - (18.77507206347528 * g_cart[17]) + (37.55014412695057 * g_cart[19]) + (9.38753603173764 * g_cart[30]) - (12.516714708983523 * g_cart[32]);
+        g_sph[5]  = 6.637990386674741 * (g_cart[4] + g_cart[22]) + 13.275980773349483 * g_cart[11] - 35.402615395598616 * (g_cart[13] + g_cart[24]) + 21.241569237359172 * g_cart[26];
+        g_sph[6]  = (-0.4516580379125866 * (g_cart[1] + g_cart[28])) + (-1.35497411373776 * (g_cart[6] + g_cart[15])) + (10.839792909902078 * g_cart[8]) + (21.679585819804156 * (g_cart[17] - g_cart[19])) + (10.839792909902078 * g_cart[30]) - (21.679585819804156 * g_cart[32]) + (5.781222885281109 * g_cart[34]);
+        g_sph[7]  = -2.389949691920173 * (g_cart[2] + g_cart[29]) - 7.169849075760519 * (g_cart[7] + g_cart[16]) + 14.339698151521036 * g_cart[9] + 28.679396303042072 * g_cart[18] - 11.47175852121683 * (g_cart[20] + g_cart[33]) + (1.092548430592079 * g_cart[35]);
+        g_sph[8]  = (-0.4516580379125866 * (g_cart[0] + g_cart[21])) + (-1.35497411373776 * (g_cart[3] + g_cart[10])) + (10.839792909902078 * g_cart[5]) + (21.679585819804156 * (g_cart[12] - g_cart[14])) + (10.839792909902078 * g_cart[23]) - (21.679585819804156 * g_cart[25]) + (5.781222885281109 * g_cart[27]);
+        g_sph[9]  = 3.3189951933373707 * (g_cart[2] + g_cart[7] - g_cart[16] - g_cart[29]) - 17.701307697799308 * g_cart[9] + 10.620784618679586 * (g_cart[20] - g_cart[33]) + 17.701307697799308 * g_cart[31];
+        g_sph[10] = (0.4693768015868821 * (g_cart[0] - g_cart[3])) - (9.38753603173764 * g_cart[5]) - (2.3468840079344107 * g_cart[10]) + (18.77507206347528 * g_cart[12]) + (12.516714708983523 * g_cart[14]) - (1.4081304047606462 * g_cart[21]) + (28.162608095212924 * g_cart[23]) - (37.55014412695057 * g_cart[25]);
+        g_sph[11] = (-3.1134934723215624 * (g_cart[2] + g_cart[29])) + (15.567467361607811 * (g_cart[7] + g_cart[16])) + (10.378311574405208 * g_cart[9]) - (62.269869446431244 * g_cart[18]) + (10.378311574405208 * g_cart[31]);
+        g_sph[12] = (-0.5189155787202604 * g_cart[0]) + (4.670240208482344 * g_cart[3]) + (6.226986944643125 * g_cart[5]) + (2.594577893601302 * g_cart[10]) - (62.269869446431244 * g_cart[12]) - (2.594577893601302 * g_cart[21]) + (31.134934723215622 * g_cart[23]);
+        g_sph[13] = (2.6459606618019 * (g_cart[2] - g_cart[29])) - 39.6894099270285 * (g_cart[7] - g_cart[16]);
+        g_sph[14] = (0.7071627325245963 * g_cart[0]) - (14.850417383016522 * g_cart[3]) + (24.75069563836087 * g_cart[10]) - (4.950139127672174 * g_cart[21]);
+        */
+    } else if(ANG == 8){
+        g_sph[grid_id           ] += 5.83141328139864*g_cart[1] + -40.81989296979048*g_cart[6] + 40.81989296979048*g_cart[15] + -5.83141328139864*g_cart[28];
+        g_sph[grid_id +   stride] += 20.40994648489524*g_cart[4] + -102.0497324244762*g_cart[11] + 61.22983945468572*g_cart[22] + -2.91570664069932*g_cart[37];
+        g_sph[grid_id + 2*stride] += -3.193996596357255*g_cart[1] + 7.452658724833595*g_cart[6] + 44.71595234900157*g_cart[8] + 7.452658724833595*g_cart[15] + -149.0531744966719*g_cart[17] + -3.193996596357255*g_cart[28] + 44.71595234900157*g_cart[30];
+        g_sph[grid_id + 3*stride] += -17.24955311049054*g_cart[4] + 17.24955311049054*g_cart[11] + 68.99821244196217*g_cart[13] + 31.04919559888297*g_cart[22] + -137.9964248839243*g_cart[24] + -3.449910622098108*g_cart[37] + 13.79964248839243*g_cart[39];
+        g_sph[grid_id + 4*stride] += 1.913666099037323*g_cart[1] + 1.913666099037323*g_cart[6] + -45.92798637689575*g_cart[8] + -1.913666099037323*g_cart[15] + 76.54664396149292*g_cart[19] + -1.913666099037323*g_cart[28] + 45.92798637689575*g_cart[30] + -76.54664396149292*g_cart[32];
+        g_sph[grid_id + 5*stride] += 11.1173953976599*g_cart[4] + 18.52899232943316*g_cart[11] + -74.11596931773265*g_cart[13] + 3.705798465886632*g_cart[22] + -49.41064621182176*g_cart[24] + 59.29277545418611*g_cart[26] + -3.705798465886632*g_cart[37] + 24.70532310591088*g_cart[39] + -19.7642584847287*g_cart[41];
+        g_sph[grid_id + 6*stride] += -0.912304516869819*g_cart[1] + -2.736913550609457*g_cart[6] + 27.36913550609457*g_cart[8] + -2.736913550609457*g_cart[15] + 54.73827101218914*g_cart[17] + -72.98436134958553*g_cart[19] + -0.912304516869819*g_cart[28] + 27.36913550609457*g_cart[30] + -72.98436134958553*g_cart[32] + 29.19374453983421*g_cart[34];
+        g_sph[grid_id + 7*stride] += -3.8164436064573*g_cart[4] + -11.4493308193719*g_cart[11] + 30.5315488516584*g_cart[13] + -11.4493308193719*g_cart[22] + 61.06309770331679*g_cart[24] + -36.63785862199007*g_cart[26] + -3.8164436064573*g_cart[37] + 30.5315488516584*g_cart[39] + -36.63785862199007*g_cart[41] + 6.978639737521918*g_cart[43];
+        g_sph[grid_id + 8*stride] += 0.3180369672047749*g_cart[0] + 1.272147868819099*g_cart[3] + -10.1771829505528*g_cart[5] + 1.908221803228649*g_cart[10] + -30.53154885165839*g_cart[12] + 30.53154885165839*g_cart[14] + 1.272147868819099*g_cart[21] + -30.53154885165839*g_cart[23] + 61.06309770331677*g_cart[25] + -16.28349272088447*g_cart[27] + 0.3180369672047749*g_cart[36] + -10.1771829505528*g_cart[38] + 30.53154885165839*g_cart[40] + -16.28349272088447*g_cart[42] + 1.16310662292032*g_cart[44];
+        g_sph[grid_id + 9*stride] += -3.8164436064573*g_cart[2] + -11.4493308193719*g_cart[7] + 30.5315488516584*g_cart[9] + -11.4493308193719*g_cart[16] + 61.06309770331679*g_cart[18] + -36.63785862199007*g_cart[20] + -3.8164436064573*g_cart[29] + 30.5315488516584*g_cart[31] + -36.63785862199007*g_cart[33] + 6.978639737521918*g_cart[35];
+        g_sph[grid_id +10*stride] += -0.4561522584349095*g_cart[0] + -0.912304516869819*g_cart[3] + 13.68456775304729*g_cart[5] + 13.68456775304729*g_cart[12] + -36.49218067479276*g_cart[14] + 0.912304516869819*g_cart[21] + -13.68456775304729*g_cart[23] + 14.5968722699171*g_cart[27] + 0.4561522584349095*g_cart[36] + -13.68456775304729*g_cart[38] + 36.49218067479276*g_cart[40] + -14.5968722699171*g_cart[42];
+        g_sph[grid_id +11*stride] += 3.705798465886632*g_cart[2] + -3.705798465886632*g_cart[7] + -24.70532310591088*g_cart[9] + -18.52899232943316*g_cart[16] + 49.41064621182176*g_cart[18] + 19.7642584847287*g_cart[20] + -11.1173953976599*g_cart[29] + 74.11596931773265*g_cart[31] + -59.29277545418611*g_cart[33];
+        g_sph[grid_id +12*stride] += 0.4784165247593308*g_cart[0] + -1.913666099037323*g_cart[3] + -11.48199659422394*g_cart[5] + -4.784165247593307*g_cart[10] + 57.40998297111968*g_cart[12] + 19.13666099037323*g_cart[14] + -1.913666099037323*g_cart[21] + 57.40998297111968*g_cart[23] + -114.8199659422394*g_cart[25] + 0.4784165247593308*g_cart[36] + -11.48199659422394*g_cart[38] + 19.13666099037323*g_cart[40];
+        g_sph[grid_id +13*stride] += -3.449910622098108*g_cart[2] + 31.04919559888297*g_cart[7] + 13.79964248839243*g_cart[9] + 17.24955311049054*g_cart[16] + -137.9964248839243*g_cart[18] + -17.24955311049054*g_cart[29] + 68.99821244196217*g_cart[31];
+        g_sph[grid_id +14*stride] += -0.5323327660595425*g_cart[0] + 7.452658724833595*g_cart[3] + 7.452658724833595*g_cart[5] + -111.7898808725039*g_cart[12] + -7.452658724833595*g_cart[21] + 111.7898808725039*g_cart[23] + 0.5323327660595425*g_cart[36] + -7.452658724833595*g_cart[38];
+        g_sph[grid_id +15*stride] += 2.91570664069932*g_cart[2] + -61.22983945468572*g_cart[7] + 102.0497324244762*g_cart[16] + -20.40994648489524*g_cart[29];
+        g_sph[grid_id +16*stride] += 0.72892666017483*g_cart[0] + -20.40994648489524*g_cart[3] + 51.0248662122381*g_cart[10] + -20.40994648489524*g_cart[21] + 0.72892666017483*g_cart[36];
+        /*
+        // Generated by ChatGPT
+        g_sph[0]  = 5.83141328139864 * (g_cart[1] - g_cart[28]) + 40.81989296979048 * (g_cart[15] - g_cart[6]);
+        g_sph[1]  = 20.40994648489524 * (g_cart[4] - 5 * g_cart[11]) + 61.22983945468572 * g_cart[22] - 2.91570664069932 * g_cart[37];
+        g_sph[2]  = -3.193996596357255 * (g_cart[1] + g_cart[28]) + 7.452658724833595 * (g_cart[6] + g_cart[15]) + 44.71595234900157 * (g_cart[8] + g_cart[30]) - 149.0531744966719 * g_cart[17];
+        g_sph[3]  = -17.24955311049054 * (g_cart[4] - g_cart[11]) + 68.99821244196217 * g_cart[13] + 31.04919559888297 * g_cart[22] - 137.9964248839243 * g_cart[24] - 3.449910622098108 * g_cart[37] + 13.79964248839243 * g_cart[39];
+        g_sph[4]  = 1.913666099037323 * (g_cart[1] + g_cart[6] - g_cart[15] - g_cart[28]) - 45.92798637689575 * g_cart[8] + 76.54664396149292 * (g_cart[19] - g_cart[32]) + 45.92798637689575 * g_cart[30];
+        g_sph[5]  = 11.1173953976599 * g_cart[4] + 18.52899232943316 * g_cart[11] - 74.11596931773265 * g_cart[13] + 3.705798465886632 * (g_cart[22] - g_cart[37]) - 49.41064621182176 * g_cart[24] + 59.29277545418611 * g_cart[26] + 24.70532310591088 * g_cart[39] - 19.7642584847287 * g_cart[41];
+        g_sph[6]  = -0.912304516869819 * (g_cart[1] + g_cart[28]) - 2.736913550609457 * (g_cart[6] + g_cart[15]) + 27.36913550609457 * (g_cart[8] + g_cart[30]) + 54.73827101218914 * g_cart[17] - 72.98436134958553 * g_cart[19] - 72.98436134958553 * g_cart[32] + 29.19374453983421 * g_cart[34];
+        g_sph[7]  = -3.8164436064573 * (g_cart[4] + g_cart[37]) - 11.4493308193719 * (g_cart[11] + g_cart[22]) + 30.5315488516584 * (g_cart[13] + g_cart[39]) + 61.06309770331679 * g_cart[24] - 36.63785862199007 * (g_cart[26] + g_cart[41]) + 6.978639737521918 * g_cart[43];
+        g_sph[8]  = 0.3180369672047749 * (g_cart[0] + g_cart[36]) + 1.272147868819099 * (g_cart[3] + g_cart[21]) - 10.1771829505528 * (g_cart[5] + g_cart[38]) + 1.908221803228649 * g_cart[10] - 30.53154885165839 * (g_cart[12] - g_cart[14] + g_cart[23] - g_cart[25] + g_cart[40]) + 61.06309770331677 * g_cart[25] - 16.28349272088447 * (g_cart[27] + g_cart[42]) + 1.16310662292032 * g_cart[44];
+        g_sph[9]  = -3.8164436064573 * (g_cart[2] + g_cart[29]) - 11.4493308193719 * (g_cart[7] + g_cart[16]) + 30.5315488516584 * g_cart[9] + 61.06309770331679 * g_cart[18] - 36.63785862199007 * (g_cart[20] + g_cart[33]) + 6.978639737521918 * g_cart[35];
+        g_sph[10] = -0.4561522584349095 * (g_cart[0] + g_cart[36]) - 0.912304516869819 * (g_cart[3] - g_cart[21]) + 13.68456775304729 * (g_cart[5] + g_cart[12] - g_cart[23] - g_cart[38]) - 36.49218067479276 * g_cart[14] + 14.5968722699171 * (g_cart[27] - g_cart[42]);
+        g_sph[11] = 3.705798465886632 * (g_cart[2] - g_cart[7]) - 24.70532310591088 * g_cart[9] - 18.52899232943316 * g_cart[16] + 49.41064621182176 * g_cart[18] + 19.7642584847287 * g_cart[20] - 11.1173953976599 * g_cart[29] + 74.11596931773265 * g_cart[31] - 59.29277545418611 * g_cart[33];
+        g_sph[12] = 0.4784165247593308 * (g_cart[0] + g_cart[36]) - 1.913666099037323 * (g_cart[3] + g_cart[21]) - 11.48199659422394 * (g_cart[5] + g_cart[38]) - 4.784165247593307 * g_cart[10] + 57.40998297111968 * (g_cart[12] + g_cart[23]) + 19.13666099037323 * (g_cart[14] + g_cart[40]) - 114.8199659422394 * g_cart[25];
+        g_sph[13] = -3.449910622098108 * (g_cart[2] - g_cart[29]) + 31.04919559888297 * g_cart[7] + 13.79964248839243 * g_cart[9] + 17.24955311049054 * g_cart[16] - 137.9964248839243 * g_cart[18] + 68.99821244196217 * g_cart[31];
+        g_sph[14] = -0.5323327660595425 * (g_cart[0] + g_cart[36]) + 7.452658724833595 * (g_cart[3] + g_cart[5] - g_cart[21] - g_cart[38]) - 111.7898808725039 * (g_cart[12] - g_cart[23]);
+        g_sph[15] = 2.91570664069932 * g_cart[2] - 61.22983945468572 * g_cart[7] + 102.0497324244762 * g_cart[16] - 20.40994648489524 * g_cart[29];
+        g_sph[16] = 0.72892666017483 * (g_cart[0] + g_cart[36]) - 20.40994648489524 * (g_cart[3] + g_cart[21]) + 51.0248662122381 * g_cart[10];
+        */
     }
 }
 
 template <int ANG> __device__
-static void _memset_cart(double *g_cart, int stride, int grid_id){
-    if (ANG == 0){
-        g_cart[grid_id] = 0.0;
-    } else if (ANG == 1){
-        g_cart[grid_id           ] = 0.0;
-        g_cart[grid_id +   stride] = 0.0;
-        g_cart[grid_id + 2*stride] = 0.0;
-    } else if (ANG == 2){
-        g_cart[grid_id           ] = 0.0;
-        g_cart[grid_id +   stride] = 0.0;
-        g_cart[grid_id + 2*stride] = 0.0;
-        g_cart[grid_id + 3*stride] = 0.0;
-        g_cart[grid_id + 4*stride] = 0.0;
-        g_cart[grid_id + 5*stride] = 0.0;
-    } else if (ANG == 3){
-        g_cart[grid_id           ] = 0.0;
-        g_cart[grid_id +   stride] = 0.0;
-        g_cart[grid_id + 2*stride] = 0.0;
-        g_cart[grid_id + 3*stride] = 0.0;
-        g_cart[grid_id + 4*stride] = 0.0;
-        g_cart[grid_id + 5*stride] = 0.0;
-        g_cart[grid_id + 6*stride] = 0.0;
-        g_cart[grid_id + 7*stride] = 0.0;
-        g_cart[grid_id + 8*stride] = 0.0;
-        g_cart[grid_id + 9*stride] = 0.0;
-    } else if (ANG == 4){
-        g_cart[grid_id           ] = 0.0;
-        g_cart[grid_id +   stride] = 0.0;
-        g_cart[grid_id + 2*stride] = 0.0;
-        g_cart[grid_id + 3*stride] = 0.0;
-        g_cart[grid_id + 4*stride] = 0.0;
-        g_cart[grid_id + 5*stride] = 0.0;
-        g_cart[grid_id + 6*stride] = 0.0;
-        g_cart[grid_id + 7*stride] = 0.0;
-        g_cart[grid_id + 8*stride] = 0.0;
-        g_cart[grid_id + 9*stride] = 0.0;
-        g_cart[grid_id +10*stride] = 0.0;
-        g_cart[grid_id +11*stride] = 0.0;
-        g_cart[grid_id +12*stride] = 0.0;
-        g_cart[grid_id +14*stride] = 0.0;
-    } else {
-        int i = 0;
-        for (int lx = ANG; lx >= 0; lx--){
-            for (int ly = ANG - lx; ly >= 0; ly--, i++){
-                g_cart[grid_id + i*stride] = 0.0;
-            }
+static void _memset_cart(double *g_cart, int count, int ngrids, int nao){
+    // Set g[:,:,grid_id] = 0
+    for (int deriv = 0; deriv < count; deriv++){
+        for (int i = 0; i < (ANG+1)*(ANG+2)/2; i++){
+            g_cart[i * ngrids] = 0.0;
         }
+        g_cart += nao * ngrids;
     }
 }
 
 template <int ANG> __device__
-static void _memset_sph(double *g_sph, int stride, int grid_id){
-    if (ANG == 0){
-        g_sph[grid_id] = 0.0;
-    } else if (ANG == 1){
-        g_sph[grid_id           ] = 0.0;
-        g_sph[grid_id +   stride] = 0.0;
-        g_sph[grid_id + 2*stride] = 0.0;
-    } else if (ANG == 2){
-        g_sph[grid_id           ] = 0.0;
-        g_sph[grid_id +   stride] = 0.0;
-        g_sph[grid_id + 2*stride] = 0.0;
-        g_sph[grid_id + 3*stride] = 0.0;
-        g_sph[grid_id + 4*stride] = 0.0;
-    } else if (ANG == 3){
-        g_sph[grid_id           ] = 0.0;
-        g_sph[grid_id +   stride] = 0.0;
-        g_sph[grid_id + 2*stride] = 0.0;
-        g_sph[grid_id + 3*stride] = 0.0;
-        g_sph[grid_id + 4*stride] = 0.0;
-        g_sph[grid_id + 5*stride] = 0.0;
-        g_sph[grid_id + 6*stride] = 0.0;
-    } else if (ANG == 4){
-        g_sph[grid_id           ] = 0.0;
-        g_sph[grid_id +   stride] = 0.0;
-        g_sph[grid_id + 2*stride] = 0.0;
-        g_sph[grid_id + 3*stride] = 0.0;
-        g_sph[grid_id + 4*stride] = 0.0;
-        g_sph[grid_id + 5*stride] = 0.0;
-        g_sph[grid_id + 6*stride] = 0.0;
-        g_sph[grid_id + 7*stride] = 0.0;
-        g_sph[grid_id + 8*stride] = 0.0;
+static void _memset_sph(double *g_sph, int count, int ngrids, int nao){
+    for (int deriv = 0; deriv < count; deriv++){
+        for (int i = 0; i < 2*ANG+1; i++){
+            g_sph[i * ngrids] = 0.0;
+        }
+        g_sph += nao * ngrids;
     }
 }
 
@@ -214,21 +326,26 @@ static void _cart_gto(double *g, double ce, double *fx, double *fy, double *fz){
     }
 }
 
-
 template <int ANG> __global__
 static void _cart_kernel_deriv0(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
 
@@ -242,8 +359,8 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
@@ -315,22 +432,27 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
     }
 }
 
-
 template <int ANG> __global__
 static void _cart_kernel_deriv1(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -347,8 +469,8 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     double ce_2a = 0;
@@ -542,9 +664,11 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
             fz0[lx] = fz0[lx-1] * rz;
         }
 
+        _memset_cart<ANG>(gto+grid_id, 4, ngrids, nao);
+
         double fx1[ANG+1], fy1[ANG+1], fz1[ANG+1];
         for (int ip = 0; ip < offsets.nprim; ++ip) {
-            double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
+            const double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
 
             _nabla1<ANG>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
             int i = 0;
@@ -555,6 +679,10 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
                     gtox[ i*ngrids + grid_id] += ce * fx1[lx] * fy0[ly] * fz0[lz];
                     gtoy[ i*ngrids + grid_id] += ce * fx0[lx] * fy1[ly] * fz0[lz];
                     gtoz[ i*ngrids + grid_id] += ce * fx0[lx] * fy0[ly] * fz1[lz];
+                    //atomicAdd(gto +i*ngrids+grid_id, ce * fx0[lx] * fy0[ly] * fz0[lz]);
+                    //atomicAdd(gtox+i*ngrids+grid_id, ce * fx1[lx] * fy0[ly] * fz0[lz]);
+                    //atomicAdd(gtoy+i*ngrids+grid_id, ce * fx0[lx] * fy1[ly] * fz0[lz]);
+                    //atomicAdd(gtoz+i*ngrids+grid_id, ce * fx0[lx] * fy0[ly] * fz1[lz]);
                 }
             }
         }
@@ -565,17 +693,23 @@ template <int ANG> __global__
 static void _cart_kernel_deriv2(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -598,8 +732,8 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
@@ -611,6 +745,9 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
+
+    _memset_cart<ANG>(gto+grid_id, 10, ngrids, nao);
+
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
         _nabla1<ANG+1>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
@@ -640,17 +777,23 @@ template <int ANG> __global__
 static void _cart_kernel_deriv3(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto    = offsets.data + i0 * ngrids;
     double* __restrict__ gtox   = offsets.data + (nao * 1 + i0) * ngrids;
@@ -683,8 +826,8 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     double fx1[ANG+3], fy1[ANG+3], fz1[ANG+3];
@@ -697,6 +840,8 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
+
+    _memset_cart<ANG>(gto+grid_id, 20, ngrids, nao);
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -738,17 +883,23 @@ template <int ANG> __global__
 static void _cart_kernel_deriv4(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto     = offsets.data + i0 * ngrids;
     double* __restrict__ gtox    = offsets.data + (nao * 1 + i0) * ngrids;
@@ -796,8 +947,8 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     double fx1[ANG+4], fy1[ANG+4], fz1[ANG+4];
@@ -811,6 +962,8 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
         fy0[lx] = fy0[lx-1] * ry;
         fz0[lx] = fz0[lx-1] * rz;
     }
+
+    _memset_cart<ANG>(gto+grid_id, 35, ngrids, nao);
 
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
@@ -862,23 +1015,26 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     }
 }
 
-
-
-
 template <int ANG> __global__
 static void _sph_kernel_deriv0(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
 
@@ -892,8 +1048,8 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
@@ -992,9 +1148,11 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
             fz0[lx] = fz0[lx-1] * rz;
         }
 
+        _memset_sph<ANG>(gto+grid_id, 1, ngrids, 0);
+
         for (int ip = 0; ip < offsets.nprim; ++ip) {
             double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
-            double g[GTO_MAX_CART];
+            double g[(ANG+1)*(ANG+2)/2];
             _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,   ngrids, grid_id);
         }
     }
@@ -1005,17 +1163,23 @@ template <int ANG> __global__
 static void _sph_kernel_deriv1(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
 
     double* __restrict__ gto = offsets.data + i0 * ngrids;
@@ -1033,8 +1197,8 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     double ce_2a = 0;
@@ -1309,10 +1473,12 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
         }
         double fx1[ANG+1], fy1[ANG+1], fz1[ANG+1];
 
+        _memset_sph<ANG>(gto+grid_id, 4, ngrids, nao);
+
         for (int ip = 0; ip < offsets.nprim; ++ip) {
             double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
             _nabla1<ANG>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
-            double g[GTO_MAX_CART];
+            double g[(ANG+1)*(ANG+2)/2];
             _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,   ngrids, grid_id);
             _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,  ngrids, grid_id);
             _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,  ngrids, grid_id);
@@ -1325,17 +1491,23 @@ template <int ANG> __global__
 static void _sph_kernel_deriv2(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto = offsets.data + i0 * ngrids;
     double* __restrict__ gtox = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1358,8 +1530,8 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1372,13 +1544,14 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
     double fx2[ANG+1], fy2[ANG+1], fz2[ANG+1];
 
+    _memset_sph<ANG>(gto+grid_id, 10, ngrids, nao);
+
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
         _nabla1<ANG+1>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
         _nabla1<ANG  >(fx2, fy2, fz2, fx1, fy1, fz1, exps[ip]);
 
-
-        double g[GTO_MAX_CART];
+        double g[(ANG+1)*(ANG+2)/2];
         _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,   ngrids, grid_id);
         _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,  ngrids, grid_id);
         _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,  ngrids, grid_id);
@@ -1397,17 +1570,23 @@ template <int ANG> __global__
 static void _sph_kernel_deriv3(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    const int bas_id = item.get_group(0);
+    #else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+    #endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto    = offsets.data + i0 * ngrids;
     double* __restrict__ gtox   = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1440,8 +1619,8 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1455,13 +1634,15 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     double fx2[ANG+2], fy2[ANG+2], fz2[ANG+2];
     double fx3[ANG+1], fy3[ANG+1], fz3[ANG+1];
 
+    _memset_sph<ANG>(gto+grid_id, 20, ngrids, nao);
+
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
         _nabla1<ANG+2>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
         _nabla1<ANG+1>(fx2, fy2, fz2, fx1, fy1, fz1, exps[ip]);
         _nabla1<ANG  >(fx3, fy3, fz3, fx2, fy2, fz2, exps[ip]);
 
-        double g[GTO_MAX_CART];
+        double g[(ANG+1)*(ANG+2)/2];
         _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,    ngrids, grid_id);
         _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,   ngrids, grid_id);
         _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,   ngrids, grid_id);
@@ -1490,17 +1671,23 @@ template <int ANG> __global__
 static void _sph_kernel_deriv4(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int grid_id = item.get_global_id(1);
+    int bas_id = item.get_group(0);
+#else
+    const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int bas_id = blockIdx.y;
+#endif
     if (grid_id >= ngrids) {
         return;
     }
 
-    int bas_id = blockIdx.y;
     int natm = c_envs.natm;
     int nao = offsets.nao;
     int local_ish = offsets.bas_off + bas_id;
     int glob_ish = offsets.bas_indices[local_ish];
-    int atm_id = c_bas_atom[glob_ish];
+    int atm_id = c_envs.bas_atom[glob_ish];
     size_t i0 = offsets.ao_loc[local_ish];
     double* __restrict__ gto     = offsets.data + i0 * ngrids;
     double* __restrict__ gtox    = offsets.data + (nao * 1 + i0) * ngrids;
@@ -1548,8 +1735,8 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = c_envs.env + c_bas_exp[glob_ish];
-    double *coeffs = c_envs.env + c_bas_coeff[glob_ish];
+    double *exps = c_envs.env + c_envs.bas_exp[glob_ish];
+    double *coeffs = c_envs.env + c_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1564,6 +1751,8 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     double fx3[ANG+2], fy3[ANG+2], fz3[ANG+2];
     double fx4[ANG+1], fy4[ANG+1], fz4[ANG+1];
 
+    _memset_sph<ANG>(gto+grid_id, 35, ngrids, nao);
+
     for (int ip = 0; ip < offsets.nprim; ++ip) {
         double ce = coeffs[ip] * exp(-exps[ip] * rr) * offsets.fac;
         _nabla1<ANG+3>(fx1, fy1, fz1, fx0, fy0, fz0, exps[ip]);
@@ -1571,7 +1760,7 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
         _nabla1<ANG+1>(fx3, fy3, fz3, fx2, fy2, fz2, exps[ip]);
         _nabla1<ANG  >(fx4, fy4, fz4, fx3, fy3, fz3, exps[ip]);
 
-        double g[GTO_MAX_CART];
+        double g[(ANG+1)*(ANG+2)/2];
         _cart_gto<ANG>(g, ce, fx0, fy0, fz0); _cart2sph<ANG>(g, gto,     ngrids, grid_id);
         _cart_gto<ANG>(g, ce, fx1, fy0, fz0); _cart2sph<ANG>(g, gtox,    ngrids, grid_id);
         _cart_gto<ANG>(g, ce, fx0, fy1, fz0); _cart2sph<ANG>(g, gtoy,    ngrids, grid_id);
@@ -1612,47 +1801,19 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
 
 extern "C" {
 __host__
-void GDFTinit_envs(GTOValEnvVars **envs_cache, int *ao_loc,
-                   int *atm, int natm, int *bas, int nbas, double *env, int nenv)
+void GDFTinit_envs(GTOValEnvVars **envs_cache, int *bas_atom, int *bas_exp, int *bas_coeff,
+                    double *atom_coords, double *env, int natm, int nbas)
 {
-    assert(nbas < NBAS_MAX);
-
     GTOValEnvVars *envs = (GTOValEnvVars *)malloc(sizeof(GTOValEnvVars));
     *envs_cache = envs;
     envs->natm = natm;
     envs->nbas = nbas;
-
-    DEVICE_INIT(int, d_ao_loc, ao_loc, nbas+1);
-    envs->ao_loc = d_ao_loc;
-
-    DEVICE_INIT(double, d_env, env, nenv);
-    envs->env = d_env;
-
-    double *atom_coords = (double *)malloc(sizeof(double) * natm * 3);
-    int ia, ptr;
-    for (ia = 0; ia < natm; ++ia) {
-        ptr = atm[PTR_COORD + ATM_SLOTS*ia];
-        atom_coords[       ia] = env[ptr+0];
-        atom_coords[  natm+ia] = env[ptr+1];
-        atom_coords[2*natm+ia] = env[ptr+2];
-    }
-    DEVICE_INIT(double, d_atom_coords, atom_coords, natm * 3);
-    envs->atom_coordx = d_atom_coords;
-    free(atom_coords);
-
-    uint16_t bas_atom[NBAS_MAX];
-    uint16_t bas_exp[NBAS_MAX];
-    uint16_t bas_coeff[NBAS_MAX];
-    int ish;
-    for (ish = 0; ish < nbas; ++ish) {
-        bas_atom[ish] = bas[ATOM_OF + ish * BAS_SLOTS];
-        bas_exp[ish] = bas[PTR_EXP + ish * BAS_SLOTS];
-        bas_coeff[ish] = bas[PTR_COEFF + ish * BAS_SLOTS];
-    }
+    envs->atom_coordx = atom_coords;
+    envs->env = env;
+    envs->bas_atom = bas_atom;
+    envs->bas_exp = bas_exp;
+    envs->bas_coeff = bas_coeff;
     checkCudaErrors(cudaMemcpyToSymbol(c_envs, envs, sizeof(GTOValEnvVars)));
-    checkCudaErrors(cudaMemcpyToSymbol(c_bas_atom, bas_atom, sizeof(uint16_t)*NBAS_MAX));
-    checkCudaErrors(cudaMemcpyToSymbol(c_bas_exp, bas_exp, sizeof(uint16_t)*NBAS_MAX));
-    checkCudaErrors(cudaMemcpyToSymbol(c_bas_coeff, bas_coeff, sizeof(uint16_t)*NBAS_MAX));
 }
 
 void GDFTdel_envs(GTOValEnvVars **envs_cache)
@@ -1661,11 +1822,6 @@ void GDFTdel_envs(GTOValEnvVars **envs_cache)
     if (envs == NULL) {
         return;
     }
-
-    FREE(envs->ao_loc);
-    FREE(envs->env);
-    FREE(envs->atom_coordx);
-
     free(envs);
     *envs_cache = NULL;
 }
@@ -1696,8 +1852,13 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     offsets.bas_indices = bas_indices;
     offsets.nbas = local_ctr_offsets[nctr];
     offsets.nao = nao;
+#ifdef USE_SYCL
+    sycl::range<2> threads(1, NG_PER_BLOCK);
+    sycl::range<2> blocks(1, (ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+#else
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+#endif
 
     for (int ictr = 0; ictr < nctr; ++ictr) {
         int local_ish = local_ctr_offsets[ictr];
@@ -1706,11 +1867,155 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
         offsets.bas_off = local_ish;
         offsets.nprim = bas[NPRIM_OF+glob_ish*BAS_SLOTS];
         offsets.fac = CINTcommon_fac_sp(l);
+#ifdef USE_SYCL
+        blocks[0] = local_ctr_offsets[ictr+1] - local_ctr_offsets[ictr];
+        if (blocks[0] == 0){
+            continue;
+        }
+#else
         blocks.y = local_ctr_offsets[ictr+1] - local_ctr_offsets[ictr];
         if (blocks.y == 0){
             continue;
         }
+#endif
         switch (deriv) {
+#ifdef USE_SYCL
+        case 0:
+            if (cart == 1) {
+                switch (l) {
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<8> (offsets); }); break;
+                default:fprintf(stderr, "l = %d not supported\n", l); }
+            } else {
+                switch (l) {
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }
+            }
+            break;
+        case 1:
+            if (cart == 1) {
+                switch (l) {
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }
+            } else {
+                switch (l) {
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }
+            }
+            break;
+        case 2:
+            if (cart == 1){
+                switch (l) {
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }); break;}
+            } else {
+                switch(l){
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+                }
+            break;
+        case 3:
+            if (cart == 1){
+                switch (l) {
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+            } else {
+                switch(l){
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+                }
+            break;
+        case 4:
+            if (cart == 1){
+                switch (l) {
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+            } else {
+                switch(l){
+                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<0> (offsets); }); break;
+                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<1> (offsets); }); break;
+                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<2> (offsets); }); break;
+                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<3> (offsets); }); break;
+                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<4> (offsets); }); break;
+                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<5> (offsets); }); break;
+                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<6> (offsets); }); break;
+                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<7> (offsets); }); break;
+                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<8> (offsets); }); break;
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
+            }
+            break;
+#else // USE_SYCL
         case 0:
             if (cart == 1) {
                 switch (l) {
@@ -1846,6 +2151,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 default: fprintf(stderr, "l = %d not supported\n", l); break; }
             }
             break;
+#endif // USE_SYCL
         default:
             fprintf(stderr, "deriv %d not supported\n", deriv);
             return 1;
@@ -1861,22 +2167,55 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
 }
 
 int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
-                 double *grids, int ngrids, int *bas_loc, int nbas, int *bas)
+                 double *grids, int ngrids, int *ctr_offsets, int nctr, int *bas)
 {
+#ifdef USE_SYCL
+    sycl::range<2> threads(1, NG_PER_BLOCK);
+    sycl::range<2> blocks(1, (ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+
+    for (int ictr = 0; ictr < nctr; ictr++){
+        int ish = ctr_offsets[ictr];
+        const int l =  bas[ANG_OF+ish*BAS_SLOTS];
+        int nprim = bas[NPRIM_OF+ish*BAS_SLOTS];
+        int bas_offset = ctr_offsets[ictr];
+        blocks[0] = ctr_offsets[ictr+1] - bas_offset;
+        if (blocks[0] == 0){
+            continue;
+        }
+        if (l > 8){
+            fprintf(stderr, "l = %d not supported\n", l);
+            return 1;
+        }
+        stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+	    _screen_index (non0shl_idx, cutoff, l, nprim, grids, ngrids, bas_offset, item);
+	});
+    }
+#else
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
 
-    for (int shl_id = 0; shl_id < nbas; ++shl_id) {
-        int l = bas[ANG_OF+shl_id*BAS_SLOTS];
-        int nprim = bas[NPRIM_OF+shl_id*BAS_SLOTS];
-        _screen_index<<<blocks, threads, 0, stream>>>(non0shl_idx, cutoff, l, shl_id, nprim, grids, ngrids);
-
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
+    for (int ictr = 0; ictr < nctr; ictr++){
+        int ish = ctr_offsets[ictr];
+        const int l =  bas[ANG_OF+ish*BAS_SLOTS];
+        int nprim = bas[NPRIM_OF+ish*BAS_SLOTS];
+        int bas_offset = ctr_offsets[ictr];
+        blocks.y = ctr_offsets[ictr+1] - bas_offset;
+        if (blocks.y == 0){
+            continue;
+        }
+        if (l > 8){
+            fprintf(stderr, "l = %d not supported\n", l);
             return 1;
         }
+        _screen_index<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim, grids, ngrids, bas_offset);
     }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+#endif // USE_SYCL
     return 0;
 }
 

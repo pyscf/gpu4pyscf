@@ -1,17 +1,17 @@
-/* Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -19,11 +19,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <cuda_runtime.h>
 #include "gint/gint.h"
-#include "gint/cuda_alloc.cuh"
 #include "nr_eval_gto.cuh"
 #include "contract_rho.cuh"
+
+#ifdef USE_SYCL
+#include "sycl_alloc.hpp"
+#else
+#include <cuda_runtime.h>
+#include "gint/cuda_alloc.cuh"
+#endif
 
 #define NG_PER_BLOCK      128
 #define NG_PER_THREADS    1
@@ -36,7 +41,22 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
     int vvngrids, int ngrids)
 {
     // grid id
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    sycl::group thread_block = item.get_group();
+    int grid_id = item.get_global_id(0);
+    const int blockDim_x = item.get_group_range(0);
+    using tile_t = double3[NG_PER_BLOCK];
+    tile_t& xj_t = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    tile_t& kp_t = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    const int tx = item.get_local_id(0);
+#else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    __shared__ double3 xj_t[NG_PER_BLOCK];
+    __shared__ double3 kp_t[NG_PER_BLOCK];
+    const int tx = threadIdx.x;
+#endif
     const bool active = grid_id < ngrids;
     double xi, yi, zi;
     double W0i, Ki;
@@ -63,12 +83,7 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
     //__shared__ double W0p_smem[NG_PER_BLOCK];
     //__shared__ double RpW_smem[NG_PER_BLOCK];
 
-    __shared__ double3 xj_t[NG_PER_BLOCK];
-    __shared__ double3 kp_t[NG_PER_BLOCK];
-
-    const int tx = threadIdx.x;
-
-    for (int j = 0; j < vvngrids; j+=blockDim.x) {
+    for (int j = 0; j < vvngrids; j+=blockDim_x) {
         int idx = j + tx;
         if (idx < vvngrids){
             //xj_smem[tx] = xj[idx];
@@ -136,7 +151,24 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
     int vvngrids, int ngrids)
 {
     // grid id
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    sycl::group thread_block = item.get_group();
+    int grid_id = item.get_global_id(0);
+    const int blockDim_x = item.get_group_range(0);
+    const int threadIdx_x = item.get_local_id(0);
+    using tile_t = double3[NG_PER_BLOCK];
+    tile_t& xj_t = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    tile_t& kp_t = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    const int tx = item.get_local_id(0);
+#else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    const int threadIdx_x = threadIdx.x;
+    __shared__ double3 xj_t[NG_PER_BLOCK];
+    __shared__ double3 kp_t[NG_PER_BLOCK];
+    const int tx = threadIdx.x;
+#endif
     const bool active = grid_id < ngrids;
     double xi, yi, zi;
     double W0i, Ki;
@@ -155,12 +187,8 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
     const double *yj = vvcoords + vvngrids;
     const double *zj = vvcoords + 2*vvngrids;
 
-    __shared__ double3 xj_t[NG_PER_BLOCK];
-    __shared__ double3 kp_t[NG_PER_BLOCK];
-
-    const int tx = threadIdx.x;
-    for (int j = 0; j < vvngrids; j+=blockDim.x) {
-        int idx = j + threadIdx.x;
+    for (int j = 0; j < vvngrids; j+=blockDim_x) {
+        int idx = j + threadIdx_x;
         if (idx < vvngrids){
             xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
             kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]};
@@ -204,6 +232,14 @@ int VXC_vv10nlc(cudaStream_t stream, double *Fvec, double *Uvec, double *Wvec,
                  const double *Kp, const double *RpW,
                  int vvngrids, int ngrids)
 {
+#ifdef USE_SYCL
+    sycl::range<1> threads(NG_PER_BLOCK);
+    sycl::range<1> blocks((ngrids/NG_PER_THREADS+1+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+    stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+	vv10_kernel(Fvec, Uvec, Wvec,
+		    vvcoords, coords,
+		    W0p, W0, K, Kp, RpW, vvngrids, ngrids); });
+#else
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids/NG_PER_THREADS+1+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     vv10_kernel<<<blocks, threads, 0, stream>>>(Fvec, Uvec, Wvec,
@@ -214,6 +250,7 @@ int VXC_vv10nlc(cudaStream_t stream, double *Fvec, double *Uvec, double *Wvec,
         fprintf(stderr, "CUDA Error of vv10: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -224,6 +261,13 @@ int VXC_vv10nlc_grad(cudaStream_t stream, double *Fvec,
                     const double *Kp, const double *RpW,
                     int vvngrids, int ngrids)
 {
+#ifdef USE_SYCL
+    sycl::range<1> threads(NG_PER_BLOCK);
+    sycl::range<1> blocks((ngrids/NG_PER_THREADS+1+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+    stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+	vv10_grad_kernel(Fvec, vvcoords, coords,
+			 W0p, W0, K, Kp, RpW, vvngrids, ngrids); });
+#else
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     vv10_grad_kernel<<<blocks, threads, 0, stream>>>(Fvec, vvcoords, coords,
@@ -233,6 +277,7 @@ int VXC_vv10nlc_grad(cudaStream_t stream, double *Fvec,
         fprintf(stderr, "CUDA Error of vv10 grad: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

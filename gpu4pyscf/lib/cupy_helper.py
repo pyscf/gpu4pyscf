@@ -1,19 +1,16 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import os
 import sys
@@ -23,16 +20,15 @@ import numpy as np
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.gto import mole
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
+from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
+from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
 
-c2s_l = mole.get_cart2sph(lmax=LMAX_ON_GPU)
-c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
-_data = {'c2s': None}
+_kernel_registery = {}
 
 def load_library(libname):
     try:
@@ -80,6 +76,61 @@ def get_avail_mem():
         mem_avail = cupy.cuda.runtime.memGetInfo()[0]
         return mem_avail + total_mem - used_mem
 
+def concatenate(array_list):
+    ''' Concatenate axis=0 only
+    '''
+    if _p2p_access:
+        return cupy.concatenate(array_list)
+    else:
+        #array_list_cpu = [a.get() for a in array_list]
+        n = sum([a.shape[0] for a in array_list])
+        a0_shape = list(array_list[0].shape)
+        out_shape = tuple([n] + a0_shape[1:])
+        out = cupy.empty(out_shape)
+        p0 = p1 = 0
+        for a in array_list:
+            p1 = p0 + a.shape[0]
+            #out[p0:p1].set(a)
+            copy_array(a, out[p0:p1])
+            p0 = p1
+        return out
+
+def broadcast_to_devices():
+    ''' Broadcast cupy ndarray to all the devices, return a list of cupy ndarray
+    '''
+    raise NotImplementedError
+
+def reduce_to_device(array_list, inplace=False):
+    ''' Reduce a list of ndarray in different devices to device 0
+    TODO: reduce memory footprint, improve throughput
+    '''
+    assert len(array_list) == num_devices
+    if num_devices == 1:
+        return array_list[0]
+    
+    out_shape = array_list[0].shape
+    for s in _streams:
+        s.synchronize()
+        
+    if inplace:
+        result = array_list[0]
+    else:
+        result = array_list[0].copy()
+    
+    # Transfer data chunk by chunk, reduce memory footprint,
+    result = result.reshape(-1)
+    for device_id, matrix in enumerate(array_list):
+        if device_id == 0:
+            continue
+        
+        assert matrix.device.id == device_id
+        matrix = matrix.reshape(-1)
+        blksize = 1024*1024*1024 // matrix.itemsize # 1GB
+        for p0, p1 in lib.prange(0,len(matrix), blksize):
+            result[p0:p1] += copy_array(matrix[p0:p1])
+            #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
+    return result.reshape(out_shape)
+    
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -96,7 +147,7 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
 class CPArrayWithTag(cupy.ndarray):
     pass
 
-@functools.wraps(lib.tag_array)
+#@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
     '''
     a should be cupy/numpy array or tuple of cupy/numpy array
@@ -115,6 +166,16 @@ def tag_array(a, **kwargs):
     t.__dict__.update(kwargs)
     return t
 
+def asarray(a, **kwargs):
+    '''Similar to cupy.asarray, when the object is an instance of
+    CPArrayWithTag, this function will remove the attributes within
+    the tagged array'''
+    if isinstance(a, CPArrayWithTag):
+        a = a.view(cupy.ndarray)
+    if kwargs:
+        a = cupy.asarray(a, **kwargs)
+    return a
+
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
     if isinstance(a, lib.NPArrayWithTag):
@@ -124,7 +185,7 @@ def to_cupy(a):
         return cupy.asarray(a)
     return a
 
-def return_cupy_array(fn):
+def return_gpunp_array(fn):
     '''Ensure that arrays in returns are cupy objects'''
     @functools.wraps(fn)
     def filter_ret(*args, **kwargs):
@@ -134,9 +195,58 @@ def return_cupy_array(fn):
         return to_cupy(ret)
     return filter_ret
 
-def unpack_tril(cderi_tril, cderi, stream=None):
-    nao = cderi.shape[1]
+def pack_tril(a, stream=None):
+    ndim = a.ndim
+    assert ndim in (2, 3)
+    if ndim == 2:
+        a = a[None]
+
+    counts, n = a.shape[:2]
+    if a.dtype != np.float64 or not a.flags.c_contiguous:
+        idx = cupy.arange(n)
+        mask = idx[:,None] >= idx
+        a_tril = a[:,mask]
+    else:
+        if stream is None:
+            stream = cupy.cuda.get_current_stream()
+        a_tril = cupy.empty((counts, n*(n+1)//2), dtype=np.float64)
+        err = libcupy_helper.pack_tril(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n), ctypes.c_int(counts))
+        if err != 0:
+            raise RuntimeError('pack_tril kernel failed')
+
+    if ndim == 2:
+        a_tril = a_tril[0]
+    return a_tril
+
+def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
+    assert cderi_tril.flags.c_contiguous
+    assert hermi in (1, 2)
+    ndim = cderi_tril.ndim
+    assert ndim in (1, 2)
+    if ndim == 1:
+        cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
+    if cderi is None:
+        nao = int((2*cderi_tril.shape[1])**.5)
+        cderi = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
+    else:
+        nao = cderi.shape[1]
+
+    if cderi_tril.dtype != np.float64:
+        idx = cupy.arange(nao)
+        mask = idx[:,None] >= idx
+        cderiT = cderi.transpose(0,2,1)
+        if hermi == 1:
+            cderiT[:,mask] = cderi_tril.conj()
+        else:
+            raise NotImplementedError
+        cderi [:,mask] = cderi_tril
+        return cderi
+
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.unpack_tril(
@@ -144,10 +254,13 @@ def unpack_tril(cderi_tril, cderi, stream=None):
         ctypes.cast(cderi_tril.data.ptr, ctypes.c_void_p),
         ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao),
-        ctypes.c_int(count))
+        ctypes.c_int(count),
+        ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in unpack_tril kernel')
-    return
+    if ndim == 1:
+        cderi = cderi[0]
+    return cderi
 
 def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
     if stream is None:
@@ -177,6 +290,7 @@ def add_sparse(a, b, indices):
     '''
     a[:,...,:np.ix_(indices, indices)] += b
     '''
+    assert a.device == b.device
     assert a.flags.c_contiguous
     assert b.flags.c_contiguous
     if len(indices) == 0: return a
@@ -188,6 +302,7 @@ def add_sparse(a, b, indices):
         count = 1
     else:
         raise RuntimeError('add_sparse only supports 2d or 3d tensor')
+
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.add_sparse(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -224,14 +339,22 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-def block_c2s_diag(ncart, nsph, angular, counts):
+@functools.lru_cache(1)
+def _initialize_c2s_data():
+    from gpu4pyscf.gto import mole
+    c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]
+    c2s_data = cupy.concatenate([x.ravel() for x in c2s_l])
+    c2s_offset = np.cumsum([0] + [x.shape[0]*x.shape[1] for x in c2s_l])
+    return c2s_l, c2s_data, c2s_offset
+
+def block_c2s_diag(angular, counts):
     '''
-    constract a cartesian to spherical transformation of n shells
+    Diagonal blocked cartesian to spherical transformation
+    Args: 
+        angular (list): angular momentum type, e.g. [0,1,2,3]
+        counts (list): count of each angular momentum
     '''
-    if _data['c2s'] is None: 
-        c2s_data = cupy.concatenate([cupy.asarray(x.ravel()) for x in c2s_l])
-        _data['c2s'] = c2s_data
-    c2s_data = _data['c2s']
+    c2s_l, c2s_data, c2s_offset = _initialize_c2s_data()
 
     nshells = np.sum(counts)
     rows = [np.array([0], dtype='int32')]
@@ -244,7 +367,8 @@ def block_c2s_diag(ncart, nsph, angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
-
+    
+    ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')
 
@@ -355,12 +479,15 @@ def transpose_sum(a, stream=None):
     '''
     return a + a.transpose(0,2,1)
     '''
+    assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
-    n = a.shape[-1]
-    if a.ndim == 2:
-        a = a.reshape([-1,n,n])
-    assert a.ndim == 3
-    count = a.shape[0]
+    assert a.ndim in (2, 3)
+    ndim = a.ndim
+    if ndim == 2:
+        a = a[None]
+    count, m, n = a.shape
+    assert m == n
+    out = a
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.transpose_sum(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -370,17 +497,21 @@ def transpose_sum(a, stream=None):
     )
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
-    return a
+    if ndim == 2:
+        out = out[0]
+    return out
 
-# for i > j of 2d mat, mat[j,i] = mat[i,j]
-def hermi_triu(mat, hermi=1, inplace=True):
+def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     '''
     Use the elements of the lower triangular part to fill the upper triangular part.
     See also pyscf.lib.hermi_triu
     '''
-    if not inplace:
+    assert hermi in (1, 2)
+    assert mat.dtype == np.float64
+    if inplace:
+        assert mat.flags.c_contiguous
+    else:
         mat = mat.copy('C')
-    assert mat.flags.c_contiguous
 
     if mat.ndim == 2:
         n = mat.shape[0]
@@ -390,23 +521,26 @@ def hermi_triu(mat, hermi=1, inplace=True):
     else:
         raise ValueError(f'dimension not supported {mat.ndim}')
 
-    err = libcupy_helper.CPdsymm_triu(
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libcupy_helper.fill_triu(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(counts))
+        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi))
     if err != 0:
-        raise RuntimeError('failed in symm_triu kernel')
-
+        raise RuntimeError('hermi_triu kernel failed')
     return mat
 
 def cart2sph_cutensor(t, axis=0, ang=1, out=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis with cutensor
     '''
+    from gpu4pyscf.gto import mole
     if(ang <= 1):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
-    c2s = cupy.asarray(c2s_l[ang])
+    c2s = mole.cart2sph_by_l(ang)
     if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
@@ -424,11 +558,12 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
     '''
     transform 'axis' of a tensor from cartesian basis into spherical basis
     '''
+    from gpu4pyscf.gto import mole
     if(ang <= 1):
         if(out is not None): out[:] = t
         return t
     size = list(t.shape)
-    c2s = c2s_l[ang]
+    c2s = mole.cart2sph_by_l(ang)
     if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
@@ -485,7 +620,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             callback function takes one dict as the argument which is
             generated by the builtin function :func:`locals`, so that the
             callback function can access all local variables in the current
-            envrionment.
+            environment.
     Returns:
         x : ndarray like b
     '''
@@ -508,17 +643,12 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     if x1.ndim == 1:
         x1 = x1.reshape(1, x1.size)
     nroots, ndim = x1.shape
+    x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+    x1 *= rmat.diagonal()[:,None]
 
-    # Not exactly QR, vectors are orthogonal but not normalized
-    x1, rmat = _qr(x1, cupy.dot, lindep)
-    for i in range(len(x1)):
-        x1[i] *= rmat[i,i]
+    innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
+    max_innerprod = max(innerprod)
 
-    innerprod = [cupy.dot(xi.conj(), xi).real for xi in x1]
-    if innerprod:
-        max_innerprod = max(innerprod)
-    else:
-        max_innerprod = 0
     if max_innerprod < lindep or max_innerprod < tol**2:
         if x0 is None:
             return cupy.zeros_like(b)
@@ -538,33 +668,29 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         if callable(callback):
             callback(cycle, xs, ax)
         x1 = axt.copy()
-
         for i in range(len(xs)):
             xsi = cupy.asarray(xs[i])
-            w = cupy.dot(axt, xsi.conj()) / innerprod[i]
+            w = cupy.dot(x1, xsi.conj()) / innerprod[i]
             x1 -= xsi * cupy.expand_dims(w,-1)
         axt = xsi = None
+        x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+        x1 *= rmat.diagonal()[:,None]
+        innerprod1 = rmat.diagonal().real ** 2
+        max_innerprod = max(innerprod1, default=0.)
 
-        x1, rmat = _qr(x1, cupy.dot, lindep)
-        for i in range(len(x1)):
-            x1[i] *= rmat[i,i]
-
-        max_innerprod = 0
-        idx = []
-        for i, xi in enumerate(x1):
-            innerprod1 = cupy.dot(xi.conj(), xi).real
-            max_innerprod = max(max_innerprod, innerprod1)
-            if innerprod1 > lindep and innerprod1 > tol**2:
-                idx.append(i)
-                innerprod.append(innerprod1)
-        log.info(f'krylov cycle {cycle}  r = {max_innerprod**.5:.3e} {x1.shape[0]} equations')
+        log.info(f'krylov cycle {cycle}, r = {max_innerprod**.5:.3e}, {x1.shape[0]} equations')
         if max_innerprod < lindep or max_innerprod < tol**2:
             break
-        x1 = x1[idx]
+        mask = (innerprod1 > lindep) & (innerprod1 > tol**2)
+        x1 = x1[mask]
+        innerprod.extend(innerprod1[mask])
+        if max_innerprod > 1e10:
+            raise RuntimeError('Krylov subspace iterations diverge')
 
-    if len(idx) > 0:
-        raise RuntimeError("CPSCF failed to converge.")
+    else:
+        raise RuntimeError('Krylov solver failed to converge')
 
+    log.info(f'krylov space size {len(xs)}')
     xs = cupy.asarray(xs)
     ax = cupy.asarray(ax)
     nd = xs.shape[0]
@@ -599,25 +725,42 @@ def _qr(xs, dot, lindep=1e-14):
     nvec = len(xs)
     dtype = xs[0].dtype
     qs = cupy.empty((nvec,xs[0].size), dtype=dtype)
-    rmat = cupy.empty((nvec,nvec), order='F', dtype=dtype)
+    rmat = cupy.eye(nvec, order='F', dtype=dtype)
 
     nv = 0
     for i in range(nvec):
         xi = cupy.array(xs[i], copy=True)
-        rmat[:,nv] = 0
-        rmat[nv,nv] = 1
-
         prod = dot(qs[:nv].conj(), xi)
         xi -= cupy.dot(qs[:nv].T, prod)
-        rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
 
         innerprod = dot(xi.conj(), xi).real
-        norm = cupy.sqrt(innerprod)
+        norm = innerprod**0.5
         if innerprod > lindep:
+            rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
             qs[nv] = xi/norm
             rmat[:nv+1,nv] /= norm
             nv += 1
     return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
+
+def _stable_qr(xs, dot, lindep=1e-14):
+    '''QR decomposition for a list of vectors (for linearly independent vectors only).
+    using the modified Gram-Schmidt process
+    '''
+    nvec = len(xs)
+    dtype = xs[0].dtype
+    Q = cupy.empty((nvec,xs[0].size), dtype=dtype)
+    R = cupy.zeros((nvec,nvec), dtype=dtype)
+    V = xs.copy()
+    nv = 0
+    for i in range(nvec):
+        norm = cupy.linalg.norm(V[i])
+        if norm**2 > lindep:
+            R[nv,nv] = norm
+            Q[nv] = V[i] / norm
+            R[nv, i+1:] = dot(Q[nv], V[i+1:].T)
+            V[i+1:] -= cupy.outer(R[nv, i+1:], Q[nv])
+            nv += 1
+    return Q[:nv], R[:nv,:nv]
 
 def _gen_x0(v, xs):
     ndim = v.ndim
@@ -657,7 +800,18 @@ def pinv(a, lindep=1e-10):
     return j2c
 
 def cond(a):
-    return cupy.linalg.norm(a,2)*cupy.linalg.norm(cupy.linalg.inv(a),2)
+    """
+    Calculate the condition number of a matrix.
+
+    Parameters:
+    a (cupy.ndarray): The input matrix.
+
+    Returns:
+    float: The condition number of the matrix.
+    """
+    _, s, _ = cupy.linalg.svd(a)
+    cond_number = s[0] / s[-1]
+    return cond_number
 
 def grouped_dot(As, Bs, Cs=None):
     '''
@@ -778,3 +932,127 @@ def grouped_gemm(As, Bs, Cs=None):
     if err != 0:
         raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
+
+def condense(opname, a, loc_x, loc_y=None):
+    assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
+    assert a.dtype == np.float64
+    a = cupy.asarray(a, order='C')
+    if loc_y is None:
+        loc_y = loc_x
+    do_transpose = False
+    if a.ndim == 2:
+        if a.flags.f_contiguous:
+            a = a.T
+            loc_x, loc_y = loc_y, loc_x
+            do_transpose = True
+        a = a[None]
+    else:
+        assert a.flags.c_contiguous
+    loc_x = cupy.asarray(loc_x, cupy.int32)
+    loc_y = cupy.asarray(loc_y, cupy.int32)
+    nloc_x = loc_x.size - 1
+    nloc_y = loc_y.size - 1
+    counts, nx, ny = a.shape
+    assert loc_x[-1] == nx
+    assert loc_y[-1] == ny
+
+    #if opname == 'absmax':
+    #    out = cupy.zeros((nloc_x, nloc_y))
+    #    err = libcupy_helper.dabsmax_condense(
+    #        ctypes.cast(out.ctypes.data, ctypes.c_void_p),
+    #        ctypes.cast(a.ctypes.data, ctypes.c_void_p),
+    #        ctypes.cast(loc_x.ctypes.data, ctypes.c_void_p),
+    #        ctypes.cast(loc_y.ctypes.data, ctypes.c_void_p),
+    #        ctypes.c_int(nloc_x), ctypes.c_int(nloc_y), ctypes.c_int(counts))
+    #    if err != 0:
+    #        raise RuntimeError('failed in dabsmax_condense kernel')
+    #    if do_transpose:
+    #        out = out.T
+    #    return out
+
+    fn_name = f'd{opname}_condense'
+    if fn_name not in _kernel_registery:
+        if opname == 'sum':
+            init_code = '0'
+            code = 'val += a[ip*nj+jp];'
+            result_code = 'val'
+        elif opname == 'max':
+            init_code = '0'
+            code = 'double tmp = a[ip*nj+jp]; val = (val > tmp) ? val : tmp;'
+            result_code = 'val'
+        elif opname == 'min':
+            init_code = '0'
+            code = 'double tmp = a[ip*nj+jp]; val = (val < tmp) ? val : tmp;'
+            result_code = 'val'
+        elif opname == 'abssum':
+            init_code = '0'
+            code = 'val += fabs(a[ip*nj+jp]);'
+            result_code = 'val'
+        elif opname == 'absmax':
+            init_code = '0'
+            code = 'double tmp = fabs(a[ip*nj+jp]); val = (val > tmp) ? val : tmp;'
+            result_code = 'val'
+        elif opname == 'norm':
+            init_code = '0'
+            code = 'double tmp = a[ip*nj+jp]; val += tmp * tmp;'
+            result_code = 'fsqrt(val)'
+
+        kernel_code = (f'''\
+extern "C" __global__
+void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
+               long long nloc_x, long long nloc_y, long long counts)'''
+'''
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= nloc_x || j >= nloc_y) {
+        return;
+    }
+    size_t ni = loc_x[nloc_x];
+    size_t nj = loc_y[nloc_y];
+    size_t Nloc_y = nloc_y;
+    int i0 = loc_x[i];
+    int i1 = loc_x[i+1];
+    int j0 = loc_y[j];
+    int j1 = loc_y[j+1];
+    double val = ''' + init_code + ''';
+    for (int n = 0; n < counts; ++n) {
+        for (int ip = i0; ip < i1; ++ip) {
+        for (int jp = j0; jp < j1; ++jp) {
+            ''' + code + '''
+        } }
+        a += ni * nj;
+    }
+    out[i*Nloc_y+j] = ''' + result_code + ''';
+}
+''')
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+
+    kernel = _kernel_registery[fn_name]
+    out = cupy.zeros((nloc_x, nloc_y))
+    blocks = ((nloc_x+15)//16, (nloc_y+15)//16)
+    threads = (16, 16)
+    kernel(blocks, threads, (out, a, loc_x, loc_y, nloc_x, nloc_y, counts))
+    cupy.cuda.Stream.null.synchronize()
+    if do_transpose:
+        out = out.T
+    return out
+
+def sandwich_dot(a, c, out=None):
+    '''Performs c.T.dot(a).dot(c)'''
+    a = cupy.asarray(a)
+    c = cupy.asarray(c)
+    a_ndim = a.ndim
+    if a_ndim == 2:
+        a = a[None]
+    counts = a.shape[0]
+    m = c.shape[1]
+    dtype = np.result_type(a, c)
+    out = cupy.empty((counts, m, m), dtype=dtype)
+    tmp = None
+    for i in range(counts):
+        tmp = cupy.dot(c.conj().T, a[i], out=tmp)
+        cupy.dot(tmp, c, out=out[i])
+    if a_ndim == 2:
+        out = out[0]
+    return out

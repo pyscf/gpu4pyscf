@@ -13,18 +13,18 @@ permissions:
   contents: read
 
 jobs:
-  build:
-
-    runs-on: self-hosted
-
+  single-gpu:
+    runs-on: [self-hosted, Linux, X64, v100]
     steps:
     - uses: actions/checkout@v3
     - name: Install dependencies
       run: |
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
         python3 -m pip install --upgrade pip
+        pip3 install pytest-benchmark
         pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
         pip3 install pyscf --upgrade
+        pip3 install git+https://github.com/pyscf/properties --upgrade
         pip3 install numpy --upgrade
         pip3 install h5py --upgrade
         pip3 install gpu4pyscf-libxc-cuda12x --upgrade
@@ -39,4 +39,32 @@ jobs:
       run: |
         echo $GITHUB_WORKSPACE
         export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-        pytest -m "not smoke" --cov=$GITHUB_WORKSPACE
+        pytest -m "not benchmark" --cov=$GITHUB_WORKSPACE
+
+  multi-gpu:
+    runs-on: [self-hosted, Linux, X64, 2T4]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies
+      run: |
+        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+        python3 -m pip install --upgrade pip
+        pip3 install pytest-benchmark
+        pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
+        pip3 install pyscf --upgrade
+        pip3 install git+https://github.com/pyscf/properties --upgrade
+        pip3 install numpy --upgrade
+        pip3 install h5py --upgrade
+        pip3 install gpu4pyscf-libxc-cuda12x --upgrade
+        pip3 install cupy-cuda12x --upgrade
+        git config --global core.compression 9
+    - name: Build GPU4PySCF
+      run: |
+        export CUDA_HOME=/usr/local/cuda
+        export CMAKE_CONFIGURE_ARGS="-DBUILD_LIBXC=OFF -DCUDA_ARCHITECTURES=70-real -DBUILD_CUTLASS=ON"
+        sh build.sh
+    - name: Test with pytest
+      run: |
+        echo $GITHUB_WORKSPACE
+        export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+        pytest -m "not benchmark" --cov=$GITHUB_WORKSPACE

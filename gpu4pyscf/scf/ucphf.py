@@ -1,17 +1,16 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 
 '''
@@ -19,30 +18,38 @@ Unrestricted coupled pertubed Hartree-Fock solver
 '''
 
 import numpy
-import cupy
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import krylov
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import krylov
+
 from pyscf import lib
-from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
-          max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN):
+          max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN,
+          level_shift=0):
 
     if s1 is None:
         return solve_nos1(fvind, mo_energy, mo_occ, h1,
-                          max_cycle, tol, hermi, verbose)
+                          max_cycle, tol, hermi, verbose, level_shift)
     else:
         return solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
-                            max_cycle, tol, hermi, verbose)
+                            max_cycle, tol, hermi, verbose, level_shift)
 kernel = solve
 
 # h1 shape is (:,nvir,nocc)
 def solve_nos1(fvind, mo_energy, mo_occ, h1,
-               max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
+               max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN,
+               level_shift=0):
     '''For field independent basis. First order overlap matrix is zero'''
     log = logger.new_logger(verbose=verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
-    nocca = cupy.sum(mo_occ[0] > 0)
-    noccb = cupy.sum(mo_occ[1] > 0)
+    nocca = gpunp.sum(mo_occ[0] > 0)
+    noccb = gpunp.sum(mo_occ[1] > 0)
 
     nvira = mo_occ[0].size - nocca
     nvirb = mo_occ[1].size - noccb
@@ -50,22 +57,22 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
     mo_ea, mo_eb = mo_energy
     e_a = mo_ea[mo_occ[0]==0]
     e_i = mo_ea[mo_occ[0]>0]
-    I, A = cupy.meshgrid(e_i, e_a)
-    ea_ai = 1 / (A - I)#cupy.einsum('a,i->ai', e_a, e_i)
+    ea_ai = 1 / (e_a[:,None] + level_shift - e_i)
 
     e_a = mo_eb[mo_occ[1]==0]
     e_i = mo_eb[mo_occ[1]>0]
-    I, A = cupy.meshgrid(e_i, e_a)
-    eb_ai = 1 / (A - I)#cupy.einsum('a,i->ai', e_a, e_i)
+    eb_ai = 1 / (e_a[:,None] + level_shift - e_i)
 
-    e_ai = cupy.hstack([ea_ai.ravel(),eb_ai.ravel()])
+    e_ai = gpunp.hstack([ea_ai.ravel(),eb_ai.ravel()])
 
-    mo1base = cupy.hstack((h1[0].reshape(-1, nvira*nocca),
+    mo1base = gpunp.hstack((h1[0].reshape(-1, nvira*nocca),
                             h1[1].reshape(-1,nvirb*noccb)))
     mo1base *= -e_ai
 
     def vind_vo(mo1):
         v = fvind(mo1.reshape(h1.shape)).reshape(h1.shape)
+        if level_shift != 0:
+            v -= mo1 * level_shift
         v *= e_ai
         return v.ravel()
     mo1 = krylov(vind_vo, mo1base.ravel(),
@@ -102,20 +109,18 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     viridxa = mo_occ[0] == 0
     viridxb = mo_occ[1] == 0
 
-    nocca = cupy.sum(mo_occ[0] > 0).get()
-    noccb = cupy.sum(mo_occ[1] > 0).get()
+    nocca = gpunp.sum(mo_occ[0] > 0).get()
+    noccb = gpunp.sum(mo_occ[1] > 0).get()
     nmoa, nmob = mo_occ[0].size, mo_occ[1].size
 
     mo_ea, mo_eb = mo_energy
     ea_a = mo_ea[mo_occ[0]==0]
     ei_a = mo_ea[mo_occ[0]>0]
-    I, A = cupy.meshgrid(ei_a, ea_a)
-    eai_a = 1 / (A - I)
+    eai_a = 1 / (ea_a[:,None] + level_shift - ei_a)
 
     ea_b = mo_eb[mo_occ[1]==0]
     ei_b = mo_eb[mo_occ[1]>0]
-    I, A = cupy.meshgrid(ei_b, ea_b)
-    eai_b = 1 / (A - I)
+    eai_b = 1 / (ea_b[:,None] + level_shift - ei_b)
 
     s1_a = s1[0].reshape(-1,nmoa,nocca)
     nset = s1_a.shape[0]
@@ -129,8 +134,8 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     mo1base_b[:,viridxb] *= -eai_b
     mo1base_a[:,occidxa] = -s1_a[:,occidxa] * .5
     mo1base_b[:,occidxb] = -s1_b[:,occidxb] * .5
-    mo1base = cupy.hstack((mo1base_a.reshape(nset,-1), mo1base_b.reshape(nset,-1)))
-    
+    mo1base = gpunp.hstack((mo1base_a.reshape(nset,-1), mo1base_b.reshape(nset,-1)))
+
     def vind_vo(mo1):
         mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)
         v = fvind(mo1).reshape(-1,nmoa*nocca+nmob*noccb)

@@ -1,21 +1,17 @@
-#!/usr/bin/env python
-
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import sys
@@ -28,10 +24,10 @@ from setuptools.command.build_py import build_py
 from distutils.util import get_platform
 
 NAME = 'gpu4pyscf'
-AUTHOR = 'Qiming Sun'
-AUTHOR_EMAIL = 'osirpt.sun@gmail.com'
+AUTHOR = 'PySCF developers'
+AUTHOR_EMAIL = None
 DESCRIPTION = 'GPU extensions for PySCF'
-LICENSE = 'GPLv3'
+LICENSE = 'Apache-2.0'
 URL = None
 DOWNLOAD_URL = None
 CLASSIFIERS = None
@@ -124,9 +120,17 @@ setup(
     ],
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
+<<<<<<< HEAD
         'pyscf~=2.6.0',
         f'cupy-cuda{CUDA_VERSION}',
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
+=======
+        'pyscf~=2.8.0',
+        'pyscf-dispersion',
+        f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
+        'geometric',
+        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}==0.5',
+>>>>>>> origin/master
     ]
 )

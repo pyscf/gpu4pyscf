@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# Copyright 2014-2018 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,13 +21,20 @@ Restricted coupled pertubed Hartree-Fock solver
 
 
 import numpy
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import krylov
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import krylov
 from pyscf import lib
-from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
-          max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN):
+          max_cycle=50, tol=1e-7, hermi=False, verbose=logger.WARN,
+          level_shift=0):
     '''
     Args:
         fvind : function
@@ -48,20 +54,22 @@ kernel = solve
 
 # h1 shape is (:,nvir,nocc)
 def solve_nos1(fvind, mo_energy, mo_occ, h1,
-               max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN):
+               max_cycle=20, tol=1e-9, hermi=False, verbose=logger.WARN,
+               level_shift=0):
     '''For field independent basis. First order overlap matrix is zero'''
     log = logger.new_logger(verbose=verbose)
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = log.init_timer()
 
     e_a = mo_energy[mo_occ==0]
     e_i = mo_energy[mo_occ>0]
-    I, A = cupy.meshgrid(e_i, e_a)
-    e_ai = 1 / (A - I)
+    e_ai = 1 / (e_a[:,None] + level_shift - e_i)
     mo1base = h1 * -e_ai
     nvir, nocc = e_ai.shape
 
     def vind_vo(mo1):
         v = fvind(mo1.reshape(-1,nvir,nocc)).reshape(-1,nvir,nocc)
+        if level_shift != 0:
+            v -= mo1 * level_shift
         v *= e_ai
         return v.reshape(-1,nvir*nocc)
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nvir*nocc),
@@ -85,7 +93,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
         energy matrix
     '''
     log = logger.new_logger(verbose=verbose)
-    t0 = (logger.process_clock(), logger.perf_counter())
+    t0 = log.init_timer()
 
     occidx = mo_occ > 0
     viridx = mo_occ == 0
@@ -110,7 +118,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
         v[:,viridx,:] *= e_ai
         v[:,occidx,:] = 0
         return v.reshape(-1,nmo*nocc)
-
+    
     mo1 = krylov(vind_vo, mo1base.reshape(-1,nmo*nocc),
                      tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
     mo1 = mo1.reshape(mo1base.shape)

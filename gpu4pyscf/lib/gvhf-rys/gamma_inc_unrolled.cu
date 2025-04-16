@@ -6,8 +6,8 @@
 __device__
 static void eval_gamma_inc_fn(double *f, double t, int m)
 {
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int block_size = blockDim.x * blockDim.y;
+    int t_id = threadIdx.x + blockDim.x * threadIdx.y + blockDim.x * blockDim.y * threadIdx.z;
+    int block_size = blockDim.x * blockDim.y * blockDim.z;
     if (t < EPS_FLOAT64) {
         f[t_id] = 1.;
         for (int i = 1; i <= m; i++) {

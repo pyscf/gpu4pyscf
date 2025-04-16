@@ -1,17 +1,16 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy
@@ -23,7 +22,7 @@ from gpu4pyscf.hessian import uks as uks_gpu
 def setUpModule():
     global mol
     mol = gto.Mole()
-    mol.verbose = 1
+    mol.verbose = 6
     mol.output = '/dev/null'
     mol.atom.extend([
         ["O" , (0. , 0.     , 0.)],
@@ -78,6 +77,14 @@ def _check_vxc(method, xc='LDA'):
     assert numpy.linalg.norm(vxc_cpu[0] - vxc_gpu[0].get()) < 1e-6
     assert numpy.linalg.norm(vxc_cpu[1] - vxc_gpu[1].get()) < 1e-6
 
+def _vs_cpu(mf, tol=1e-7):
+    mf.conv_tol_cpscf = 1e-8
+    ref = mf.Hessian().kernel()
+    hessobj = mf.Hessian().to_gpu()
+    hessobj.base.cphf_grids = hessobj.base.grids
+    e2_gpu = hessobj.kernel()
+    assert abs(ref - e2_gpu).max() < tol
+
 class KnownValues(unittest.TestCase):
     def test_vxc_diag(self):
         _check_vxc('_get_vxc_diag', xc='LDA')
@@ -93,6 +100,31 @@ class KnownValues(unittest.TestCase):
         _check_vxc('_get_vxc_deriv2', xc='LDA')
         _check_vxc('_get_vxc_deriv2', xc='PBE')
         _check_vxc('_get_vxc_deriv2', xc='TPSS')
+
+    def test_hessian_lda(self, disp=None):
+        print('-----testing LDA Hessian----')
+        mf = mol.UKS(xc='LDA').run()
+        _vs_cpu(mf)
+
+    def test_hessian_gga(self):
+        print('-----testing PBE Hessian----')
+        mf = mol.UKS(xc='PBE').run()
+        _vs_cpu(mf, tol=1e-6)
+
+    def test_hessian_hybrid(self):
+        print('-----testing B3LYP Hessian----')
+        mf = mol.UKS(xc='b3lyp').run()
+        _vs_cpu(mf, tol=1e-6)
+
+    def test_hessian_mgga(self):
+        print('-----testing M06 Hessian----')
+        mf = mol.UKS(xc='m06').run()
+        _vs_cpu(mf)
+
+    def test_hessian_rsh(self):
+        print('-----testing wb97 Hessian----')
+        mf = mol.UKS(xc='wb97').run()
+        _vs_cpu(mf)
 
 if __name__ == "__main__":
     print("Full Tests for UKS Hessian")

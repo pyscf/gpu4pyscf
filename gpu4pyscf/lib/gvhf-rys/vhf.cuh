@@ -65,6 +65,14 @@ typedef struct {
 } JKMatrix;
 
 typedef struct {
+    double *ejk;
+    double *dm;
+    double j_factor;
+    double k_factor;
+    uint16_t n_dm;
+} JKEnergy;
+
+typedef struct {
     uint8_t li;
     uint8_t lj;
     uint8_t lk;
@@ -86,6 +94,8 @@ typedef struct {
     int *tile_ij_mapping;
     int *tile_kl_mapping;
     float *q_cond;
+    float *tile_q_cond;
+    float *s_estimator;
     float *dm_cond;
     float cutoff;
 } BoundsInfo;

@@ -6,6 +6,7 @@
 **/build
 **/launch_logs
 **/deps
+**/.benchmarks
 core
 **tmp*
 *.egg-info/

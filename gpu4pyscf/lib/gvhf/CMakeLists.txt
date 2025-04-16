@@ -1,48 +1,42 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v -maxrregcount=128")
 
-if (USE_SYCL)
-  add_library(gvhf SHARED
-    constant.cpp
-    nr_jk_driver.cpp
-    nr_jk_driver_int3c2e_ip1.cpp
-    nr_jk_driver_int3c2e_ip2.cpp
-    nr_jk_driver_int3c2e_pass1.cpp
-    nr_jk_driver_int3c2e_pass2.cpp
-    nr_jk_driver_ip1.cpp
-    get_veff_driver_ip1.cpp
-  )
+set(GPU_SRCS
+  constant.cu
+  #nr_jk_driver.cu
+  nr_jk_driver_int3c2e_ip1.cu
+  nr_jk_driver_int3c2e_ip2.cu
+  nr_jk_driver_int3c2e_pass1.cu
+  nr_jk_driver_int3c2e_pass2.cu
+  #nr_jk_driver_ip1.cu
+  #get_veff_driver_ip1.cu
+  rys_roots_dat.cu
+)
 
-  # set_target_properties(gvhf PROPERTIES
-  #   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-  #   CUDA_SEPARABLE_COMPILATION ON)
-else()
-  add_library(gvhf SHARED
-    constant.cu
-    nr_jk_driver.cu
-    nr_jk_driver_int3c2e_ip1.cu
-    nr_jk_driver_int3c2e_ip2.cu
-    nr_jk_driver_int3c2e_pass1.cu
-    nr_jk_driver_int3c2e_pass2.cu
-    nr_jk_driver_ip1.cu
-    get_veff_driver_ip1.cu
-  )
+if (USE_SYCL)
+  file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
+  set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
+
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+else (USE_SYCL)
+  add_library(gvhf SHARED ${GPU_SRCS})
+  set_target_properties(gvhf PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+    CUDA_SEPARABLE_COMPILATION ON)
+endif (USE_SYCL)
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
 #option(ENABLE_STATIC "Enforce static library build" 0)
@@ -50,9 +44,5 @@ else()
 #  set(BUILD_SHARED_LIBS 0)
 #endif()
 
-set_target_properties(gvhf PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-  CUDA_SEPARABLE_COMPILATION ON)
-endif()
 
 target_link_libraries(gvhf gint)

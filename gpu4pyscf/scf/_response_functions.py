@@ -1,26 +1,29 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+else:
+    import dpnp as gpunp
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf import hf, uhf
+from gpu4pyscf.scf import hf, uhf, rohf
 
-# tempory implemention, will be replaced after pyscf 2.2.0
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
-                      singlet=None, hermi=0, max_memory=None):
+                      singlet=None, hermi=0, grids=None, max_memory=None):
     '''Generate a function to compute the product of RHF response function and
     RHF density matrices.
 
@@ -32,43 +35,40 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
+    
     if isinstance(mf, hf.KohnShamDFT):
-        from pyscf.dft import numint
+        if grids is None:
+            grids = mf.grids
+        if grids and grids.coords is None:
+            grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-        if getattr(mf, 'nlc', '') != '':
+        if mf.do_nlc():
             logger.warn(mf, 'NLC functional found in DFT object.  Its second '
                         'deriviative is not available. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-        hybrid = abs(hyb) > 1e-10
-
-        # mf can be pbc.dft.RKS object with multigrid
-        if (not hybrid and
-            'MultiGridFFTDF' == getattr(mf, 'with_df', None).__class__.__name__):
-            from pyscf.pbc.dft import multigrid
-            dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-            return multigrid._gen_rhf_response(mf, dm0, singlet, hermi)
+        hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
         if singlet is None:
             # for ground state orbital hessian
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                mo_coeff, mo_occ, 0)
+            spin = 0
         else:
-            rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
-                                                [mo_coeff]*2, [mo_occ*.5]*2, spin=1)
-        dm0 = None  #mf.make_rdm1(mo_coeff, mo_occ)
+            spin = 1
+        rho0, vxc, fxc = ni.cache_xc_kernel(
+            mol, grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
+        dm0 = None
 
         if singlet is None:
             # Without specify singlet, used in ground state orbital hessian
             def vind(dm1):
                 # The singlet hessian
                 if hermi == 2:
-                    v1 = cupy.zeros_like(dm1)
+                    v1 = gpunp.zeros_like(dm1)
                 else:
-                    v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
+                    v1 = ni.nr_rks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                        rho0, vxc, fxc, max_memory=max_memory)
-                if hybrid or abs(alpha) > 1e-10:
+                if hybrid:
                     if hermi != 2:
                         vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
                         vk *= hyb
@@ -80,8 +80,45 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 elif hermi != 2:
                     v1 += mf.get_j(mol, dm1, hermi=hermi)
                 return v1
-        else:
-            raise NotImplementedError('only singlet response is supported!')
+
+        elif singlet:
+            fxc *= .5
+            def vind(dm1):
+                if hermi == 2:
+                    v1 = gpunp.zeros_like(dm1)
+                else:
+                    # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+                    v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, True,
+                                          rho0, vxc, fxc, max_memory=max_memory)
+                if hybrid:
+                    if hermi != 2:
+                        vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
+                        vk *= hyb
+                        if abs(omega) > 1e-10:  # For range separated Coulomb
+                            vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                        v1 += vj - .5 * vk
+                    else:
+                        v1 -= .5 * hyb * mf.get_k(mol, dm1, hermi=hermi)
+                elif hermi != 2:
+                    v1 += mf.get_j(mol, dm1, hermi=hermi)
+                return v1
+
+        else:  # triplet
+            fxc *= .5
+            def vind(dm1):
+                if hermi == 2:
+                    v1 = gpunp.zeros_like(dm1)
+                else:
+                    # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+                    v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, False,
+                                          rho0, vxc, fxc, max_memory=max_memory)
+                if hybrid:
+                    vk = mf.get_k(mol, dm1, hermi=hermi)
+                    vk *= hyb
+                    if abs(omega) > 1e-10:  # For range separated Coulomb
+                        vk += mf.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                    v1 += -.5 * vk
+                return v1
 
     else:  # HF
         if (singlet is None or singlet) and hermi != 2:
@@ -96,44 +133,37 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
 
 
 def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
-                      with_j=True, hermi=0, max_memory=None):
+                      with_j=True, hermi=0, grids=None, max_memory=None):
     '''Generate a function to compute the product of UHF response function and
     UHF density matrices.
     '''
-    assert isinstance(mf, uhf.UHF)
+    assert isinstance(mf, (uhf.UHF, rohf.ROHF))
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
     if isinstance(mf, hf.KohnShamDFT):
+        if grids is None:
+            grids = mf.grids
+        if grids and grids.coords is None:
+            grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+        if mf.do_nlc():
             logger.warn(mf, 'NLC functional found in DFT object.  Its second '
                         'deriviative is not available. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-        # mf can be pbc.dft.UKS object with multigrid
-        if (not hybrid and
-            'MultiGridFFTDF' == getattr(mf, 'with_df', None).__class__.__name__):
-            from pyscf.pbc.dft import multigrid
-            dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-            return multigrid._gen_uhf_response(mf, dm0, with_j, hermi)
-
-        rho0, vxc, fxc = ni.cache_xc_kernel(mol, mf.grids, mf.xc,
+        rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
                                             mo_coeff, mo_occ, 1)
         dm0 = None
 
-        if max_memory is None:
-            mem_now = lib.current_memory()[0]
-            max_memory = max(2000, mf.max_memory*.8-mem_now)
-
         def vind(dm1):
             if hermi == 2:
-                v1 = cupy.zeros_like(dm1)
+                v1 = gpunp.zeros_like(dm1)
             else:
-                v1 = ni.nr_uks_fxc(mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
+                v1 = ni.nr_uks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                    rho0, vxc, fxc, max_memory=max_memory)
             if not hybrid:
                 if with_j:
@@ -168,3 +198,4 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
 
 hf.RHF.gen_response = _gen_rhf_response
 uhf.UHF.gen_response = _gen_uhf_response
+rohf.ROHF.gen_response = _gen_uhf_response

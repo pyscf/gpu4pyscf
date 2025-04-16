@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import numpy as np
 import cupy
@@ -42,20 +41,20 @@ def _auto_create_mode(array, mode):
             'ndim mismatch: {} != {}'.format(array.ndim, mode.ndim))
     return mode
 
-def _create_tensor_descriptor(a):
-    handle = cutensor._get_handle()
-    key = (handle.ptr, a.dtype, tuple(a.shape), tuple(a.strides))
-    # hard coded
-    alignment_req = 8
-    if key not in _tensor_descriptors:
-        num_modes = a.ndim
-        extent = np.array(a.shape, dtype=np.int64)
-        stride = np.array(a.strides, dtype=np.int64) // a.itemsize
-        cutensor_dtype = cutensor._get_cutensor_dtype(a.dtype)
-        _tensor_descriptors[key] = cutensor.TensorDescriptor(
-            handle.ptr, num_modes, extent.ctypes.data, stride.ctypes.data,
-            cutensor_dtype, alignment_req=alignment_req)
-    return _tensor_descriptors[key]
+#def _create_tensor_descriptor(a):
+#    handle = cutensor._get_handle()
+#    key = (handle.ptr, a.dtype, tuple(a.shape), tuple(a.strides))
+#    # hard coded
+#    alignment_req = 8
+#    if key not in _tensor_descriptors:
+#        num_modes = a.ndim
+#        extent = np.array(a.shape, dtype=np.int64)
+#        stride = np.array(a.strides, dtype=np.int64) // a.itemsize
+#        cutensor_dtype = cutensor._get_cutensor_dtype(a.dtype)
+#        _tensor_descriptors[key] = cutensor.TensorDescriptor(
+#            handle.ptr, num_modes, extent.ctypes.data, stride.ctypes.data,
+#            cutensor_dtype, alignment_req=alignment_req)
+#    return _tensor_descriptors[key]
 
 def contraction(
     pattern, a, b, alpha, beta,
@@ -80,14 +79,16 @@ def contraction(
     mode_b = list(str_b)
     mode_c = list(str_c)
 
-    if(out is not None):
-        c = out
-    else:
-        c = cupy.empty([shape[k] for k in str_c], order='C')
+    dtype = np.result_type(a.dtype, b.dtype)
+    a = cupy.asarray(a, dtype=dtype)
+    b = cupy.asarray(b, dtype=dtype)
+    if out is None:
+        out = cupy.empty([shape[k] for k in str_c], order='C', dtype=dtype)
+    c = out
 
-    desc_a = _create_tensor_descriptor(a)
-    desc_b = _create_tensor_descriptor(b)
-    desc_c = _create_tensor_descriptor(c)
+    desc_a = cutensor.create_tensor_descriptor(a)
+    desc_b = cutensor.create_tensor_descriptor(b)
+    desc_c = cutensor.create_tensor_descriptor(c)
 
     mode_a = _auto_create_mode(a, mode_a)
     mode_b = _auto_create_mode(b, mode_b)
@@ -102,24 +103,25 @@ def contraction(
     ws = cupy.empty(ws_size, dtype=np.int8)
     out = c
 
-    alpha = np.asarray(alpha)
-    beta = np.asarray(beta)
+    alpha = np.asarray(alpha, dtype=dtype)
+    beta = np.asarray(beta, dtype=dtype)
 
-    cutensor_backend.contract(cutensor._get_handle().ptr, plan.ptr,
+    handler = cutensor._get_handle()
+    cutensor_backend.contract(handler.ptr, plan.ptr,
                              alpha.ctypes.data, a.data.ptr, b.data.ptr,
                              beta.ctypes.data, c.data.ptr, out.data.ptr,
                              ws.data.ptr, ws_size)
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/master
     return out
 
 import os
-if 'CONTRACT_ENGINE' in os.environ:
-    contract_engine = os.environ['CONTRACT_ENGINE']
-else:
-    contract_engine = None
-
+contract_engine = None
 if cutensor is None:
     contract_engine = 'cupy'  # default contraction engine
+contract_engine = os.environ.get('CONTRACT_ENGINE', contract_engine)
 
 # override the 'contract' function if einsum is customized or cutensor is not found
 if contract_engine is not None:
@@ -137,11 +139,23 @@ if contract_engine is not None:
     import warnings
     warnings.warn(f'using {contract_engine} as the tensor contraction engine.')
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
-        if out is None:
-            return cupy.asarray(einsum(pattern, a, b), order='C')
-        else:
-            out[:] = alpha*einsum(pattern, a, b) + beta*out
-            return cupy.asarray(out, order='C')
+        try:
+            if out is None:
+                out = einsum(pattern, a, b)
+                out *= alpha
+            elif beta == 0.:
+                out[:] = einsum(pattern, a, b)
+                out *= alpha
+            else:
+                out *= beta
+                tmp = einsum(pattern, a, b)
+                tmp *= alpha
+                out += tmp
+        except cupy.cuda.memory.OutOfMemoryError:
+            print('Out of memory error caused by cupy.einsum. '
+                  'It is recommended to install cutensor to resolve this.')
+            raise
+        return cupy.asarray(out, order='C')
 else:
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
         '''

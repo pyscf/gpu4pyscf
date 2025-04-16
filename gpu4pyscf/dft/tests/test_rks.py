@@ -1,20 +1,18 @@
-# gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# Copyright (C) 2022 Qiming Sun
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+import pickle
 import numpy as np
 import unittest
 import pyscf
@@ -67,10 +65,17 @@ class KnownValues(unittest.TestCase):
     '''
     def test_rks_lda(self):
         print('------- LDA ----------------')
-        e_tot = run_dft("LDA, vwn5", mol_sph)
+        mf = mol_sph.RKS(xc='LDA,vwn5').to_gpu()
+        mf.grids.level = grids_level
+        mf.nlcgrids.level = nlcgrids_level
+        e_tot = mf.kernel()
         e_ref = -75.9046410402
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
+
+        # test serialization
+        mf1 = pickle.loads(pickle.dumps(mf))
+        assert mf1.e_tot == e_tot
 
     def test_rks_pbe(self):
         print('------- PBE ----------------')
@@ -124,6 +129,34 @@ class KnownValues(unittest.TestCase):
     def test_rks_d4(self):
         print('-------- B3LYP with d4 -------------')
         e_tot = run_dft('B3LYP', mol_sph, disp='d4')
+        e_ref = -76.4669590803
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
+    def test_rks_b3lyp_d3bj(self):
+        print('-------- B3LYP-d3bj -------------')
+        e_tot = run_dft('B3LYP-d3bj', mol_sph)
+        e_ref = -76.4672233969
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
+    def test_rks_wb97x_d3bj(self):
+        print('-------- wb97x-d3bj -------------')
+        e_tot = run_dft('wb97x-d3bj', mol_sph)
+        e_ref = -76.47761276450566
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
+    def test_rks_wb97m_d3bj(self):
+        print('-------- wb97m-d3bj -------------')
+        e_tot = run_dft('wb97m-d3bj', mol_sph)
+        e_ref = -76.47675948061112
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+
+    def test_rks_b3lyp_d4(self):
+        print('-------- B3LYP with d4 -------------')
+        e_tot = run_dft('B3LYP-d4', mol_sph)
         e_ref = -76.4669590803
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)

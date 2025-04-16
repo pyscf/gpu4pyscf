@@ -1,0 +1,117 @@
+v1.3.2 (2025-03-10)
+-------------------
+* Improvements
+  - Dump xc info and grids into to log file
+  - Optimize 4-center integral evalulation CUDA kernels using warp divergent algorithm
+  - Support up to I orbitals in DFT
+  - Fix out-of-bound issue in DFT hessian for heavy atoms (>=19)
+* Deprecation
+  - SM60 is not supported in PyPi package
+
+v1.3.1 (2025-02-04)
+-------------------
+* New Features
+  - Analytical Hessian for PCM solvent model
+  - Driver for 3c methods (wB97x-3c, R2Scan-3c, B97-3c, etc.)
+* Improvements
+  - Preconditioner and computation efficiency of Davidson iterations for TDDFT
+
+
+v1.3.0 (2025-01-07)
+-------------------
+* New Features
+  - PBC analytical Fourier transform on GPU
+* Improvements
+  - Optimized computation efficiency and memory footprint for density fitting Hessian
+  - Support pickle serialization for most classes (SCF, DF, PCM, etc.)
+  - Efficiency of moving CuPy arrays between GPU cards
+
+
+v1.2.1 (2024-12-20)
+-------------------
+* New Features
+  - Change the license from GPL v3.0 to Apache 2.0
+  - Multi-GPU support for SCF, Gradients, and Hessian computation using AO-direct algorithm
+  - Add PBC HF and DFT with k-points, UHF/UKS, and density fitting
+* Improvements
+  - Change the default conv_tol_cpscf = 1e-3 / batch of atoms to conv_tol_cpscf = 1e-6 / atom
+  - Fix numerical instability in complex-valued TDHF diagonalization
+  - Improve PCM and QMMM with int1e_grids kernel
+  - Support non-symmetric int3c2e integral
+  - Optimize Hessian calculation with direct SCF
+  - Improve the numerical stability of int3c2e for point charge
+  - Add CI workflow for multi-GPU
+* Fixes
+  - Fix non-contiguous array error in p2p transfer between GPUs.
+  - Fix bugs in NMR calculations
+
+
+v1.2.0 (2024-12-09)
+-------------------
+* New Features
+  - Spin-conserved TDA and TDDFT methods
+  - Spin-flip TDA method.
+  - J-engine using McMuchie-Davidson integral algorithm
+  - Support multi-GPU density fitting energy, gradients and Hessian computation.
+  - Second order SCF solver
+* Improvements
+  - Support non-hermitian density matrix in J/K builder
+  - Secondary grids for CPHF solver
+  - 3-center integral computation efficiency for gradients and hessian
+  - One-electron Coulomb integrals against point charges and Gaussian charge distributions on grids.
+  - Automatically apply SCF initial guess from existing wavefunction
+
+
+v1.1.0 (2024-10-29)
+-------------------
+* New Features
+  - Add esp charge and resp charge by @wxj6000 in #208
+  - New Rys kernel by @sunqm in #221
+  - Optimize nuclear gradients using new Rys kernel by @sunqm in #224
+  - GPU kernel for analytical hessian by @sunqm in #227
+  - Add QM/MM by @MoleOrbitalHybridAnalyst in #218
+* Improvements
+  - Improved compatiability with pyscf 2.7.0 by @wxj6000 in #216
+  - Add skipping SCF cycles by @kvkarandashev in #229
+  - Skip building gint, gvhf, ... when building libxc by @wxj6000 in #210
+* Bugfix
+  - Typo in build_wheels.sh by @wxj6000 in #209
+  - Typo in dft_driver.py by @wxj6000 in #220
+  - Bugfix: cusolver error when specifying gpu by @wxj6000 in #213
+  - Bugfix: error in int2c2e by @wxj6000 in #212
+  - Bugfix: inconsistent gradient with CPU. Improved to_cpu, uks gradient, and grid_response by @wxj6000 in #230
+  - Bugfix: recompute int3c2e in DF UHF by @wxj6000 in #226
+  - New Contributors
+  - @MoleOrbitalHybridAnalyst made their first contribution in #218
+  - @kvkarandashev made their first contribution in #229
+
+
+v1.0.2 (2024-09-03)
+-------------------
+* Bugfix: append data in h5 file by @wxj6000 in #200
+* Support customized CHELPG radii by @wxj6000 in #202
+* Add cupy installation guide for developer installation instructions by @henryw7 in #204
+* Bugfix: save density when spin unrestricted by @wxj6000 in #205
+* Add chkfile support for pysisyphus by @henryw7 in #203
+
+
+v1.0.1 (2024-08-24)
+-------------------
+* Bugfix in rks.reset by @wxj6000 in #191. The bug leads to the failure of geometry optimization with direct SCF (#190)
+* Bugfix when CUDA unified memory is disabled. Removed CUDA unified memory in libxc, and reduced the overhead in calling libxc @wxj6000 in #180, #189
+* Bugfix and Improvement in opt_driver by @wxj6000 in #187 #197
+* Support SMD in opt_driver and dft driver @liuyu-chem1996 in #196
+* Support thermo calculation in dft_driver @liuyu-chem1996 in #192
+
+
+v1.0.0 (2024-07-23)
+-------------------
+Released features:
+* Density fitting scheme and direct SCF scheme
+* SCF, analytical gradient, and analytical Hessian calculations for Hartree-Fock and DFT
+* Spin-conserved and spin-flip TDA and TDDFT for excitated states
+* Nonlocal functional correction (vv10) for SCF and gradient
+* PCM models, SMD model, their analytical gradients, and semi-analytical Hessian matrix
+* Unrestricted Hartree-Fock and unrestricted DFT, gradient, and Hessian
+* MP2/DF-MP2 and CCSD (experimental)
+* Polarizability, IR, and NMR shielding (experimental)

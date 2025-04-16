@@ -1,22 +1,27 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import numpy as np
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import load_library    
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import load_library    
 import ctypes
-from gpu4pyscf.lib.cupy_helper import load_library
 
 libcupy_helper = load_library('libcupy_helper')
 
@@ -52,9 +57,9 @@ class CDERI():
         self.col.append(cols)
         self.data.append(data)
 
-        rows = cupy.asarray(rows, dtype=cupy.int64)
-        cols = cupy.asarray(cols, dtype=cupy.int64)
-        assert rows.dtype == cupy.int64 and cols.dtype == cupy.int64
+        rows = gpunp.asarray(rows, dtype=gpunp.int64)
+        cols = gpunp.asarray(cols, dtype=gpunp.int64)
+        assert rows.dtype == gpunp.int64 and cols.dtype == gpunp.int64
         nij = len(rows)
         err = libcupy_helper.add_block(
             ctypes.byref(self.handle),
@@ -68,7 +73,7 @@ class CDERI():
         return
 
     def unpack(self, p0, p1, out=None):
-        if out is None: out = cupy.zeros([p1-p0, self.nao, self.nao])
+        if out is None: out = gpunp.zeros([p1-p0, self.nao, self.nao])
 
         libcupy_helper.unpack(
             ctypes.byref(self.handle),
@@ -77,4 +82,3 @@ class CDERI():
             ctypes.cast(out.data.ptr, ctypes.c_void_p)
         )
         return out
-

@@ -1,17 +1,17 @@
-/* Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -19,8 +19,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#ifdef USE_SYCL
+#include "sycl_alloc.hpp"
+#else
 #include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
+#endif
 
 #define THREADSX        32
 #define THREADSY        4
@@ -33,10 +37,26 @@ static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
                        int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
                        uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    sycl::group thread_block = item.get_group();
+    int tx = item.get_local_id(2);
+    int ty = item.get_local_id(1);
+    int grid_blk = thread_block.get_group_id(2);
+    int shell_blk = thread_block.get_group_id(1);
+    int blockIdx_z = thread_block.get_group_id(0);
+    using tile_t = double[THREADSX*THREADSY];
+    tile_t& s_ao = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    tile_t& s_dm = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+#else
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int grid_blk = blockIdx.x;
     int shell_blk = blockIdx.y;
+    int blockIdx_z = blockIdx.z;
+    __shared__ double s_ao[THREADSX*THREADSY];
+    __shared__ double s_dm[THREADSX*THREADSY];
+#endif
     int jsh = jsh0 + shell_blk * THREADSY + ty;
     if (jsh >= jsh1) {
         return;
@@ -57,15 +77,12 @@ static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
     }
 
     int grid_id = grid_blk * THREADSX + tx;
-    int jp = blockIdx.z;
+    int jp = blockIdx_z;
     int j = ao_loc[jsh] + jp;
     int ishp, ip, k, i, seg;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_ao[THREADSX*THREADSY];
-    __shared__ double s_dm[THREADSX*THREADSY];
 
     for (seg = 0; seg < nsegs; seg++) {
         int ish0 = bas_segs[seg];
@@ -107,10 +124,26 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
                         int ngrids, int nbas, int nbins, int nsegs, int *bas_segs,
                         uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    sycl::group thread_block = item.get_group();
+    int tx = item.get_local_id(2);
+    int ty = item.get_local_id(1);
+    int grid_blk = thread_block.get_group_id(2);
+    int shell_blk = thread_block.get_group_id(1);
+    int blockIdx_z = thread_block.get_group_id(0);
+    using tile_t = double[THREADSX*THREADSY];
+    tile_t& s_ao = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    tile_t& s_dm = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+#else
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int grid_blk = blockIdx.x;
     int shell_blk = blockIdx.y;
+    int blockIdx_z = blockIdx.z;
+    __shared__ double s_ao[THREADSX*THREADSY];
+    __shared__ double s_dm[THREADSX*THREADSY];
+#endif
     int jsh = jsh0 + shell_blk * THREADSY + ty;
     if (jsh >= jsh1) {
         return;
@@ -131,15 +164,12 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
     }
 
     int grid_id = grid_blk * THREADSX + tx;
-    int jp = blockIdx.z;
+    int jp = blockIdx_z;
     int j = ao_loc[jsh] + jp;
     int ishp, ip, k, i, seg;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_ao[THREADSX*THREADSY];
-    __shared__ double s_dm[THREADSX*THREADSY];
 
     for (seg = 0; seg < nsegs; seg++) {
         int ish0 = bas_segs[seg];
@@ -181,10 +211,32 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                         int ngrids, int nbas, int nbins, uint8_t *screen_index,
                         int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    sycl::group thread_block = item.get_group();
+    const int tx = item.get_local_id(2);
+    const int ty = item.get_local_id(1);
+    const int tz = item.get_local_id(0);
+    const int task_ij = thread_block.get_group_id(2);
+    const int blockIdx_y = thread_block.get_group_id(1);
+    const int blockIdx_z = thread_block.get_group_id(0);
+    using tile_t = double[THREADSXY];
+    tile_t& s_bra = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    tile_t& s_ket = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    const int gridDim_y = item.get_group_range(1);
+    const int gridDim_z = item.get_group_range(0);
+#else
     int task_ij = blockIdx.x;
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int tz = threadIdx.z;
+    int blockIdx_y = blockIdx.y;
+    int blockIdx_z = blockIdx.z;
+    __shared__ double s_bra[THREADSXY];
+    __shared__ double s_ket[THREADSXY];
+    int gridDim_y = gridDim.y;
+    int gridDim_z = gridDim.z;
+#endif
     int txy = ty * DIVXY + tx;
     int tyz = tz * THREADSY + ty;
     int ish0 = bas_pair2bra[task_ij];
@@ -193,18 +245,15 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
     int jsh4 = jsh0 / THREADSY;
-    int degen_i = gridDim.y;
-    int degen_j = gridDim.z;
-    int ip = blockIdx.y;
-    int jp = blockIdx.z;
+    int degen_i = gridDim_y;
+    int degen_j = gridDim_z;
+    int ip = blockIdx_y;
+    int jp = blockIdx_z;
 
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_bra[THREADSXY];
-    __shared__ double s_ket[THREADSXY];
 
     int grid_blk;
     for (grid_blk = 0; grid_blk < ngrids/THREADSX; grid_blk++) {
@@ -274,10 +323,32 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
                        int ngrids, int nbas, int nbins, uint8_t *screen_index,
                        int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    sycl::group thread_block = item.get_group();
+    const int tx = item.get_local_id(2);
+    const int ty = item.get_local_id(1);
+    const int tz = item.get_local_id(0);
+    const int task_ij = thread_block.get_group_id(2);
+    const int ip = thread_block.get_group_id(1);
+    const int jp = thread_block.get_group_id(0);
+    using tile_t = double[THREADSXY];
+    tile_t& s_bra = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    tile_t& s_ket = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    const int degen_i = item.get_group_range(1);
+    const int degen_j = item.get_group_range(0);
+#else
     int task_ij = blockIdx.x;
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int tz = threadIdx.z;
+    int degen_i = gridDim.y;
+    int degen_j = gridDim.z;
+    int ip = blockIdx.y;
+    int jp = blockIdx.z;
+    __shared__ double s_bra[THREADSXY];
+    __shared__ double s_ket[THREADSXY];
+#endif
     int txy = ty * DIVXY + tx;
     int tyz = tz * THREADSY + ty;
     int ish0 = bas_pair2bra[task_ij];
@@ -286,18 +357,11 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
     int j0 = ao_loc[jsh0];
     int ish4 = ish0 / THREADSY;
     int jsh4 = jsh0 / THREADSY;
-    int degen_i = gridDim.y;
-    int degen_j = gridDim.z;
-    int ip = blockIdx.y;
-    int jp = blockIdx.z;
 
     int bas_blocks = (nbas + THREADSY - 1) / THREADSY;
     size_t Nao = ao_loc[nbas];
     size_t Ngrids = ngrids;
     double val = 0;
-
-    __shared__ double s_bra[THREADSXY];
-    __shared__ double s_ket[THREADSXY];
 
     int grid_blk;
     for (grid_blk = 0; grid_blk < ngrids/THREADSX; grid_blk++) {
@@ -433,6 +497,21 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
         assert(ish1 % THREADSY == 0);
         int degen = ao_loc[ish0+1] - ao_loc[ish0];
         int nsh = ish1 - ish0;
+#ifdef USE_SYCL
+        sycl::range<3> threads(1, THREADSY, THREADSX);
+        sycl::range<3> blocks(degen, (nsh+THREADSY-1)/THREADSY, (ngrids+THREADSX-1)/THREADSX);
+        if (trans_dm) {
+            sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+		_dot_ao_dmT(out, ao, dm, ish0, ish1, ngrids, nbas,
+			    nbins, nsegs, d_seg_loc, d_sindex,
+			    d_pair_mask, d_ao_loc); });
+        } else {
+            sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+            _dot_ao_dm(out, ao, dm, ish0, ish1, ngrids, nbas,
+		       nbins, nsegs, d_seg_loc, d_sindex,
+		       d_pair_mask, d_ao_loc); });
+	}
+#else // USE_SYCL
         dim3 threads(THREADSX, THREADSY);
         dim3 blocks((ngrids+THREADSX-1)/THREADSX, (nsh+THREADSY-1)/THREADSY, degen);
         if (trans_dm) {
@@ -451,6 +530,7 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
             err_code = 1;
             goto cleanup;
         }
+#endif // USE_SYCL
     }
 cleanup:
     FREE(d_sindex);
@@ -488,6 +568,13 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
         assert(jsh0 % THREADSY == 0);
         int degen_i = ao_loc[ish0+1] - ao_loc[ish0];
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
+#ifdef USE_SYCL
+        sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
+        sycl::range<3> blocks(degen_j, degen_i, ntasks);
+	sycl_get_queue->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+	    _dot_aow_ao(out, bra, ket, wv, ngrids, nbas, nbins, d_sindex,
+			d_pair2bra+task0, d_pair2ket+task0, d_ao_loc); });
+#else
         dim3 threads(DIVXY, THREADSY, THREADSY);
         dim3 blocks(ntasks, degen_i, degen_j);
         _dot_aow_ao<<<blocks, threads>>>(out, bra, ket, wv, ngrids, nbas, nbins, d_sindex,
@@ -499,6 +586,7 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
             err_code = 1;
             goto cleanup;
         }
+#endif
     }
 cleanup:
     FREE(d_sindex);
@@ -535,6 +623,13 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
         assert(jsh0 % THREADSY == 0);
         int degen_i = ao_loc[ish0+1] - ao_loc[ish0];
         int degen_j = ao_loc[jsh0+1] - ao_loc[jsh0];
+#ifdef USE_SYCL
+        sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
+        sycl::range<3> blocks(degen_j, degen_i, ntasks);
+	sycl_get_queue->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+	    _dot_ao_ao(out, bra, ket, ngrids, nbas, nbins, d_sindex,
+		       d_pair2bra+task0, d_pair2ket+task0, d_ao_loc); });
+#else
         dim3 threads(DIVXY, THREADSY, THREADSY);
         dim3 blocks(ntasks, degen_i, degen_j);
         _dot_ao_ao<<<blocks, threads>>>(out, bra, ket, ngrids, nbas, nbins, d_sindex,
@@ -546,6 +641,7 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
             err_code = 1;
             goto cleanup;
         }
+#endif
     }
 cleanup:
     FREE(d_sindex);

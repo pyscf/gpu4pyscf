@@ -1,17 +1,17 @@
-# Copyright 2024 The GPU4PySCF Authors. All Rights Reserved.
+#!/usr/bin/env python
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 ###########################################################
 #  Example of calculating two-stage RESP charge
@@ -42,11 +42,11 @@ print('Fitted ESP charge')
 print(q0)
 
 # RESP charge // first stage fitting
-q1 = esp.resp_solve(mol, dm)    
+q1 = esp.resp_solve(mol, dm)
 
-# Add constraint: fix those charges in the second stage 
+# Add constraint: fix those charges in the second stage
 # q2[4] = q1[4]
-# q2[5] = q1[5] 
+# q2[5] = q1[5]
 # q2[6] = q1[6]
 # q2[7] = q1[7]
 sum_constraints = []
@@ -58,7 +58,7 @@ for i in range(4,8):
 equal_constraints = [[1,2,3]]
 
 # RESP charge // second stage fitting
-q2 = esp.resp_solve(mol, dm, resp_a=1e-3, 
+q2 = esp.resp_solve(mol, dm, resp_a=1e-3,
                     sum_constraints=sum_constraints,
                     equal_constraints=equal_constraints)
 print('Fitted RESP charge')

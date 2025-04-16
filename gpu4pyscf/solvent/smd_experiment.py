@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 '''
 SMD solvent model (for experiment and education)
@@ -19,7 +18,11 @@ SMD solvent model (for experiment and education)
 
 import numpy as np
 import scipy
-import cupy
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+else:
+    import dpnp as gpunp
 from pyscf.data import radii
 from gpu4pyscf.solvent.smd import hartree2kcal
 from gpu4pyscf.solvent import pcm
@@ -219,7 +222,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             tension += sig_OC * t_OC + sig_ON * t_ON + sig_OO * t_OO + sig_OP * t_OP
             tensions.append(tension)
             continue
-    return cupy.asarray(tensions)
+    return gpunp.asarray(tensions)
 
 def molecular_surface_tension(beta, gamma, phi, psi):
     sig_gamma = sigma_gamma * gamma / gamma0
@@ -245,7 +248,7 @@ def naive_sasa(mol, rad):
                     overlap = (r1 + r2 - r) / (r1 + r2)
                     area -= overlap * area
         sasa.append(area)
-    return cupy.asarray(sasa)
+    return gpunp.asarray(sasa)
 
 def get_cds(smdobj):
     mol = smdobj.mol
@@ -265,8 +268,8 @@ def get_cds(smdobj):
     surface = pcm.gen_surface(mol, ng=smdobj.sasa_ng, rad=rad)
     area = surface['area']
     gridslice = surface['gslice_by_atom']
-    SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice])
+    SASA = gpunp.asarray([gpunp.sum(area[p0:p1], axis=0) for p0,p1, in gridslice])
     SASA *= radii.BOHR**2
-    mol_cds = mol_tension * cupy.sum(SASA) / 1000 # in kcal/mol
-    atm_cds = cupy.sum(SASA * atm_tension) / 1000 # in kcal/mol
+    mol_cds = mol_tension * gpunp.sum(SASA) / 1000 # in kcal/mol
+    atm_cds = gpunp.sum(SASA * atm_tension) / 1000 # in kcal/mol
     return (mol_cds + atm_cds)/hartree2kcal # hartree

@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """
 Wrappers to the LibXC C structs
@@ -24,6 +23,14 @@ Modified source code from libXC
 import ctypes
 import numpy as np
 
+XC_FAMILY_LDA     =      1
+XC_FAMILY_GGA     =      2
+XC_FAMILY_MGGA    =      4
+XC_FAMILY_LCA     =      8
+XC_FAMILY_OEP     =     16
+XC_FAMILY_HYB_GGA =     32
+XC_FAMILY_HYB_MGGA=     64
+XC_FAMILY_HYB_LDA =    128
 
 class func_reference_type(ctypes.Structure):
     """
@@ -146,7 +153,7 @@ class xc_dimensions(ctypes.Structure):
          ("v4lapl3tau", ctypes.c_int),
          ("v4lapl2tau2", ctypes.c_int),
          ("v4lapltau3", ctypes.c_int),
-         ("v4tau4", ctypes.c_int),]
+         ("v4tau4", ctypes.c_int)]
 
 
 class xc_func_type(ctypes.Structure):
@@ -162,10 +169,9 @@ class xc_func_type(ctypes.Structure):
         ("mix_coef", ctypes.POINTER(ctypes.c_double)),
 
         # Hybrids
-        ("hyb_number_terms", ctypes.c_int),
-        ("hyb_type", ctypes.POINTER(ctypes.c_int)),
-        ("hyb_coeff", ctypes.POINTER(ctypes.c_double)),
-        ("hyb_omega", ctypes.POINTER(ctypes.c_double)),
+        ("cam_omega", ctypes.c_double),
+        ("cam_alpha", ctypes.c_double),
+        ("cam_beta", ctypes.c_double),
 
         # VV10
         ("nlc_b", ctypes.c_double),
@@ -174,6 +180,126 @@ class xc_func_type(ctypes.Structure):
         ("dim", xc_dimensions),
 
         # parameters
+        ("ext_params", ctypes.POINTER(ctypes.c_double)),
         ("params", ctypes.c_void_p),  # void *params;
+
         ("dens_threshold", ctypes.c_double),
+        ("zeta_threshold", ctypes.c_double),
+        ("sigma_threshold", ctypes.c_double),
+        ("tau_threshold", ctypes.c_double)
+    ]
+
+class xc_lda_out_params(ctypes.Structure):
+    """
+    Holds the output parameters for LDA functions
+    """
+    _fields_ = [
+        ("zk", ctypes.c_void_p),
+        ("vrho", ctypes.c_void_p),
+        ("v2rho2", ctypes.c_void_p),
+        ("v3rho3", ctypes.c_void_p),
+        ("v4rho4", ctypes.c_void_p),
+    ]
+
+class xc_gga_out_params(ctypes.Structure):
+    """
+    Holds the output parameters for GGA functions
+    """
+    _fields_ = [
+        ("zk", ctypes.c_void_p),
+        ("vrho", ctypes.c_void_p),
+        ("vsigma", ctypes.c_void_p),
+        ("v2rho2", ctypes.c_void_p),
+        ("v2rhosigma", ctypes.c_void_p),
+        ("v2sigma2", ctypes.c_void_p),
+        ("v3rho3", ctypes.c_void_p),
+        ("v3rho2sigma", ctypes.c_void_p),
+        ("v3rhosigma2", ctypes.c_void_p),
+        ("v3sigma3", ctypes.c_void_p),
+        ("v4rho4", ctypes.c_void_p),
+        ("v4rho3sigma", ctypes.c_void_p),
+        ("v4rho2sigma2", ctypes.c_void_p),
+        ("v4rhosigma3", ctypes.c_void_p),
+        ("v4sigma4", ctypes.c_void_p),
+    ]
+
+class xc_mgga_out_params(ctypes.Structure):
+    """
+    Holds the output parameters for MGGA functions
+    """
+    _fields_ = [
+        ("zk", ctypes.c_void_p),
+
+        ("vrho", ctypes.c_void_p),
+        ("vsigma", ctypes.c_void_p),
+        ("vlapl", ctypes.c_void_p),
+        ("vtau", ctypes.c_void_p),
+
+        ("v2rho2", ctypes.c_void_p),
+        ("v2rhosigma", ctypes.c_void_p),
+        ("v2rholapl", ctypes.c_void_p),
+        ("v2rhotau", ctypes.c_void_p),
+        ("v2sigma2", ctypes.c_void_p),
+        ("v2sigmalapl", ctypes.c_void_p),
+        ("v2sigmatau", ctypes.c_void_p),
+        ("v2lapl2", ctypes.c_void_p),
+        ("v2lapltau", ctypes.c_void_p),
+        ("v2tau2", ctypes.c_void_p),
+
+        ("v3rho3", ctypes.c_void_p),
+        ("v3rho2sigma", ctypes.c_void_p),
+        ("v3rho2lapl", ctypes.c_void_p),
+        ("v3rho2tau", ctypes.c_void_p),
+        ("v3rhosigma2", ctypes.c_void_p),
+        ("v3rhosigmalapl", ctypes.c_void_p),
+        ("v3rhosigmatau", ctypes.c_void_p),
+        ("v3rholapl2", ctypes.c_void_p),
+        ("v3rholapltau", ctypes.c_void_p),
+        ("v3rhotau2", ctypes.c_void_p),
+        ("v3sigma3", ctypes.c_void_p),
+        ("v3sigma2lapl", ctypes.c_void_p),
+        ("v3sigma2tau", ctypes.c_void_p),
+        ("v3sigmalapl2", ctypes.c_void_p),
+        ("v3sigmalapltau", ctypes.c_void_p),
+        ("v3sigmatau2", ctypes.c_void_p),
+        ("v3lapl3", ctypes.c_void_p),
+        ("v3lapl2tau", ctypes.c_void_p),
+        ("v3lapltau2", ctypes.c_void_p),
+        ("v3tau3", ctypes.c_void_p),
+
+        ("v4rho4", ctypes.c_void_p),
+        ("v4rho3sigma", ctypes.c_void_p),
+        ("v4rho3lapl", ctypes.c_void_p),
+        ("v4rho3tau", ctypes.c_void_p),
+        ("v4rho2sigma2", ctypes.c_void_p),
+        ("v4rho2sigmalapl", ctypes.c_void_p),
+        ("v4rho2sigmatau", ctypes.c_void_p),
+        ("v4rho2lapl2", ctypes.c_void_p),
+        ("v4rho2lapltau", ctypes.c_void_p),
+        ("v4rho2tau2", ctypes.c_void_p),
+        ("v4rhosigma3", ctypes.c_void_p),
+        ("v4rhosigma2lapl", ctypes.c_void_p),
+        ("v4rhosigma2tau", ctypes.c_void_p),
+        ("v4rhosigmalapl2", ctypes.c_void_p),
+        ("v4rhosigmalapltau", ctypes.c_void_p),
+        ("v4rhosigmatau2", ctypes.c_void_p),
+        ("v4rholapl3", ctypes.c_void_p),
+        ("v4rholapl2tau", ctypes.c_void_p),
+        ("v4rholapltau2", ctypes.c_void_p),
+        ("v4rhotau3", ctypes.c_void_p),
+        ("v4sigma4", ctypes.c_void_p),
+        ("v4sigma3lapl", ctypes.c_void_p),
+        ("v4sigma3tau", ctypes.c_void_p),
+        ("v4sigma2lapl2", ctypes.c_void_p),
+        ("v4sigma2lapltau", ctypes.c_void_p),
+        ("v4sigma2tau2", ctypes.c_void_p),
+        ("v4sigmalapl3", ctypes.c_void_p),
+        ("v4sigmalapl2tau", ctypes.c_void_p),
+        ("v4sigmalapltau2", ctypes.c_void_p),
+        ("v4sigmatau3", ctypes.c_void_p),
+        ("v4lapl4", ctypes.c_void_p),
+        ("v4lapl3tau", ctypes.c_void_p),
+        ("v4lapl2tau2", ctypes.c_void_p),
+        ("v4lapltau3", ctypes.c_void_p),
+        ("v4tau4", ctypes.c_void_p),
     ]

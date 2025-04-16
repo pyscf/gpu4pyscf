@@ -1,20 +1,17 @@
 /*
- * gpu4pyscf is a plugin to use Nvidia GPU in PySCF package
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * Copyright (C) 2023 Qiming Sun
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include <stdio.h>
@@ -23,9 +20,14 @@
 
 #include "gvhf.h"
 
+#ifdef USE_SYCL
+#include "gint/sycl_alloc.hpp"
+#else
+#include "gint/cuda_alloc.cuh"
+#endif
+
 #include "gint/gint.h"
 #include "gint/config.h"
-#include "gint/cuda_alloc.cuh"
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
@@ -46,6 +48,77 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
   assert(ntasks_kl < 65536*THREADSY);
   int type_ijkl = (envs->i_l << 6) | (envs->j_l << 4) | (envs->k_l << 2) | envs->l_l;
 
+#ifdef USE_SYCL
+  sycl::range<2> threads(THREADSY, THREADSX);
+  sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+  switch (nrys_roots) {
+    case 1:
+      switch (type_ijkl) {
+        case 0b0000: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0000(*envs, *jk, *offsets); }); break;
+        default:
+          fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
+      }
+      break;
+
+    case 2:
+      switch (type_ijkl) {
+        case (0<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0010(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0011(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0020(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1000(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1010(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1100(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2000(*envs, *jk, *offsets); }); break;
+        default:
+          fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
+      }
+      break;
+
+    case 3:
+      switch (type_ijkl) {
+        case (0<<6)|(0<<4)|(2<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0021(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(2<<2)|2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0022(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(3<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0030(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(3<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0031(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1011(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1020(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(2<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1021(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(0<<4)|(3<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1030(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(1<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1110(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(1<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1111(*envs, *jk, *offsets); }); break;
+        case (1<<6)|(1<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1120(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2010(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2011(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2020(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2100(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(1<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2110(*envs, *jk, *offsets); }); break;
+        case (2<<6)|(2<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2200(*envs, *jk, *offsets); }); break;
+        case (3<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3000(*envs, *jk, *offsets); }); break;
+        case (3<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3010(*envs, *jk, *offsets); }); break;
+        case (3<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3100(*envs, *jk, *offsets); }); break;
+        default:
+          fprintf(stderr, "roots=3 type_ijkl %d\n", type_ijkl);
+      }
+      break;
+
+    case 4:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<4, NABLAGOUTSIZE4> (*envs, *jk, *offsets); });
+      break;
+    case 5:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5> (*envs, *jk, *offsets); });
+      break;
+    case 6:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<6, NABLAGOUTSIZE6> (*envs, *jk, *offsets); });
+      break;
+    case 7:
+      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<7, NABLAGOUTSIZE7> (*envs, *jk, *offsets); });
+      break;
+    default:
+      fprintf(stderr, "rys roots %d\n", nrys_roots);
+      return 1;
+  }
+
+#else // USE_SYCL
   dim3 threads(THREADSX, THREADSY);
   dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
   switch (nrys_roots) {
@@ -121,6 +194,7 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
     fprintf(stderr, "CUDA Error of GINTint2e_ip1_jk_kernel: %s\n", cudaGetErrorString(err));
     return 1;
   }
+#endif // USE_SYCL
   return 0;
 }
 
@@ -145,7 +219,7 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
       fprintf(stderr, "build_ip1_jk: unsupported rys order %d\n", envs.nrys_roots);
       return 2;
   }
-
+  /*
   if (envs.nrys_roots > 2) {
     int16_t *idx4c = (int16_t *)malloc(sizeof(int16_t) * envs.nf * 3);
     int *idx_ij = (int *)malloc(sizeof(int) * envs.nfi * envs.nfj * 3);
@@ -163,7 +237,7 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
     free(idx_ij);
     free(idx_kl);
   }
-
+  */
   // Data and buffers to be allocated on-device. Allocate them here to
   // reduce the calls to malloc
   int kl_bin, ij_bin1;
@@ -172,7 +246,11 @@ int GINTbuild_ip1_jk(BasisProdCache *bpcache,
 
 //  checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
   // move bpcache to constant memory
+  #ifdef USE_SYCL
+  stream.memcpy(c_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+  #else
   checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+  #endif
 
   JKMatrix jk;
   jk.n_dm = n_dm;

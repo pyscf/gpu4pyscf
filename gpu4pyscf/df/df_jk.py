@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# Copyright 2014-2019 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,22 +16,32 @@
 # Modified by Xiaojie Wu <wxj6000@gmail.com>
 
 import copy
-import cupy
+from concurrent.futures import ThreadPoolExecutor
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import contract, transpose_sum, reduce_to_device
+else:
+    import dpnp as gpunp
+    from gpu4pyscf.lib.dpnp_helper import contract, transpose_sum, reduce_to_device
+    import dpctl.memory as dpmem
+    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
+    from dpctl._sycl_queue_manager import get_device_cached_queue
 import numpy
-from cupy import cublas
 from pyscf import lib, __config__
 from pyscf.scf import dhf
-from pyscf.df import df_jk, addons
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, take_last2d, transpose_sum, load_library, get_avail_mem
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
-
-libcupy_helper = load_library('libcupy_helper')
+from gpu4pyscf.__config__ import _streams, num_devices
 
 def _pin_memory(array):
-    mem = cupy.cuda.alloc_pinned_memory(array.nbytes)
+    if not has_dpctl:
+        mem = gpunp.cuda.alloc_pinned_memory(array.nbytes)
+    else:
+        mem = dpmem.MemoryUSMHost(array.nbytes)
     ret = numpy.frombuffer(mem, array.dtype, array.size).reshape(array.shape)
     ret[...] = array
     return ret
@@ -48,22 +57,22 @@ def init_workflow(mf, dm0=None):
             if key in mf.with_df._rsh_df:
                 rsh_df = mf.with_df._rsh_df[key]
             else:
-                rsh_df = mf.with_df._rsh_df[key] = copy.copy(mf.with_df).reset()
+                rsh_df = mf.with_df._rsh_df[key] = mf.with_df.copy().reset()
             rsh_df.build(omega=omega)
         return
 
+    mf.h1e = gpunp.asarray(mf.get_hcore(mf.mol))
+    mf.s1e = gpunp.asarray(mf.get_ovlp(mf.mol))
     # pre-compute h1e and s1e and cderi for async workflow
     with lib.call_in_background(build_df) as build:
         build()
-        mf.s1e = cupy.asarray(mf.get_ovlp(mf.mol))
-        mf.h1e = cupy.asarray(mf.get_hcore(mf.mol))
         # for DFT object
         if hasattr(mf, '_numint'):
             ni = mf._numint
             rks.initialize_grids(mf, mf.mol, dm0)
             ni.build(mf.mol, mf.grids.coords)
             mf._numint.xcfuns = numint._init_xcfuns(mf.xc, dm0.ndim==3)
-    dm0 = cupy.asarray(dm0)
+    dm0 = gpunp.asarray(dm0)
     return
 
 def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
@@ -102,7 +111,7 @@ def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
             mf.with_df = with_df
         elif getattr(mf.with_df, 'auxbasis', None) != auxbasis:
             #logger.warn(mf, 'DF might have been initialized twice.')
-            mf = copy.copy(mf)
+            mf = mf.copy()
             mf.with_df = with_df
             mf.only_dfj = only_dfj
         return mf
@@ -125,7 +134,7 @@ class _DFHF:
     to_gpu = utils.to_gpu
     device = utils.device
     __name_mixin__ = 'DF'
-    _keys = {'rhoj', 'rhok', 'disp', 'screen_tol'}
+    _keys = {'rhoj', 'rhok', 'disp', 'screen_tol', 'with_df', 'only_dfj'}
 
     def __init__(self, mf, dfobj, only_dfj):
         self.__dict__.update(mf.__dict__)
@@ -135,7 +144,6 @@ class _DFHF:
         self.direct_scf = False
         self.with_df = dfobj
         self.only_dfj = only_dfj
-        self._keys = mf._keys.union(['with_df', 'only_dfj'])
 
     def undo_df(self):
         '''Remove the DFHF Mixin'''
@@ -181,6 +189,8 @@ class _DFHF:
             return uhf_grad.Gradients(self)
         raise NotImplementedError()
 
+    Gradients = nuc_grad_method
+
     def Hessian(self):
         from gpu4pyscf.dft.rks import KohnShamDFT
         if isinstance(self, hf.RHF):
@@ -199,6 +209,7 @@ class _DFHF:
                 return uhf_hess.Hessian(self)
         else:
             raise NotImplementedError
+
     @property
     def auxbasis(self):
         return getattr(self.with_df, 'auxbasis', None)
@@ -219,7 +230,7 @@ class _DFHF:
 
         if dm.ndim == 2:
             if self.direct_scf:
-                ddm = cupy.asarray(dm) - dm_last
+                ddm = gpunp.asarray(dm) - dm_last
                 vj, vk = self.get_jk(mol, ddm, hermi=hermi)
                 return vhf_last + vj - vk * .5
             else:
@@ -227,10 +238,10 @@ class _DFHF:
                 return vj - vk * .5
         elif dm.ndim == 3:
             if self.direct_scf:
-                ddm = cupy.asarray(dm) - dm_last
+                ddm = gpunp.asarray(dm) - dm_last
                 vj, vk = self.get_jk(mol, ddm, hermi=hermi)
                 vhf = vj[0] + vj[1] - vk
-                vhf += cupy.asarray(vhf_last)
+                vhf += gpunp.asarray(vhf_last)
                 return vhf
             else:
                 vj, vk = self.get_jk(mol, dm, hermi=hermi)
@@ -242,7 +253,179 @@ class _DFHF:
         obj = self.undo_df().to_cpu().density_fit()
         return utils.to_cpu(self, obj)
 
-def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
+def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
+                     with_j=True, with_k=True, hermi=0, device_id=0):
+    ''' Calculate J and K matrices on single GPU
+    '''
+    #with gpunp.cuda.Device(device_id), _streams[device_id]:
+    assert isinstance(dfobj.verbose, int)
+    log = logger.new_logger(dfobj.mol, dfobj.verbose)
+    t0 = log.init_timer()
+    dms = gpunp.asarray(dms)
+    mo_coeff = gpunp.asarray(mo_coeff)
+    mo_occ = gpunp.asarray(mo_occ)
+    nao = dms.shape[-1]
+    intopt = dfobj.intopt
+    rows = intopt.cderi_row
+    cols = intopt.cderi_col
+    nset = dms.shape[0]
+    dms_shape = dms.shape
+    vj = vk = None
+    if with_j:
+        dm_sparse = dms[:,rows,cols]
+        if hermi == 0:
+            dm_sparse += dms[:,cols,rows]
+        else:
+            dm_sparse *= 2
+        dm_sparse[:, intopt.cderi_diag] *= .5
+
+    if with_k:
+        vk = gpunp.zeros_like(dms)
+
+    # SCF K matrix with occ
+    if mo_coeff is not None:
+        assert hermi == 1
+        nocc = 0
+        occ_coeff = [0]*nset
+        for i in range(nset):
+            occ_idx = mo_occ[i] > 0
+            occ_coeff[i] = mo_coeff[i][:,occ_idx] * mo_occ[i][occ_idx]**0.5
+            nocc += mo_occ[i].sum()
+        blksize = dfobj.get_blksize(extra=nao*nocc)
+        if with_j:
+            vj_packed = gpunp.zeros_like(dm_sparse)
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+            # leading dimension is 1
+            if with_j:
+                rhoj = dm_sparse.dot(cderi_sparse)
+                vj_packed += gpunp.dot(rhoj, cderi_sparse.T)
+            cderi_sparse = rhoj = None
+            for i in range(nset):
+                if with_k:
+                    rhok = contract('Lji,jk->Lki', cderi, occ_coeff[i])
+                    # In most cases, syrk does not outperform gpunp.dot
+                    #cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[i], alpha=1.0, beta=1.0, lower=True)
+                    rhok = rhok.reshape([-1,nao])
+                    vk[i] += gpunp.dot(rhok.T, rhok)
+                rhok = None
+
+        if with_j:
+            vj = gpunp.zeros(dms_shape)
+            vj[:,rows,cols] = vj_packed
+            vj[:,cols,rows] = vj_packed
+    t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
+    return vj, vk
+
+def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
+                      with_j=True, with_k=True, hermi=0, device_id=0):
+    ''' Calculate J and K matrices with mo response
+        For CP-HF or TDDFT
+    '''
+    vj = vk = None
+    #with gpunp.cuda.Device(device_id), _streams[device_id]:
+    assert isinstance(dfobj.verbose, int)
+    log = logger.new_logger(dfobj.mol, dfobj.verbose)
+    t0 = log.init_timer()
+    dms = gpunp.asarray(dms)
+    mo1s = [gpunp.asarray(mo1) for mo1 in mo1s]
+    occ_coeffs = [gpunp.asarray(occ_coeff) for occ_coeff in occ_coeffs]
+
+    nao = dms.shape[-1]
+    intopt = dfobj.intopt
+    rows = intopt.cderi_row
+    cols = intopt.cderi_col
+    dms_shape = dms.shape
+    if with_j:
+        dm_sparse = dms[:,rows,cols]
+        if hermi == 0:
+            dm_sparse += dms[:,cols,rows]
+        else:
+            dm_sparse *= 2
+        dm_sparse[:, intopt.cderi_diag] *= .5
+
+    if with_k:
+        vk = gpunp.zeros_like(dms)
+
+    if with_j:
+        vj_sparse = gpunp.zeros_like(dm_sparse)
+
+    nocc = max([mo1.shape[2] for mo1 in mo1s])
+    blksize = dfobj.get_blksize(extra=2*nao*nocc)
+    for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+        if with_j:
+            rhoj = dm_sparse.dot(cderi_sparse)
+            vj_sparse += gpunp.dot(rhoj, cderi_sparse.T)
+            rhoj = None
+        cderi_sparse = None
+        if with_k:
+            iset = 0
+            for occ_coeff, mo1 in zip(occ_coeffs, mo1s):
+                rhok = contract('Lij,jk->Lki', cderi, occ_coeff).reshape([-1,nao])
+                for i in range(mo1.shape[0]):
+                    rhok1 = contract('Lij,jk->Lki', cderi, mo1[i]).reshape([-1,nao])
+                    #contract('Lki,Lkj->ij', rhok1, rhok, alpha=1.0, beta=1.0, out=vk[iset])
+                    vk[iset] += gpunp.dot(rhok1.T, rhok)
+                    iset += 1
+            mo1 = rhok1 = rhok = None
+        cderi = None
+    mo1s = None
+    if with_j:
+        vj = gpunp.zeros(dms_shape)
+        vj[:,rows,cols] = vj_sparse
+        vj[:,cols,rows] = vj_sparse
+    if with_k and hermi:
+        transpose_sum(vk)
+    vj_sparse = None
+
+    t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
+    return vj, vk
+
+def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0):
+    ''' Calculate J and K matrices with density matrix
+    '''
+    #with gpunp.cuda.Device(device_id), _streams[device_id]:
+    assert isinstance(dfobj.verbose, int)
+    log = logger.new_logger(dfobj.mol, dfobj.verbose)
+    t0 = log.init_timer()
+    dms = gpunp.asarray(dms)
+    intopt = dfobj.intopt
+    rows = intopt.cderi_row
+    cols = intopt.cderi_col
+    nao = dms.shape[-1]
+    dms_shape = dms.shape
+    vj = vk = None
+    if with_j:
+        dm_sparse = dms[:,rows,cols]
+        if hermi == 0:
+            dm_sparse += dms[:,cols,rows]
+        else:
+            dm_sparse *= 2
+        dm_sparse[:, intopt.cderi_diag] *= .5
+        vj_sparse = gpunp.zeros_like(dm_sparse)
+
+    if with_k:
+        vk = gpunp.zeros_like(dms)
+
+    nset = dms.shape[0]
+    blksize = dfobj.get_blksize()
+    for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+        if with_j:
+            rhoj = dm_sparse.dot(cderi_sparse)
+            vj_sparse += gpunp.dot(rhoj, cderi_sparse.T)
+        if with_k:
+            for k in range(nset):
+                rhok = contract('Lij,jk->Lki', cderi, dms[k]).reshape([-1,nao])
+                #vk[k] += contract('Lki,Lkj->ij', rhok, cderi)
+                vk[k] += gpunp.dot(rhok.T, cderi.reshape([-1,nao]))
+    if with_j:
+        vj = gpunp.zeros(dms_shape)
+        vj[:,rows,cols] = vj_sparse
+        vj[:,cols,rows] = vj_sparse
+
+    t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
+    return vj, vk
+
+def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-14, omega=None):
     '''
     get jk with density fitting
     outputs and input are on the same device
@@ -251,134 +434,95 @@ def get_jk(dfobj, dms_tag, hermi=1, with_j=True, with_k=True, direct_scf_tol=1e-
 
     log = logger.new_logger(dfobj.mol, dfobj.verbose)
     out_shape = dms_tag.shape
-    out_cupy = isinstance(dms_tag, cupy.ndarray)
-    if not isinstance(dms_tag, cupy.ndarray):
-        dms_tag = cupy.asarray(dms_tag)
+    out_cupy = isinstance(dms_tag, gpunp.ndarray)
+    if not isinstance(dms_tag, gpunp.ndarray):
+        dms_tag = gpunp.asarray(dms_tag)
 
     assert(with_j or with_k)
     if dms_tag is None: logger.error("dm is not given")
     nao = dms_tag.shape[-1]
-    dms = dms_tag.reshape([-1,nao,nao])
-    nset = dms.shape[0]
     t1 = t0 = log.init_timer()
     if dfobj._cderi is None:
-        log.debug('CDERI not found, build...')
+        log.debug('Build CDERI ...')
         dfobj.build(direct_scf_tol=direct_scf_tol, omega=omega)
         t1 = log.timer_debug1('init jk', *t0)
 
     assert nao == dfobj.nao
-    vj = None
-    vk = None
-    ao_idx = dfobj.intopt.ao_idx
-    dms = take_last2d(dms, ao_idx)
+    intopt = dfobj.intopt
 
-    rows = dfobj.intopt.cderi_row
-    cols = dfobj.intopt.cderi_col
-    
-    if with_j:
-        dm_sparse = dms[:,rows,cols]
-        dm_sparse[:, dfobj.intopt.cderi_diag] *= .5
-        vj = cupy.zeros_like(dms)
+    nao = dms_tag.shape[-1]
+    dms = dms_tag.reshape([-1,nao,nao])
+    intopt = dfobj.intopt
+    dms = intopt.sort_orbitals(dms, axis=[1,2])
 
-    if with_k:
-        vk = cupy.zeros_like(dms)
-
-    # SCF K matrix with occ
+    if not has_dpctl:
+        gpunp.cuda.get_current_stream().synchronize()
+    else:
+        dev = get_default_cached_device()
+        get_device_cached_queue(dev).wait()
     if getattr(dms_tag, 'mo_coeff', None) is not None:
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
         nmo = mo_occ.shape[-1]
         mo_coeff = mo_coeff.reshape(-1,nao,nmo)
         mo_occ   = mo_occ.reshape(-1,nmo)
-        nocc = 0
-        occ_coeff = [0]*nset
-        for i in range(nset):
-            occ_idx = mo_occ[i] > 0
-            occ_coeff[i] = mo_coeff[i][:,occ_idx][ao_idx] * mo_occ[i][occ_idx]**0.5
-            nocc += mo_occ[i].sum()
-        blksize = dfobj.get_blksize(extra=nao*nocc)
-        if with_j:
-            vj_packed = cupy.zeros_like(dm_sparse)
-        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
-            # leading dimension is 1
-            if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
-                vj_packed += cupy.dot(rhoj, cderi_sparse.T)
-            for i in range(nset):
-                if with_k:
-                    rhok = contract('Lji,jk->Lki', cderi, occ_coeff[i])
-                    # In most cases, syrk does not outperform cupy.dot
-                    #cublas.syrk('T', rhok.reshape([-1,nao]), out=vk[i], alpha=1.0, beta=1.0, lower=True)
-                    rhok = rhok.reshape([-1,nao])
-                    vk[i] += cupy.dot(rhok.T, rhok)
-        if with_j:
-            vj[:,rows,cols] = vj_packed
-            vj[:,cols,rows] = vj_packed
+        mo_coeff = intopt.sort_orbitals(mo_coeff, axis=[1])
 
-    # CP-HF K matrix
+        futures = []
+        with ThreadPoolExecutor(max_workers=num_devices) as executor:
+            for device_id in range(num_devices):
+                future = executor.submit(
+                    _jk_task_with_mo,
+                    dfobj, dms, mo_coeff, mo_occ,
+                    hermi=hermi, device_id=device_id,
+                    with_j=with_j, with_k=with_k)
+                futures.append(future)
+
     elif hasattr(dms_tag, 'mo1'):
         occ_coeffs = dms_tag.occ_coeff
         mo1s = dms_tag.mo1
-        mo_occ = dms_tag.mo_occ
-        if not isinstance(occ_coeffs, list):
-            occ_coeffs = [occ_coeffs * 2.0] # For restricted
-        if not isinstance(mo1s, list):
+        if not isinstance(occ_coeffs, (tuple, list)):
+            # *2 for double occupancy in RHF/RKS
+            occ_coeffs = [occ_coeffs * 2.0]
+        if not isinstance(mo1s, (tuple, list)):
             mo1s = [mo1s]
+        occ_coeffs = [intopt.sort_orbitals(occ_coeff, axis=[0]) for occ_coeff in occ_coeffs]
+        mo1s = [intopt.sort_orbitals(mo1, axis=[1]) for mo1 in mo1s]
 
-        occ_coeffs = [occ_coeff[ao_idx] for occ_coeff in occ_coeffs]
-        mo1s = [mo1[:,ao_idx] for mo1 in mo1s]
+        futures = []
+        with ThreadPoolExecutor(max_workers=num_devices) as executor:
+            for device_id in range(num_devices):
+                future = executor.submit(
+                    _jk_task_with_mo1,
+                    dfobj, dms, mo1s, occ_coeffs,
+                    hermi=hermi, device_id=device_id,
+                    with_j=with_j, with_k=with_k)
+                futures.append(future)
 
-        if with_j:
-            vj_sparse = cupy.zeros_like(dm_sparse)
-
-        nocc = max([mo1.shape[2] for mo1 in mo1s])
-
-        blksize = dfobj.get_blksize(extra=2*nao*nocc)
-        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
-            if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
-                vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
-            if with_k:
-                iset = 0
-                for occ_coeff, mo1 in zip(occ_coeffs, mo1s):
-                    rhok = contract('Lij,jk->Lki', cderi, occ_coeff).reshape([-1,nao])
-                    for i in range(mo1.shape[0]):
-                        rhok1 = contract('Lij,jk->Lki', cderi, mo1[i]).reshape([-1,nao])
-                        #contract('Lki,Lkj->ij', rhok, rhok1, alpha=1.0, beta=1.0, out=vk[iset])
-                        vk[iset] += cupy.dot(rhok.T, rhok1)
-                        iset += 1
-        occ_coeff = rhok1 = rhok = mo1 = None
-        if with_j:
-            vj[:,rows,cols] = vj_sparse
-            vj[:,cols,rows] = vj_sparse
-        if with_k:
-            transpose_sum(vk)
     # general K matrix with density matrix
     else:
-        if with_j:
-            vj_sparse = cupy.zeros_like(dm_sparse)
-        blksize = dfobj.get_blksize()
-        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
-            if with_j:
-                rhoj = 2.0*dm_sparse.dot(cderi_sparse)
-                vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
-            if with_k:
-                for k in range(nset):
-                    rhok = contract('Lij,jk->Lki', cderi, dms[k]).reshape([-1,nao])
-                    #vk[k] += contract('Lki,Lkj->ij', cderi, rhok)
-                    vk[k] += cupy.dot(cderi.reshape([-1,nao]).T, rhok)
-        if with_j:
-            vj[:,rows,cols] = vj_sparse
-            vj[:,cols,rows] = vj_sparse
-        rhok = None
+        futures = []
+        with ThreadPoolExecutor(max_workers=num_devices) as executor:
+            for device_id in range(num_devices):
+                future = executor.submit(
+                    _jk_task_with_dm, dfobj, dms,
+                    hermi=hermi, device_id=device_id,
+                    with_j=with_j, with_k=with_k)
+                futures.append(future)
 
-    rev_ao_idx = dfobj.intopt.rev_ao_idx
+    vj = vk = None
     if with_j:
-        vj = take_last2d(vj, rev_ao_idx)
+        vj = [future.result()[0] for future in futures]
+        vj = reduce_to_device(vj, inplace=True)
+        vj = intopt.unsort_orbitals(vj, axis=[1,2])
         vj = vj.reshape(out_shape)
+
     if with_k:
-        vk = take_last2d(vk, rev_ao_idx)
+        vk = [future.result()[1] for future in futures]
+        vk = reduce_to_device(vk, inplace=True)
+        vk = intopt.unsort_orbitals(vk, axis=[1,2])
         vk = vk.reshape(out_shape)
+
     t1 = log.timer_debug1('vj and vk', *t1)
     if out_cupy:
         return vj, vk
@@ -400,7 +544,7 @@ def _get_jk(dfobj, dm, hermi=1, with_j=True, with_k=True,
     if key in dfobj._rsh_df:
         rsh_df = dfobj._rsh_df[key]
     else:
-        rsh_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
+        rsh_df = dfobj._rsh_df[key] = dfobj.copy().reset()
         logger.info(dfobj, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
 
     with rsh_df.mol.with_range_coulomb(omega):
@@ -414,9 +558,9 @@ def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
     j2c = dfobj.j2c
     rhoj = int3c2e.get_j_int3c2e_pass1(intopt, dm)
     if dfobj.cd_low.tag == 'eig':
-        rhoj, _, _, _ = cupy.linalg.lstsq(j2c, rhoj)
+        rhoj, _, _, _ = gpunp.linalg.lstsq(j2c, rhoj)
     else:
-        rhoj = cupy.linalg.solve(j2c, rhoj)
+        rhoj = gpunp.linalg.solve(j2c, rhoj)
 
     rhoj *= 2.0
     vj = int3c2e.get_j_int3c2e_pass2(intopt, rhoj)

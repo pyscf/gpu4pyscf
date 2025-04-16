@@ -1,17 +1,16 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import unittest
 import numpy
@@ -37,6 +36,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
     mol.basis = 'sto3g'
     mol.output = '/dev/null'
     mol.build(verbose=0)
+    # Warning: This system has all orbitals filled, which is FAR from physical
     mol.nelectron = mol.nao * 2
     epsilon = 35.9
     lebedev_order = 3
@@ -73,8 +73,8 @@ class KnownValues(unittest.TestCase):
         cm.build()
 
         dF, dA = pcm_grad.get_dF_dA(cm.surface)
-        dD, dS, dSii = pcm_grad.get_dD_dS(cm.surface, dF, with_S=True, with_D=True)
-
+        dD, dS = pcm_grad.get_dD_dS(cm.surface, with_S=True, with_D=True)
+        dSii = pcm_grad.get_dSii(cm.surface, dF)
         def get_FADS(mol):
             mol.build()
             cm = pcm.PCM(mol)
@@ -109,21 +109,21 @@ class KnownValues(unittest.TestCase):
                 dD0 = (D0 - D1)/(2.0*eps)
                 dS0 = (S0 - S1)/(2.0*eps)
 
-                assert numpy.linalg.norm(dF0 - dF[:,ia,j]) < 1e-8
-                assert numpy.linalg.norm(dA0 - dA[:,ia,j]) < 1e-8
+                assert numpy.linalg.norm(dF0 - dF[j,:,ia]) < 1e-8
+                assert numpy.linalg.norm(dA0 - dA[j,:,ia]) < 1e-8
 
                 # the diagonal entries are calcualted separately
-                assert numpy.linalg.norm(dSii[:,ia,j] - numpy.diag(dS0)) < 1e-8
+                assert numpy.linalg.norm(dSii[j,:,ia] - numpy.diag(dS0)) < 1e-8
                 numpy.fill_diagonal(dS0, 0)
 
                 dS_ia = numpy.zeros_like(dS0)
-                dS_ia[p0:p1] = dS[p0:p1,:,j]
-                dS_ia[:,p0:p1] -= dS[:,p0:p1,j]
+                dS_ia[p0:p1] = dS[j,p0:p1,:]
+                dS_ia[:,p0:p1] -= dS[j,:,p0:p1]
                 assert numpy.linalg.norm(dS0 - dS_ia) < 1e-8
 
                 dD_ia = numpy.zeros_like(dD0)
-                dD_ia[p0:p1] = dD[p0:p1,:,j]
-                dD_ia[:,p0:p1] -= dD[:,p0:p1,j]
+                dD_ia[p0:p1] = dD[j,p0:p1,:]
+                dD_ia[:,p0:p1] -= dD[j,:,p0:p1]
                 assert numpy.linalg.norm(dD0 - dD_ia) < 1e-8
 
     def test_dD_dS(self):
@@ -132,13 +132,11 @@ class KnownValues(unittest.TestCase):
         cm.method = 'IEF-PCM'
         cm.build()
 
-        dF, dA = pcm_grad.get_dF_dA(cm.surface)
-        dD0, dS0, dSii0 = pcm_grad.get_dD_dS(cm.surface, dF, with_S=True, with_D=True)
-        dD1, dS1, dSii1 = pcm_grad.get_dD_dS_slow(cm.surface, dF, with_S=True, with_D=True)
-
+        dD0, dS0 = pcm_grad.get_dD_dS(cm.surface, with_S=True, with_D=True)
+        dD1, dS1 = pcm_grad.get_dD_dS_slow(cm.surface, with_S=True, with_D=True)
+        
         assert cupy.linalg.norm(dD0 - dD1) < 1e-8
         assert cupy.linalg.norm(dS0 - dS1) < 1e-8
-        assert cupy.linalg.norm(dSii0 - dSii1) < 1e-8
 
     def test_grad_CPCM(self):
         grad = _grad_with_solvent('C-PCM')
@@ -171,11 +169,14 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_SSVPE(self):
         grad = _grad_with_solvent('SS(V)PE')
-        g0 = numpy.asarray(
-            [[ 3.42479745e-15, -1.00280742e-16, -1.61117735e+00],
-            [ 1.07135985e+00, -6.97375148e-16,  8.05588676e-01],
-            [-1.07135985e+00,  7.91425487e-16,  8.05588676e-01]]
-        )
+        # Note: This reference value is obtained via finite difference with dx = 1e-5
+        #       QChem 6.1 has a bug in SSVPE gradient, they use the IEFPCM gradient algorithm
+        #       to compute SSVPE gradient, which is wrong.
+        g0 = numpy.asarray([
+            [ 0.00000000e+00, -7.10542736e-10, -1.63195623e+00],
+            [ 1.07705138e+00,  2.13162821e-09,  8.15978117e-01],
+            [-1.07705138e+00, -2.13162821e-09,  8.15978116e-01],
+        ])
         print(f"Gradient error in RHF with SS(V)PE: {numpy.linalg.norm(g0 - grad)}")
         assert numpy.linalg.norm(g0 - grad) < 1e-6
 

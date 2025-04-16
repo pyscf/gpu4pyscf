@@ -1,115 +1,598 @@
-/* Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+/*
+ * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#endif
 
-template <int NROOTS, int GSIZE> __global__
+template <int LI, int LJ, int LK> __device__
+static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
+        double* j3, double* k3, double *g, double ak2,
+        int ish, int jsh, int ksh)
+{
+    int *ao_loc = c_bpcache.ao_loc;
+    const int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
+    const int k0 = ao_loc[ksh  ] - jk.ao_offsets_k;
+
+    constexpr int LK_CEIL = LK + 1;
+    constexpr int NROOTS = (LI+LJ+LK_CEIL)/2 + 1;
+    constexpr int nfi = (LI+1)*(LI+2)/2;
+    constexpr int nfj = (LJ+1)*(LJ+2)/2;
+    constexpr int nfk = (LK+1)*(LK+2)/2;
+
+    constexpr int di = NROOTS;
+    constexpr int dj = di * (LI + 1);
+    constexpr int dk = dj * (LJ + 1);
+    constexpr int g_size = dk * (LK_CEIL + 1);
+
+    const int nao = jk.nao;
+
+    double* __restrict__ rhoj = jk.rhoj;
+    double* __restrict__ rhok = jk.rhok;
+    double* __restrict__ dm = jk.dm;
+
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
+
+    if (rhoj == NULL){
+        for (int kp = 0; kp < nfk; ++kp) {
+        for (int jp = 0; jp < nfj; ++jp) {
+        for (int ip = 0; ip < nfi; ++ip) {
+            const int loc_k = c_l_locs[LK] + kp;
+            const int loc_j = c_l_locs[LJ] + jp;
+            const int loc_i = c_l_locs[LI] + ip;
+
+            const int k_idx = idx[loc_k];
+            const int k_idy = idy[loc_k];
+            const int k_idz = idz[loc_k];
+
+            const int ix = dk * k_idx + dj * idx[loc_j] + di * idx[loc_i];
+            const int iy = dk * k_idy + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+            const int iz = dk * k_idz + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+            double sx = 0.0;
+            double sy = 0.0;
+            double sz = 0.0;
+#pragma unroll
+            for (int ir = 0; ir < NROOTS; ++ir){
+                const double gx = g[ix+ir];
+                const double gy = g[iy+ir];
+                const double gz = g[iz+ir];
+
+                double fx = ak2*g[ix+ir+dk];
+                double fy = ak2*g[iy+ir+dk];
+                double fz = ak2*g[iz+ir+dk];
+
+                fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
+                fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
+                fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
+
+                sx += fx * gy * gz;
+                sy += gx * fy * gz;
+                sz += gx * gy * fz;
+            }
+
+            const int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
+            const double rhok_tmp = rhok[off_rhok];
+            k3[0] += sx * rhok_tmp;
+            k3[1] += sy * rhok_tmp;
+            k3[2] += sz * rhok_tmp;
+        }}}
+        return;
+    }
+
+    if (rhok == NULL){
+        for (int kp = 0; kp < nfk; ++kp) {
+            double jx = 0.0;
+            double jy = 0.0;
+            double jz = 0.0;
+
+            for (int jp = 0; jp < nfj; ++jp) {
+            for (int ip = 0; ip < nfi; ++ip) {
+                const int loc_k = c_l_locs[LK] + kp;
+                const int loc_j = c_l_locs[LJ] + jp;
+                const int loc_i = c_l_locs[LI] + ip;
+
+                const int k_idx = idx[loc_k];
+                const int k_idy = idy[loc_k];
+                const int k_idz = idz[loc_k];
+
+                const int ix = dk * k_idx + dj * idx[loc_j] + di * idx[loc_i];
+                const int iy = dk * k_idy + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+                const int iz = dk * k_idz + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+                double sx = 0.0;
+                double sy = 0.0;
+                double sz = 0.0;
+    #pragma unroll
+                for (int ir = 0; ir < NROOTS; ++ir){
+                    const double gx = g[ix+ir];
+                    const double gy = g[iy+ir];
+                    const double gz = g[iz+ir];
+
+                    double fx = ak2*g[ix+ir+dk];
+                    double fy = ak2*g[iy+ir+dk];
+                    double fz = ak2*g[iz+ir+dk];
+
+                    fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
+                    fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
+                    fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
+
+                    sx += fx * gy * gz;
+                    sy += gx * fy * gz;
+                    sz += gx * gy * fz;
+                }
+                const int off_dm = (ip+i0) + nao*(jp+j0);
+                const double dm_ij = dm[off_dm];
+                jx += dm_ij * sx;
+                jy += dm_ij * sy;
+                jz += dm_ij * sz;
+            }}
+            const double rhoj_k = rhoj[kp + k0];
+            j3[0] += jx * rhoj_k;
+            j3[1] += jy * rhoj_k;
+            j3[2] += jz * rhoj_k;
+        }
+        return;
+    }
+
+    for (int kp = 0; kp < nfk; ++kp) {
+        double jx = 0.0;
+        double jy = 0.0;
+        double jz = 0.0;
+
+        for (int jp = 0; jp < nfj; ++jp) {
+        for (int ip = 0; ip < nfi; ++ip) {
+            const int loc_k = c_l_locs[LK] + kp;
+            const int loc_j = c_l_locs[LJ] + jp;
+            const int loc_i = c_l_locs[LI] + ip;
+
+            const int k_idx = idx[loc_k];
+            const int k_idy = idy[loc_k];
+            const int k_idz = idz[loc_k];
+
+            const int ix = dk * k_idx + dj * idx[loc_j] + di * idx[loc_i];
+            const int iy = dk * k_idy + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+            const int iz = dk * k_idz + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+            double sx = 0.0;
+            double sy = 0.0;
+            double sz = 0.0;
+#pragma unroll
+            for (int ir = 0; ir < NROOTS; ++ir){
+                const double gx = g[ix+ir];
+                const double gy = g[iy+ir];
+                const double gz = g[iz+ir];
+
+                double fx = ak2*g[ix+ir+dk];
+                double fy = ak2*g[iy+ir+dk];
+                double fz = ak2*g[iz+ir+dk];
+
+                fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
+                fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
+                fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
+
+                sx += fx * gy * gz;
+                sy += gx * fy * gz;
+                sz += gx * gy * fz;
+            }
+
+            const int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
+            const double rhok_tmp = rhok[off_rhok];
+            k3[0] += sx * rhok_tmp;
+            k3[1] += sy * rhok_tmp;
+            k3[2] += sz * rhok_tmp;
+
+            const int off_dm = (i0+ip) + nao*(j0+jp);
+            const double dm_ij = dm[off_dm];
+            jx += dm_ij * sx;
+            jy += dm_ij * sy;
+            jz += dm_ij * sz;
+        }}
+
+        const double rhoj_k = rhoj[kp+k0];
+        j3[0] += jx * rhoj_k;
+        j3[1] += jy * rhoj_k;
+        j3[2] += jz * rhoj_k;
+    }
+}
+
+__device__
+static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
+    int *bas_atm = c_bpcache.bas_atm;
+    const int atm_id = bas_atm[ksh];
+    double *vj = jk.vj;
+    double *vk = jk.vk;
+
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int tx = item.get_local_id(1);
+    const int ty = item.get_local_id(0);
+    using tile_t = double[THREADSX][THREADSY];
+    tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
+    #else
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    __shared__ double sdata[THREADSX][THREADSY];
+    #endif
+
+    if (vj != NULL){
+        for (int j = 0; j < 3; j++){
+            sdata[ty][tx] = j3[j]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
+            if (tx == 0) atomicAdd(vj + 3*atm_id+j, sdata[ty][0]);
+        }
+    }
+    if (vk != NULL){
+        for (int j = 0; j < 3; j++){
+            sdata[ty][tx] = k3[j]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
+            if (tx == 0) atomicAdd(vk + 3*atm_id+j, sdata[ty][0]);
+        }
+    }
+}
+
+// Unrolled verion
+template <int LI, int LJ, int LK> __global__
 void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ntasks_kl = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         active = false;
         task_ij = 0;
         task_kl = 0;
     }
-    double norm = envs.fac;
-
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int bas_kl = offsets.bas_kl + task_kl;
+    const int nprim_ij = envs.nprim_ij;
+    const int nprim_kl = envs.nprim_kl;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int lsh = bas_pair2ket[bas_kl];
-    double* __restrict__ exp = c_bpcache.a1;
-    double g[2*GSIZE];
-    double *f = g + GSIZE;
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+    const int ksh = bas_pair2bra[bas_kl];
 
-    int ij, kl;
-    int as_ish, as_jsh, as_ksh, as_lsh;
-    if (envs.ibase) {
-        as_ish = ish;
-        as_jsh = jsh;
-    } else {
-        as_ish = jsh;
-        as_jsh = ish;
-    }
-    if (envs.kbase) {
-        as_ksh = ksh;
-        as_lsh = lsh;
-    } else {
-        as_ksh = lsh;
-        as_lsh = ksh;
-    }
+    constexpr int LK_CEIL = LK + 1;
+    constexpr int NROOTS = (LI+LJ+LK_CEIL)/2 + 1;
+    constexpr int GSIZE = 3 * NROOTS * (LI+1)*(LJ+1)*(LK_CEIL+1);
 
-    double j3[GPU_AUX_NF * 3];
-    double k3[GPU_AUX_NF * 3];
-    for (int k = 0; k < GPU_AUX_NF * 3; k++){
-        j3[k] = 0.0;
-        k3[k] = 0.0;
-    }
+    double g[GSIZE];
+
+    const int as_ish = envs.ibase ? ish: jsh;
+    const int as_jsh = envs.ibase ? jsh: ish;
+
+    double j3[3] = {0.0};
+    double k3[3] = {0.0};
+
     if (active) {
-        for (ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
-            for (kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
-            GINTg0_2e_2d4d<NROOTS>(envs, g, norm, as_ish, as_jsh, as_ksh, as_lsh, ij, kl);
-            double ak2 = -2.0*exp[kl];
-            GINTnabla1k_2e<NROOTS>(envs, f, g, ak2, envs.i_l, envs.j_l, envs.k_l);
-            GINTkernel_int3c2e_ip2_getjk_direct<NROOTS>(envs, jk, j3, k3, f, g, ish, jsh, ksh);
-            }
-        }
+        for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+        for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+            GINTg0_int3c2e<LI, LJ, LK_CEIL>(envs, g, as_ish, as_jsh, ksh, ij, kl);
+            const double ak2 = -2.0*c_bpcache.a1[kl];
+            GINTkernel_int3c2e_ip2_getjk_direct<LI, LJ, LK>(envs, jk, j3, k3, g, ak2, ish, jsh, ksh);
+        }}
     }
-
     write_int3c2e_ip2_jk(jk, j3, k3, ksh);
 }
 
+__device__
+static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
+        double* j3, double* k3, double *g, const double ak2,
+        const int ish, const int jsh, const int ksh)
+{
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int threadIdx_x = item.get_local_id(1);
+    const int blockDim_x = item.get_group_range(1);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
+    int *ao_loc = c_bpcache.ao_loc;
+    const int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
+    const int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
+    const int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
+    const int j1 = ao_loc[jsh+1] - jk.ao_offsets_j;
+    const int k0 = ao_loc[ksh  ] - jk.ao_offsets_k;
+    const int k1 = ao_loc[ksh+1] - jk.ao_offsets_k;
+    const int di = envs.stride_i;
+    const int dj = envs.stride_j;
+    const int dk = envs.stride_k;
+    const int g_size = envs.g_size;
+    const int nao = jk.nao;
+
+    double* __restrict__ rhoj = jk.rhoj;
+    double* __restrict__ rhok = jk.rhok;
+    double* __restrict__ dm = jk.dm;
+
+    const int i_l = envs.i_l;
+    const int j_l = envs.j_l;
+    const int k_l = envs.k_l;
+    const int nrys_roots = envs.nrys_roots;
+
+    int *idx = c_idx;
+    int *idy = c_idx + TOT_NF;
+    int *idz = c_idx + TOT_NF * 2;
+
+    if (rhoj == NULL){
+        for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {
+            const int kp = tx / ((j1-j0)*(i1-i0));
+            const int jp = (tx / (i1-i0)) % (j1-j0);
+            const int ip = tx % (i1-i0);
+
+            const int loc_k = c_l_locs[k_l] + kp;
+            const int loc_j = c_l_locs[j_l] + jp;
+            const int loc_i = c_l_locs[i_l] + ip;
+
+            int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+            int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+            int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+            const int k_idx = idx[loc_k];
+            const int k_idy = idy[loc_k];
+            const int k_idz = idz[loc_k];
+
+            double sx = 0.0;
+            double sy = 0.0;
+            double sz = 0.0;
+#pragma unroll
+            for (int ir = 0; ir < nrys_roots; ++ir, ++ix, ++iy, ++iz){
+                const double gx = g[ix];
+                const double gy = g[iy];
+                const double gz = g[iz];
+
+                double fx = ak2*g[ix+dk];
+                double fy = ak2*g[iy+dk];
+                double fz = ak2*g[iz+dk];
+
+                fx += k_idx>0 ? k_idx*g[ix-dk] : 0.0;
+                fy += k_idy>0 ? k_idy*g[iy-dk] : 0.0;
+                fz += k_idz>0 ? k_idz*g[iz-dk] : 0.0;
+
+                sx += fx * gy * gz;
+                sy += gx * fy * gz;
+                sz += gx * gy * fz;
+            }
+
+            const int off_rhok = (ip+i0) + nao*(jp+j0) + (kp+k0)*nao*nao;
+            const double rhok_tmp = rhok[off_rhok];
+            k3[0] += sx * rhok_tmp;
+            k3[1] += sy * rhok_tmp;
+            k3[2] += sz * rhok_tmp;
+        }
+        return;
+    }
+
+    if (rhok == NULL){
+        for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {
+            const int kp = tx / ((j1-j0)*(i1-i0));
+            const int jp = (tx / (i1-i0)) % (j1-j0);
+            const int ip = tx % (i1-i0);
+
+            const int loc_k = c_l_locs[k_l] + kp;
+            const int loc_j = c_l_locs[j_l] + jp;
+            const int loc_i = c_l_locs[i_l] + ip;
+
+            const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+            const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+            const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+            const int k_idx = idx[loc_k];
+            const int k_idy = idy[loc_k];
+            const int k_idz = idz[loc_k];
+
+            double sx = 0.0;
+            double sy = 0.0;
+            double sz = 0.0;
+#pragma unroll
+            for (int ir = 0; ir < nrys_roots; ++ir){
+                const double gx = g[ix+ir];
+                const double gy = g[iy+ir];
+                const double gz = g[iz+ir];
+
+                double fx = ak2*g[ix+ir+dk];
+                double fy = ak2*g[iy+ir+dk];
+                double fz = ak2*g[iz+ir+dk];
+
+                fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
+                fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
+                fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
+
+                sx += fx * gy * gz;
+                sy += gx * fy * gz;
+                sz += gx * gy * fz;
+            }
+            const int off_dm = (ip+i0) + nao*(jp+j0);
+            const double dm_rhoj = dm[off_dm] * rhoj[kp + k0];
+            j3[0] += dm_rhoj * sx;
+            j3[1] += dm_rhoj * sy;
+            j3[2] += dm_rhoj * sz;
+        }
+        return;
+    }
+
+    for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {
+        const int kp = tx / ((j1-j0)*(i1-i0));
+        const int jp = (tx / (i1-i0)) % (j1-j0);
+        const int ip = tx % (i1-i0);
+
+        const int loc_k = c_l_locs[k_l] + kp;
+        const int loc_j = c_l_locs[j_l] + jp;
+        const int loc_i = c_l_locs[i_l] + ip;
+
+        const int ix = dk * idx[loc_k] + dj * idx[loc_j] + di * idx[loc_i];
+        const int iy = dk * idy[loc_k] + dj * idy[loc_j] + di * idy[loc_i] + g_size;
+        const int iz = dk * idz[loc_k] + dj * idz[loc_j] + di * idz[loc_i] + g_size * 2;
+
+        const int k_idx = idx[loc_k];
+        const int k_idy = idy[loc_k];
+        const int k_idz = idz[loc_k];
+
+        double sx = 0.0;
+        double sy = 0.0;
+        double sz = 0.0;
+#pragma unroll
+        for (int ir = 0; ir < nrys_roots; ++ir){
+            const double gx = g[ix+ir];
+            const double gy = g[iy+ir];
+            const double gz = g[iz+ir];
+
+            double fx = ak2*g[ix+ir+dk];
+            double fy = ak2*g[iy+ir+dk];
+            double fz = ak2*g[iz+ir+dk];
+
+            fx += k_idx>0 ? k_idx*g[ix+ir-dk] : 0.0;
+            fy += k_idy>0 ? k_idy*g[iy+ir-dk] : 0.0;
+            fz += k_idz>0 ? k_idz*g[iz+ir-dk] : 0.0;
+
+            sx += fx * gy * gz;
+            sy += gx * fy * gz;
+            sz += gx * gy * fz;
+        }
+
+        const int off_rhok = (i0+ip) + nao*(j0+jp) + (k0+kp)*nao*nao;
+        const double rhok_tmp = rhok[off_rhok];
+        k3[0] += sx * rhok_tmp;
+        k3[1] += sy * rhok_tmp;
+        k3[2] += sz * rhok_tmp;
+
+        const int off_dm = (i0+ip) + nao*(jp+j0);
+        const double dm_rhoj = dm[off_dm] * rhoj[k0+kp];
+        j3[0] += dm_rhoj * sx;
+        j3[1] += dm_rhoj * sy;
+        j3[2] += dm_rhoj * sz;
+    }
+}
+
+
+// General version
+__global__
+void GINTint3c2e_ip2_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
+#ifdef USE_SYCL
+				       , sycl::nd_item<2> &item, sycl::decorated_local_ptr<double> g
+#endif
+    )
+{
+    #ifdef USE_SYCL
+    const int task_ij = item.get_group(1);
+    const int task_kl = item.get_group(0);
+    #else
+    const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
+    extern __shared__ double g[];
+    #endif
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int bas_kl = offsets.bas_kl + task_kl;
+    const int nprim_ij = envs.nprim_ij;
+    const int nprim_kl = envs.nprim_kl;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+    int *bas_pair2bra = c_bpcache.bas_pair2bra;
+    int *bas_pair2ket = c_bpcache.bas_pair2ket;
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+    const int ksh = bas_pair2bra[bas_kl];
+
+    const int as_ish = envs.ibase ? ish: jsh;
+    const int as_jsh = envs.ibase ? jsh: ish;
+
+    double j3[3] = {0.0};
+    double k3[3] = {0.0};
+
+    for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
+    for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
+        GINTg0_int3c2e_shared(envs, g, as_ish, as_jsh, ksh, ij, kl);
+        const double ak2 = -2.0* c_bpcache.a1[kl];
+        GINTkernel_int3c2e_ip2_getjk_direct(envs, jk, j3, k3, g, ak2, ish, jsh, ksh);
+    }}
+
+    constexpr int nthreads = THREADSX * THREADSY;
+    int *bas_atm = c_bpcache.bas_atm;
+    const int atm_id = bas_atm[ksh];
+    if (jk.vj != NULL){
+        block_reduce<nthreads>(jk.vj+3*atm_id,   j3[0]);
+        block_reduce<nthreads>(jk.vj+3*atm_id+1, j3[1]);
+        block_reduce<nthreads>(jk.vj+3*atm_id+2, j3[2]);
+    }
+    if (jk.vk != NULL){
+        block_reduce<nthreads>(jk.vk+3*atm_id,   k3[0]);
+        block_reduce<nthreads>(jk.vk+3*atm_id+1, k3[1]);
+        block_reduce<nthreads>(jk.vk+3*atm_id+2, k3[2]);
+    }
+}
 
 __global__
-static void GINTrun_int3c2e_ip2_jk_kernel0010(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
-    int ntasks_ij = offsets.ntasks_ij;
-    int ntasks_kl = offsets.ntasks_kl;
-    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    const int ntasks_ij = offsets.ntasks_ij;
+    const int ntasks_kl = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int task_kl = item.get_global_id(0);
+    const int tx = item.get_local_id(1);
+    const int ty = item.get_local_id(0);
+    using tile_t = double[THREADSX][THREADSY];
+    tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
+    #else
+    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    __shared__ double sdata[THREADSX][THREADSY];
+    #endif
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
         active = false;
         task_ij = 0;
         task_kl = 0;
     }
-    int bas_ij = offsets.bas_ij + task_ij;
-    int bas_kl = offsets.bas_kl + task_kl;
-    double norm = envs.fac;
-    double omega = envs.omega;
+    const int bas_ij = offsets.bas_ij + task_ij;
+    const int bas_kl = offsets.bas_kl + task_kl;
+    const double norm = envs.fac;
+    const double omega = envs.omega;
     int *bas_pair2bra = c_bpcache.bas_pair2bra;
     int *bas_pair2ket = c_bpcache.bas_pair2ket;
-    int ish = bas_pair2bra[bas_ij];
-    int jsh = bas_pair2ket[bas_ij];
-    int ksh = bas_pair2bra[bas_kl];
-    int nprim_ij = envs.nprim_ij;
-    int nprim_kl = envs.nprim_kl;
-    int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
-    int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
+    const int ish = bas_pair2bra[bas_ij];
+    const int jsh = bas_pair2ket[bas_ij];
+    const int ksh = bas_pair2bra[bas_kl];
+    const int nprim_ij = envs.nprim_ij;
+    const int nprim_kl = envs.nprim_kl;
+    const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;
+    const int prim_kl = offsets.primitive_kl + task_kl * nprim_kl;
     double* __restrict__ a12 = c_bpcache.a12;
     double* __restrict__ e12 = c_bpcache.e12;
     double* __restrict__ x12 = c_bpcache.x12;
@@ -118,76 +601,68 @@ static void GINTrun_int3c2e_ip2_jk_kernel0010(GINTEnvVars envs, JKMatrix jk, Bas
     double* __restrict__ a1 = c_bpcache.a1;
     int ij, kl;
     int prim_ij0, prim_ij1, prim_kl0, prim_kl1;
-    int nbas = c_bpcache.nbas;
-    double* __restrict__ bas_x = c_bpcache.bas_coords;
-    double* __restrict__ bas_y = bas_x + nbas;
-    double* __restrict__ bas_z = bas_y + nbas;
 
     double gout0 = 0;
     double gout1 = 0;
     double gout2 = 0;
-    double xk = bas_x[ksh];
-    double yk = bas_y[ksh];
-    double zk = bas_z[ksh];
+
     prim_ij0 = prim_ij;
     prim_ij1 = prim_ij + nprim_ij;
     prim_kl0 = prim_kl;
     prim_kl1 = prim_kl + nprim_kl;
     for (ij = prim_ij0; ij < prim_ij1; ++ij) {
     for (kl = prim_kl0; kl < prim_kl1; ++kl) {
-        double ak2 = -2.0*a1[kl];
-        double aij = a12[ij];
-        double eij = e12[ij];
-        double xij = x12[ij];
-        double yij = y12[ij];
-        double zij = z12[ij];
-        double akl = a12[kl];
-        double ekl = e12[kl];
-        double xkl = x12[kl];
-        double ykl = y12[kl];
-        double zkl = z12[kl];
-        double xijxkl = xij - xkl;
-        double yijykl = yij - ykl;
-        double zijzkl = zij - zkl;
-        double aijkl = aij + akl;
-        double a1 = aij * akl;
+        const double ak2 = -2.0*a1[kl];
+        const double aij = a12[ij];
+        const double eij = e12[ij];
+        const double xij = x12[ij];
+        const double yij = y12[ij];
+        const double zij = z12[ij];
+        const double akl = a12[kl];
+        const double ekl = e12[kl];
+        const double xkl = x12[kl];
+        const double ykl = y12[kl];
+        const double zkl = z12[kl];
+        const double xijxkl = xij - xkl;
+        const double yijykl = yij - ykl;
+        const double zijzkl = zij - zkl;
+        const double aijkl = aij + akl;
+        const double a1 = aij * akl;
         double a0 = a1 / aijkl;
-        double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
+        const double theta = omega > 0.0 ? omega * omega / (omega * omega + a0) : 1.0;
         a0 *= theta;
-        double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
-        double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
+        const double x = a0 * (xijxkl * xijxkl + yijykl * yijykl + zijzkl * zijzkl);
+        const double fac = norm * eij * ekl * sqrt(a0 / (a1 * a1 * a1));
         double root0, weight0;
         if (x < 3.e-7) {
             root0 = 0.5;
             weight0 = 1.;
         } else {
-            double tt = sqrt(x);
-            double fmt0 = SQRTPIE4 / tt * erf(tt);
+            const double tt = sqrt(x);
+            const double fmt0 = SQRTPIE4 / tt * erf(tt);
             weight0 = fmt0;
-            double e = exp(-x);
-            double b = .5 / x;
-            double fmt1 = b * (fmt0 - e);
+            const double e = exp(-x);
+            const double b = .5 / x;
+            const double fmt1 = b * (fmt0 - e);
             root0 = fmt1 / (fmt0 - fmt1);
         }
         root0 /= root0 + 1 - root0 * theta;
-        double u2 = a0 * root0;
-        double tmp4 = .5 / (u2 * aijkl + a1);
-        double b00 = u2 * tmp4;
-        double tmp1 = 2 * b00;
-        double tmp3 = tmp1 * aij;
-        double c0px = xkl - xk + tmp3 * xijxkl;
-        double c0py = ykl - yk + tmp3 * yijykl;
-        double c0pz = zkl - zk + tmp3 * zijzkl;
-        double g_0 = 1;
-        double g_1 = c0px;
-        double g_2 = 1;
-        double g_3 = c0py;
-        double g_4 = weight0 * fac;
-        double g_5 = c0pz * g_4;
+        const double u2 = a0 * root0;
+        const double tmp1 = u2 / (u2 * aijkl + a1);
+        const double tmp3 = tmp1 * aij;
+        const double c0px = tmp3 * xijxkl;
+        const double c0py = tmp3 * yijykl;
+        const double c0pz = tmp3 * zijzkl;
+        const double g_0 = 1;
+        const double g_1 = c0px;
+        const double g_2 = 1;
+        const double g_3 = c0py;
+        const double g_4 = weight0 * fac;
+        const double g_5 = c0pz * g_4;
 
-        double f_1 = ak2 * g_1;
-        double f_3 = ak2 * g_3;
-        double f_5 = ak2 * g_5;
+        const double f_1 = ak2 * g_1;
+        const double f_3 = ak2 * g_3;
+        const double f_5 = ak2 * g_5;
 
         gout0 += f_1 * g_2 * g_4;
         gout1 += g_0 * f_3 * g_4;
@@ -196,57 +671,53 @@ static void GINTrun_int3c2e_ip2_jk_kernel0010(GINTEnvVars envs, JKMatrix jk, Bas
     } }
 
     int *ao_loc = c_bpcache.ao_loc;
-    int i0 = ao_loc[ish] - jk.ao_offsets_i;
-    int j0 = ao_loc[jsh] - jk.ao_offsets_j;
-    int k0 = ao_loc[ksh] - jk.ao_offsets_k;
+    const int i0 = ao_loc[ish] - jk.ao_offsets_i;
+    const int j0 = ao_loc[jsh] - jk.ao_offsets_j;
+    const int k0 = ao_loc[ksh] - jk.ao_offsets_k;
 
-    int nao = jk.nao;
-    int naux = jk.naux;
+    const int nao = jk.nao;
     double* __restrict__ dm = jk.dm;
     double* __restrict__ rhok = jk.rhok;
     double* __restrict__ rhoj = jk.rhoj;
     double* __restrict__ vj = jk.vj;
     double* __restrict__ vk = jk.vk;
 
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
-    __shared__ double sdata[THREADSX][THREADSY];
     if (!active){
         gout0 = 0.0; gout1 = 0.0; gout2 = 0.0;
     }
+    int *bas_atm = c_bpcache.bas_atm;
+    const int atm_id = bas_atm[ksh];
     if (vj != NULL){
-        double rhoj_tmp;
-        int off_dm = i0 + nao*j0;
-        rhoj_tmp = dm[off_dm] * rhoj[k0];
+        const int off_dm = i0 + nao*j0;
+        const double rhoj_tmp = dm[off_dm] * rhoj[k0];
         double vj_tmp[3];
         vj_tmp[0] = gout0 * rhoj_tmp;
         vj_tmp[1] = gout1 * rhoj_tmp;
         vj_tmp[2] = gout2 * rhoj_tmp;
         for (int j = 0; j < 3; j++){
-            sdata[tx][ty] = vj_tmp[j]; __syncthreads();
-            if(tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
-            if(tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
-            if(tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
-            if(tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
-            if (tx == 0) atomicAdd(vj+k0+j*naux, sdata[0][ty]);
+            sdata[ty][tx] = vj_tmp[j]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
+            if (tx == 0) atomicAdd(vj + 3*atm_id+j, sdata[ty][0]);
         }
     }
 
     if (vk != NULL){
-        double rhok_tmp;
         int off_rhok = i0 + nao*j0 + k0*nao*nao;
-        rhok_tmp = rhok[off_rhok];
+        double rhok_tmp = rhok[off_rhok];
         double vk_tmp[3];
         vk_tmp[0] = gout0 * rhok_tmp;
         vk_tmp[1] = gout1 * rhok_tmp;
         vk_tmp[2] = gout2 * rhok_tmp;
         for (int j = 0; j < 3; j++){
-            sdata[tx][ty] = vk_tmp[j]; __syncthreads();
-            if(tx<8) sdata[tx][ty] += sdata[tx+8][ty]; __syncthreads();
-            if(tx<4) sdata[tx][ty] += sdata[tx+4][ty]; __syncthreads();
-            if(tx<2) sdata[tx][ty] += sdata[tx+2][ty]; __syncthreads();
-            if(tx<1) sdata[tx][ty] += sdata[tx+1][ty]; __syncthreads();
-            if (tx == 0) atomicAdd(vk+k0+j*naux, sdata[0][ty]);
+            sdata[ty][tx] = vk_tmp[j]; __syncthreads();
+            if(THREADSX >= 16 && tx<8) sdata[ty][tx] += sdata[ty][tx+8]; __syncthreads();
+            if(THREADSX >= 8  && tx<4) sdata[ty][tx] += sdata[ty][tx+4]; __syncthreads();
+            if(THREADSX >= 4  && tx<2) sdata[ty][tx] += sdata[ty][tx+2]; __syncthreads();
+            if(THREADSX >= 2  && tx<1) sdata[ty][tx] += sdata[ty][tx+1]; __syncthreads();
+            if (tx == 0) atomicAdd(vk + 3*atm_id+j, sdata[ty][0]);
         }
     }
 }

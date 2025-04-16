@@ -1,17 +1,17 @@
-# Copyright 2023 The GPU4PySCF Authors. All Rights Reserved.
+#!/usr/bin/env python
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 #########################################################
 #  Example of calculating Electrostatic potential (ESP)
@@ -21,6 +21,7 @@ import pyscf
 import numpy as np
 from pyscf import gto
 from gpu4pyscf.dft import rks
+from gpu4pyscf.gto.int3c1e import int1e_grids
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -33,10 +34,8 @@ mf = rks.RKS(mol, xc='B3LYP').density_fit()
 mf.kernel()
 dm = mf.make_rdm1()  # compute one-electron density matrix
 
-# Use default mesh grids
-coords = mf.grids.coords.get()
+# Use default Lebedev grids
+coords = mf.grids.coords
 
-# The efficiency can be improved if needed
-from pyscf import df
-fakemol = gto.fakemol_for_charges(coords)
-v = np.einsum('ijp,ij->p', df.incore.aux_e2(mol, fakemol), dm)
+# Calculate electrostatic potential
+v = int1e_grids(mol, coords, dm=dm) # performing 'ijp,ij->p' efficiently
