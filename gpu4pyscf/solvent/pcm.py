@@ -245,7 +245,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v', 'v_grids_n', 'state_specific', 'dm_prev'
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -264,8 +264,6 @@ class PCM(lib.StreamObject):
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
-        self.state_specific = False
-        self.dm_prev = None
 
         self.max_cycle = 20
         self.conv_tol = 1e-7
@@ -388,26 +386,12 @@ class PCM(lib.StreamObject):
         v_grids_e = self._get_v(dms)
         v_grids = self.v_grids_n - v_grids_e
 
-        if self.dm_prev is not None:
-            if not isinstance(self.dm_prev, cupy.ndarray):
-                self.dm_prev = cupy.asarray(self.dm_prev)
-            self.dm_prev = self.dm_prev.reshape(-1,nao,nao)
-            if self.dm_prev.shape[0] == 2:
-                self.dm_prev = (self.dm_prev[0] + self.dm_prev[1]).reshape(-1,nao,nao)
-            v_grids_e_prev = self._get_v(self.dm_prev)
-            vgrids_prev = self.v_grids_n - v_grids_e_prev
-            b = self.left_multiply_R(vgrids_prev.T)
-            q = self.left_solve_K(b).T
-            vK_1 = self.left_solve_K(vgrids_prev.T, K_transpose = True)
-            qt = self.left_multiply_R(vK_1, R_transpose = True).T
-            q_sym = (q + qt)/2.0
-        else:
-            b = self.left_multiply_R(v_grids.T)
-            q = self.left_solve_K(b).T
+        b = self.left_multiply_R(v_grids.T)
+        q = self.left_solve_K(b).T
 
-            vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
-            qt = self.left_multiply_R(vK_1, R_transpose = True).T
-            q_sym = (q + qt)/2.0
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        qt = self.left_multiply_R(vK_1, R_transpose = True).T
+        q_sym = (q + qt)/2.0
         vmat = self._get_vmat(q_sym)
         epcm = 0.5 * cupy.dot(v_grids[0], q_sym[0])
 

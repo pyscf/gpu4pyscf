@@ -85,15 +85,6 @@ class SCFWithSolvent(_Solvation):
             else:
                 dm = dm_or_wfn
             with_solvent.e, with_solvent.v = with_solvent.kernel(dm)
-        else:
-            if with_solvent.state_specific:
-                if dm_or_wfn is None:
-                    dm = self.make_rdm1()
-                elif isinstance(dm_or_wfn, WaveFunction):
-                    dm = dm_or_wfn.make_rdm1()
-                else:
-                    dm = dm_or_wfn
-                # with_solvent.e, with_solvent.v = with_solvent.kernel(dm)
         e_solvent, v_solvent = with_solvent.e, with_solvent.v
         if veff.shape[-1] != v_solvent.shape[-1]:
             # lowmem mode, only lower triangular part of Fock matrix is stored
@@ -104,7 +95,7 @@ class SCFWithSolvent(_Solvation):
             veff = lib.tag_array(veff, e_solvent=e_solvent, v_solvent=v_solvent)
         else:
             veff = tag_array(veff, e_solvent=e_solvent, v_solvent=v_solvent)
-        print(f"Solvent Energy = {e_solvent}")
+        # print(f"Solvent Energy = {e_solvent}")
         return veff
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm_or_wfn=None, cycle=-1,

@@ -25,10 +25,10 @@ from gpu4pyscf import scf
 
 
 class TDPCM(PCM):
-    def __init__(self, mfpcmobj, eps_optical=1.78, equilium_solvation=False):
+    def __init__(self, mfpcmobj, eps_optical=1.78, equilibrium_solvation=False):
         self.__dict__.update(mfpcmobj.__dict__)
-        self.equilibrium_solvation = equilium_solvation
-        if not equilium_solvation:
+        self.equilibrium_solvation = equilibrium_solvation
+        if not equilibrium_solvation:
             self.eps = eps_optical
         
 
@@ -105,11 +105,7 @@ class WithSolventTDSCF:
         return obj
 
     def kernel(self, *args, **kwargs):
-        pcmobj = self._scf.with_solvent
-        if pcmobj.state_specific:
-            return super().kernel(*args, **kwargs)
-        else:
-            return super().kernel(*args, **kwargs)
+        super().kernel(*args, **kwargs)
     
     def _finalize(self):
         super()._finalize()
