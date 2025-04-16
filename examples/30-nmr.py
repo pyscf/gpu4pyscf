@@ -14,12 +14,12 @@
 # limitations under the License.
 
 ###################################
-#  Example of Polarizability
+#  Example of NMR shielding constant
 ###################################
 
 import pyscf
 from gpu4pyscf.dft import rks
-from gpu4pyscf.properties import polarizability
+from gpu4pyscf.properties import shielding
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -36,11 +36,13 @@ mol.build()
 mf = rks.RKS(mol, xc='b3lyp')
 mf.grids.level = grids_level
 e_gpu = mf.kernel() # -76.3849465946694
-polar_gpu = polarizability.eval_polarizability(mf)
-print('------------------- Polarizability -----------------------------')
-print(polar_gpu)
+msc_d, msc_p = shielding.eval_shielding(mf)
+msc = (msc_d + msc_p).get()
+print('------------------- NMR shielding constant -----------------------------')
+for i in range(mol.natm):
+    print(f"Isotropic NMR shielding constant for {i}-th atom is {msc[i].trace()/3:.4f}")
 """
-[[ 6.96412939e+00  8.89901195e-16  1.41475771e-13]
- [ 8.89901195e-16  1.48264173e+00 -2.84030606e-14]
- [ 1.41475771e-13 -2.84030606e-14  4.81230456e+00]]
+Isotropic NMR shielding constant for 0-th atom is 318.1915
+Isotropic NMR shielding constant for 1-th atom is 33.0777
+Isotropic NMR shielding constant for 2-th atom is 33.0777
 """

@@ -14,12 +14,12 @@
 # limitations under the License.
 
 ###################################
-#  Example of Polarizability
+#  Example of IR intensity
 ###################################
 
 import pyscf
 from gpu4pyscf.dft import rks
-from gpu4pyscf.properties import polarizability
+from gpu4pyscf.properties import ir
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -36,11 +36,14 @@ mol.build()
 mf = rks.RKS(mol, xc='b3lyp')
 mf.grids.level = grids_level
 e_gpu = mf.kernel() # -76.3849465946694
-polar_gpu = polarizability.eval_polarizability(mf)
-print('------------------- Polarizability -----------------------------')
-print(polar_gpu)
+
+h = mf.Hessian()
+freq, intensity = ir.eval_ir_freq_intensity(mf, h)
+print('------------------- IR frequncy and intensity -----------------------------')
+for i in range(freq.shape[0]):
+    print(f"IR frequency|intensity for {i}-th mode is {freq[i]:.4f}|{intensity[i]:.4f}")
 """
-[[ 6.96412939e+00  8.89901195e-16  1.41475771e-13]
- [ 8.89901195e-16  1.48264173e+00 -2.84030606e-14]
- [ 1.41475771e-13 -2.84030606e-14  4.81230456e+00]]
+IR frequency|intensity for 0-th mode is 1613.0983|62.3589
+IR frequency|intensity for 1-th mode is 3874.9470|3.8058
+IR frequency|intensity for 2-th mode is 4006.0074|5.0657
 """
