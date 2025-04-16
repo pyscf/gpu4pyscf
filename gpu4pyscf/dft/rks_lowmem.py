@@ -22,7 +22,8 @@ from pyscf import lib as pyscf_lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf import hf_lowmem, jk
-from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import (
+    tag_array, pack_tril, get_avail_mem, asarray)
 from pyscf import __config__
 
 __all__ = [
@@ -124,7 +125,7 @@ class RKS(rks.RKS):
             if isinstance(vj_last, cp.ndarray):
                 vj += vj_last
             else:
-                vj += cp.asarray(vj_last)
+                vj += asarray(vj_last)
         vxc += vj
         vj = vj.get()
 
@@ -154,7 +155,7 @@ class RKS(rks.RKS):
                 if isinstance(vk_last, cp.ndarray):
                     vk += vk_last
                 else:
-                    vk += cp.asarray(vk_last)
+                    vk += asarray(vk_last)
             vxc -= vk
             vk = vk.get()
 
@@ -198,8 +199,8 @@ def initialize_grids(ks, mol=None, dm_or_wfn=None):
         t0 = logger.init_timer(ks)
         ks.grids.build()
         #ks.grids.build(with_non0tab=True)
-        ks.grids.weights = cp.asarray(ks.grids.weights)
-        ks.grids.coords = cp.asarray(ks.grids.coords)
+        ks.grids.weights = asarray(ks.grids.weights)
+        ks.grids.coords = asarray(ks.grids.coords)
         if ks.small_rho_cutoff > 1e-20:
             # Filter grids the first time setup grids
             ks.grids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.grids)
@@ -210,8 +211,8 @@ def initialize_grids(ks, mol=None, dm_or_wfn=None):
                 t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build()
-                ks.nlcgrids.weights = cp.asarray(ks.nlcgrids.weights)
-                ks.nlcgrids.coords = cp.asarray(ks.nlcgrids.coords)
+                ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
+                ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
                 if ks.small_rho_cutoff > 1e-20:
                     # Filter grids the first time setup grids
                     ks.nlcgrids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.nlcgrids)

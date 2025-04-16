@@ -27,7 +27,8 @@ import pyscf.scf.diis as cpu_diis
 import gpu4pyscf.lib as lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, eigh, sandwich_dot, pack_tril, unpack_tril, get_avail_mem)
+    contract, eigh, sandwich_dot, pack_tril, unpack_tril, get_avail_mem,
+    asarray)
 
 # J. Mol. Struct. 114, 31-34 (1984); DOI:10.1016/S0022-2860(84)87198-7
 # PCCP, 4, 11 (2002); DOI:10.1039/B108658H
@@ -85,7 +86,7 @@ class CDIIS(lib.diis.DIIS):
                     self.Corth = cp.empty_like(s)
                     for k, (fk, sk) in enumerate(zip(f[0], s)):
                         self.Corth[k] = eigh(fk, sk)[1]
-                Corth = cp.asarray(self.Corth)
+                Corth = asarray(self.Corth)
                 sdf = cp.empty_like(f)
                 tmp = None
                 tmp = contract('Kij,Kjk->Kik', d[0], f[0], out=tmp)
@@ -113,7 +114,7 @@ class CDIIS(lib.diis.DIIS):
                         self.Corth[k] = eigh(fk, sk)[1]
                 sd = contract('Kij,Kjk->Kik', s, d)
                 sdf = contract('Kij,Kjk->Kik', sd, f)
-                Corth = cp.asarray(self.Corth)
+                Corth = asarray(self.Corth)
                 sdf = contract('Kpq,Kqj->Kpj', sdf, Corth)
                 sdf = contract('Kpj,Kpi->Kij', sdf, Corth.conj())
                 errvec = sdf - sdf.conj().transpose(0,2,1)
