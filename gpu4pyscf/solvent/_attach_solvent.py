@@ -141,26 +141,30 @@ class SCFWithSolvent(_Solvation):
     def TDA(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
-        tda_method = super().TDA()
-        return self.with_solvent.TDA(tda_method, eps_optical, equilibrium_solvation, linear_response)
+        td = super().TDA()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
 
     def TDDFT(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
-        tda_method = super().TDDFT()
-        return self.with_solvent.TDDFT(tda_method, eps_optical, equilibrium_solvation, linear_response)
+        td = super().TDDFT()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
     
     def TDHF(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
-        tda_method = super().TDHF()
-        return self.with_solvent.TDHF(tda_method, eps_optical, equilibrium_solvation, linear_response)
+        td = super().TDHF()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
     
     def CasidaTDDFT(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
-        tda_method = super().CasidaTDDFT()
-        return self.with_solvent.CasidaTDDFT(tda_method, eps_optical, equilibrium_solvation, linear_response)
+        td = super().CasidaTDDFT()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
 
     Gradients = nuc_grad_method
 
@@ -178,8 +182,8 @@ class SCFWithSolvent(_Solvation):
             v = vind(dm1)
             if self.with_solvent.equilibrium_solvation:
                 if is_uhf:
-                    v_solvent = self.with_solvent._B_dot_x(dm1)
-                    v += v_solvent[0] + v_solvent[1]
+                    v_solvent = self.with_solvent._B_dot_x(dm1[0]+dm1[1])
+                    v += v_solvent
                 elif singlet:
                     v += self.with_solvent._B_dot_x(dm1)
             return v

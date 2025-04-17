@@ -32,7 +32,7 @@ class TDPCM(PCM):
             self.eps = eps_optical
         
 
-def make_tdscf_object(tda_method, eps_optical=1.78, equilibrium_solvation=False, linear_response=True):
+def make_tdscf_object(tda_method, equilibrium_solvation=False, eps_optical=1.78):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
@@ -89,10 +89,16 @@ class WithSolventTDSCF:
             v = vind(dm1)
             if self.linear_response:
                 if is_uhf:
-                    v_solvent = pcmobj._B_dot_x(dm1)
-                    v += v_solvent[0] + v_solvent[1]
+                    v_solvent = pcmobj._B_dot_x(dm1[0]+dm1[1])
+                if self._scf.with_solvent.equilibrium_solvation:
+                    pass
+                else:
+                        v += v_solvent
                 elif singlet:
-                    v += pcmobj._B_dot_x(dm1)
+                if self._scf.with_solvent.equilibrium_solvation:
+                    pass
+                else:
+                        v += pcmobj._B_dot_x(dm1)
                 else:
                     logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
             return v     
