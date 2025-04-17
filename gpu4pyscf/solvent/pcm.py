@@ -467,22 +467,6 @@ class PCM(lib.StreamObject):
             return pcm_grad.make_grad_object(grad_method)
         else:
             raise RuntimeError('Only SCF gradient is supported')
-        
-    def TDA(self, td, equilibrium_solvation=False, eps_optical=1.78):
-        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-    
-    def TDHF(self, td, equilibrium_solvation=False, eps_optical=1.78):
-        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-    
-    def TDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
-        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-    
-    def CasidaTDDFT(self, td, equilibrium_solvation=False, eps_optical=1.78):
-        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
 
     def Hessian(self, hess_method):
         from gpu4pyscf.solvent.hessian import pcm as pcm_hess
