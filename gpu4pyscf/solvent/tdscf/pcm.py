@@ -68,6 +68,7 @@ class WithSolventTDSCF:
         # singlet=None is orbital hessian or CPHF type response function
         singlet = kwargs.get('singlet', True)
         singlet = singlet or singlet is None
+        assert not self._scf.with_solvent.equilibrium_solvation
         def vind_with_solvent(dm1):
             v = vind(dm1)
             if self.linear_response:
@@ -79,7 +80,7 @@ class WithSolventTDSCF:
                     if not self._scf.with_solvent.equilibrium_solvation:
                         v += pcmobj._B_dot_x(dm1)
                 else:
-                    logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
+                    logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')   
             return v     
         return vind_with_solvent
 

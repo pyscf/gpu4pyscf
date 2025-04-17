@@ -143,7 +143,7 @@ class SCFWithSolvent(_Solvation):
             raise ValueError('equilibrium_solvation must be specified')
         td = super().TDA()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical, linear_response)
 
     def TDDFT(self, equilibrium_solvation=None, eps_optical=1.78, linear_response=True):
         if equilibrium_solvation is None:
