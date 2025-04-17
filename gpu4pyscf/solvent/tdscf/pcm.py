@@ -32,7 +32,7 @@ class TDPCM(PCM):
             self.eps = eps_optical
         
 
-def make_tdscf_object(tda_method, equilibrium_solvation=False, eps_optical=1.78):
+def make_tdscf_object(tda_method, equilibrium_solvation=False, eps_optical=1.78, linear_response=True):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
@@ -46,23 +46,6 @@ def make_tdscf_gradient_object(tda_grad_method):
             + tda_grad_method.__class__.__name__)
     return lib.set_class(WithSolventTDSCFGradient(tda_grad_method),
                          (WithSolventTDSCFGradient, tda_grad_method.__class__), name)
-
-
-
-# def add_prefix(prefix):  
-#     def decorator(func): 
-#         def wrapper(*args, ​**kwargs):  
-#             original_result = func(*args, **kwargs)  
-#             return f"[{prefix}] {original_result}"  
-#         return wrapper
-#     return decorator
-
-
-# def state_specific(td, x0=None, nstates=None):
-#     td.kernel(x0=x0, nstates=nstates)
-#     for icyc in range(50):
-#         pass
-    # A.a = decorator(A.a)
 
 
 class WithSolventTDSCF:
