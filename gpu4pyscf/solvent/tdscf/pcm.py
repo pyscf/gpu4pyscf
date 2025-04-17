@@ -90,14 +90,10 @@ class WithSolventTDSCF:
             if self.linear_response:
                 if is_uhf:
                     v_solvent = pcmobj._B_dot_x(dm1[0]+dm1[1])
-                if self._scf.with_solvent.equilibrium_solvation:
-                    pass
-                else:
+                    if not self._scf.with_solvent.equilibrium_solvation:
                         v += v_solvent
                 elif singlet:
-                if self._scf.with_solvent.equilibrium_solvation:
-                    pass
-                else:
+                    if not self._scf.with_solvent.equilibrium_solvation:
                         v += pcmobj._B_dot_x(dm1)
                 else:
                     logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
