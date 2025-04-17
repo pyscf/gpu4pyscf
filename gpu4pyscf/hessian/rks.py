@@ -33,6 +33,9 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.hessian import jk
 from gpu4pyscf.lib.cupy_helper import tag_array
+import ctypes
+
+libgdft = numint.libgdft
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -908,13 +911,7 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     t0 = log.timer_debug1('nr_rks_fxc', *t0)
     return cupy.asarray(vmat)
 
-def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
-    """
-        mo_coeff, mo_occ, together with mocc, dm0 in the following code, are 0-th order
-        dm1s is first order
-
-        TODO: check the effect of different grid, using mf.nlcgrids right now
-    """
+def nr_rks_fnlc_mo_numerical(mf, mol, mo_coeff, mo_occ, dm1s):
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = 2 * mocc @ mocc.T
 
@@ -941,7 +938,180 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
 
             orbital_hessian[i,j,:,:] = (vnlc_p - vnlc_m) / (2 * dx)
 
-    vmat = cupy.einsum("ijkl,dij->dkl", orbital_hessian, dm1s)
+    vmat = cupy.einsum("ijkl,dlk->dij", orbital_hessian, dm1s)
+    # vmat = jk._ao2mo(vmat, mocc, mo_coeff)
+    return vmat
+
+def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
+    """
+        Equation notation follows:
+        Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
+        VV10-containing density functionals: Theory, efficient implementation, and
+        benchmark assessments. J Chem Phys. 2023 May 28;158(20):204109. doi: 10.1063/5.0152838.
+
+        mo_coeff, mo_occ are 0-th order
+        dm1s is first order
+
+        TODO: check the effect of different grid, using mf.nlcgrids right now
+    """
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = 2 * mocc @ mocc.T
+
+    grids = mf.nlcgrids
+    grids.coords = cupy.ascontiguousarray(grids.coords)
+    ngrids = grids.weights.shape[0]
+    nao = mol.nao
+
+    n_dm1 = dm1s.shape[0]
+    vmat = cupy.empty([n_dm1, nao, nao])
+
+    ni = mf._numint
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+    _sorted_mol = opt._sorted_mol
+
+    if ni.libxc.is_nlc(mf.xc):
+        xc_code = mf.xc
+    else:
+        xc_code = mf.nlc
+    nlc_coefs = ni.nlc_coeff(xc_code)
+    if len(nlc_coefs) != 1:
+        raise NotImplementedError('Additive NLC')
+    nlc_pars, fac = nlc_coefs[0]
+
+    kappa_prefactor = nlc_pars[0] * 1.5 * numpy.pi * (9 * numpy.pi)**(-1.0/6.0)
+    C_in_omega = nlc_pars[1]
+
+    with opt.gdft_envs_cache():
+        ao = ni.eval_ao(_sorted_mol, grids.coords, deriv = 1, gdftopt = opt, transpose = False)
+        rho_gamma = numint.eval_rho(_sorted_mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+
+        rho_i = rho_gamma[0,:]
+        gamma_i = rho_gamma[1,:]**2 + rho_gamma[2,:]**2 + rho_gamma[3,:]**2
+
+        rho_zero_threshold = 1e-8 # Consistent with gradient, which is also hardcoded.
+                                  # Probably should be mf.small_rho_cutoff
+        rho_zero_mask = (rho_i < rho_zero_threshold)
+
+        # rho_i  [rho_zero_mask] = 0.0
+        # gamma_i[rho_zero_mask] = 0.0
+
+        omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
+        kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+
+        # omega_i[rho_zero_mask] = 0.0
+        # kappa_i[rho_zero_mask] = 0.0
+
+        U_i = cupy.empty(ngrids)
+        W_i = cupy.empty(ngrids)
+        A_i = cupy.empty(ngrids)
+        B_i = cupy.empty(ngrids)
+        C_i = cupy.empty(ngrids)
+
+        stream = cupy.cuda.get_current_stream()
+        libgdft.VXC_vv10nlc_hess_eval_UWABC(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids.coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids.weights.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids)
+        )
+
+        # U_i[rho_zero_mask] = 0.0
+        # W_i[rho_zero_mask] = 0.0
+        # A_i[rho_zero_mask] = 0.0
+        # B_i[rho_zero_mask] = 0.0
+        # C_i[rho_zero_mask] = 0.0
+
+        domega_drho_i         = cupy.empty(ngrids)
+        domega_dgamma_i       = cupy.empty(ngrids)
+        d2omega_drho2_i       = cupy.empty(ngrids)
+        d2omega_dgamma2_i     = cupy.empty(ngrids)
+        d2omega_drho_dgamma_i = cupy.empty(ngrids)
+        libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(C_in_omega),
+            ctypes.c_int(ngrids)
+        )
+        dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
+        d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
+
+        # domega_drho_i        [rho_zero_mask] = 0.0
+        # domega_dgamma_i      [rho_zero_mask] = 0.0
+        # d2omega_drho2_i      [rho_zero_mask] = 0.0
+        # d2omega_dgamma2_i    [rho_zero_mask] = 0.0
+        # d2omega_drho_dgamma_i[rho_zero_mask] = 0.0
+        # dkappa_drho_i        [rho_zero_mask] = 0.0
+        # d2kappa_drho2_i      [rho_zero_mask] = 0.0
+
+        f_gamma_i = rho_i * domega_dgamma_i * W_i
+
+        for i_dm in range(n_dm1):
+            dm1 = dm1s[i_dm, :, :]
+            rho_gamma_1 = numint.eval_rho(_sorted_mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
+
+            rho_t_i = rho_gamma_1[0,:]
+            gamma_t_i = rho_gamma[1,:] * rho_gamma_1[1,:] + rho_gamma[2,:] * rho_gamma_1[2,:] + rho_gamma[3,:] * rho_gamma_1[3,:]
+
+            f_rho_t_i   = cupy.zeros(ngrids)
+            f_gamma_t_i = cupy.zeros(ngrids)
+
+            libgdft.VXC_vv10nlc_hess_eval_f_t(
+                ctypes.cast(stream.ptr, ctypes.c_void_p),
+                ctypes.cast(f_rho_t_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(f_gamma_t_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(grids.coords.data.ptr, ctypes.c_void_p),
+                ctypes.cast(grids.weights.data.ptr, ctypes.c_void_p),
+                ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(rho_t_i.data.ptr, ctypes.c_void_p),
+                ctypes.cast(gamma_t_i.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ngrids)
+            )
+
+            nabla_mu_nu = cupy.einsum("ig,djg->dijg", ao[0], ao[1:4]) + cupy.einsum("dig,jg->dijg", ao[1:4], ao[0])
+            fxc_gamma = 2 * (rho_gamma[1:4,:] * f_gamma_t_i + rho_gamma_1[1:4,:] * f_gamma_i) * grids.weights
+
+            vmat[i_dm, :, :] = cupy.einsum("ig,jg,g->ij", ao[0], ao[0], f_rho_t_i * grids.weights)
+            vmat[i_dm, :, :] += cupy.einsum("dijg,dg->ij", nabla_mu_nu, fxc_gamma)
+
+    vmat_numerical = nr_rks_fnlc_mo_numerical(mf, mol, mo_coeff, mo_occ, dm1s)
+    # print(cupy.max(cupy.abs(vmat - vmat_numerical)))
+    # print(vmat_numerical[1,:6,:6])
+    # print(vmat[1,:6,:6])
+    # exit()
+
+    vmat = vmat_numerical
+
     vmat = jk._ao2mo(vmat, mocc, mo_coeff)
     return vmat
 
