@@ -49,7 +49,7 @@ def gen_vind(mf, mo_coeff, mo_occ):
     return fx
 
 
-def eval_polarizability(mf):
+def eval_polarizability(mf, max_cycle=20, tol=1e-10):
     """main function to calculate the polarizability
 
     Args:
@@ -77,7 +77,7 @@ def eval_polarizability(mf):
         h1 = cupy.array(h1)
     for idirect in range(3):
         h1ai = -mvir.T.conj()@h1[idirect]@mocc
-        mo1 = cphf.solve(fx, mo_energy, mo_occ, h1ai,  max_cycle=20, tol=1e-10)[0]
+        mo1 = cphf.solve(fx, mo_energy, mo_occ, h1ai, max_cycle=max_cycle, tol=tol)[0]
         for jdirect in range(idirect, 3):
             p10 = np.trace(mo1.conj().T@mvir.conj().T@h1[jdirect]@mocc)*2
             p01 = np.trace(mocc.conj().T@h1[jdirect]@mvir@mo1)*2
