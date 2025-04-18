@@ -30,6 +30,7 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
 
 from pyscf import __config__
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
@@ -485,13 +486,12 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 def _vv10nlc_grad(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     # VV10 gradient term from Vydrov and Van Voorhis 2010 eq. 25-26
     # https://doi.org/10.1063/1.3521275
-    thresh=1e-8
 
     #output
     exc=cupy.zeros((rho[0,:].size,3))
 
     #outer grid needs threshing
-    threshind=rho[0,:]>=thresh
+    threshind=rho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
     coords=coords[threshind]
     R=rho[0,:][threshind]
     Gx=rho[1,:][threshind]
@@ -500,7 +500,7 @@ def _vv10nlc_grad(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     G=Gx**2.+Gy**2.+Gz**2.
 
     #inner grid needs threshing
-    innerthreshind=vvrho[0,:]>=thresh
+    innerthreshind=vvrho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
     vvcoords=vvcoords[innerthreshind]
     vvweight=vvweight[innerthreshind]
     Rp=vvrho[0,:][innerthreshind]
