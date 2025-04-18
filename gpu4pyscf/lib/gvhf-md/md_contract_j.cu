@@ -91,6 +91,9 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int gout_stride = blockDim.y;
     int nsq_per_block = blockDim.x;
     int t_id = gout_id * nsq_per_block + sq_id;
+    int lane_id = t_id % 32;
+    int group_id = lane_id / threadsx;
+    unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
@@ -588,40 +591,46 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lkl];
             for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
                 __syncthreads();
-                double vj_kl = 0.;
+                double val = 0.;
                 if (k < nf3kl) {
                     double phase = efg_phase[k];
                     int off = k * nf3ij;
                     for (int i = 0; i < nf3ij; ++i) {
                         double s = Rt[sq_id+p1[off+i]*nsq_per_block];
-                        vj_kl += phase * s * dm_ij_cache[tx+i*threadsx];
+                        val += phase * s * dm_ij_cache[tx+i*threadsx];
                     }
                 }
-                vj_cache[t_id] = vj_kl;
-                for (int stride = threadsx/2; stride > 0; stride /= 2) {
-                    __syncthreads();
-                    if (tx < stride) {
-                        vj_cache[t_id] += vj_cache[t_id + stride];
-                    }
+                //vj_cache[t_id] = val;
+                //for (int stride = threadsx/2; stride > 0; stride /= 2) {
+                //    __syncthreads();
+                //    if (tx < stride) {
+                //        vj_cache[t_id] += vj_cache[t_id + stride];
+                //    }
+                //}
+                //__syncthreads();
+                //if (tx == 0 && k < nf3kl) {
+                //    vj_kl_cache[ty+k*threadsy] += vj_cache[t_id];
+                //}
+                for (int offset = threadsx/2; offset > 0; offset /= 2) {
+                    val += __shfl_down_sync(mask, val, offset);
                 }
-                __syncthreads();
                 if (tx == 0 && k < nf3kl) {
-                    vj_kl_cache[ty+k*threadsy] += vj_cache[t_id];
+                    vj_kl_cache[ty+k*threadsy] += val;
                 }
             }
 
             p1 = Rt2_ij_kl + Rt2_idx_offsets[lij*RT2_MAX+lkl];
             for (int i = gout_id; i < nf3ij+gout_id; i += gout_stride) {
                 __syncthreads();
-                double vj_ij = 0.;
+                double val = 0.;
                 if (i < nf3ij) {
                     int off = i * nf3kl;
                     for (int k = 0; k < nf3kl; ++k) {
                         double s = Rt[sq_id+p1[off+k]*nsq_per_block];
-                        vj_ij += efg_phase[k] * s * dm_kl_cache[ty+k*threadsy];
+                        val += efg_phase[k] * s * dm_kl_cache[ty+k*threadsy];
                     }
                 }
-                vj_cache[t_id] = vj_ij;
+                vj_cache[t_id] = val;
                 for (int stride = threadsy/2; stride > 0; stride /= 2) {
                     __syncthreads();
                     if (ty < stride) {
