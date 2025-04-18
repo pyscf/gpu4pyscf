@@ -197,9 +197,9 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
         const int iz = _cart_pow_z[p];
         const int ix = LI - iy - iz;
 
-        double *fx = fi + (ix+1)*ix/2;
-        double *fy = fi + (iy+1)*iy/2 + nfi;
-        double *fz = fi + (iz+1)*iz/2 + nfi*2;
+        const int ix_off = (ix+1)*ix/2;
+        const int iy_off = (iy+1)*iy/2 + nfi;
+        const int iz_off = (iz+1)*iz/2 + nfi*2;
 
         double ang_pmn[AO_LMAX_IP+1];
         for (int i = 0; i < AO_LMAX_IP+1; i++){
@@ -210,7 +210,7 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
             const int ijk = i+j+k;
-            const double fac = fx[i] * fy[j] * fz[k];
+            const double fac = fi[i+ix_off] * fi[j+iy_off] * fi[k+iz_off];
             const int LI_i = LI-i;
             const int ioff = (LI_i)*(LI_i+1)*(LI_i+2)/6;
             const int joff = (LI_i-j)*(LI_i-j+1)/2;
@@ -247,9 +247,9 @@ void type2_ang(double * __restrict__ facs, double *rca, double *omega){
         const int iz = _cart_pow_z[p];
         const int ix = LI - iy - iz;
 
-        double *fx = fi + (ix+1)*ix/2;
-        double *fy = fi + (iy+1)*iy/2 + nfi;
-        double *fz = fi + (iz+1)*iz/2 + nfi*2;
+        const int ix_off = (ix+1)*ix/2;
+        const int iy_off = (iy+1)*iy/2 + nfi;
+        const int iz_off = (iz+1)*iz/2 + nfi*2;
 
         double ang_pmn[LI+1];
         for (int i = 0; i < LI+1; i++){
@@ -260,7 +260,7 @@ void type2_ang(double * __restrict__ facs, double *rca, double *omega){
         for (int j = 0; j <= iy; j++){
         for (int k = 0; k <= iz; k++){
             const int ijk = i+j+k;
-            const double fac = fx[i] * fy[j] * fz[k];
+            const double fac = fi[i+ix_off] * fi[j+iy_off] * fi[k+iz_off];
             const int LI_i = LI-i;
             const int ioff = (LI_i)*(LI_i+1)*(LI_i+2)/6;
             const int joff = (LI_i-j)*(LI_i-j+1)/2;

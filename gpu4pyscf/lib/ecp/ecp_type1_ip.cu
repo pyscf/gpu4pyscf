@@ -94,28 +94,27 @@ void type1_cart_unrolled_kernel(double *gctr,
         const int iy = _cart_pow_y[mi];
         const int iz = _cart_pow_z[mi];
         const int ix = LI - iy - iz;
-
-        double* fx_i = fi + (ix+1)*ix/2;
-        double* fy_i = fi + (iy+1)*iy/2 + nfi;
-        double* fz_i = fi + (iz+1)*iz/2 + 2*nfi;
+        const int ix_off = (ix+1)*ix/2;
+        const int iy_off = (iy+1)*iy/2 + nfi;
+        const int iz_off = (iz+1)*iz/2 + 2*nfi;
 
         const int jy = _cart_pow_y[mj];
         const int jz = _cart_pow_z[mj];
         const int jx = LJ - jy - jz;
-        double* fx_j = fj + (jx+1)*jx/2;
-        double* fy_j = fj + (jy+1)*jy/2 + nfj;
-        double* fz_j = fj + (jz+1)*jz/2 + 2*nfj;
+        const int jx_off = (jx+1)*jx/2;
+        const int jy_off = (jy+1)*jy/2 + nfj;
+        const int jz_off = (jz+1)*jz/2 + 2*nfj;
 
         // cache ifac and jfac in register
         double tmp = 0.0;
         for (int i1 = 0; i1 <= ix; i1++){
         for (int i2 = 0; i2 <= iy; i2++){
         for (int i3 = 0; i3 <= iz; i3++){
-            const double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
+            const double ifac = fi[i1+ix_off] * fi[i2+iy_off] * fi[i3+iz_off];
             for (int j1 = 0; j1 <= jx; j1++){
             for (int j2 = 0; j2 <= jy; j2++){
             for (int j3 = 0; j3 <= jz; j3++){
-                const double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
+                const double jfac = fj[j1+jx_off] * fj[j2+jy_off] * fj[j3+jz_off];
                 const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}
@@ -123,7 +122,6 @@ void type1_cart_unrolled_kernel(double *gctr,
         gctr[ij] = tmp;
     }
 }
-
 
 template <int orderi, int orderj> __device__
 void type1_cart_kernel(double *gctr,
@@ -209,28 +207,27 @@ void type1_cart_kernel(double *gctr,
         const int iy = _cart_pow_y[mi];
         const int iz = _cart_pow_z[mi];
         const int ix = LI - iy - iz;
-
-        double* fx_i = fi + (ix+1)*ix/2;
-        double* fy_i = fi + (iy+1)*iy/2 + nfi;
-        double* fz_i = fi + (iz+1)*iz/2 + 2*nfi;
+        const int ix_off = (ix+1)*ix/2;
+        const int iy_off = (iy+1)*iy/2 + nfi;
+        const int iz_off = (iz+1)*iz/2 + 2*nfi;
 
         const int jy = _cart_pow_y[mj];
         const int jz = _cart_pow_z[mj];
         const int jx = LJ - jy - jz;
-        double* fx_j = fj + (jx+1)*jx/2;
-        double* fy_j = fj + (jy+1)*jy/2 + nfj;
-        double* fz_j = fj + (jz+1)*jz/2 + 2*nfj;
+        const int jx_off = (jx+1)*jx/2;
+        const int jy_off = (jy+1)*jy/2 + nfj;
+        const int jz_off = (jz+1)*jz/2 + 2*nfj;
 
         // cache ifac and jfac in register
         double tmp = 0.0;
         for (int i1 = 0; i1 <= ix; i1++){
         for (int i2 = 0; i2 <= iy; i2++){
         for (int i3 = 0; i3 <= iz; i3++){
-            const double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
+            const double ifac = fi[i1+ix_off] * fi[i2+iy_off] * fi[i3+iz_off];
             for (int j1 = 0; j1 <= jx; j1++){
             for (int j2 = 0; j2 <= jy; j2++){
             for (int j3 = 0; j3 <= jz; j3++){
-                const double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
+                const double jfac = fj[j1+jx_off] * fj[j2+jy_off] * fj[j3+jz_off];
                 const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}

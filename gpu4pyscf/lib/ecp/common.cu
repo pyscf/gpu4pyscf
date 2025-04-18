@@ -78,15 +78,15 @@ void cache_fac(double *fx, int LI, double *ri){
     }
 
     const int nfi = (LI1+1)*LI1/2;
-    double *fy = fx + nfi;
-    double *fz = fy + nfi;
     for (int i = 0; i <= LI; i++){
-        const int ioffset = i*(i+1)/2;
+        const int xoffset = i*(i+1)/2;
+        const int yoffset = xoffset + nfi;
+        const int zoffset = yoffset + nfi;
         for (int j = 0; j <= i; j++){
-            const double bfac = _binom[ioffset+j]; // binom(i,j)
-            fx[ioffset+j] = bfac * xx[i-j];
-            fy[ioffset+j] = bfac * yy[i-j];
-            fz[ioffset+j] = bfac * zz[i-j];
+            const double bfac = _binom[xoffset+j]; // binom(i,j)
+            fx[xoffset+j] = bfac * xx[i-j];
+            fx[yoffset+j] = bfac * yy[i-j];
+            fx[zoffset+j] = bfac * zz[i-j];
         }
     }
 }
@@ -103,15 +103,15 @@ void cache_fac(double *fx, double *ri){
     }
 
     constexpr int nfi = (LI1+1)*LI1/2;
-    double *fy = fx + nfi;
-    double *fz = fy + nfi;
     for (int i = 0; i <= LI; i++){
-        const int ioffset = i*(i+1)/2;
+        const int xoffset = i*(i+1)/2;
+        const int yoffset = xoffset + nfi;
+        const int zoffset = yoffset + nfi;
         for (int j = 0; j <= i; j++){
-            const double bfac = _binom[ioffset+j]; // binom(i,j)
-            fx[ioffset+j] = bfac * xx[i-j];
-            fy[ioffset+j] = bfac * yy[i-j];
-            fz[ioffset+j] = bfac * zz[i-j];
+            const double bfac = _binom[xoffset+j]; // binom(i,j)
+            fx[xoffset+j] = bfac * xx[i-j];
+            fx[yoffset+j] = bfac * yy[i-j];
+            fx[zoffset+j] = bfac * zz[i-j];
         }
     }
 }

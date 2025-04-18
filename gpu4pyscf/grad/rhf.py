@@ -232,7 +232,7 @@ def get_dh1e_ecp(mol, dm):
     dh1e_ecp = contract('nxij,ij->nx', h1_ecp, dm)
     return 2.0 * dh1e_ecp
 
-def get_hcore(mf, mol):
+def get_hcore(mf, mol, exclude_ecp=False):
     '''
     Nuclear gradients of core Hamiltonian
     '''
@@ -242,20 +242,8 @@ def get_hcore(mf, mol):
     else:
         h += mol.intor('int1e_ipnuc', comp=3)
     h = cupy.asarray(h)
-    if mol.has_ecp():
+    if not exclude_ecp and mol.has_ecp():
         h += get_ecp_ip(mol).sum(axis=0)
-    return -h
-
-def get_hcore_no_ecp(mf, mol):
-    '''
-    Nuclear gradients of core Hamiltonian, w/o ECP
-    '''
-    h = mol.intor('int1e_ipkin', comp=3)
-    if mol._pseudo:
-        NotImplementedError('Nuclear gradients for GTH PP')
-    else:
-        h += mol.intor('int1e_ipnuc', comp=3)
-    h = cupy.asarray(h)
     return -h
 
 def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
@@ -283,12 +271,14 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
     # (\nabla i | hcore | j) - (\nabla i | j)
-    h1 = cupy.asarray(mf_grad.get_hcore_no_ecp(mol))
+    h1 = cupy.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
     s1 = cupy.asarray(mf_grad.get_ovlp(mol))
 
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0)
 
+    # Calculate ECP contributions in (i | \nabla hcore | j) and 
+    # (\nabla i | hcore | j) simultaneously
     if mol.has_ecp():
         # TODO: slice ecp_atoms
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
@@ -446,7 +436,6 @@ class Gradients(GradientsBase):
 
     make_rdm1e = rhf_grad_cpu.Gradients.make_rdm1e
     grad_elec = grad_elec
-    get_hcore_no_ecp = get_hcore_no_ecp
     
     def get_veff(self, mol=None, dm=None, verbose=None):
         '''

@@ -1018,29 +1018,12 @@ class QMMMGrad:
             return (qm_multipole_grad + qm_ewovrl_grad + qm_ewg_grad).get(), \
                    (mm_ewovrl_grad + mm_ewg_grad).get()
 
-    def get_hcore(self, mol=None):
+    def get_hcore(self, mol=None, exclude_ecp=False):
         if mol is None:
             mol = self.mol
         cput0 = (logger.process_clock(), logger.perf_counter())
         def calculate_h1e(self, h1_gpu):
-            h1 = super().get_hcore(mol)
-            h1_gpu[:] = cp.asarray(h1)
-            return
-
-        g_qm_orig = cp.empty([3, mol.nao, mol.nao])
-        with lib.call_in_background(calculate_h1e) as calculate_hs:
-            calculate_hs(self, g_qm_orig)
-            g_qm = get_hcore_mm(self)
-
-        logger.timer(self, 'get_hcore', *cput0)
-        return g_qm_orig + g_qm
-
-    def get_hcore_no_ecp(self, mol=None):
-        if mol is None:
-            mol = self.mol
-        cput0 = (logger.process_clock(), logger.perf_counter())
-        def calculate_h1e(self, h1_gpu):
-            h1 = super().get_hcore_no_ecp(mol)
+            h1 = super().get_hcore(mol, exclude_ecp=exclude_ecp)
             h1_gpu[:] = cp.asarray(h1)
             return
 

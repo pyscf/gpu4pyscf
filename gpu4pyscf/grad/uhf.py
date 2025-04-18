@@ -66,12 +66,14 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     de = cupy.zeros((len(atmlst),3))
     
     # (\nabla i | hcore | j) - (\nabla i | j)
-    h1 = cupy.asarray(mf_grad.get_hcore_no_ecp(mol))
+    h1 = cupy.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
     s1 = cupy.asarray(mf_grad.get_ovlp(mol))
 
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0_sf)
 
+    # Calculate ECP contributions in (i | \nabla hcore | j) and 
+    # (\nabla i | hcore | j) simultaneously
     if mol.has_ecp():
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
@@ -110,7 +112,6 @@ class Gradients(rhf_grad.GradientsBase):
     device = utils.device
 
     grad_elec = grad_elec
-    get_hcore_no_ecp = rhf_grad.get_hcore_no_ecp
 
     def get_veff(self, mol, dm, verbose=None):
         '''
