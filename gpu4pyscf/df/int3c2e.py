@@ -1419,23 +1419,14 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
 
 def get_dh1e(mol, dm0):
     '''
-    contract 'int1e_iprinv', with density matrix
+    Contract 'int1e_iprinv', with density matrix
     xijk,ij->kx
     '''
-    natm = mol.natm
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
-    fakemol = gto.fakemol_for_charges(coords)
-    fakemol.output = mol.output
-    fakemol.verbose = mol.verbose
-    fakemol.stdout = mol.stdout
-    intopt = VHFOpt(mol, fakemol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    dm0_sorted = intopt.sort_orbitals(dm0, axis=[0,1])
-    dh1e = cupy.zeros([natm,3])
-    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
-        dh1e[k0:k1,:3] += contract('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
-    return 2.0 * contract('kx,k->kx', dh1e, -charges)
+    from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip2
+    de0 = int1e_grids_ip2(mol, coords, charges=charges, dm=dm0)
+    return de0.T
 
 def get_d2h1e(mol, dm0):
     natm = mol.natm

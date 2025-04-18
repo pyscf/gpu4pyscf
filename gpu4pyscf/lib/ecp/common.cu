@@ -78,15 +78,40 @@ void cache_fac(double *fx, int LI, double *ri){
     }
 
     const int nfi = (LI1+1)*LI1/2;
-    double *fy = fx + nfi;
-    double *fz = fy + nfi;
     for (int i = 0; i <= LI; i++){
-        const int ioffset = i*(i+1)/2;
+        const int xoffset = i*(i+1)/2;
+        const int yoffset = xoffset + nfi;
+        const int zoffset = yoffset + nfi;
         for (int j = 0; j <= i; j++){
-            const double bfac = _binom[ioffset+j]; // binom(i,j)
-            fx[ioffset+j] = bfac * xx[i-j];
-            fy[ioffset+j] = bfac * yy[i-j];
-            fz[ioffset+j] = bfac * zz[i-j];
+            const double bfac = _binom[xoffset+j]; // binom(i,j)
+            fx[xoffset+j] = bfac * xx[i-j];
+            fx[yoffset+j] = bfac * yy[i-j];
+            fx[zoffset+j] = bfac * zz[i-j];
+        }
+    }
+}
+
+template <int LI> __device__
+void cache_fac(double *fx, double *ri){
+    constexpr int LI1 = LI + 1;
+    double xx[LI1], yy[LI1], zz[LI1];
+    xx[0] = 1; yy[0] = 1; zz[0] = 1;
+    for (int i = 1; i <= LI; i++){
+        xx[i] = xx[i-1] * ri[0];
+        yy[i] = yy[i-1] * ri[1];
+        zz[i] = zz[i-1] * ri[2];
+    }
+
+    constexpr int nfi = (LI1+1)*LI1/2;
+    for (int i = 0; i <= LI; i++){
+        const int xoffset = i*(i+1)/2;
+        const int yoffset = xoffset + nfi;
+        const int zoffset = yoffset + nfi;
+        for (int j = 0; j <= i; j++){
+            const double bfac = _binom[xoffset+j]; // binom(i,j)
+            fx[xoffset+j] = bfac * xx[i-j];
+            fx[yoffset+j] = bfac * yy[i-j];
+            fx[zoffset+j] = bfac * zz[i-j];
         }
     }
 }
@@ -155,7 +180,6 @@ void _li_up(double *out, double *buf, const int li, const int lj){
         atomicAdd(outy + j*nfi + _y_addr[i], yfac * buf[j*nfi0 + i]);
         atomicAdd(outz + j*nfi + _z_addr[i], zfac * buf[j*nfi0 + i]);
     }
-    __syncthreads();
 }
 
 __device__
@@ -192,7 +216,6 @@ void _li_up_and_write(double *out, double *buf, const int li, const int lj, cons
         atomicAdd(outzy + j + i_addr[1]*nao, yfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
         atomicAdd(outzz + j + i_addr[2]*nao, zfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
     }
-    __syncthreads();
 }
 
 
@@ -213,7 +236,6 @@ void _li_down(double *out, double *buf, const int li, const int lj){
         atomicAdd(outy + j*nfi+i, fac * buf[j*nfi1+_y_addr[i]]);
         atomicAdd(outz + j*nfi+i, fac * buf[j*nfi1+_z_addr[i]]);
     }
-    __syncthreads();
 }
 
 __device__
@@ -249,7 +271,6 @@ void _li_down_and_write(double *out, double *buf, const int li, const int lj, co
         atomicAdd(outzy + j + i*nao, fac * buf[j*nfi1 + i_addr[1] + 2*nfi1*nfj]);
         atomicAdd(outzz + j + i*nao, fac * buf[j*nfi1 + i_addr[2] + 2*nfi1*nfj]);
     }
-    __syncthreads();
 }
 
 
@@ -287,7 +308,6 @@ void _lj_up_and_write(double *out, double *buf, const int li, const int lj, cons
         atomicAdd(outzy + j_addr[1] + nao*i, yfac * buf[j*nfi + i + 2*nfi*nfj0]);
         atomicAdd(outzz + j_addr[2] + nao*i, zfac * buf[j*nfi + i + 2*nfi*nfj0]);
     }
-    __syncthreads();
 }
 
 __device__
@@ -322,7 +342,6 @@ void _lj_down_and_write(double *out, double *buf, const int li, const int lj, co
         atomicAdd(outzy + j + i*nao, fac * buf[j_addr[1]*nfi + i + 2*nfi*nfj1]);
         atomicAdd(outzz + j + i*nao, fac * buf[j_addr[2]*nfi + i + 2*nfi*nfj1]);
     }
-    __syncthreads();
 }
 
 /*
