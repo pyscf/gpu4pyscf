@@ -38,6 +38,7 @@ ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 AO_ALIGNMENT = getattr(__config__, 'ao_aligned', 16)
 AO_THRESHOLD = 1e-10
 GB = 1024*1024*1024
+NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD = 1e-10
 
 # Should we release the cupy cache?
 FREE_CUPY_CACHE = False
@@ -299,14 +300,12 @@ def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
     return rho
 
 def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
-    thresh=1e-10
-
     #output
     exc=cupy.zeros(rho[0,:].size)
     vxc=cupy.zeros([2,rho[0,:].size])
 
     #outer grid needs threshing
-    threshind=rho[0,:]>=thresh
+    threshind=rho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
     coords=coords[threshind]
     R=rho[0,:][threshind]
     Gx=rho[1,:][threshind]
@@ -315,7 +314,7 @@ def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     G=Gx**2.+Gy**2.+Gz**2.
 
     #inner grid needs threshing
-    innerthreshind=vvrho[0,:]>=thresh
+    innerthreshind=vvrho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
     vvcoords=vvcoords[innerthreshind]
     vvweight=vvweight[innerthreshind]
     Rp=vvrho[0,:][innerthreshind]
