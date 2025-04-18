@@ -331,8 +331,7 @@ static void vv10_hess_eval_f_t_kernel(double* f_rho_t, double* f_gamma_t,
 
         const double rho_dgdrho_i = rho_i * (r_ij2 * domega_drho_i + dkappa_drho_i);
         const double rho_dgdrho_j = rho_j * (r_ij2 * domega_drho_j + dkappa_drho_j);
-        // const double d2Phi_dgij_dgji_over_Phi = 2 * (g_sum_1 * g_sum_1 + g_ij_1 * g_ji_1);
-        const double d2Phi_dgij_dgji_over_Phi = (2 * g_sum_1 * g_sum_1 + g_sum_1 * (g_ij_1 + g_ji_1) + g_ij_1 * g_ji_1);
+        const double d2Phi_dgij_dgji_over_Phi = 2 * (g_sum_1 * g_sum_1 + g_ij_1 * g_ji_1);
 
         const double f_rho_rho_ij = Phi_ij * (rho_dgdrho_i * rho_dgdrho_j * d2Phi_dgij_dgji_over_Phi
                                               - rho_dgdrho_i * (g_sum_1 + g_ij_1)
@@ -374,112 +373,6 @@ static void vv10_hess_eval_f_t_kernel(double* f_rho_t, double* f_gamma_t,
     f_rho_t[i]   = f_rho_t_i;
     f_gamma_t[i] = f_gamma_t_i;
 }
-
-// __global__
-// static void vv10_hess_eval_f_ij_kernel(double* f_rho_rho, double* f_rho_gamma, double* f_gamma_rho, double* f_gamma_gamma,
-//                                       const double* grid_coord, const double* grid_weight,
-//                                       const double* rho, const double* omega, const double* kappa,
-//                                       const double* U, const double* W, const double* A, const double* B, const double* C,
-//                                       const double* domega_drho, const double* domega_dgamma, const double* dkappa_drho,
-//                                       const double* d2omega_drho2, const double* d2omega_dgamma2, const double* d2omega_drho_dgamma, const double* d2kappa_drho2,
-//                                     //   const double* rho_t, const double* gamma_t,
-//                                       const int ngrids)
-// {
-//     const int i = blockIdx.x * blockDim.x + threadIdx.x;
-//     if (i >= ngrids)
-//         return;
-
-//     const double omega_i = omega[i];
-//     const double kappa_i = kappa[i];
-//     const double3 r_i = { grid_coord[i * 3 + 0], grid_coord[i * 3 + 1], grid_coord[i * 3 + 2] };
-
-//     const double rho_i = rho[i];
-//     const double domega_drho_i = domega_drho[i];
-//     const double domega_dgamma_i = domega_dgamma[i];
-//     const double dkappa_drho_i = dkappa_drho[i];
-
-//     // double f_rho_t_i = 0;
-//     // double f_gamma_t_i = 0;
-
-//     for (int j = 0; j < ngrids; j++) {
-//         // if (i == j) {
-//         //     f_rho_rho[i * ngrids + j] = 0;
-//         //     f_gamma_rho[i * ngrids + j] = 0;
-//         //     f_rho_gamma[i * ngrids + j] = 0;
-//         //     f_gamma_gamma[i * ngrids + j] = 0;
-//         //     continue;
-//         // }
-//         const double omega_j = omega[j];
-//         const double kappa_j = kappa[j];
-//         const double3 r_j = { grid_coord[j * 3 + 0], grid_coord[j * 3 + 1], grid_coord[j * 3 + 2] };
-//         const double rho_j = rho[j];
-
-//         const double domega_drho_j = domega_drho[j];
-//         const double domega_dgamma_j = domega_dgamma[j];
-//         const double dkappa_drho_j = dkappa_drho[j];
-
-//         const double r_ij2 = (r_i.x - r_j.x) * (r_i.x - r_j.x) + (r_i.y - r_j.y) * (r_i.y - r_j.y) + (r_i.z - r_j.z) * (r_i.z - r_j.z);
-//         const double g_ij = omega_i * r_ij2 + kappa_i;
-//         const double g_ji = omega_j * r_ij2 + kappa_j;
-//         const double g_ij_1 = 1 / g_ij;
-//         const double g_ji_1 = 1 / g_ji;
-//         const double g_sum_1 = 1 / (g_ij + g_ji);
-//         const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
-
-//         const double rho_dgdrho_i = rho_i * (r_ij2 * domega_drho_i + dkappa_drho_i);
-//         const double rho_dgdrho_j = rho_j * (r_ij2 * domega_drho_j + dkappa_drho_j);
-//         // const double d2Phi_dgij_dgji_over_Phi = (2 * g_sum_1 * g_sum_1 + 2 * g_ij_1 * g_ji_1);
-//         const double d2Phi_dgij_dgji_over_Phi = (2 * g_sum_1 * g_sum_1 + g_sum_1 * (g_ij_1 + g_ji_1) + g_ij_1 * g_ji_1);
-
-//         const double f_rho_rho_ij = Phi_ij * (rho_dgdrho_i * rho_dgdrho_j * d2Phi_dgij_dgji_over_Phi
-//                                               - rho_dgdrho_i * (g_sum_1 + g_ij_1)
-//                                               - rho_dgdrho_j * (g_sum_1 + g_ji_1) + 1);
-//         const double f_gamma_rho_ij = rho_i * domega_dgamma_i * r_ij2 * Phi_ij * (rho_dgdrho_j * d2Phi_dgij_dgji_over_Phi - (g_sum_1 + g_ij_1));
-//         const double f_rho_gamma_ij = rho_j * domega_dgamma_j * r_ij2 * Phi_ij * (rho_dgdrho_i * d2Phi_dgij_dgji_over_Phi - (g_sum_1 + g_ji_1));
-//         const double f_gamma_gamma_ij = rho_i * rho_j * domega_dgamma_i * domega_dgamma_j * r_ij2 * r_ij2 * Phi_ij * d2Phi_dgij_dgji_over_Phi;
-
-//         const double weight_i = grid_weight[i];
-//         const double weight_j = grid_weight[j];
-//         f_rho_rho[i * ngrids + j]     = weight_i * weight_j * f_rho_rho_ij;
-//         f_gamma_rho[i * ngrids + j]   = weight_i * weight_j * f_gamma_rho_ij;
-//         f_rho_gamma[i * ngrids + j]   = weight_i * weight_j * f_rho_gamma_ij;
-//         f_gamma_gamma[i * ngrids + j] = weight_i * weight_j * f_gamma_gamma_ij;
-//         // const double rho_t_j = rho_t[j];
-//         // const double gamma_t_j = gamma_t[j];
-//         // f_rho_t_i   += weight_j * (  f_rho_rho_ij * rho_t_j + 2 *   f_rho_gamma_ij * gamma_t_j);
-//         // f_gamma_t_i += weight_j * (f_gamma_rho_ij * rho_t_j + 2 * f_gamma_gamma_ij * gamma_t_j);
-//     }
-
-//     const double U_i = U[i];
-//     const double W_i = W[i];
-//     const double A_i = A[i];
-//     const double B_i = B[i];
-//     const double C_i = C[i];
-//     const double d2omega_drho2_i = d2omega_drho2[i];
-//     const double d2omega_dgamma2_i = d2omega_dgamma2[i];
-//     const double d2omega_drho_dgamma_i = d2omega_drho_dgamma[i];
-//     const double d2kappa_drho2_i = d2kappa_drho2[i];
-
-//     const double f_rho_rho_ii = 2 * domega_drho_i * W_i + 2 * dkappa_drho_i * U_i
-//                                 + rho_i * (d2omega_drho2_i * W_i + d2kappa_drho2_i * U_i + dkappa_drho_i * dkappa_drho_i * A_i
-//                                            + domega_drho_i * domega_drho_i * C_i + 2 * domega_drho_i * dkappa_drho_i * B_i);
-//     const double f_gamma_rho_ii = domega_dgamma_i * W_i + rho_i * (d2omega_drho_dgamma_i * W_i
-//                                                                    + domega_dgamma_i * (dkappa_drho_i * B_i + domega_drho_i * C_i));
-//     const double f_rho_gamma_ii = f_gamma_rho_ii;
-//     const double f_gamma_gamma_ii = rho_i * (d2omega_dgamma2_i * W_i + domega_dgamma_i * domega_dgamma_i * C_i);
-
-//     f_rho_rho[i * ngrids + i]     += grid_weight[i] * f_rho_rho_ii;
-//     f_gamma_rho[i * ngrids + i]   += grid_weight[i] * f_gamma_rho_ii;
-//     f_rho_gamma[i * ngrids + i]   += grid_weight[i] * f_rho_gamma_ii;
-//     f_gamma_gamma[i * ngrids + i] += grid_weight[i] * f_gamma_gamma_ii;
-//     // const double rho_t_i = rho_t[i];
-//     // const double gamma_t_i = gamma_t[i];
-//     // f_rho_t_i   +=   f_rho_rho_ii * rho_t_i + 2 *   f_rho_gamma_ii * gamma_t_i;
-//     // f_gamma_t_i += f_gamma_rho_ii * rho_t_i + 2 * f_gamma_gamma_ii * gamma_t_i;
-
-//     // f_rho_t[i]   = f_rho_t_i;
-//     // f_gamma_t[i] = f_gamma_t_i;
-// }
 
 extern "C" {
 __host__
@@ -586,31 +479,4 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
     }
     return 0;
 }
-
-// __host__
-// int VXC_vv10nlc_hess_eval_f_ij(const cudaStream_t stream,
-//                                 double* f_rho_rho, double* f_rho_gamma, double* f_gamma_rho, double* f_gamma_gamma,
-//                                       const double* grid_coord, const double* grid_weight,
-//                                       const double* rho, const double* omega, const double* kappa,
-//                                       const double* U, const double* W, const double* A, const double* B, const double* C,
-//                                       const double* domega_drho, const double* domega_dgamma, const double* dkappa_drho,
-//                                       const double* d2omega_drho2, const double* d2omega_dgamma2, const double* d2omega_drho_dgamma, const double* d2kappa_drho2,
-//                                     //   const double* rho_t, const double* gamma_t,
-//                                       const int ngrids)
-// {
-//     const dim3 threads(NG_PER_BLOCK);
-//     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-//     vv10_hess_eval_f_ij_kernel<<<blocks, threads, 0, stream>>>(f_rho_rho, f_rho_gamma, f_gamma_rho, f_gamma_gamma,
-//                                                               grid_coord, grid_weight, rho, omega, kappa,
-//                                                               U, W, A, B, C,
-//                                                               domega_drho, domega_dgamma, dkappa_drho,
-//                                                               d2omega_drho2, d2omega_dgamma2, d2omega_drho_dgamma, d2kappa_drho2,
-//                                                               ngrids);
-//     const cudaError_t err = cudaGetLastError();
-//     if (err != cudaSuccess) {
-//         fprintf(stderr, "CUDA Error of vv10 hess TODO: %s\n", cudaGetErrorString(err));
-//         return 1;
-//     }
-//     return 0;
-// }
 }

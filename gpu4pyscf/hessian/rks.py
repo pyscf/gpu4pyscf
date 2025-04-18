@@ -938,7 +938,7 @@ def nr_rks_fnlc_mo_numerical(mf, mol, mo_coeff, mo_occ, dm1s):
 
             orbital_hessian[i,j,:,:] = (vnlc_p - vnlc_m) / (2 * dx)
 
-    vmat = cupy.einsum("ijkl,dlk->dij", orbital_hessian, dm1s)
+    vmat = cupy.einsum("ijkl,dji->dkl", orbital_hessian, dm1s)
     # vmat = jk._ao2mo(vmat, mocc, mo_coeff)
     return vmat
 
@@ -970,7 +970,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
-    _sorted_mol = opt._sorted_mol
 
     if ni.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
@@ -985,8 +984,8 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
     C_in_omega = nlc_pars[1]
 
     with opt.gdft_envs_cache():
-        ao = ni.eval_ao(_sorted_mol, grids.coords, deriv = 1, gdftopt = opt, transpose = False)
-        rho_gamma = numint.eval_rho(_sorted_mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+        ao = ni.eval_ao(mol, grids.coords, deriv = 1, gdftopt = opt, transpose = False)
+        rho_gamma = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
 
         rho_i = rho_gamma[0,:]
         gamma_i = rho_gamma[1,:]**2 + rho_gamma[2,:]**2 + rho_gamma[3,:]**2
@@ -1064,7 +1063,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
 
         for i_dm in range(n_dm1):
             dm1 = dm1s[i_dm, :, :]
-            rho_gamma_1 = numint.eval_rho(_sorted_mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
+            rho_gamma_1 = numint.eval_rho(mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
 
             rho_t_i = rho_gamma_1[0,:]
             gamma_t_i = rho_gamma[1,:] * rho_gamma_1[1,:] + rho_gamma[2,:] * rho_gamma_1[2,:] + rho_gamma[3,:] * rho_gamma_1[3,:]
@@ -1104,13 +1103,8 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
             vmat[i_dm, :, :] = cupy.einsum("ig,jg,g->ij", ao[0], ao[0], f_rho_t_i * grids.weights)
             vmat[i_dm, :, :] += cupy.einsum("dijg,dg->ij", nabla_mu_nu, fxc_gamma)
 
-    vmat_numerical = nr_rks_fnlc_mo_numerical(mf, mol, mo_coeff, mo_occ, dm1s)
+    # vmat_numerical = nr_rks_fnlc_mo_numerical(mf, mol, mo_coeff, mo_occ, dm1s)
     # print(cupy.max(cupy.abs(vmat - vmat_numerical)))
-    # print(vmat_numerical[1,:6,:6])
-    # print(vmat[1,:6,:6])
-    # exit()
-
-    vmat = vmat_numerical
 
     vmat = jk._ao2mo(vmat, mocc, mo_coeff)
     return vmat
