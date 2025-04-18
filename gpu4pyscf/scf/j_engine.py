@@ -40,7 +40,7 @@ __all__ = [
 PTR_BAS_COORD = 7
 LMAX = 4
 SHM_SIZE = shm_size - 1024
-THREADS = 512
+THREADS = 256
 
 libvhf_md = load_library('libgvhf_md')
 libvhf_md.MD_build_j.restype = ctypes.c_int
@@ -162,7 +162,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
                         raise RuntimeError(f'MD_build_j kernel for {llll} failed')
                     if log.verbose >= logger.DEBUG1:
                         ntasks = tile_ij_mapping.size * tile_kl_mapping.size
-                        t1, t1p = log.timer_debug1(f'processing {llll}, tasks ~= {ntasks}', *t1), t1
+                        t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
                         if llll not in timing_collection:
                             timing_collection[llll] = 0
                         timing_collection[llll] += t1[1] - t1p[1]
@@ -218,22 +218,16 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
     ij = _nearest_power2(int(nsq**.5))
     kl = nsq // ij
 
-    # guess tilex and tiley, tiley ~= tilex * (nf3ij / nf3kl)
-    tilex = tiley = 1
-    if nf3ij >= nf3kl:
-        tiley = _nearest_power2(int(nf3ij//nf3kl), return_leq=False)
-    else:
-        tilex = _nearest_power2(int(nf3kl//nf3ij), return_leq=False)
-    cache_size = ij*tilex * (4+nf3ij) + kl*tiley * (4+nf3kl)
+    tilex = 128 // (lij+1)
+    tiley = 32
+    cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2
         ij = _nearest_power2(int(nsq**.5))
         kl = nsq // ij
-        cache_size = ij*tilex * (4+nf3ij) + kl*tiley * (4+nf3kl)
+        cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     gout_stride = threads // nsq
 
-    tilex_max = _nearest_power2((shm_size//8-nsq*unit)//cache_size)
-    if tilex_max > 1:
-        tilex *= tilex_max
-        tiley *= tilex_max
+    # Adjust tiley, to effectively utilize the 40 registers per thread as cache
+    tiley = min(32, int(ij * gout_stride * 32 / nf3kl))
     return ij, kl, gout_stride, tilex, tiley

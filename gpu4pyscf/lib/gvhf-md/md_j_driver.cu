@@ -64,11 +64,12 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         int bsizex = threads_ij * tilex;
         int bsizey = threads_kl * tiley;
         int nsq_per_block = threads_ij * threads_kl;
-        int threads = threads_ij * threads_kl * gout_stride;
+        dim3 threads(threads_ij*threads_kl, gout_stride);
         int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
         int buflen = (order+1) * nsq_per_block
-            + bsizex * (4+nf3ij) + bsizey * (4+nf3kl)
+            + threads_ij * 4 + bsizey * 4
+            + nf3ij * threads_ij * 2 + nf3kl * threads_kl * 2
             + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
         buflen += MAX(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
         int blocks_ij = (ntile_ij_pairs + bsizex - 1) / bsizex;
