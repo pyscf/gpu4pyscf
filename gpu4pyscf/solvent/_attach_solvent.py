@@ -137,6 +137,34 @@ class SCFWithSolvent(_Solvation):
         grad_method = super().nuc_grad_method()
         return self.with_solvent.nuc_grad_method(grad_method)
 
+    def TDA(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().TDA()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+
+    def TDDFT(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().TDDFT()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+    
+    def TDHF(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().TDHF()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+    
+    def CasidaTDDFT(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().CasidaTDDFT()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+
     Gradients = nuc_grad_method
 
     def Hessian(self):
@@ -153,8 +181,8 @@ class SCFWithSolvent(_Solvation):
             v = vind(dm1)
             if self.with_solvent.equilibrium_solvation:
                 if is_uhf:
-                    v_solvent = self.with_solvent._B_dot_x(dm1)
-                    v += v_solvent[0] + v_solvent[1]
+                    v_solvent = self.with_solvent._B_dot_x(dm1[0]+dm1[1])
+                    v += v_solvent
                 elif singlet:
                     v += self.with_solvent._B_dot_x(dm1)
             return v

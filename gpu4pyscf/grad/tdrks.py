@@ -43,6 +43,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    if singlet is None:
+        singlet = True
     log = logger.new_logger(td_grad, verbose)
     time0 = logger.init_timer(td_grad)
 
@@ -67,6 +69,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
+    td_grad.dmxpy = dmxpy
 
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
@@ -104,11 +107,13 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
                 vk2 = cp.asarray(vk2)
             vk += cp.stack((vk0, vk1, vk2)) * (alpha - hyb)
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0] + k1ao[0] * 2
+        veff0doo += td_grad.solvent_response(dmzoo)
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
             veff = vj[1] * 2 - vk[1] + f1vo[0] * 2
         else:
             veff = f1vo[0] - vk[1]
+        veff += td_grad.solvent_response(dmxpy + dmxpy.T)
         veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
         wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
@@ -137,7 +142,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         veff0mom = cp.zeros((nmo, nmo))
 
     # set singlet=None, generate function for CPHF type response kernel
-    vresp = mf.gen_response(singlet=None, hermi=1)
+    vresp = td_grad.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
@@ -182,6 +187,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     s1 = mf_grad.get_ovlp(mol)
 
     dmz1doo = z1ao + dmzoo
+    td_grad.dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))
 
     if atmlst is None:
