@@ -14,10 +14,12 @@
 
 import tempfile
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
+from gpu4pyscf.pbc.df import rsdf_builder
 
 def test_gamma_point():
     cell = pyscf.M(
@@ -175,3 +177,45 @@ C    D
                 dat = abs(gpu_dat[ki,kj].get())
                 print(ki,kj)
                 assert abs(dat - ref).max() < 1e-8
+
+def test_gamma_point_compressed():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': [[0, [1.1, 1.]],
+                      [1, [2., 1.]]],
+               'C2': 'ccpvdz'},
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    omega = 0.3
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(cell, auxcell, omega=omega)
+    nao = cell.nao
+    i, j, diag = idx
+    naux = auxcell.nao
+    out = cp.zeros((naux,nao,nao))
+    out[:,j,i] = dat
+    out[:,i,j] = dat
+
+    ref = build_cderi(cell, auxcell, omega=omega)[0]
+    assert abs(ref[0,0] - out).max() < 1e-14

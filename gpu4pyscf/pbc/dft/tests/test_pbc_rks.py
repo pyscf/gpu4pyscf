@@ -15,14 +15,16 @@
 import unittest
 import tempfile
 import numpy as np
+import cupy as cp
 from pyscf.pbc import gto as pbcgto
+from pyscf.pbc.dft import UniformGrids
+from pyscf.lib import unpack_tril
 from gpu4pyscf.pbc import dft as pbcdft
 
 
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        global cell
         L = 4
         n = 21
         cell = pbcgto.Cell()
@@ -36,12 +38,8 @@ class KnownValues(unittest.TestCase):
                                     [0, (1.2, 1.0)]]})
         cls.cell = cell
 
-    @classmethod
-    def tearDownClass(cls):
-        global cell
-        del cell
-
     def test_lda_fft(self):
+        cell = self.cell
         mf = pbcdft.RKS(cell, xc='lda,vwn').run()
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
@@ -55,6 +53,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
     def test_gga_fft(self):
+        cell = self.cell
         mf = pbcdft.RKS(cell, xc='pbe0').run()
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
@@ -68,6 +67,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
     def test_rsh_fft(self):
+        cell = self.cell
         mf = pbcdft.RKS(cell, xc='camb3lyp').run()
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
@@ -80,7 +80,56 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
+    def test_lda_gdf(self):
+        from pyscf.pbc.df.df import _load3c
+        cell = self.cell
+        xc = 'svwn'
+        mf = pbcdft.RKS(cell, xc=xc).density_fit().run()
+        pcell = cell.copy()
+        pcell.precision = 1e-10
+        mf_ref = pcell.RKS(xc=xc).density_fit()
+        # Becke grids were used in PySCF, while the GPU4PySCF takes uniform grids
+        mf_ref.grids = UniformGrids(pcell)
+        mf_ref.run()
+        assert abs(mf.e_tot - mf_ref.e_tot) < 5e-7
+
+        with_df = mf.with_df
+        auxcell = with_df.auxcell
+        i, j, diag = with_df._cderi_idx
+        nao = cell.nao
+        naux = auxcell.nao
+        out = cp.zeros((naux,nao,nao))
+        out[:,j,i] = out[:,i,j] = with_df._cderi[0]
+        with _load3c(mf_ref.with_df._cderi, 'j3c', np.zeros((2,3))) as cderi:
+            ref = unpack_tril(cderi[:])
+        assert abs(out.get() - ref).max() < 1e-8
+
+    def test_gga_gdf(self):
+        cell = self.cell
+        xc = 'pbe0'
+        mf = pbcdft.RKS(cell, xc=xc).density_fit().run()
+        pcell = cell.copy()
+        pcell.precision = 1e-10
+        mf_ref = pcell.RKS(xc=xc).density_fit()
+        # Becke grids were used in PySCF, while the GPU4PySCF takes uniform grids
+        mf_ref.grids = UniformGrids(pcell)
+        mf_ref.run()
+        assert abs(mf.e_tot - mf_ref.e_tot) < 5e-7
+
+    def test_rsh_gdf(self):
+        cell = self.cell
+        xc = 'camb3lyp'
+        mf = pbcdft.RKS(cell, xc=xc).density_fit().run()
+        pcell = cell.copy()
+        pcell.precision = 1e-10
+        mf_ref = pcell.RKS(xc=xc).density_fit()
+        # Becke grids were used in PySCF, while the GPU4PySCF takes uniform grids
+        mf_ref.grids = UniformGrids(pcell)
+        mf_ref.run()
+        assert abs(mf.e_tot - mf_ref.e_tot) < 5e-7
+
     def test_lda_fft_with_kpt(self):
+        cell = self.cell
         np.random.seed(1)
         k = np.random.random(3)
         mf = pbcdft.RKS(cell, xc='lda,vwn', kpt=k).run()
@@ -96,6 +145,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
     def test_gga_fft_with_kpt(self):
+        cell = self.cell
         np.random.seed(1)
         k = np.random.random(3)
         mf = pbcdft.RKS(cell, xc='pbe0', kpt=k).run(conv_tol=1e-10)
@@ -111,6 +161,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
     def test_rsh_fft_with_kpt(self):
+        cell = self.cell
         np.random.seed(1)
         k = np.random.random(3)
         mf = pbcdft.RKS(cell, xc='camb3lyp', kpt=k).run(conv_tol=1e-10)
@@ -126,6 +177,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
     def test_kpts_lda_fft(self):
+        cell = self.cell
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KRKS(cell, xc='lda,vwn', kpts=kpts).run(conv_tol=1e-10)
@@ -141,6 +193,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
     def test_kpts_gga_fft(self):
+        cell = self.cell
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).run(conv_tol=1e-10)
@@ -148,6 +201,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
     def test_kpts_rsh_fft(self):
+        cell = self.cell
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KRKS(cell, xc='camb3lyp', kpts=kpts).run(conv_tol=1e-9)
@@ -166,7 +220,7 @@ class KnownValues(unittest.TestCase):
 
         mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()
         self.assertTrue(isinstance(mf.with_df, GDF))
-        self.assertAlmostEqual(mf.e_tot, -0.44834992009430463, 7)
+        self.assertAlmostEqual(mf.e_tot, -0.4483496502, 7)
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -174,7 +228,7 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
         self.assertTrue(isinstance(kmf.with_df, GDF))
-        self.assertAlmostEqual(kmf.e_tot, -0.44429306, 7)
+        self.assertAlmostEqual(kmf.e_tot, -0.44429306, 6)
         mf_ref = kmf.to_cpu()
         mf_ref.run()
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)

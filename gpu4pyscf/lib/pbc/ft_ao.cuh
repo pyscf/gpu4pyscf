@@ -21,17 +21,15 @@
 #ifndef HAVE_DEFINED_AFTENVVAS_H
 #define HAVE_DEFINED_AFTENVVAS_H
 typedef struct {
-    uint16_t natm; // in bvk-cell
-    uint16_t nbas; // in bvk-cell
+    uint16_t cell0_natm; // in bvk-cell
+    uint16_t cell0_nbas; // in bvk-cell
     uint16_t bvk_ncells; // number of images in the BvK cell
-    uint16_t padding;
+    uint16_t nimgs; // number of images in lattice sum
     int *atm;
     int *bas;
     double *env;
     int *ao_loc; // in bvk-cell
     double *img_coords; // vectors in lattice sum
-    int *img_idx; // indices of img_coords in each shell-pair
-    int *img_offsets; // offset AFTIntEnvVars.img_idx for each shell-pair
 } AFTIntEnvVars;
 
 typedef struct {
@@ -44,9 +42,10 @@ typedef struct {
     uint8_t iprim;
     uint8_t jprim;
     int npairs_ij;
-    int *ish_in_pair;
-    int *jsh_in_pair;
     int ngrids;
+    int *bas_ij_idx;
     double *grids;
+    int *img_offsets; // offset AFTIntEnvVars.img_idx for each shell-pair
+    int *img_idx; // indices of img_coords in each shell-pair
 } AFTBoundsInfo;
 #endif

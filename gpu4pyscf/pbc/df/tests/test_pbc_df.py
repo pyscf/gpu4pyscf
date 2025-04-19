@@ -93,6 +93,19 @@ class KnownValues(unittest.TestCase):
         assert abs(vj.get() - jref).max() < 1e-8
         assert abs(vk.get() - kref).max() < 1e-8
 
+    def test_jk_gamma_point(self):
+        mydf0 = df_cpu.GDF(cell)
+        mydf  = GDF(cell)
+        mydf.is_gamma_point = True
+        nao = cell.nao
+        np.random.seed(12)
+        dm = np.random.random((nao,nao))
+        dm = dm + dm.T
+        vj, vk = mydf.get_jk(dm, hermi=1, exxdiv='ewald')
+        jref, kref = mydf0.get_jk(dm, hermi=1, exxdiv='ewald')
+        assert abs(vj - jref).max() < 1e-8
+        assert abs(vk - kref).max() < 1e-8
+
     def test_jk1(self):
         kpts = cell.make_kpts([1,6,1])
         nkpts = len(kpts)
