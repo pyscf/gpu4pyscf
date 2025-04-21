@@ -91,12 +91,12 @@ typedef struct {
     uint8_t lprim;
     union {int ntile_ij_pairs; int npairs_ij;};
     union {int ntile_kl_pairs; int npairs_kl;};
-    int *tile_ij_mapping;
-    int *tile_kl_mapping;
+    union {int *tile_ij_mapping; int *pair_ij_mapping;};
+    union {int *tile_kl_mapping; int *pair_kl_mapping;};
     float *q_cond;
-    float *tile_q_cond;
+    union {float *tile_q_cond; float *qd_ij_max;};
     float *s_estimator;
-    float *dm_cond;
+    union {float *dm_cond; float *qd_kl_max;};
     float cutoff;
 } BoundsInfo;
 

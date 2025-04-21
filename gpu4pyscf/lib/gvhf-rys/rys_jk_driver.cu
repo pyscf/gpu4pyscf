@@ -35,6 +35,8 @@ __constant__ Fold3Index c_i_in_fold3idx[495];
 
 extern __global__ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                     ShellQuartet *pool, uint32_t *batch_head);
+extern __global__ void rys_j_kernel1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                                     int threadsx, int threadsy, int tilex, int tiley);
 extern __global__ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                     ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
@@ -645,6 +647,7 @@ int RYS_init_rysj_constant(int shm_size)
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_j_kernel1, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(rys_j_with_gout_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
