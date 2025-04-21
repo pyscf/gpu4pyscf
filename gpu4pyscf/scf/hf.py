@@ -337,6 +337,10 @@ def init_guess_by_minao(mol):
     '''Generate initial guess density matrix based on ANO basis, then project
     the density matrix to the basis set defined by ``mol``
 
+    Note: this function is inconsistent with the latest PySCF (v2.9) and eariler versions.
+    This function returns block diagonal density matrix associated with each atom.
+    While the function in PySCF projects the density matrix into the full space of atomic basis
+
     Returns:
         Density matrix, 2D ndarray
     '''
@@ -445,7 +449,7 @@ def init_guess_by_minao(mol):
     for ia in range(mol.natm):
         symb = mol.atom_symbol(ia)
         if gto.is_ghost_atom(symb):
-            i0, i1 = aoslice[ia,:2]
+            i0, i1 = aoslice[ia,2:]
             n = i1 - i0
             dm.append(cupy.zeros((n, n)))
             mo_coeff.append(cupy.zeros((n, 0)))
