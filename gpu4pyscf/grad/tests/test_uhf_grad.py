@@ -16,6 +16,7 @@ import pyscf
 import numpy as np
 import unittest
 import pytest
+from pyscf import lib, gto
 from gpu4pyscf import scf
 from packaging import version
 
@@ -75,6 +76,19 @@ class KnownValues(unittest.TestCase):
     def test_grad_d4(self):
         print('------- UHF with D4 -----')
         _check_grad(mol_sph, tol=1e-6, disp='d4')
+
+    def test_grad_ecp(self):
+        mol = gto.M(atom=' H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
+                    ecp='lanl2dz', verbose=0)
+        mf = scf.RHF(mol)
+        g_scan = mf.nuc_grad_method().as_scanner()
+        g = g_scan(mol.atom)[1]
+        self.assertAlmostEqual(lib.fp(g), 0.012310573162997052, 7)
+        
+        mfs = mf.as_scanner()
+        e1 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0 -0.001'))
+        e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0  0.001'))
+        self.assertAlmostEqual(g[1,2], (e2-e1)/0.002*lib.param.BOHR, 6)
 
     def test_to_cpu(self):
         mf = scf.uhf.UHF(mol_sph)
