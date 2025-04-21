@@ -32,7 +32,6 @@ from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.hessian import jk
-from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
 import ctypes
 
@@ -549,7 +548,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     mf = hessobj.base
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = numpy.dot(mocc, mocc.T) * 2
-    dm0 = tag_array(dm0, mo_coeff = mo_coeff, mo_occ = mo_occ)
 
     de2 = cupy.empty([mol.natm, mol.natm, 3, 3])
 
