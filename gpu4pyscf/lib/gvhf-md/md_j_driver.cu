@@ -26,15 +26,15 @@ __constant__ Fold3Index c_i_in_fold3idx[495];
 
 extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int workers);
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds);
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int nao,
                 RysIntEnvVars envs, int *scheme, int *shls_slice,
-                int ntile_ij_pairs, int ntile_kl_pairs,
-                int *tile_ij_mapping, int *tile_kl_mapping, float *tile_q_cond,
+                int npairs_ij, int npairs_kl,
+                int *pair_ij_mapping, int *pair_kl_mapping,
+                float **qd_ij_max, float **qd_kl_max,
                 float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                uint32_t *batch_head, int workers,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -46,14 +46,16 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
     uint8_t lk = bas[ANG_OF + ksh0*BAS_SLOTS];
     uint8_t ll = bas[ANG_OF + lsh0*BAS_SLOTS];
     uint8_t order = li + lj + lk + ll;
+    float *tile16_qd_ij_max = qd_ij_max[4];
+    float *tile16_qd_kl_max = qd_kl_max[4];
     BoundsInfo bounds = {li, lj, lk, ll,
         0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0 , 0,
-        ntile_ij_pairs, ntile_kl_pairs, tile_ij_mapping, tile_kl_mapping,
-        q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
+        npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
+        q_cond, tile16_qd_ij_max, s_estimator, tile16_qd_kl_max, cutoff};
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 
-    if (!md_j_unrolled(&envs, &jk, &bounds, workers)) {
+    if (!md_j_unrolled(&envs, &jk, &bounds)) {
         int lij = li + lj;
         int lkl = lk + ll;
         int threads_ij = scheme[0];
@@ -61,6 +63,22 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         int gout_stride = scheme[2];
         int tilex = scheme[3];
         int tiley = scheme[4];
+        switch (threads_ij) {
+        case 1: bounds.qd_ij_max = qd_ij_max[0]; break;
+        case 2: bounds.qd_ij_max = qd_ij_max[1]; break;
+        case 4: bounds.qd_ij_max = qd_ij_max[2]; break;
+        case 8: bounds.qd_ij_max = qd_ij_max[3]; break;
+        case 16: bounds.qd_ij_max = qd_ij_max[4]; break;
+        case 32: bounds.qd_ij_max = qd_ij_max[5]; break;
+        }
+        switch (threads_kl) {
+        case 1: bounds.qd_kl_max = qd_kl_max[0]; break;
+        case 2: bounds.qd_kl_max = qd_kl_max[1]; break;
+        case 4: bounds.qd_kl_max = qd_kl_max[2]; break;
+        case 8: bounds.qd_kl_max = qd_kl_max[3]; break;
+        case 16: bounds.qd_kl_max = qd_kl_max[4]; break;
+        case 32: bounds.qd_kl_max = qd_kl_max[5]; break;
+        }
         int bsizex = threads_ij * tilex;
         int bsizey = threads_kl * tiley;
         int nsq_per_block = threads_ij * threads_kl;
@@ -72,8 +90,8 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
             + nf3ij * threads_ij * 2 + nf3kl * threads_kl * 2
             + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
         buflen += MAX(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
-        int blocks_ij = (ntile_ij_pairs + bsizex - 1) / bsizex;
-        int blocks_kl = (ntile_kl_pairs + bsizey - 1) / bsizey;
+        int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
+        int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
         dim3 blocks(blocks_ij, blocks_kl);
         md_j_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
             envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);

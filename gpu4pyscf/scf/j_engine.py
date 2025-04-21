@@ -31,7 +31,8 @@ from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (
-    _make_j_engine_pair_locs, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
+    _make_j_engine_pair_locs, _make_pair_qd_cond,
+    RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
 
 __all__ = [
     'get_j',
@@ -55,7 +56,6 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
         vhfopt = _VHFOpt(mol).build()
 
     mol = vhfopt.sorted_mol
-    nbas = mol.nbas
     nao, nao_orig = vhfopt.decontract_coeff.shape
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -71,7 +71,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
 
     ao_loc = mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = dm_cond.max()
+    log_max_dm = float(dm_cond.max())
     log_cutoff = math.log(vhfopt.direct_scf_tol)
 
     dms = dms.get()
@@ -102,24 +102,10 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = len(uniq_l_ctr)
-    tile_mappings = {}
-    workers = gpu_specs['multiProcessorCount']
 
-    info = cp.empty(2, dtype=np.uint32)
-
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            ij_shls = (ish0, ish1, jsh0, jsh1)
-            sub_q = vhfopt.q_cond[ish0:ish1,jsh0:jsh1]
-            mask = sub_q > log_cutoff# - log_max_dm
-            if i == j:
-                mask = cp.tril(mask)
-            t_ij = (cp.arange(ish0, ish1, dtype=np.int32)[:,None] * nbas +
-                    cp.arange(jsh0, jsh1, dtype=np.int32))
-            idx = cp.argsort(sub_q[mask])[::-1]
-            tile_mappings[i,j] = t_ij[mask][idx]
+    q_cond = vhfopt.q_cond
+    pair_mappings = _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond,
+                                       dm_cond, log_cutoff-log_max_dm)
     t1 = t2 = log.timer_debug1('q_cond and dm_cond', *cput0)
 
     timing_collection = {}
@@ -130,14 +116,14 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
         for j in range(i+1):
             ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
                        l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
-            tile_ij_mapping = tile_mappings[i,j]
+            pair_ij_mapping, qd_ij_addrs = pair_mappings[i,j][:2]
             for k in range(i+1):
                 for l in range(k+1):
                     if i == k and j < l: continue
                     llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
                                l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-                    tile_kl_mapping = tile_mappings[k,l]
+                    pair_kl_mapping, qd_kl_addrs = pair_mappings[k,l][:2]
                     scheme = _md_j_engine_quartets_scheme(uniq_l_ctr[[i, j, k, l], 0])
                     err = kern(
                         ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
@@ -145,23 +131,22 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
                         rys_envs, (ctypes.c_int*5)(*scheme),
                         (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                        ctypes.c_int(tile_ij_mapping.size),
-                        ctypes.c_int(tile_kl_mapping.size),
-                        ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(pair_ij_mapping.size),
+                        ctypes.c_int(pair_kl_mapping.size),
+                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                        (ctypes.c_void_p*6)(*qd_ij_addrs),
+                        (ctypes.c_void_p*6)(*qd_kl_addrs),
+                        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
                         lib.c_null_ptr(),
                         lib.c_null_ptr(),
-                        ctypes.c_float(log_cutoff-log_max_dm),
-                        ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(workers),
+                        ctypes.c_float(log_cutoff),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
                     if err != 0:
                         raise RuntimeError(f'MD_build_j kernel for {llll} failed')
                     if log.verbose >= logger.DEBUG1:
-                        ntasks = tile_ij_mapping.size * tile_kl_mapping.size
+                        ntasks = pair_ij_mapping.size * pair_kl_mapping.size
                         t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
                         if llll not in timing_collection:
                             timing_collection[llll] = 0
@@ -215,19 +200,19 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
         nsq = threads
     else:
         nsq = _nearest_power2(counts)
-    ij = _nearest_power2(int(nsq**.5))
-    kl = nsq // ij
+    kl = _nearest_power2(int(nsq**.5))
+    ij = nsq // kl
 
-    tilex = 128 // (lij+1)
+    tilex = min(64, 128 // (lij+1))
     tiley = 32
     cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2
-        ij = _nearest_power2(int(nsq**.5))
-        kl = nsq // ij
+        kl = _nearest_power2(int(nsq**.5))
+        ij = nsq // kl
         cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     gout_stride = threads // nsq
 
     # Adjust tiley, to effectively utilize the 40 registers per thread as cache
-    tiley = min(32, int(ij * gout_stride * 32 / nf3kl))
+    tiley = min(32, int(ij * gout_stride * 28 / nf3kl))
     return ij, kl, gout_stride, tilex, tiley

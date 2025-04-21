@@ -23,7 +23,7 @@
 #include "gvhf-rys/gamma_inc.cu"
 
 #define RT2_MAX 9
-#define KL_SIZE 27
+#define KL_SIZE 28
 
 extern __constant__ uint16_t c_Rt_idx[];
 extern __constant__ int8_t c_Rt_tuv_fac[];
@@ -73,8 +73,8 @@ __global__
 void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                  int threadsx, int threadsy, int tilex, int tiley)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
     int bsizey = threadsy * tiley;
     int task_ij0 = blockIdx.x * bsizex;
@@ -123,6 +123,8 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *dm_kl_cache = dm_ij_cache + nf3ij * threadsx;
     double *vj_ij_cache = dm_kl_cache + nf3kl * threadsy;
     double *vj_kl_cache = vj_ij_cache + nf3ij * threadsx;
+    float *qd_ij_max = bounds.qd_ij_max;
+    float *qd_kl_max = bounds.qd_kl_max;
 
     // zero out all cache;
     for (int n = t_id; n < (threadsx+bsizey)*4; n += threads) {
@@ -158,11 +160,10 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         dm_kl[n] = 0;
         vj_kl[n] = 0;
     }
-    int addr0, addr1, slots, slot_id;
 
     int kl_counts = nf3kl * tiley;
-    slots = gout_stride * threadsx;
-    slot_id = gout_id * threadsx + tx;
+    int slots = gout_stride * threadsx;
+    int slot_id = gout_id * threadsx + tx;
     for (int k = 0; k <= KL_SIZE; ++k) {
         int n = k * slots + slot_id;
         if (n >= kl_counts) break;
@@ -181,7 +182,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_ij0 >= npairs_ij) {
             continue;
         }
-        int pair_ij0 = pair_ij_mapping[task_ij0];
+        __syncthreads();
         for (int n = t_id; n < threadsx; n += threads) {
             int task_ij = task_ij0 + n;
             if (task_ij < npairs_ij) {
@@ -204,61 +205,62 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 Rp_cache[n+3*threadsx] = 1.;
             }
         }
+        double fac_sym = PI_FAC;
+        int task_ij = task_ij0 + tx;
+        if (task_ij >= npairs_ij) {
+            task_ij = task_ij0;
+            fac_sym = 0.;
+        }
+        int pair_ij = pair_ij_mapping[task_ij];
+        int ish = pair_ij / nbas;
+        int jsh = pair_ij % nbas;
+        if (ish == jsh) fac_sym *= .5;
+        int slot_id = gout_id * threadsy + ty;
+        int slots = gout_stride * threadsy;
+        int ij_loc0 = pair_loc[pair_ij];
+        for (int n = slot_id; n < nf3ij; n += slots) {
+            dm_ij_cache[tx+n*threadsx] = dm[ij_loc0+n];
+            vj_ij_cache[tx+n*threadsx] = 0;
+        }
         for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
             int task_kl0 = blockIdx.y * bsizey + batch_kl * threadsy;
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
+            int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
             int sq_kl = ty + batch_kl * threadsy;
-            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
-            double fac_sym = PI_FAC;
-            if (task_ij >= npairs_ij) {
-                task_ij = task_ij0;
-                fac_sym = 0.;
-            }
+            double fac = fac_sym;
             if (task_kl >= npairs_kl) {
                 task_kl = task_kl0;
-                fac_sym = 0.;
+                fac = 0.;
             }
-            int pair_ij = pair_ij_mapping[task_ij];
             int pair_kl = pair_kl_mapping[task_kl];
-            int ish = pair_ij / nbas;
-            int jsh = pair_ij % nbas;
             int ksh = pair_kl / nbas;
             int lsh = pair_kl % nbas;
-            if (ish == jsh) fac_sym *= .5;
-            if (ksh == lsh) fac_sym *= .5;
+            if (ksh == lsh) fac *= .5;
             if (pair_ij_mapping == pair_kl_mapping) {
-                if (task_ij == task_kl) fac_sym *= .5;
+                if (task_ij == task_kl) fac *= .5;
                 // TODO: skip certain blocks when task_ij < task_kl
-                if (task_ij < task_kl) fac_sym = 0.;
+                if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
-            if (batch_kl == 0) {
-                slot_id = gout_id * threadsy + ty;
-                slots = gout_stride * threadsy;
-                int ij_loc0 = pair_loc[pair_ij];
-                for (int n = slot_id; n < nf3ij; n += slots) {
-                    dm_ij_cache[tx+n*threadsx] = dm[ij_loc0+n];
-                    vj_ij_cache[tx+n*threadsx] = 0;
-                }
-            }
-            slots = gout_stride * threadsx;
-            slot_id = gout_id * threadsx + tx;
+            int slots = gout_stride * threadsx;
+            int slot_id = gout_id * threadsx + tx;
             //int kl_loc0 = pair_loc[pair_kl];
             for (int n = slot_id; n < nf3kl; n += slots) {
                 //dm_kl_cache[ty+n*threadsy] = dm[kl_loc0+n];
                 vj_kl_cache[ty+n*threadsy] = 0;
             }
             // load dm_kl_cache from dm_kl regisers of each thread
-            addr0 = batch_kl * nf3kl;
-            addr1 = addr0 + nf3kl;
+            int addr0 = batch_kl * nf3kl;
+            int addr1 = addr0 + nf3kl;
             switch (addr0 / slots) {
             case 0:
                 for (int n = 0; n <  3; ++n) {
@@ -460,38 +462,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     }
                 }
                 break;
-            case 25:
-                for (int n = 25; n <= 28; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 26:
-                for (int n = 26; n <= 29; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 27:
-                for (int n = 27; n <= 30; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 28:
-                for (int n = 28; n <= 31; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
             }
 
             double *Rt, *buf;
@@ -510,7 +480,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double ykl = Rq_cache[sq_kl+1*bsizey];
             double zkl = Rq_cache[sq_kl+2*bsizey];
             double akl = Rq_cache[sq_kl+3*bsizey];
-            double fac = fac_sym / (aij*akl*sqrt(aij+akl));
             double xpq = xij - xkl;
             double ypq = yij - ykl;
             double zpq = zij - zkl;
@@ -520,6 +489,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             if (gout_id == 0) {
                 eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
                 double a2 = -2. * theta;
+                fac /= aij*akl*sqrt(aij+akl);
                 gamma_inc[sq_id] *= fac;
                 for (int i = 1; i <= order; i++) {
                     fac *= a2;
@@ -643,10 +613,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 }
             }
             __syncthreads();
-            addr0 = batch_kl * nf3kl;
-            addr1 = addr0 + nf3kl;
-            slots = gout_stride * threadsx;
-            slot_id = gout_id * threadsx + tx;
             switch (addr0 / slots) {
             case 0:
                 for (int n = 0; n <  3; ++n) {
@@ -848,46 +814,12 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     }
                 }
                 break;
-            case 25:
-                for (int n = 25; n <= 28; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 26:
-                for (int n = 26; n <= 29; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 27:
-                for (int n = 27; n <= 30; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 28:
-                for (int n = 28; n <= 31; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
             }
         }
         // The last tile for ij
-        int task_ij = task_ij0 + tx;
-        int pair_ij = pair_ij_mapping[task_ij];
-        if (task_ij < npairs_ij) {
-            slots = gout_stride * threadsy;
-            slot_id = gout_id * threadsy + ty;
+        if (task_ij0+tx < npairs_ij) {
+            int slots = gout_stride * threadsy;
+            int slot_id = gout_id * threadsy + ty;
             int ij_loc0 = pair_loc[pair_ij];
             for (int n = slot_id; n < nf3ij; n += slots) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*threadsx]);
@@ -895,8 +827,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 
-    slots = gout_stride * threadsx;
-    slot_id = gout_id * threadsx + tx;
     for (int k = 0; k <= KL_SIZE; ++k) {
         int n = k * slots + slot_id;
         if (n >= kl_counts) break;
