@@ -184,6 +184,8 @@ class SCFWithSolvent(_Solvation):
                 if is_uhf:
                     v_solvent = self.with_solvent._B_dot_x(dm1[0]+dm1[1])
                     v += v_solvent
+                    v_solvent = self.with_solvent._B_dot_x(dm1[0]+dm1[1])
+                    v += v_solvent
                 elif singlet:
                     v += self.with_solvent._B_dot_x(dm1)
             return v
