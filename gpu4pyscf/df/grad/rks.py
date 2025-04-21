@@ -40,15 +40,6 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if grids.coords is None:
         grids.build(with_non0tab=False)
 
-    nlcgrids = None
-    if mf.do_nlc():
-        if ks_grad.nlcgrids is not None:
-            nlcgrids = ks_grad.nlcgrids
-        else:
-            nlcgrids = mf.nlcgrids
-        if nlcgrids.coords is None:
-            nlcgrids.build(with_non0tab=False)
-
     #enabling range-separated hybrids
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
 
@@ -59,26 +50,22 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
                 ni, mol, grids, mf.xc, dm,
                 max_memory=max_memory, verbose=ks_grad.verbose)
         #logger.debug1(ks_grad, 'sum(grids response) %s', exc.sum(axis=0))
-        if mf.do_nlc():
-            raise NotImplementedError
     else:
         exc, exc1 = rks_grad.get_exc(
                 ni, mol, grids, mf.xc, dm,
                 max_memory=max_memory, verbose=ks_grad.verbose)
-        if mf.do_nlc():
-            if ni.libxc.is_nlc(mf.xc):
-                xc = mf.xc
-            else:
-                xc = mf.nlc
-            enlc, exc1_nlc = rks_grad.get_nlc_exc(
-                ni, mol, nlcgrids, xc, dm,
-                max_memory=max_memory, verbose=ks_grad.verbose)
-            exc1 += exc1_nlc
     t0 = logger.timer(ks_grad, 'vxc total', *t0)
 
     aoslices = mol.aoslice_by_atom()
     exc1 = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     exc1 = cupy.asarray(exc1)
+
+    if mf.do_nlc():
+        enlc1_per_atom, enlc1_grid = rks_grad._get_denlc(ks_grad, mol, dm, max_memory)
+        exc1 += enlc1_per_atom
+        if ks_grad.grid_response:
+            exc += enlc1_grid
+
     if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
         ej, ejaux = ks_grad.get_j(mol, dm)
         exc1 += ej
