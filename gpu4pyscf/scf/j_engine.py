@@ -203,8 +203,8 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = min(32, 64 // (lij+1))
-    tiley = 16
+    tilex = min(32, 128 // (lij+1))
+    tiley = min(32, 128 // (lkl+1))
     cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2
@@ -214,5 +214,5 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
     gout_stride = threads // nsq
 
     # Adjust tiley, to effectively utilize the 40 registers per thread as cache
-    tiley = min(32, int(ij * gout_stride * 28 / nf3kl))
+    tiley = min(32, tiley, int(ij * gout_stride * 28 / nf3kl))
     return ij, kl, gout_stride, tilex, tiley

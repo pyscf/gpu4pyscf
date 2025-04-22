@@ -8679,7 +8679,7 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
     }
 }
 
-int rys_j_unrolled1(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds)
+int rys_j_unrolled_experiment(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds)
 {
     int li = bounds->li;
     int lj = bounds->lj;

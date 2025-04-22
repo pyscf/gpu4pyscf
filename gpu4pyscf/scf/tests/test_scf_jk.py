@@ -50,7 +50,7 @@ def test_jk_hermi1():
     assert abs(vj - ref[0]).max() < 1e-9
     assert abs(lib.fp(vj) - -2327.4715195591784) < 5e-10
 
-    vj = jk.get_j1(mol, dm, hermi=1).get()
+    vj = jk._get_j_experiment(mol, dm, hermi=1).get()
     assert abs(vj - ref[0]).max() < 1e-9
     assert abs(lib.fp(vj) - -2327.4715195591784) < 5e-10
 

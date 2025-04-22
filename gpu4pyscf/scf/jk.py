@@ -118,8 +118,11 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     log.timer('vj', *cput0)
     return vj
 
-def get_j1(mol, dm, hermi=0, vhfopt=None, verbose=None):
-    '''Compute J matrix
+def _get_j_experiment(mol, dm, hermi=0, vhfopt=None, verbose=None):
+    '''An experimental J engine under development using the Rys integral
+    algorithm. This version reduces the overhead of "create_tasks" and utilizes
+    the shared memory more effectively. However, this version is slower than the
+    previous implementation.
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
@@ -139,7 +142,7 @@ def get_j1(mol, dm, hermi=0, vhfopt=None, verbose=None):
         dms = transpose_sum(dms)
         dms *= .5
 
-    vj = vhfopt.get_j1(dms, log)
+    vj = vhfopt._get_j_experiment(dms, log)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
     vj = vhfopt.apply_coeff_CT_mat_C(cp.asarray(vj))
     vj = vj.reshape(dm.shape)
@@ -779,7 +782,7 @@ class _VHFOpt:
             vj += hermi_triu(vj1)
         return vj
 
-    def get_j1(self, dms, verbose):
+    def _get_j_experiment(self, dms, verbose):
         assert dms.ndim == 3
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
@@ -811,7 +814,7 @@ class _VHFOpt:
                     for l in range(k+1):
                         if i == k and j < l: continue
                         tasks.append((i,j,k,l))
-        schemes = {t: _j_engine_quartets_scheme1(mol, uniq_l_ctr[list(t)]) for t in tasks}
+        schemes = {t: _j_engine_quartets_scheme_experiment(mol, uniq_l_ctr[list(t)]) for t in tasks}
 
         def proc(dm_xyz, dm_cond):
             device_id = cp.cuda.device.get_device_id()
@@ -840,7 +843,7 @@ class _VHFOpt:
 
             timing_collection = {}
             kern_counts = 0
-            kern = libvhf_rys.RYS_build_j1
+            kern = libvhf_rys.RYS_build_j_experiment
 
             while tasks:
                 try:
@@ -1098,7 +1101,7 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     gout_stride = THREADS // n
     return n, gout_stride, with_gout
 
-def _j_engine_quartets_scheme1(mol, l_ctr_pattern, shm_size=SHM_SIZE):
+def _j_engine_quartets_scheme_experiment(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
@@ -1125,7 +1128,7 @@ def _j_engine_quartets_scheme1(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = min(32, 64 // (lij+1))
+    tilex = 16
     tiley = 16
     cache_size = ij * nf3ij * 2 + kl * nf3kl * 2 + ij*ij_prims + 3*(ij+kl)
     while (nsq * unit + cache_size) * 8 > shm_size:
@@ -1134,8 +1137,6 @@ def _j_engine_quartets_scheme1(mol, l_ctr_pattern, shm_size=SHM_SIZE):
         ij = nsq // kl
         cache_size = ij * nf3ij * 2 + kl * nf3kl * 2 + ij*ij_prims + 3*(ij+kl)
     gout_stride = threads // nsq
-    # Adjust tiley, to effectively utilize the 40 registers per thread as cache
-    tiley = min(16, int(ij * gout_stride * 24 / nf3kl))
     return ij, kl, gout_stride, tilex, tiley
 
 def _nearest_power2(n, return_leq=True):

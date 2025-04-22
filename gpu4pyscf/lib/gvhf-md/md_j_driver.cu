@@ -89,7 +89,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
             + threads_ij * 4 + bsizey * 4
             + nf3ij * threads_ij * 2 + nf3kl * threads_kl * 2
             + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
-        buflen += MAX(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
+        buflen += max(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
         int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
         int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
         dim3 blocks(blocks_ij, blocks_kl);

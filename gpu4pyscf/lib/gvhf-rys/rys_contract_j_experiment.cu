@@ -24,10 +24,8 @@
 #include "rys_roots.cu"
 #include "create_tasks.cu"
 
-#define KL_SIZE 24
-
 __global__
-void rys_j_kernel1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+void rys_j_kernel_experiment(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   int threadsx, int threadsy, int tilex, int tiley)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
@@ -107,11 +105,6 @@ void rys_j_kernel1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *vj_cache = buf1 - sq_id;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-
-    register double vj_kl[KL_SIZE];
-    for (int n = 0; n < KL_SIZE; ++n) {
-        vj_kl[n] = 0;
-    }
 
     for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
         int task_ij0 = blockIdx.x * bsizex + batch_ij * threadsx;
@@ -519,177 +512,10 @@ void rys_j_kernel1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 }
             }
             __syncthreads();
-            int addr0 = batch_kl * nf3kl;
-            int addr1 = addr0 + nf3kl;
-            switch (addr0 / slots) {
-            case 0:
-                for (int n = 0; n <  3; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
+            if (task_kl0+ty < npairs_kl) {
+                for (int n = slot_id; n < nf3kl; n += slots) {
+                    atomicAdd(vj+kl_loc0+n, vj_kl_cache[ty+n*threadsy]);
                 }
-                break;
-            case 1:
-                for (int n = 1; n <= 4; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 2:
-                for (int n = 2; n <= 5; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 3:
-                for (int n = 3; n <= 6; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 4:
-                for (int n = 4; n <= 7; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 5:
-                for (int n = 5; n <= 8; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 6:
-                for (int n = 6; n <= 9; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 7:
-                for (int n = 7; n <= 10; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 8:
-                for (int n = 8; n <= 11; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 9:
-                for (int n = 9; n <= 12; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 10:
-                for (int n = 10; n <= 13; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 11:
-                for (int n = 11; n <= 14; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 12:
-                for (int n = 12; n <= 15; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 13:
-                for (int n = 13; n <= 16; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 14:
-                for (int n = 14; n <= 17; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 15:
-                for (int n = 15; n <= 18; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 16:
-                for (int n = 16; n <= 19; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 17:
-                for (int n = 17; n <= 20; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 18:
-                for (int n = 18; n <= 21; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 19:
-                for (int n = 19; n <= 22; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 20:
-                for (int n = 20; n <= 23; ++n) {
-                    int addr = n * slots + slot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
             }
         }
         // The last tile for ij
@@ -702,25 +528,9 @@ void rys_j_kernel1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-
-    int kl_counts = nf3kl * tiley;
-    int slots = gout_stride * threadsx;
-    int slot_id = gout_id * threadsx + tx;
-    for (int k = 0; k <= KL_SIZE; ++k) {
-        int n = k * slots + slot_id;
-        if (n >= kl_counts) break;
-        int tile = n / nf3kl;
-        int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
-        if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
-            int kl = n % nf3kl;
-            atomicAdd(vj+kl_loc0+kl, vj_kl[k]);
-        }
-    }
 }
 
-extern int rys_j_unrolled1(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds);
+extern int rys_j_unrolled_experiment(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds);
 
 extern "C" {
 int RYS_build_j1(double *vj, double *dm, int n_dm, int nao,
@@ -770,7 +580,7 @@ int RYS_build_j1(double *vj, double *dm, int n_dm, int nao,
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 
-    if (!rys_j_unrolled1(&envs, &jk, &bounds)) {
+    if (!rys_j_unrolled_experiment(&envs, &jk, &bounds)) {
         int threads_ij = scheme[0];
         int threads_kl = scheme[1];
         int gout_stride = scheme[2];
@@ -806,7 +616,7 @@ int RYS_build_j1(double *vj, double *dm, int n_dm, int nao,
         int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
         int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
         dim3 blocks(blocks_ij, blocks_kl);
-        rys_j_kernel1<<<blocks, threads, buflen*sizeof(double)>>>(
+        rys_j_kernel_experiment<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
     }
     cudaError_t err = cudaGetLastError();
