@@ -91,7 +91,7 @@ class WithSolventTDSCF:
         return obj
 
     def kernel(self, *args, **kwargs):
-        super().kernel(*args, **kwargs)
+        return super().kernel(*args, **kwargs)
     
     def _finalize(self):
         super()._finalize()
