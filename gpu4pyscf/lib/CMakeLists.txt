@@ -31,7 +31,7 @@ if (USE_SYCL)
   #find_package(IntelSYCL REQUIRED PATHS ${DPCTL_CMAKE_MODULES_PATH} NO_DEFAULT_PATH)
 
   add_definitions(-DUSE_SYCL=1)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -x c++ -nocudainc -nocudalib")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl")
   # add_definitions(-DSYCL_EXT_ONEAPI_DEVICE_GLOBAL=1)
 endif(USE_SYCL)
 

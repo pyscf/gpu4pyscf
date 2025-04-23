@@ -75,14 +75,19 @@ double sub_dm_xyz(int lx, int ly, int lz, int li, int lj, int nao,
 }
 
 template <int L> __device__ static
-void dm_to_dm_xyz(double *dm_xyz, double *dm, int nao, int li, int lj,
+void dm_to_dm_xyz(double *cache, double *dm_xyz, double *dm, int nao, int li, int lj,
                   double *ri, double *rj, double cicj)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    auto c_i_in_fold3idx = s_i_in_fold3idx.get();
+#else
     int thread_id = threadIdx.x;
+#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;
-    extern __shared__ double cache[];
     double *cx = cache + sp_id;
     double *cy = cx + lj1 * lj1 * WARP_SIZE;
     double *cz = cy + lj1 * lj1 * WARP_SIZE;
@@ -109,7 +114,13 @@ void dm_xyz_to_dm(double *dm, double *dm_xyz, int nao, int li, int lj,
                   double *ri, double *rj, double cicj, double *cache,
                   int npairs_per_block)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    auto c_i_in_fold2idx = s_i_in_fold2idx.get();
+#else
     int thread_id = threadIdx.x;
+#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int lj1 = lj + 1;

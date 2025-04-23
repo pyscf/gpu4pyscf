@@ -39,18 +39,21 @@ set(GPU_SRCS
     rys_roots_dat.cu
   )
 
+add_library(gint SHARED ${GPU_SRCS})
+
 if (USE_SYCL)
   file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
   file(GLOB ALL_GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
 
   set_source_files_properties(${ALL_GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  set_target_properties(gint PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+  target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
 else()
   set_target_properties(gint PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
     CUDA_SEPARABLE_COMPILATION ON)
 endif()
-
-add_library(gint SHARED ${GPU_SRCS})
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
 #option(ENABLE_STATIC "Enforce static library build" 0)

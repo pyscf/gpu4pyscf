@@ -51,7 +51,15 @@ namespace compat {
 }
 using double3 = compat::double3;
 
-static inline double atomicAdd(double* addr, const double val) { return sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(*addr).fetch_add( val ); }
+template <typename T>
+static inline T
+atomicAdd(T* addr, const T val) {
+    sycl::atomic_ref<T,
+        sycl::memory_order::relaxed,
+        sycl::memory_scope::device,
+        sycl::access::address_space::global_space> atom(*addr);
+    return atom.fetch_add(val);
+}
 
 template <typename T>
 static inline typename std::enable_if<std::is_integral<T>::value, T>::type
@@ -64,14 +72,14 @@ atomicOr(T* addr, const T val) {
 }
 
 // #ifdef SYCL_EXT_ONEAPI_DEVICE_GLOBAL
-// template <class T>
-// using sycl_device_global = sycl::ext::oneapi::experimental::device_global<T>;
-// #else
 template <class T>
-using sycl_device_global = sycl::ext::oneapi::experimental::device_global<
-    T,
-    decltype(sycl::ext::oneapi::experimental::properties(
-        sycl::ext::oneapi::experimental::device_image_scope))>;
+using sycl_device_global = sycl::ext::oneapi::experimental::device_global<T>;
+// #else
+// template <class T>
+// using sycl_device_global = sycl::ext::oneapi::experimental::device_global<
+//     T,
+//     decltype(sycl::ext::oneapi::experimental::properties(
+//         sycl::ext::oneapi::experimental::device_image_scope))>;
 // #endif
 
 
@@ -183,4 +191,3 @@ static inline void cudaMemset(void* ptr, int val, size_t size) {
 // static inline void cudaMemcpyToSymbol(const char* symbol, const void* src, size_t count) {
 //   sycl_get_queue()->memcpy(symbol, src, count).wait();
 // }
-

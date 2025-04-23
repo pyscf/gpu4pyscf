@@ -17,16 +17,20 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
 #include "multigrid.cuh"
 #include "cart2xyz.cu"
 #include "loader.cu"
 
 template <int L> __device__ static
-void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
+void _eval_rho_orth_kernel(double *cache, double *rho, double *dm, MGridEnvVars envs,
                            MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+#else
     int thread_id = threadIdx.x;
+#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     int npairs_this_block = MIN(bounds.nshl_pair - pair_idx0, WARP_SIZE);
@@ -82,11 +86,10 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     // TODO: multiple dms
-    dm_to_dm_xyz<L>(dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
+    dm_to_dm_xyz<L>(cache, dm_xyz, dm+i0*nao+j0, nao, li, lj, ri, rj, cicj);
 
     double r1[L+1];
     double dmx_gyz[L+1];
-    extern __shared__ double cache[];
 
     int ngridx = ngrid_span;
     int ngridy = ngrid_span;
@@ -205,23 +208,34 @@ void _eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
 
 template <int L> __global__
 void eval_rho_orth_kernel(double *rho, double *dm, MGridEnvVars envs,
-                          MGridBounds bounds, double *pool, uint32_t *batch_head)
+                          MGridBounds bounds, double *pool, uint32_t *batch_head
+#ifdef USE_SYCL
+                          , sycl::nd_item<1> &item, double* cache
+#endif
+                          )
 {
+#ifdef USE_SYCL
+    int thread_id = item.get_local_id(0);
+    int b_id = item.get_group(0);
+    uint32_t& pair_idx0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<uint32_t>(item.get_group());
+#else
     int thread_id = threadIdx.x;
     int b_id = blockIdx.x;
+    extern __shared__ double cache[];
+    __shared__ uint32_t pair_idx0;
+#endif
     int ngrid_span = bounds.ngrid_radius * 2;
     int xs_size = (L+1) * ngrid_span;
     int nf2 = (L+1)*(L+2)/2;
     int nf3 = nf2*(L+3)/3;
     pool += (xs_size*3 + nf3 + nf2*ngrid_span + 3) * WARP_SIZE * b_id;
 
-    __shared__ uint32_t pair_idx0;
     if (thread_id == 0) {
         pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
     }
     __syncthreads();
     while (pair_idx0 < bounds.nshl_pair) {
-        _eval_rho_orth_kernel<L>(rho, dm, envs, bounds, pool, pair_idx0);
+        _eval_rho_orth_kernel<L>(cache, rho, dm, envs, bounds, pool, pair_idx0);
         if (thread_id == 0) {
             pair_idx0 = atomicAdd(batch_head, WARP_SIZE);
         }
@@ -251,6 +265,27 @@ int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
         nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
+
+    #ifdef USE_SYCL
+    sycl::queue &stream = *sycl_get_queue();
+    batch_head = sycl::malloc_device<uint32_t>(1, stream);
+    stream.memset(batch_head, 0, 1*sizeof(uint32_t)).wait();
+
+    switch (l) {
+    case 0: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(0, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<0> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 1: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(1, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<1> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 2: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(2, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<2> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 3: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(3, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<3> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 4: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(4, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<4> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 5: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(5, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<5> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 6: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(6, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<6> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 7: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(7, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<7> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 8: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen(8, &bounds)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_rho_orth_kernel<8> (rho, dm, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    default: return 1;
+    }
+
+    sycl::free(batch_head, stream);
+    #else // USE_SYCL
     cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
     cudaMemset(batch_head, 0, sizeof(uint32_t));
 
@@ -274,6 +309,7 @@ int MG_eval_rho_orth(double *rho, double *dm, MGridEnvVars envs,
         return 1;
     }
     cudaFree(batch_head);
+    #endif
     return 0;
 }
 }

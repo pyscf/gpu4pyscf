@@ -503,21 +503,13 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
 
     const int gsize = envs.g_size;
 
-    #ifdef USE_SYCL
-    item.barrier();
-    #else
     __syncthreads();
-    #endif
     for (int i = threadIdx_x; i < nrys_roots; i += blockDim_x) {
         g0[i] = envs.fac;
         g0[i+gsize] = fac;
         g0[i+2*gsize] = weight;
     }
-    #ifdef USE_SYCL
-    item.barrier();
-    #else
     __syncthreads();
-    #endif
 
     for (int tx = threadIdx_x; tx < nrys_roots*3; tx += blockDim_x) {
         const int iroot = tx % nrys_roots;
@@ -620,11 +612,7 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
             }
         }
     }
-    #ifdef USE_SYCL
-    item.barrier();
-    #else
     __syncthreads();
-    #endif
 }
 
 

@@ -21,16 +21,17 @@ set(GPU_SRCS
   vv10.cu
   libxc.cu
 )
+add_library(gdft SHARED ${GPU_SRCS})
 
 if (USE_SYCL)
   file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
   set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
 
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  target_compile_options(gdft PRIVATE -x c++ -nocudainc -nocudalib)
 else(USE_SYCL)
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 endif (USE_SYCL)
 
-add_library(gdft SHARED ${GPU_SRCS})
 set_target_properties(gdft PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})

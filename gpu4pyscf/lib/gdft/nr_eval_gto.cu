@@ -61,8 +61,7 @@ static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, d
     int grid_id = item.get_global_id(1);
     int ish = item.get_group(0) + bas_offset;
     sycl::group thread_block = item.get_group();
-    using tile_t = double[NG_PER_BLOCK];
-    tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    int (&sdata)[NG_PER_BLOCK] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[NG_PER_BLOCK]>(thread_block);
     const int blockDim_x = item.get_group_range(1);
     const int threadIdx_x = item.get_local_id(1);
     auto c_envs = s_envs.get();

@@ -25,12 +25,16 @@ set(GPU_SRCS
   #get_veff_driver_ip1.cu
   rys_roots_dat.cu
 )
+add_library(gvhf SHARED ${GPU_SRCS})
 
 if (USE_SYCL)
   file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
   set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
 
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  set_target_properties(gvhf PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+  target_compile_options(gvhf PRIVATE -x c++ -nocudainc -nocudalib)
 else (USE_SYCL)
   set_target_properties(gvhf PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -43,5 +47,4 @@ endif (USE_SYCL)
 #  set(BUILD_SHARED_LIBS 0)
 #endif()
 
-add_library(gvhf SHARED ${GPU_SRCS})
 target_link_libraries(gvhf gint)

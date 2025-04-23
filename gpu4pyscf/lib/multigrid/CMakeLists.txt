@@ -5,11 +5,15 @@ set(GPU_SRCS
     eval_tau.cu eval_mat_tau.cu
   )
 
+add_library(mgrid SHARED ${GPU_SRCS})
+
 if (USE_SYCL)
   file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
   set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
 
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  set_target_properties(mgrid PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+  target_compile_options(mgrid PRIVATE -x c++ -nocudainc -nocudalib)
 else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
@@ -17,7 +21,5 @@ else()
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
     CUDA_SEPARABLE_COMPILATION ON)
 endif (USE_SYCL)
-
-add_library(mgrid SHARED ${GPU_SRCS})
 
 #target_link_libraries(ft_ao OpenMP::OpenMP_C)

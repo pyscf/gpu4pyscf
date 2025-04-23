@@ -14,10 +14,20 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include <stdint.h>
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+inline constexpr uint32_t WARP_SIZE = 32;
+inline constexpr uint32_t WARPS = 8;
+#else // USE_SYCL
+#include <cuda_runtime.h>
 #define WARP_SIZE       32
 #define WARPS           8
+#endif // USE_SYCL
+
 #define THREADS         (WARP_SIZE*WARPS)
 #define LMAX            4
 
@@ -73,8 +83,16 @@ typedef struct {
     uint8_t _padding;
 } Fold3Index;
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+
+extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
+extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+#else //USE_SYCL
 #ifdef __CUDACC__
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
-#endif
+#endif // __CUDACC__
+#endif // USE_SYCL
+
 #endif

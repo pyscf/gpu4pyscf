@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
 #include "multigrid.cuh"
 
 __device__ static
@@ -25,7 +24,12 @@ void init_orth_data(double *pool, int *grid_start,
                     MGridEnvVars envs, MGridBounds bounds, double *ri, double *rj,
                     double ai, double aj, int l)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+#else
     int thread_id = threadIdx.x;
+#endif
     int warp_id = thread_id / WARP_SIZE;
     int ngrid_span = bounds.ngrid_radius * 2;
     int l1 = l + 1;
@@ -120,6 +124,9 @@ __device__ inline
 int load_xs(double *xs_cache, double *xs_exp, int ix0, int ngridx,
             int l, int batch_size, int xs_stride, int warp_id)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+#endif
     int nx = MIN(ngridx - ix0, batch_size);
     double *_xs_exp = xs_exp + ix0 * WARP_SIZE;
     for (int i = warp_id; i < nx; i += WARPS) {
@@ -134,7 +141,12 @@ int load_xs(double *xs_cache, double *xs_exp, int ix0, int ngridx,
 __device__ static
 double reduce_warps(double val, int ngridx, int thread_id, int sp_id, int warp_id)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    double (&cache)[THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
+#else
     __shared__ double cache[THREADS];
+#endif
     cache[thread_id] = val;
     __syncthreads();
     for (int stride = 4; stride > 0; stride /= 2) {
@@ -146,11 +158,22 @@ double reduce_warps(double val, int ngridx, int thread_id, int sp_id, int warp_i
     return cache[sp_id];
 }
 
-template <int L> __device__ static
-void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
+template <int L>
+#ifdef USE_SYCL
+// SYCL: rror: 'sycl_device' attribute cannot be applied to a static function or function in an anonymous namespace
+SYCL_EXTERNAL __device__
+#else
+__device__ static
+#endif
+void fill_dm_xyz(double* cache, double *dm_xyz, double *gx_dmyz, double *xs_exp,
                  int ngridx, int ngrid_span)
 {
+#ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+#else
     int thread_id = threadIdx.x;
+#endif
     int sp_id = thread_id % WARP_SIZE;
     int warp_id = thread_id / WARP_SIZE;
     constexpr int L1 = L + 1;
@@ -162,7 +185,6 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
     for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
         r3[n] = 0.;
     }
-    extern __shared__ double cache[];
     double *xs_cache = cache + sp_id;
     double *yz_cache = cache + L1 * WARP_SIZE + sp_id;
     for (int ix = 0; ix < ngridx; ++ix) {
@@ -247,7 +269,6 @@ void fill_dm_xyz(double *dm_xyz, double *gx_dmyz, double *xs_exp,
         for (int n = 0; n < (L1*nf2+WARPS-1)/WARPS; ++n) {
             r3[n] = 0.;
         }
-        extern __shared__ double cache[];
         double *xs_cache = cache + sp_id;
         double *yz_cache = cache + L1 * WARP_SIZE + sp_id;
         for (int ix = 0; ix < ngridx; ++ix) {
