@@ -195,10 +195,10 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
 }
 
 __global__
-static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restrict__ W, double* __restrict__ A, double* __restrict__ B, double* __restrict__ C,
-                                        const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
-                                        const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
-                                        const int ngrids)
+static void vv10_hess_eval_UWABCE_kernel(double* __restrict__ U, double* __restrict__ W, double* __restrict__ A, double* __restrict__ B, double* __restrict__ C, double* __restrict__ E,
+                                         const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
+                                         const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
+                                         const int ngrids)
 {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= ngrids)
@@ -213,6 +213,7 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
     double A_i = 0;
     double B_i = 0;
     double C_i = 0;
+    double E_i = 0;
 
     for (int j = 0; j < ngrids; j++) {
         const double omega_j = omega[j];
@@ -228,10 +229,10 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
         const double g_sum_1 = 1 / (g_ij + g_ji);
         const double Phi_ij = -1.5 / g_ji * g_ij_1 * g_sum_1;
 
-        const double wj_rhoj_Phiij = weight_j * rho_j * Phi_ij;
-        const double U_ij = wj_rhoj_Phiij * (g_sum_1 + g_ij_1);
+        const double E_ij = weight_j * rho_j * Phi_ij;
+        const double U_ij = E_ij * (g_sum_1 + g_ij_1);
         const double W_ij = U_ij * r_ij2;
-        const double A_ij = wj_rhoj_Phiij * (g_sum_1 * g_sum_1 + g_sum_1 * g_ij_1 + g_ij_1 * g_ij_1);
+        const double A_ij = E_ij * (g_sum_1 * g_sum_1 + g_sum_1 * g_ij_1 + g_ij_1 * g_ij_1);
         const double B_ij = A_ij * r_ij2;
         const double C_ij = B_ij * r_ij2;
 
@@ -240,6 +241,7 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
         A_i += A_ij;
         B_i += B_ij;
         C_i += C_ij;
+        E_i += E_ij;
     }
 
     U[i] = -U_i;
@@ -247,6 +249,7 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
     A[i] = 2 * A_i;
     B[i] = 2 * B_i;
     C[i] = 2 * C_i;
+    E[i] = E_i;
 }
 
 __global__
@@ -354,8 +357,8 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
             if (i_trial + i_trial_start >= ntrial) continue;
             const double   rho_t_j =   rho_t[(i_trial + i_trial_start) * ngrids + j];
             const double gamma_t_j = gamma_t[(i_trial + i_trial_start) * ngrids + j];
-            f_rho_t_i  [i_trial] += weight_j * (  f_rho_rho_ij * rho_t_j + 2 *   f_rho_gamma_ij * gamma_t_j);
-            f_gamma_t_i[i_trial] += weight_j * (f_gamma_rho_ij * rho_t_j + 2 * f_gamma_gamma_ij * gamma_t_j);
+            f_rho_t_i  [i_trial] += weight_j * (  f_rho_rho_ij * rho_t_j +   f_rho_gamma_ij * gamma_t_j);
+            f_gamma_t_i[i_trial] += weight_j * (f_gamma_rho_ij * rho_t_j + f_gamma_gamma_ij * gamma_t_j);
         }
     }
 
@@ -382,8 +385,8 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
         if (i_trial + i_trial_start >= ntrial) continue;
         const double rho_t_i   =   rho_t[(i_trial + i_trial_start) * ngrids + i];
         const double gamma_t_i = gamma_t[(i_trial + i_trial_start) * ngrids + i];
-        f_rho_t_i  [i_trial] += (  f_rho_rho_ii * rho_t_i + 2 *   f_rho_gamma_ii * gamma_t_i);
-        f_gamma_t_i[i_trial] += (f_gamma_rho_ii * rho_t_i + 2 * f_gamma_gamma_ii * gamma_t_i);
+        f_rho_t_i  [i_trial] += (  f_rho_rho_ii * rho_t_i +   f_rho_gamma_ii * gamma_t_i);
+        f_gamma_t_i[i_trial] += (f_gamma_rho_ii * rho_t_i + f_gamma_gamma_ii * gamma_t_i);
 
         f_rho_t  [(i_trial + i_trial_start) * ngrids + i] = f_rho_t_i  [i_trial];
         f_gamma_t[(i_trial + i_trial_start) * ngrids + i] = f_gamma_t_i[i_trial];
@@ -431,16 +434,16 @@ int VXC_vv10nlc_grad(cudaStream_t stream, double *Fvec,
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_UWABC(const cudaStream_t stream,
-                                double* U, double* W, double* A, double* B, double* C,
-                                const double* grid_coord, const double* grid_weight,
-                                const double* rho, const double* omega, const double* kappa,
-                                const int ngrids)
+int VXC_vv10nlc_hess_eval_UWABCE(const cudaStream_t stream,
+                                 double* U, double* W, double* A, double* B, double* C, double* E,
+                                 const double* grid_coord, const double* grid_weight,
+                                 const double* rho, const double* omega, const double* kappa,
+                                 const int ngrids)
 {
     const dim3 threads(NG_PER_BLOCK);
     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    vv10_hess_eval_UWABC_kernel<<<blocks, threads, 0, stream>>>(U, W, A, B, C,
-                                                                grid_coord, grid_weight, rho, omega, kappa, ngrids);
+    vv10_hess_eval_UWABCE_kernel<<<blocks, threads, 0, stream>>>(U, W, A, B, C, E,
+                                                                 grid_coord, grid_weight, rho, omega, kappa, ngrids);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 hess eval_UWABC: %s\n", cudaGetErrorString(err));
