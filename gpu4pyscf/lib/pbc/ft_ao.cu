@@ -28,7 +28,8 @@
 #define OF_COMPLEX      2
 
 __global__
-void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
+void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+                      int compressing)
 {
     // sp is short for shl_pair
     int sp_block_id = blockIdx.x;
@@ -36,26 +37,22 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     int nGv_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int nsp_per_block = blockDim.z;
-    int Gv_id = threadIdx.x;
+    int Gv_id_in_block = threadIdx.x;
     int gout_id = threadIdx.y;
     int sp_id = threadIdx.z;
     int npairs_ij = bounds.npairs_ij;
-    int pair_ij_idx = sp_block_id * nsp_per_block + sp_id;
-
-    if (pair_ij_idx >= npairs_ij) {
+    int pair_ij = sp_block_id * nsp_per_block + sp_id;
+    if (pair_ij >= npairs_ij) {
         return;
     }
 
-    int nbas = envs.nbas;
-    int ish = bounds.ish_in_pair[pair_ij_idx];
-    int jsh = bounds.jsh_in_pair[pair_ij_idx];
-    int *sp_img_offsets = envs.img_offsets;
-    int bas_ij = ish * nbas + jsh;
-    int img0 = sp_img_offsets[bas_ij];
-    int img1 = sp_img_offsets[bas_ij+1];
-    if (img0 >= img1) {
-        return;
-    }
+    int nbas = envs.cell0_nbas * envs.bvk_ncells;
+    int bas_ij = bounds.bas_ij_idx[pair_ij];
+    int ish = bas_ij / nbas;
+    int jsh = bas_ij % nbas;
+    int *sp_img_offsets = bounds.img_offsets;
+    int img0 = sp_img_offsets[pair_ij];
+    int img1 = sp_img_offsets[pair_ij+1];
 
     int li = bounds.li;
     int lj = bounds.lj;
@@ -82,18 +79,19 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
     double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
     double *rj = env + atm[ja*ATM_SLOTS+PTR_COORD];
     double *img_coords = envs.img_coords;
-    int *img_idx = envs.img_idx;
+    int *img_idx = bounds.img_idx;
 
     int nGv = bounds.ngrids;
-    double *Gv = bounds.grids + Gv_block_id * nGv_per_block;
-    double kx = Gv[Gv_id];
-    double ky = Gv[Gv_id + nGv];
-    double kz = Gv[Gv_id + nGv * 2];
+    int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
+    double *Gv = bounds.grids + Gv_id;
+    double kx = Gv[0];
+    double ky = Gv[nGv];
+    double kz = Gv[nGv * 2];
     double kk = kx * kx + ky * ky + kz * kz;
     double rjri[3];
 
     extern __shared__ double g[];
-    double *gxR = g + g_size * nGv_per_block * sp_id + Gv_id;
+    double *gxR = g + g_size * nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxI + gx_len;
     double *gyI = gyR + gx_len;
@@ -159,7 +157,7 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
                     double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                     double *_gxI = _gxR + gx_len;
                     double RpaR = rjri[n] * aj_aij; // Rp - Ra
-                    double RpaI = -a2 * Gv[Gv_id+nGv*n];
+                    double RpaI = -a2 * Gv[nGv*n];
                     s0xR = _gxR[0];
                     s0xI = _gxI[0];
                     s1xR = RpaR * s0xR - RpaI * s0xI;
@@ -222,27 +220,41 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds)
         }
     }
 
-    if (Gv_block_id * nGv_per_block + Gv_id < nGv) {
-        int nfi = (li + 1) * (li + 2) / 2;
-        int *ao_loc = envs.ao_loc;
-        int ncells = envs.bvk_ncells;
-        int nbasp = nbas / ncells;
-        size_t nao = ao_loc[nbasp];
-        size_t cell_id = jsh / nbasp;
-        int cell0_jsh = jsh % nbasp;
-        size_t i0 = ao_loc[ish];
-        size_t j0 = ao_loc[cell0_jsh];
-        double *aft_tensor = out + 
-                (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv
-                 + Gv_block_id*nGv_per_block + Gv_id) * OF_COMPLEX;
-        for (int n = 0; n < GOUT_WIDTH; ++n) {
-            int ij = n*gout_stride + gout_id;
-            if (ij >= nfij) break;
-            size_t i = ij % nfi;
-            size_t j = ij / nfi;
-            size_t addr = (i*nao+j)*nGv;
-            aft_tensor[addr*2  ] = goutR[n];
-            aft_tensor[addr*2+1] = goutI[n];
+    if (Gv_id < nGv) {
+        if (compressing) {
+            int nfi = (li + 1) * (li + 2) / 2;
+            int nfj = (lj + 1) * (lj + 2) / 2;
+            int nfij = nfi * nfj;
+            int stride = npairs_ij * nGv * OF_COMPLEX;
+            double *aft_tensor = out + (pair_ij * nGv + Gv_id) * OF_COMPLEX;
+#pragma unroll
+            for (int n = 0; n < GOUT_WIDTH; ++n) {
+                int ij = n*gout_stride + gout_id;
+                if (ij >= nfij) break;
+                aft_tensor[ij*stride  ] = goutR[n];
+                aft_tensor[ij*stride+1] = goutI[n];
+            }
+        } else {
+            int nfi = (li + 1) * (li + 2) / 2;
+            int *ao_loc = envs.ao_loc;
+            int nbasp = envs.cell0_nbas;
+            size_t nao = ao_loc[nbasp];
+            size_t cell_id = jsh / nbasp;
+            int cell0_jsh = jsh % nbasp;
+            size_t i0 = ao_loc[ish];
+            size_t j0 = ao_loc[cell0_jsh];
+            double *aft_tensor = out +
+                    (cell_id * nao*nao*nGv + (i0*nao+j0) * nGv + Gv_id) * OF_COMPLEX;
+#pragma unroll
+            for (int n = 0; n < GOUT_WIDTH; ++n) {
+                int ij = n*gout_stride + gout_id;
+                if (ij >= nfij) break;
+                size_t i = ij % nfi;
+                size_t j = ij / nfi;
+                size_t addr = (i*nao+j)*nGv;
+                aft_tensor[addr*2  ] = goutR[n];
+                aft_tensor[addr*2+1] = goutI[n];
+            }
         }
     }
 }
@@ -265,4 +277,211 @@ void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv
         int ck = conj_mapping[k];
         out[ji + ck*nao2_nGv+Gv_id] = out[ij + k*nao2_nGv+Gv_id];
     }
+}
+
+//__global__
+//void ft_aopair_unpack(double *out, double *dat, int *addresses,
+//                       int *conj_mapping, int bvk_ncells, int nGv)
+//{
+//}
+
+#define REMOTE_THRESHOLD 50
+
+// count images for the overlap between cell and bvkcell
+__global__ static
+void overlap_img_counts_kernel(int *img_counts, int ish0, int jsh0, int nish, int njsh,
+                               AFTIntEnvVars envs, float *exps, float *log_coeff,
+                               float log_cutoff, int permutation_symmetry)
+{
+    int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int s_njsh = envs.bvk_ncells * njsh;
+    if (bas_ij >= nish*s_njsh) {
+        return;
+    }
+    int nimgs = envs.nimgs;
+    int *atm = envs.atm;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
+    int ish = bas_ij / s_njsh;
+    int jsh = bas_ij % s_njsh;
+    int cell0_ish = ish        + ish0;;
+    int cell0_jsh = jsh % njsh + jsh0;;
+    if (permutation_symmetry && cell0_ish < cell0_jsh) {
+        return;
+    }
+    ish =                                cell0_ish;
+    jsh = jsh / njsh * envs.cell0_nbas + cell0_jsh;
+    int li = bas[ANG_OF + cell0_ish*BAS_SLOTS];
+    int lj = bas[ANG_OF + cell0_jsh*BAS_SLOTS];
+    float ai = exps[cell0_ish];
+    float aj = exps[cell0_jsh];
+    float aij = ai + aj;
+    float fi = ai / aij;
+    float fj = aj / aij;
+    float theta_ij = ai * aj / aij;
+    float log_ci = log_coeff[cell0_ish];
+    float log_cj = log_coeff[cell0_jsh];
+    float log_cicj = log_ci + log_cj;
+    double *ri = env + atm[bas[ish*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
+    double *rj = env + atm[bas[jsh*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
+    float xi = ri[0];
+    float yi = ri[1];
+    float zi = ri[2];
+    float xj = rj[0];
+    float yj = rj[1];
+    float zj = rj[2];
+    // log(ci*cj * (pi/aij)**1.5)
+    float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    log_cutoff = log_cutoff - log_fac;
+
+    int counts = 0;
+    for (int img = 0; img < nimgs; ++img) {
+        float xjL = xj + img_coords[img*3+0];
+        float yjL = yj + img_coords[img*3+1];
+        float zjL = zj + img_coords[img*3+2];
+        float xjxi = xjL - xi;
+        float yjyi = yjL - yi;
+        float zjzi = zjL - zi;
+        float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
+        float theta_ij_rr = theta_ij * rr_ij;
+        if (theta_ij_rr > REMOTE_THRESHOLD) {
+            continue;
+        }
+
+        float dr = sqrtf(rr_ij);
+        float dri = fj * dr;
+        float drj = fi * dr;
+        float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
+        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
+        float estimator = dri_fac + drj_fac + theta_ij_rr;
+        if (estimator > log_cutoff) {
+            counts++;
+        }
+    }
+    img_counts[bas_ij] = counts;
+}
+
+__global__ static
+void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
+                            int npairs, int ish0, int jsh0, int nish, int njsh,
+                            AFTIntEnvVars envs, float *exps, float *log_coeff,
+                            float log_cutoff)
+{
+    int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (pair_id >= npairs) {
+        return;
+    }
+    int bas_ij = bas_ij_mapping[pair_id];
+    int s_njsh = envs.bvk_ncells * njsh;
+    int ish = bas_ij / s_njsh;
+    int jsh = bas_ij % s_njsh;
+    int cell0_ish = ish        + ish0;;
+    int cell0_jsh = jsh % njsh + jsh0;;
+    ish =                                cell0_ish;
+    jsh = jsh / njsh * envs.cell0_nbas + cell0_jsh;
+
+    int nimgs = envs.nimgs;
+    int *atm = envs.atm;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    double *img_coords = envs.img_coords;
+    int li = bas[ANG_OF + cell0_ish*BAS_SLOTS];
+    int lj = bas[ANG_OF + cell0_jsh*BAS_SLOTS];
+    float ai = exps[cell0_ish];
+    float aj = exps[cell0_jsh];
+    float aij = ai + aj;
+    float fi = ai / aij;
+    float fj = aj / aij;
+    float theta_ij = ai * aj / aij;
+    float log_ci = log_coeff[cell0_ish];
+    float log_cj = log_coeff[cell0_jsh];
+    float log_cicj = log_ci + log_cj;
+    double *ri = env + atm[bas[ish*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
+    double *rj = env + atm[bas[jsh*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
+    float xi = ri[0];
+    float yi = ri[1];
+    float zi = ri[2];
+    float xj = rj[0];
+    float yj = rj[1];
+    float zj = rj[2];
+    // log(ci*cj * (pi/aij)**1.5)
+    float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    log_cutoff = log_cutoff - log_fac;
+
+    int counts = 0;
+    img_idx += img_offsets[pair_id];
+    for (int img = 0; img < nimgs; ++img) {
+        float xjL = xj + img_coords[img*3+0];
+        float yjL = yj + img_coords[img*3+1];
+        float zjL = zj + img_coords[img*3+2];
+        float xjxi = xjL - xi;
+        float yjyi = yjL - yi;
+        float zjzi = zjL - zi;
+        float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
+        float theta_ij_rr = theta_ij * rr_ij;
+        if (theta_ij_rr > REMOTE_THRESHOLD) {
+            continue;
+        }
+
+        float dr = sqrtf(rr_ij);
+        float dri = fj * dr;
+        float drj = fi * dr;
+        float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
+        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
+        float estimator = dri_fac + drj_fac + theta_ij_rr;
+        if (estimator > log_cutoff) {
+            img_idx[counts] = img;
+            counts++;
+        }
+    }
+}
+
+extern "C" {
+int overlap_img_counts(int *img_counts, int *shls_slice, AFTIntEnvVars *envs,
+                       float *exps, float *log_coeff, float log_cutoff,
+                       int permutation_symmetry)
+{
+    int ish0 = shls_slice[0];
+    int ish1 = shls_slice[1];
+    int jsh0 = shls_slice[2];
+    int jsh1 = shls_slice[3];
+    int nish = ish1 - ish0;
+    int njsh = jsh1 - jsh0;
+    constexpr int threads = 512;
+    int ncells = envs->bvk_ncells;
+    int blocks = (nish*ncells*njsh + threads-1)/threads;
+    overlap_img_counts_kernel<<<blocks, threads>>>(
+        img_counts, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, log_cutoff,
+        permutation_symmetry);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
+                    int npairs, int *shls_slice, AFTIntEnvVars *envs,
+                    float *exps, float *log_coeff, float log_cutoff)
+{
+    int ish0 = shls_slice[0];
+    int ish1 = shls_slice[1];
+    int jsh0 = shls_slice[2];
+    int jsh1 = shls_slice[3];
+    int nish = ish1 - ish0;
+    int njsh = jsh1 - jsh0;
+    constexpr int threads = 512;
+    int blocks = (npairs + threads-1)/threads;
+    overlap_img_idx_kernel<<<blocks, threads>>>(
+        img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
+        *envs, exps, log_coeff, log_cutoff);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
 }

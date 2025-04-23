@@ -313,7 +313,7 @@ def extract_pgto_params(mol, op='diffused'):
             c = abs(mol._libcint_ctr_coeff(i)).max(axis=1)
             l = mol.bas_angular(i)
             # A quick estimation for the radius that each primitive GTO vanishes
-            r2 = np.log(c**2 / precision * 10**l) / e
+            r2 = np.log(c**2 / precision * 10**l + 1e-200) / e
             idx = r2.argmax()
             es.append(e[idx])
             cs.append(c[idx].max())
@@ -325,7 +325,7 @@ def extract_pgto_params(mol, op='diffused'):
             l = mol.bas_angular(i)
             # A quick estimation for the resolution of planewaves that each
             # primitive GTO requires
-            ke = np.log(c**2 / precision * 50**l) * e
+            ke = np.log(c**2 / precision * 50**l + 1e-200) * e
             idx = ke.argmax()
             es.append(e[idx])
             cs.append(c[idx].max())
