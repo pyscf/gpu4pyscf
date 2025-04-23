@@ -172,6 +172,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     log.timer('vj', *cput0)
     return vj
 
+
 class _VHFOpt(jk._VHFOpt):
     def __init__(self, mol, cutoff=1e-13):
         super().__init__(mol, cutoff)
@@ -203,10 +204,15 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = min(32, 128 // (lij+1))
+    tilex = 32
     tiley = min(32, 128 // (lkl+1))
+    s4 = False
     if li == lk and lj == ll:
-        cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
+        if s4:
+            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
+        else:
+            ij = kl
+            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     else:
         cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     while (nsq * unit + cache_size) * 8 > shm_size:
@@ -214,11 +220,18 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
         kl = _nearest_power2(int(nsq**.5))
         ij = nsq // kl
         if li == lk and lj == ll:
-            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
+            if s4:
+                cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
+            else:
+                ij = kl
+                cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
         else:
             cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
     gout_stride = threads // nsq
 
-    # Adjust tiley, to effectively utilize the 40 registers per thread as cache
-    tiley = min(32, tiley, int(ij * gout_stride * 28 / nf3kl))
+    # Adjust tiley, to effectively utilize the 28 registers per thread as cache
+    _KL_REGISTERS = 28 # see md_contract_j.cu
+    tiley = min(32, tiley, int(ij * gout_stride * _KL_REGISTERS / nf3kl))
+    if li == lk and lj == ll:
+        tilex = tiley
     return ij, kl, gout_stride, tilex, tiley

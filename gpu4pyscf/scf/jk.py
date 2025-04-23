@@ -1128,8 +1128,7 @@ def _j_engine_quartets_scheme_experiment(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = 16
-    tiley = 16
+    tilex = tiley = 16
     cache_size = ij * nf3ij * 2 + kl * nf3kl * 2 + ij*ij_prims + 3*(ij+kl)
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2

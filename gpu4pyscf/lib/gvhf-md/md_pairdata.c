@@ -146,12 +146,12 @@ void Et_dot_dm(double *Et_dm, double *dm, int *ao_loc, int *pair_loc,
                         int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
                         get_E_tensor(Et, li, lj, ai, aj, ri, rj, buf);
                         double cc = ci * cj;
-                        double *pdm = dm + j0*nao + i0;
+                        double *pdm = dm + i0*nao + j0;
                         for (int n = 0, t = 0; t < Et_len; t++) {
                                 double rho_t = 0.;
                                 for (int i = 0; i < nfi; i++) {
                                 for (int j = 0; j < nfj; j++, n++) {
-                                        rho_t += Et[n] * cc * pdm[j*nao+i];
+                                        rho_t += Et[n] * cc * pdm[i*nao+j];
                                 } }
                                 rho[t] = rho_t;
                         }

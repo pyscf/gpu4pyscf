@@ -90,7 +90,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
         int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
         dim3 blocks(blocks_ij, blocks_kl);
-        if (li == lk && lj == ll) {
+        if (0 and li == lk && lj == ll) {
             int buflen = (order+1) * nsq_per_block
                 + threads_ij * 4 + bsizey * 4
                 + nf3ij * threads_ij + nf3kl * threads_kl
