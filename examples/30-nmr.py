@@ -28,14 +28,12 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 bas='631g'
-grids_level = 6
 
 mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
 mol.build()
 
 mf = rks.RKS(mol, xc='b3lyp')
-mf.grids.level = grids_level
-e_gpu = mf.kernel() # -76.3849465946694
+e_gpu = mf.kernel() # -76.3849465432042
 msc_d, msc_p = shielding.eval_shielding(mf)
 msc = (msc_d + msc_p).get()
 print('------------------- NMR shielding constant -----------------------------')
