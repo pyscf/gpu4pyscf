@@ -240,6 +240,21 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
         raise RuntimeError('Failed in generating PCM D and S matrices.')
     return D, S
 
+
+# def get_phi(pcmobj, sigma):
+#     """
+#     """
+#     mol = pcmobj.mol
+#     int2c2e = mol._add_suffix('int2c2e')
+#     grid_coords = pcmobj.surface['grid_coords']
+#     charge_exp  = pcmobj.surface['charge_exp']
+#     fakemol_charge = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
+#     v_ng = gto.mole.intor_cross(int2c2e, fakemol_charge, fakemol_charge)
+#     v_ng = cupy.asarray(v_ng)
+#     phi_s = sigma@v_ng
+#     return phi_s
+
+
 class PCM(lib.StreamObject):
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
@@ -276,6 +291,8 @@ class PCM(lib.StreamObject):
         self.v = None
         self.v_grids_n = None
         self.dmprev = None
+        # self.dm0 = None
+        # self.eps_optical = 1.78
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
@@ -388,6 +405,12 @@ class PCM(lib.StreamObject):
         v_grids_e = self._get_v(dms)
         v_grids = self.v_grids_n - v_grids_e
 
+        # eps = self.eps
+        # eps_optical = self.eps_optical
+        # chi_e = (eps - 1)/(4 * numpy.pi)
+        # chi_fast = (eps_optical - 1)/(4 * numpy.pi)
+        # chi_slow = (eps - eps_optical)/(4 * numpy.pi)
+
         if self.dmprev is not None:
             dmprev = self.dmprev
             dmprev = dmprev.reshape(-1,nao,nao)
@@ -395,6 +418,12 @@ class PCM(lib.StreamObject):
                 dmprev = (dmprev[0] + dmprev[1]).reshape(-1,nao,nao)
             if not isinstance(dmprev, cupy.ndarray):
                 dmprev = cupy.asarray(dmprev)
+            # dm0 = self.dm0
+            # dm0 = dm0.reshape(-1,nao,nao)
+            # if dm0.shape[0] == 2:
+            #     dm0 = (dm0[0] + dm0[1]).reshape(-1,nao,nao)
+            # if not isinstance(dm0, cupy.ndarray):
+            #     dm0 = cupy.asarray(dm0)
             v_grids_e_prev = self._get_v(dmprev)
             v_grids_prev = self.v_grids_n - v_grids_e_prev
             b = self.left_multiply_R(v_grids_prev.T)
@@ -403,6 +432,30 @@ class PCM(lib.StreamObject):
             vK_1 = self.left_solve_K(v_grids_prev.T, K_transpose = True)
             qt = self.left_multiply_R(vK_1, R_transpose = True).T
             q_sym = (q + qt)/2.0
+
+            # v_grids_e_0 = self._get_v(dm0)
+            # v_grids_0 = self.v_grids_n - v_grids_e_0
+            # b_0 = self.left_multiply_R(v_grids_0.T)
+            # q_0 = self.left_solve_K(b_0).T
+
+            # vK_1_0 = self.left_solve_K(v_grids_0.T, K_transpose = True)
+            # qt_0 = self.left_multiply_R(vK_1_0, R_transpose = True).T
+            # q_sym_0 = (q_0 + qt_0)/2.0
+
+            # q_sym_0_s = chi_slow/chi_e * q_sym_0
+            # phi_1_s = get_phi(self, q_sym_0_s)
+            # vgrids_2 = v_grids_prev + phi_1_s
+            # b_2 = self.left_multiply_R(vgrids_2.T)
+            # q_2 = self.left_solve_K(b_2).T
+            # vK_1_2 = self.left_solve_K(vgrids_2.T, K_transpose = True)
+            # qt_2 = self.left_multiply_R(vK_1_2, R_transpose = True).T
+            # q_sym_2_f = (q_2 + qt_2)/2.0
+            # q_sym = q_sym_0_s + q_sym_2_f
+            # q = q_0 * chi_slow/chi_e + q_2
+            # q_sym = q_sym_0_s
+            # q = q_0 * chi_slow/chi_e
+
+
         else:
             b = self.left_multiply_R(v_grids.T)
             q = self.left_solve_K(b).T
