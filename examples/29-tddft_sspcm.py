@@ -17,28 +17,32 @@
 #  Example of TDDFT with State-Specific Solvent
 ###################################
 
+import numpy as np
+import pyscf
+import cupy as cp
+from pyscf import gto, scf, dft, tddft
+from gpu4pyscf.lib.cupy_helper import contract
+import copy
+from functools import reduce
+from gpu4pyscf.scf import cphf
+
 """
 [Experimental Feature Notice]
 -----------------------------------------------------------------------
 This implementation is EXPERIMENTAL and subject to change without warning.
 Users must fully understand the theoretical assumptions and limitations 
 before application in production systems. Misuse may lead to incorrect results.
+
+Users may refer to the following papers for more details:
+1. The State-specific approach and how to do a SS-PCM TDDFT calculation: 
+    Exploring Chemistry with Electronic Structure Methods
+2. 10.1063/1.2222364
+3. 10.1063/1.2757168
 """
-import numpy as np
-import pyscf
-import cupy as cp
-import gpu4pyscf
-from pyscf import gto, scf, dft, tddft
-from gpu4pyscf.solvent._attach_solvent import SCFWithSolvent
-from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
-from gpu4pyscf.scf.hf_lowmem import WaveFunction
-from gpu4pyscf.lib.cupy_helper import contract
-from pyscf import lib
-import copy
-from functools import reduce
-from gpu4pyscf.scf import cphf
 
 def get_total_density(td_grad, mf, x_y, singlet=True, relaxed=True):
+    """
+    """
     mol = mf.mol
     mo_coeff = cp.asarray(mf.mo_coeff)
     mo_energy = cp.asarray(mf.mo_energy)
@@ -130,7 +134,7 @@ def get_phi(pcmobj, sigma):
     return phi_s
 
 
-def get_deltaG(mfeq, mfneq, tdneq, tdgneq, eps_optical=1.78):
+def get_deltaG(mfeq, mfneq, tdneq, dm2, eps_optical=1.78):
     pcmobj = mfeq.with_solvent
     eps = pcmobj.eps
 
@@ -140,14 +144,10 @@ def get_deltaG(mfeq, mfneq, tdneq, tdgneq, eps_optical=1.78):
     pcmobj_optical.build()
     dm1_eq = mfeq.make_rdm1()
 
-    dm2 = get_total_density(tdgneq, mfneq, tdneq.xy[0])
     chi_e = (eps - 1)/(4 * np.pi)
-    chi_fast = (eps_optical - 1)/(4 * np.pi)
     chi_slow = (eps - eps_optical)/(4 * np.pi)
     q_1 = pcmobj._get_qsym(dm1_eq, with_nuc=True)[0]
     q_1_s = chi_slow/chi_e * q_1
-    q_2 = pcmobj._get_qsym(dm2, with_nuc=True)[0]
-    q_2_s = chi_slow/chi_e * q_2
     v1 = pcmobj._get_vgrids(dm1_eq, with_nuc=True)
     v2 = pcmobj._get_vgrids(dm2, with_nuc=True)
     phi_1_s = get_phi(pcmobj, q_1_s)
@@ -171,8 +171,86 @@ def get_deltaG(mfeq, mfneq, tdneq, tdgneq, eps_optical=1.78):
     delta_G = 0.5*q_2_f.T@v2_rho + q_1_s.T@v2_rho - 0.5*q_1_s.T@v1_rho + 0.5*q_1_s@phi2_f - 0.5*q_1_s@phi1_f
     nuc_cor = 0.5*q_1_s.T@pcmobj.v_grids_n + 0.5*q_2_f.T@pcmobj.v_grids_n
     e_ss = tdneq.e[0] + mfneq.e_tot + delta_G + mfeq.with_solvent.e + nuc_cor
-    e_ss, delta_G + mfeq.with_solvent.e + nuc_cor
+    return e_ss
 
 
-def external_iteration():
-    pass
+def get_mf(mol, xc, solvent_model=None):
+    if xc.lower() == 'hf':
+        mf = scf.RHF(mol).PCM().to_gpu()
+        if solvent_model is not None:
+            mf.with_solvent = solvent_model
+        else:
+            mf.with_solvent.method = 'cpcm'
+            mf.with_solvent.equilibrium_solvation = False
+            mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+            mf.with_solvent.eps = 78
+            radii_array = pyscf.data.radii.UFF*1.1
+            mf.with_solvent.radii_table = radii_array
+    else:
+        raise NotImplementedError
+
+    return mf
+
+def get_td(mf, xc, tda=False, equilibrium_solvation=True, linear_response=False):
+    if tda:
+        raise NotImplementedError
+    else:
+        if xc.lower() == 'hf':
+            td = mf.TDHF(equilibrium_solvation=equilibrium_solvation, 
+                         linear_response=linear_response).set(nstates=5)
+        else:
+            raise NotImplementedError
+    return td
+
+
+def external_iteration(mol, xc='hf', tda=False, max_cycle=20, conv_tol=1e-6, 
+                       relaxed=True, equilibrium_solvation=True, linear_response=False):
+    mf1 = get_mf(mol, xc)
+    mf1.kernel()
+    td1 = get_td(mf1, xc, tda, equilibrium_solvation, linear_response)
+    td1.kernel()
+    g1 = td1.nuc_grad_method()
+    e0 = mf1.e_tot + td1.e[0]
+
+    for icycle in range(max_cycle):
+        if icycle == 0:
+            dmprev = get_total_density(g1, mf1, td1.xy[0], relaxed=relaxed)
+            pcmobj = copy.copy(mf1.with_solvent)
+        else:
+            dmprev = get_total_density(gcycle, mfcycle, tdcycle.xy[0], relaxed=relaxed)
+            pcmobj = copy.copy(mfcycle.with_solvent) 
+
+        pcmobj.dmprev = dmprev
+        pcmobj.build()
+        pcmobj.kernel(dmprev)
+
+        mfcycle = get_mf(mol, xc, pcmobj)
+        mfcycle.kernel(mf1.make_rdm1())
+        tdcycle = get_td(mfcycle, xc, tda, equilibrium_solvation, linear_response)
+        tdcycle.kernel()
+        gcycle = tdcycle.nuc_grad_method()
+        e_ex = tdcycle.e[0]+mfcycle.e_tot
+        if abs(e_ex-e0)<conv_tol:
+            break
+        e0 = e_ex
+
+    dmfinal = get_total_density(gcycle, mfcycle, tdcycle.xy[0], relaxed=relaxed)
+
+    return mf1, mfcycle, tdcycle, dmfinal
+
+
+def main():
+    mol = gto.Mole()
+    mol.atom = [
+        ['O', (0. , 0., 0.)],
+        ['H', (0. , -0.757, 0.587)],
+        ['H', (0. , 0.757, 0.587)], ]
+    mol.basis = 'ccpvdz'
+    mol.symmetry = False
+    mol.build()
+    mfeq, mfneq, tdneq, dmfinal = external_iteration(mol)
+    e_ss = get_deltaG(mfeq, mfneq, tdneq, dmfinal)
+    print('TDDFT-SSPCM energy:', e_ss)
+
+if __name__ == '__main__':
+    main()
