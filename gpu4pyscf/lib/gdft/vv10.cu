@@ -150,66 +150,60 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
     const double *K, const double *Kp, const double *RpW,
     int vvngrids, int ngrids)
 {
-    // grid id
 #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
     sycl::group thread_block = item.get_group();
-    int grid_id = item.get_global_id(0);
-    const int blockDim_x = item.get_group_range(0);
+    const int outer_grid_id = item.get_group(0) * NG_PER_BLOCK + item.get_local_id(0);
     const int threadIdx_x = item.get_local_id(0);
     using tile_t = double3[NG_PER_BLOCK];
     tile_t& xj_t = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
     tile_t& kp_t = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
-    const int tx = item.get_local_id(0);
 #else
-    int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    const int blockDim_x = blockDim.x;
-    const int threadIdx_x = threadIdx.x;
+    const int outer_grid_id = blockIdx.x * NG_PER_BLOCK + threadIdx.x;
     __shared__ double3 xj_t[NG_PER_BLOCK];
     __shared__ double3 kp_t[NG_PER_BLOCK];
-    const int tx = threadIdx.x;
+    const int threadIdx_x = threadIdx.x;
 #endif
-    const bool active = grid_id < ngrids;
-    double xi, yi, zi;
-    double W0i, Ki;
-    if (active){
-        xi = coords[grid_id];
-        yi = coords[ngrids + grid_id];
-        zi = coords[2*ngrids + grid_id];
-        W0i = W0[grid_id];
-        Ki = K[grid_id];
+    const bool active = outer_grid_id < ngrids;
+
+    double xi, yi, zi, W0i, Ki;
+    if (active) {
+        xi  = coords[outer_grid_id * 3    ];
+        yi  = coords[outer_grid_id * 3 + 1];
+        zi  = coords[outer_grid_id * 3 + 2];
+        W0i = W0[outer_grid_id];
+        Ki  =  K[outer_grid_id];
     }
     double FX = 0;
     double FY = 0;
     double FZ = 0;
 
-    const double *xj = vvcoords;
-    const double *yj = vvcoords + vvngrids;
-    const double *zj = vvcoords + 2*vvngrids;
-
-    for (int j = 0; j < vvngrids; j+=blockDim_x) {
-        int idx = j + threadIdx_x;
-        if (idx < vvngrids){
-            xj_t[tx] = {xj[idx], yj[idx], zj[idx]};
-            kp_t[tx] = {Kp[idx], W0p[idx], RpW[idx]};
+    for (int j = 0; j < vvngrids; j += NG_PER_BLOCK) {
+        const int idx = j + threadIdx_x;
+        if (idx < vvngrids) {
+            const double *xyzj = vvcoords + idx * 3;
+            xj_t[threadIdx_x] = { xyzj[0], xyzj[1], xyzj[2] };
+            kp_t[threadIdx_x] = { Kp[idx], W0p[idx], RpW[idx] };
         }
         __syncthreads();
-        for (int l = 0, M = min(NG_PER_BLOCK, vvngrids - j); l < M; ++l){
-            double3 xj_tmp = xj_t[l];
-            // about 23 operations for each pair
-            double DX = xj_tmp.x - xi;
-            double DY = xj_tmp.y - yi;
-            double DZ = xj_tmp.z - zi;
-            double R2 = DX*DX + DY*DY + DZ*DZ;
 
-            double3 kp_tmp = kp_t[l];
-            double gp = R2*kp_tmp.y + kp_tmp.x;
-            double g  = R2*W0i + Ki;
-            double gt = g + gp;
-            double ggp = g * gp;
-            double ggt_gp = gt * ggp;
-            double T = kp_tmp.z / (ggt_gp * ggt_gp);
-            double Q = T * ((W0i*gp + kp_tmp.y*g)*gt + (W0i+kp_tmp.y)*ggp);
+        const int M = min(NG_PER_BLOCK, vvngrids - j);
+        for (int l = 0; l < M; ++l) {
+            const double3 xj_tmp = xj_t[l];
+            const double DX = xj_tmp.x - xi;
+            const double DY = xj_tmp.y - yi;
+            const double DZ = xj_tmp.z - zi;
+            const double R2 = DX*DX + DY*DY + DZ*DZ;
+
+            const double3 kp_tmp = kp_t[l];
+            const double Kpj  = kp_tmp.x;
+            const double W0pj = kp_tmp.y;
+            const double RpWj = kp_tmp.z;
+            const double gp = R2*W0pj + Kpj;
+            const double g  = R2*W0i + Ki;
+            const double gt = g + gp;
+            const double T = RpWj / (g*gp*gt);
+            const double Q = T * (W0i/g + W0pj/gp + (W0i+W0pj)/gt);
 
             FX += Q * DX;
             FY += Q * DY;
@@ -217,10 +211,11 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
         }
          __syncthreads();
     }
+
     if (active) {
-        Fvec[0*ngrids + grid_id] = FX * -3;
-        Fvec[1*ngrids + grid_id] = FY * -3;
-        Fvec[2*ngrids + grid_id] = FZ * -3;
+        Fvec[outer_grid_id * 3    ] = FX * -3;
+        Fvec[outer_grid_id * 3 + 1] = FY * -3;
+        Fvec[outer_grid_id * 3 + 2] = FZ * -3;
     }
 }
 
