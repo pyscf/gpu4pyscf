@@ -19,10 +19,10 @@
 #include <math.h>
 #ifdef USE_SYCL
 #include "gint/sycl_device.hpp"
-#else
+#else // USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
-#endif
+#endif // USE_SYCL
 
 
 #define NATOM_PER_BLOCK        128
@@ -32,7 +32,7 @@ __global__
 void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, double *a,
                             int *atm_idx, int ngrids, int natm
 			    #ifdef USE_SYCL
-			    , sycl::nd_item<2> item
+			    , sycl::nd_item<2> &item
 			    #endif
     )
 {

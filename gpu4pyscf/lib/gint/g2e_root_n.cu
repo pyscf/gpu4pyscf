@@ -96,6 +96,7 @@ void GINTfill_int2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets off
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;

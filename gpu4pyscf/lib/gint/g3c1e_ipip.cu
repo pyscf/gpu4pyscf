@@ -20,6 +20,9 @@ template <int NROOTS>
 __device__
 static void GINTwrite_int3c1e_ipip1_charge_contracted(const double* g, double* local_output, const double minus_two_a, const double prefactor, const int i_l, const int j_l)
 {
+    #ifdef USE_SYCL
+    auto c_bpcache = s_bpcache.get();
+    #endif
     const int *idx = c_idx;
     const int *idy = c_idx + TOT_NF;
     const int *idz = c_idx + TOT_NF * 2;
@@ -100,7 +103,17 @@ static void GINTfill_int3c1e_ipip1_charge_contracted_kernel_general(double* outp
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int thread_y_id = item.get_global_id(0);
+    const int total_threads_y = item.get_global_range(0);
+    auto c_bpcache = s_bpcache.get();
+    #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
+    const int total_threads_y = gridDim.y * blockDim.y;
+    #endif
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -120,7 +133,7 @@ static void GINTfill_int3c1e_ipip1_charge_contracted_kernel_general(double* outp
                         * (l_j_max_density_elements + 1) * (l_j_max_density_elements + 2) / 2
                         * 6] { 0.0 };
 
-    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+    for (int task_grid = thread_y_id; task_grid < ngrids; task_grid += total_threads_y) {
         const double* grid_point = grid_points + task_grid * 4;
         const double charge = grid_point[3];
         const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
@@ -257,7 +270,17 @@ static void GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general(double* out
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int thread_y_id = item.get_global_id(0);
+    const int total_threads_y = item.get_global_range(0);
+    auto c_bpcache = s_bpcache.get();
+    #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
+    const int total_threads_y = gridDim.y * blockDim.y;
+    #endif
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -278,7 +301,7 @@ static void GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general(double* out
                         * (l_j_max_density_elements + 1) * (l_j_max_density_elements + 2) / 2
                         * 9] { 0.0 };
 
-    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+    for (int task_grid = thread_y_id; task_grid < ngrids; task_grid += total_threads_y) {
         const double* grid_point = grid_points + task_grid * 4;
         const double charge = grid_point[3];
         const double charge_exponent = (charge_exponents != NULL) ? charge_exponents[task_grid] : 0.0;
@@ -424,7 +447,17 @@ static void GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general(double* out
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_ij = item.get_global_id(1);
+    const int thread_y_id = item.get_global_id(0);
+    const int total_threads_y = item.get_global_range(0);
+    auto c_bpcache = s_bpcache.get();
+    #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
+    const int total_threads_y = gridDim.y * blockDim.y;
+    #endif
     if (task_ij >= ntasks_ij) {
         return;
     }
@@ -452,7 +485,7 @@ static void GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general(double* out
                         * (l_j_max_density_elements + 1) * (l_j_max_density_elements + 2) / 2
                         * 9] { 0.0 };
 
-    for (int task_grid = blockIdx.y * blockDim.y + threadIdx.y; task_grid < ngrids; task_grid += gridDim.y * blockDim.y) {
+    for (int task_grid = thread_y_id; task_grid < ngrids; task_grid += total_threads_y) {
         const double* grid_point = grid_points + task_grid * 4;
         const double Cx = grid_point[0];
         const double Cy = grid_point[1];
@@ -513,7 +546,17 @@ static void GINTfill_int3c1e_ipip2_density_contracted_kernel_general(double* out
 
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = offsets.ntasks_kl;
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int task_grid = item.get_global_id(0);
+    const int thread_x_id = item.get_global_id(1);
+    const int total_threads_x = item.get_global_range(1);
+    auto c_bpcache = s_bpcache.get();
+    #else
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
+    const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total_threads_x = gridDim.x * blockDim.x;
+    #endif
     if (task_grid >= ngrids) {
         return;
     }
@@ -530,7 +573,7 @@ static void GINTfill_int3c1e_ipip2_density_contracted_kernel_general(double* out
     double d2eri_dCydCy_pair_sum = 0.0;
     double d2eri_dCydCz_pair_sum = 0.0;
     double d2eri_dCzdCz_pair_sum = 0.0;
-    for (int task_ij = blockIdx.x * blockDim.x + threadIdx.x; task_ij < ntasks_ij; task_ij += gridDim.x * blockDim.x) {
+    for (int task_ij = thread_x_id; task_ij < ntasks_ij; task_ij += total_threads_x) {
 
         const int bas_ij = offsets.bas_ij + task_ij;
         const int prim_ij = offsets.primitive_ij + task_ij * nprim_ij;

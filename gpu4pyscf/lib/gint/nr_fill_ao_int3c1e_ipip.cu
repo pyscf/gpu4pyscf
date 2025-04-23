@@ -18,11 +18,16 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef USE_SYCL
+#include "sycl_alloc.hpp"
+#else
 #include <cuda_runtime.h>
+#include "cuda_alloc.cuh"
+#endif
 
 #include "gint.h"
 #include "gint1e.h"
-#include "cuda_alloc.cuh"
 #include "cint2e.cuh"
 
 #include "rys_roots.cu"
@@ -37,6 +42,21 @@ static int GINTfill_int3c1e_ipip1_charge_contracted_tasks(double* output, const 
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = (offsets.ntasks_kl + n_charge_sum_per_thread - 1) / n_charge_sum_per_thread;
 
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADSY, THREADSX);
+    sycl::range<2> blocks((ngrids+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+    const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
+    switch (nrys_roots) {
+    case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    default:
+        fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
+        return 1;
+    }
+#else // USE_SYCL
     const dim3 threads(THREADSX, THREADSY);
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
     const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
@@ -56,6 +76,7 @@ static int GINTfill_int3c1e_ipip1_charge_contracted_tasks(double* output, const 
         fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
         return 1;
     }
+#endif // USE_SYCL
     return 0;
 }
 
@@ -67,15 +88,30 @@ static int GINTfill_int3c1e_ipvip1_charge_contracted_tasks(double* output, const
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = (offsets.ntasks_kl + n_charge_sum_per_thread - 1) / n_charge_sum_per_thread;
 
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADSY, THREADSX);
+    sycl::range<2> blocks((ngrids+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+    const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
+    switch (nrys_roots) {
+    case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    default:
+        fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
+        return 1;
+    }
+#else // USE_SYCL
     const dim3 threads(THREADSX, THREADSY);
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
     const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
     switch (nrys_roots) {
-    case 2: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
-    case 3: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
-    case 4: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
-    case 5: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
-    case 6: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 2: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 3: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 4: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 5: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 6: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
     default:
         fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
         return 1;
@@ -86,6 +122,7 @@ static int GINTfill_int3c1e_ipvip1_charge_contracted_tasks(double* output, const
         fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
         return 1;
     }
+#endif //USE_SYCL
     return 0;
 }
 
@@ -97,6 +134,21 @@ static int GINTfill_int3c1e_ip1ip2_charge_contracted_tasks(double* output, const
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = (offsets.ntasks_kl + n_charge_sum_per_thread - 1) / n_charge_sum_per_thread;
 
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADSY, THREADSX);
+    sycl::range<2> blocks((ngrids+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+    const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
+    switch (nrys_roots) {
+    case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E> (output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    default:
+        fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
+        return 1;
+    }
+#else // USE_SYCL
     const dim3 threads(THREADSX, THREADSY);
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
     const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
@@ -116,6 +168,7 @@ static int GINTfill_int3c1e_ip1ip2_charge_contracted_tasks(double* output, const
         fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
         return 1;
     }
+#endif // USE_SYCL
     return 0;
 }
 
@@ -127,6 +180,25 @@ static int GINTfill_int3c1e_ipip2_density_contracted_tasks(double* output, const
     const int ntasks_ij = (offsets.ntasks_ij + n_pair_sum_per_thread - 1) / n_pair_sum_per_thread;
     const int ngrids = offsets.ntasks_kl;
 
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADSY, THREADSX);
+    sycl::range<2> blocks((ngrids+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+    switch (i_l + j_l) {
+    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 0> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 1> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 2> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 3> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 4> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 5> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 6> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 7> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_ipip2_density_contracted_kernel_general< 8> (output, density, hermite_density_offsets, offsets, nprim_ij, omega, grid_points, charge_exponents); }); break;
+    // Up to g + g = 8 now
+    default:
+        fprintf(stderr, "i_l + j_l = %d out of range\n", i_l + j_l);
+        return 1;
+    }
+#else // USE_SYCL
     const dim3 threads(THREADSX, THREADSY);
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
     switch (i_l + j_l) {
@@ -150,6 +222,7 @@ static int GINTfill_int3c1e_ipip2_density_contracted_tasks(double* output, const
         fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
         return 1;
     }
+#endif // USE_SYCL
     return 0;
 }
 
@@ -172,7 +245,11 @@ int GINTfill_int3c1e_ipip1_charge_contracted(const cudaStream_t stream, const Ba
         return 2;
     }
 
+    #ifdef USE_SYCL
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    #endif
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -222,7 +299,11 @@ int GINTfill_int3c1e_ipvip1_charge_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
+    #ifdef USE_SYCL
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    #endif
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -272,7 +353,11 @@ int GINTfill_int3c1e_ip1ip2_charge_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
+    #ifdef USE_SYCL
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    #endif
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;
@@ -322,7 +407,11 @@ int GINTfill_int3c1e_ipip2_density_contracted(const cudaStream_t stream, const B
         return 2;
     }
 
+    #ifdef USE_SYCL
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
+    #endif
 
     const int* bas_pairs_locs = bpcache->bas_pairs_locs;
     const int* primitive_pairs_locs = bpcache->primitive_pairs_locs;

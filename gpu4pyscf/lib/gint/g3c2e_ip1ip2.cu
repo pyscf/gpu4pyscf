@@ -109,6 +109,7 @@ void GINTfill_int3c2e_ip1ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOf
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -162,7 +163,8 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
     #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
-    const int blockDim_x = item.get_group_range(1);
+    const int blockDim_x = item.get_local_range(1);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -288,18 +290,19 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
 __global__
 void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets
 #ifdef USE_SYCL
-					    , sycl::nd_item<2> item, sycl::decorated_local_ptr<double> g0
+					    , sycl::nd_item<2> item, double* g0
 #endif
     )
 {
 #ifdef USE_SYCL
     const int task_ij = item.get_group(1);
     const int task_kl = item.get_group(0);
+    auto c_bpcache = s_bpcache.get();
 #else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
     extern __shared__ double g0[];
-    #endif
+#endif
     const int bas_ij = offsets.bas_ij + task_ij;
     const int bas_kl = offsets.bas_kl + task_kl;
     const int nprim_ij = envs.nprim_ij;
@@ -334,6 +337,7 @@ static void GINTfill_int3c2e_ip1ip2_kernel000(GINTEnvVars envs, ERITensor eri, B
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;

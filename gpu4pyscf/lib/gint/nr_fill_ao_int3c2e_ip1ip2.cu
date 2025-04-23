@@ -20,10 +20,10 @@
 #include <string.h>
 
 #ifdef USE_SYCL
+#include "sycl_alloc.hpp"
+#else // USE_SYCL
 #include <cuda_runtime.h>
 #include "cuda_alloc.cuh"
-#else // USE_SYCL
-#include "sycl_alloc.hpp"
 #endif
 
 #include "gint.h"
@@ -130,7 +130,7 @@ static int GINTfill_int3c2e_ip1ip2_tasks(ERITensor *eri, BasisProdOffsets *offse
 	    stream.submit([&](sycl::handler &cgh) {
 		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize), cgh);
 		cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-		    GINTfill_int3c2e_ip1ip2_general_kernel(*envs, *eri, *offsets,
+                  GINTfill_int3c2e_ip1ip2_general_kernel(*envs, *eri, *offsets, item,
 			GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
 		}); });
         }
@@ -249,7 +249,7 @@ int GINTfill_int3c2e_ip1ip2(cudaStream_t stream, BasisProdCache *bpcache, double
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
 #ifdef USE_SYCL
-    stream.memcpy(c_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
 #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
 #endif

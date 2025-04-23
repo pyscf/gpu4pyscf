@@ -40,16 +40,10 @@ set(GPU_SRCS
   )
 
 if (USE_SYCL)
-  # set_source_files_properties(
-  #   path/to/header1.cuh
-  #   path/to/header2.cuh
-  #   PROPERTIES
-  #   LANGUAGE CXX
-  # )
   file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-  set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
+  file(GLOB ALL_GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
 
-  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  set_source_files_properties(${ALL_GPU_SRCS} PROPERTIES LANGUAGE CXX)
 else()
   set_target_properties(gint PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}

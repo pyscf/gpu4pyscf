@@ -20,10 +20,10 @@
 #include <string.h>
 
 #ifdef USE_SYCL
+#include "sycl_alloc.hpp"
+#else // USE_SYCL
 #include <cuda_runtime.h>
 #include "cuda_alloc.cuh"
-#else // USE_SYCL
-#include "sycl_alloc.hpp"
 #endif
 
 #include "gint.h"
@@ -49,8 +49,13 @@ static int GINTfill_int2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTE
     int ntasks_kl = offsets->ntasks_kl;
     assert(ntasks_kl < 65536*THREADSY);
     int type_ijkl;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADSY, THREADSX);
+    sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+    #else
     dim3 threads(THREADSX, THREADSY);
     dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ntasks_kl+THREADSY-1)/THREADSY);
+    #endif
     switch (nrys_roots) {
     case 1:
         type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
@@ -222,7 +227,7 @@ int GINTfill_int2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, in
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     #ifdef USE_SYCL
-    stream.memcpy(c_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
     #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
     #endif

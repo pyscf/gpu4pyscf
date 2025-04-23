@@ -14,15 +14,14 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#endif
-
 template <int LI, int LJ, int LK> __device__
 static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk, double* j3, double* k3,
         double* g, const double ai2,
         const int ish, const int jsh, const int ksh)
 {
+#ifdef USE_SYCL
+    auto c_bpcache = s_bpcache.get();
+#endif
     int *ao_loc = c_bpcache.ao_loc;
     const int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     const int j0 = ao_loc[jsh  ] - jk.ao_offsets_j;
@@ -212,22 +211,22 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk, d
 
 __device__
 static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
-    int *bas_atm = c_bpcache.bas_atm;
-    const int atm_id = bas_atm[ish];
-    double *vj = jk.vj;
-    double *vk = jk.vk;
-
     #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int tx = item.get_local_id(1);
     const int ty = item.get_local_id(0);
     using tile_t = double[THREADSX][THREADSY];
     tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
+    auto c_bpcache = s_bpcache.get();
     #else
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
     __shared__ double sdata[THREADSX][THREADSY];
     #endif
+    int *bas_atm = c_bpcache.bas_atm;
+    const int atm_id = bas_atm[ish];
+    double *vj = jk.vj;
+    double *vk = jk.vk;
 
     if (vj != NULL){
         for (int j = 0; j < 3; j++){
@@ -253,18 +252,22 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
 }
 
 // Unrolled version
-template <int LI, int LJ, int LK> __global__
-void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+template <int LI, int LJ, int LK>
+#ifdef USE_SYCL
+SYCL_EXTERNAL
+#endif
+__global__ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
+    int task_ij = item.get_global_id(1);
+    int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     #endif
     bool active = true;
     if (task_ij >= ntasks_ij || task_kl >= ntasks_kl) {
@@ -284,7 +287,7 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     const int jsh = bas_pair2ket[bas_ij];
     const int ksh = bas_pair2bra[bas_kl];
 
-    double* __restrict__ exp = c_bpcache.a1;
+    double* __restrict__ expp = c_bpcache.a1;
     constexpr int LI_CEIL = LI + 1;
     constexpr int NROOTS = (LI_CEIL+LJ+LK)/2 + 1;
     constexpr int GSIZE = 3 * NROOTS * (LI_CEIL+1)*(LJ+1)*(LK+1);
@@ -301,7 +304,7 @@ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
         for (int ij = prim_ij; ij < prim_ij+nprim_ij; ++ij) {
         for (int kl = prim_kl; kl < prim_kl+nprim_kl; ++kl) {
             GINTg0_int3c2e<LI_CEIL, LJ, LK>(envs, g, as_ish, as_jsh, ksh, ij, kl);
-            const double ai2 = -2.0*exp[ij];
+            const double ai2 = -2.0*expp[ij];
             GINTkernel_int3c2e_ip1_getjk_direct<LI, LJ, LK>(envs, jk, j3, k3, g, ai2, ish, jsh, ksh);
         }}
     }
@@ -318,6 +321,7 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
     const int blockDim_x = item.get_group_range(1);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -502,13 +506,14 @@ static void GINTkernel_int3c2e_ip1_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 __global__
 void GINTint3c2e_ip1_jk_general_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets
 #ifdef USE_SYCL
-				       , sycl::nd_item<2> &item, sycl::decorated_local_ptr<double> g
+				       , sycl::nd_item<2> &item, double* g
 #endif
     )
 {
     #ifdef USE_SYCL
     const int task_ij = item.get_group(1);
     const int task_kl = item.get_group(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
@@ -561,15 +566,16 @@ static void GINTint3c2e_ip1_jk_kernel000(GINTEnvVars envs, JKMatrix jk, BasisPro
     const int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
-    const int task_ij = item.get_global_id(1);
-    const int task_kl = item.get_global_id(0);
+    int task_ij = item.get_global_id(1);
+    int task_kl = item.get_global_id(0);
     const int tx = item.get_local_id(1);
     const int ty = item.get_local_id(0);
     using tile_t = double[THREADSX][THREADSY];
     tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
+    auto c_bpcache = s_bpcache.get();
     #else
-    const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
+    int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
+    int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
     __shared__ double sdata[THREADSX][THREADSY];

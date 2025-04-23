@@ -480,8 +480,13 @@ int GDFT_xc_lda(cudaStream_t stream,
     _memset_lda(out, order, np, dim);
     //FREE(dim);
 
+    #ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> blocks((np+THREADS-1)/THREADS);
+    #else
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
+    #endif
 
     for (int ii=0; ii< n_func_aux; ii++){
         xc_func_type *aux = func->func_aux[ii];
@@ -531,8 +536,13 @@ int GDFT_xc_gga(cudaStream_t stream,
     _memset_gga(out, order, np, dim);
     //FREE(dim);
 
+    #ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> blocks((np+THREADS-1)/THREADS);
+    #else
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
+    #endif
     for (int ii=0; ii< n_func_aux; ii++){
 	    xc_func_type *aux = func->func_aux[ii];
         double coef = func->mix_coef[ii];
@@ -591,8 +601,13 @@ int GDFT_xc_mgga(cudaStream_t stream,
     _memset_mgga(out, order, np, dim);
     //FREE(dim);
 
+    #ifdef USE_SYCL
+    sycl::range<1> threads(THREADS);
+    sycl::range<1> blocks((np+THREADS-1)/THREADS);
+    #else
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
+    #endif
 
     for (int ii=0; ii< n_func_aux; ii++){
     	xc_func_type *aux = func->func_aux[ii];

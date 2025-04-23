@@ -142,7 +142,7 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
 	    stream.submit([&](sycl::handler &cgh) {
 		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize), cgh);
 		cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-		    GINTfill_int3c2e_kernel(*envs, *eri, *offsets, item
+                  GINTfill_int3c2e_kernel(*envs, *eri, *offsets, item,
 			GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
 		}); });
         }
@@ -180,7 +180,7 @@ int GINTfill_int3c2e(cudaStream_t stream, BasisProdCache *bpcache, double *eri, 
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     #ifdef USE_SYCL
-    stream.memcpy(c_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
     #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
     #endif

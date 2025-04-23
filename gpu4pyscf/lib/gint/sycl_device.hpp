@@ -6,16 +6,20 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <type_traits>
 
 #include <sys/syscall.h>
 #include <unistd.h>
 
 #include <sycl/sycl.hpp>
 
+#define __forceinline__ __attribute__((always_inline))
 #define __global__ __attribute__((always_inline))
 #define __device__ __attribute__((always_inline))
 #define __host__ __attribute__((always_inline))
 #define __constant__ static constexpr
+
+using cudaStream_t = sycl::queue&;
 
 #define sqrt sycl::sqrt
 #define min sycl::min
@@ -23,22 +27,41 @@
 #define exp sycl::exp
 #define fabs sycl::fabs
 #define erf sycl::erf
+#define pow sycl::pown
+#define rnorm3d(d1,d2,d3) (1 / sycl::length(sycl::double3(d1, d2, d3)))
+#define norm3d(d1,d2,d3) (sycl::length(sycl::double3(d1, d2, d3)))
 
-static inline void cudaMemset(void* ptr, int val, size_t size) {
-  sycl_get_queue()->memset(ptr, val, size).wait();
-}
-static inline void cudaMemcpyToSymbol(const char* symbol, const void* src, size_t count) {
-  sycl_get_queue()->memcpy(symbol, src, count).wait();
-}
+#define __syncthreads() (item.barrier(sycl::access::fence_space::local_space))
 
-// #ifdef __SYCL_DEVICE_ONLY__
-// #include <sycl/sycl.hpp>
-// extern sycl::nd_item<3> __syncthreads_item_ref;
-// #define __syncthreads() __syncthreads_item_ref.barrier(sycl::access::fence_space::local_space)
-// #endif
+namespace compat {
+  struct double3 {
+    double x, y, z;
+
+    double3() = default;
+    double3(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
+
+    // sycl::vec<double, 3> to_sycl_vec() const {
+    //   return sycl::vec<double, 3>(x, y, z);
+    // }
+
+    // void from_sycl_vec(const sycl::vec<double, 3>& v) {
+    //   x = v.x(); y = v.y(); z = v.z();
+    // }
+  };
+}
+using double3 = compat::double3;
 
 static inline double atomicAdd(double* addr, const double val) { return sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(*addr).fetch_add( val ); }
-static inline double atomicOr(double* addr, const double val) { return sycl::atomic_ref<double, sycl::memory_order::relaxed, sycl::memory_scope::device, sycl::access::address_space::global_space>(*addr).fetch_or( val ); }
+
+template <typename T>
+static inline typename std::enable_if<std::is_integral<T>::value, T>::type
+atomicOr(T* addr, const T val) {
+    sycl::atomic_ref<T,
+        sycl::memory_order::relaxed,
+        sycl::memory_scope::device,
+        sycl::access::address_space::global_space> atom(*addr);
+    return atom.fetch_or(val);
+}
 
 // #ifdef SYCL_EXT_ONEAPI_DEVICE_GLOBAL
 // template <class T>
@@ -54,7 +77,7 @@ using sycl_device_global = sycl::ext::oneapi::experimental::device_global<
 
 #if defined(__INTEL_LLVM_COMPILER) && __INTEL_LLVM_COMPILER >= 20230200
 #define GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(accessor) \
-  accessor.get_multi_ptr<sycl::access::decorated::yes>()
+  accessor.get_multi_ptr<sycl::access::decorated::no>().get()
 #else
 #define GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(accessor) accessor.get_pointer()
 #endif
@@ -110,7 +133,7 @@ public:
 
   /// Returns the instance of device manager singleton.
   static dev_mgr& instance() {
-    static dev_mgr d_m;
+    static dev_mgr d_m{};
     return d_m;
   }
   dev_mgr(const dev_mgr&)            = delete;
@@ -122,7 +145,7 @@ private:
   mutable std::mutex m_mutex;
 
   dev_mgr() {
-    sycl::device dev;
+    sycl::device dev{sycl::gpu_selector_v};
     _queues.push_back(new sycl::queue(dev, asyncHandler, sycl::property_list{sycl::property::queue::in_order{}}));
   }
 
@@ -153,3 +176,11 @@ static inline void syclSetDevice(int id) { dev_mgr::instance().select_device(id)
 
 /// Util function to get number of GPU devices (default: explicit scaling)
 static inline void syclGetDeviceCount(int* id) { *id = dev_mgr::instance().device_count(); }
+
+static inline void cudaMemset(void* ptr, int val, size_t size) {
+  sycl_get_queue()->memset(ptr, val, size).wait();
+}
+// static inline void cudaMemcpyToSymbol(const char* symbol, const void* src, size_t count) {
+//   sycl_get_queue()->memcpy(symbol, src, count).wait();
+// }
+

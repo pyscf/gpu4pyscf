@@ -22,7 +22,8 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
     #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
-    const int blockDim_x = item.get_group_range(1);
+    const int blockDim_x = item.get_local_range(1);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -83,7 +84,8 @@ static void GINTmemset_int3c2e(GINTEnvVars envs, ERITensor eri, int ish, int jsh
     #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
-    const int blockDim_x = item.get_group_range(1);
+    const int blockDim_x = item.get_local_range(1);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -111,7 +113,7 @@ static void GINTmemset_int3c2e(GINTEnvVars envs, ERITensor eri, int ish, int jsh
 __global__
 void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets
 			     #ifdef USE_SYCL
-			     , sycl::nd_item<2> item, sycl::decorated_local_ptr<double> g
+			     , sycl::nd_item<2> item, double* g
 			     #endif
     )
 {
@@ -120,6 +122,7 @@ void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets o
     #ifdef USE_SYCL
     const int task_ij = item.get_group(1);
     const int task_kl = item.get_group(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
@@ -161,6 +164,7 @@ static void GINTfill_int3c2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisPr
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -238,6 +242,7 @@ static void GINTfill_int3c2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisPr
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -351,6 +356,7 @@ static void GINTfill_int3c2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisPr
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -469,6 +475,7 @@ static void GINTfill_int3c2e_kernel0100(GINTEnvVars envs, ERITensor eri, BasisPr
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;

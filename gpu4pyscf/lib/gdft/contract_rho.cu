@@ -21,9 +21,10 @@
 #include <assert.h>
 #ifdef USE_SYCL
 #include "gint/sycl_device.hpp"
-#else
+#else // USE_SYCL
 #include <cuda_runtime.h>
-#endif
+#endif // USE_SYCL
+
 #include "contract_rho.cuh"
 
 // TODO: improve this?
@@ -81,8 +82,7 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
 #endif
     )
 {
-    #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+#ifdef USE_SYCL
     int grid_id = item.get_global_id(1);
     sycl::group thread_block = item.get_group();
     using tile_t = double[BLKSIZEX*(BLKSIZEY+1)];
@@ -91,14 +91,14 @@ void GDFTcontract_rho4_kernel(double *rho, double *bra, double *ket, int ngrids,
     int ix = item.get_local_id(1);
     int iy = item.get_local_id(0);
     int blockDim_y = item.get_global_range(0);
-    #else
+#else
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     __shared__ double buf[BLKSIZEX*(BLKSIZEY+1)];
     int threadIdx_y = threadIdx.y;
     int ix = threadIdx.x;
     int iy = threadIdx.y;
     int blockDim_y = blockDim.y;
-    #endif
+#endif
     const bool active = grid_id < ngrids;
     size_t ket_stride = nao * ngrids;
     size_t rho_stride = count * ngrids;
@@ -210,7 +210,7 @@ void GDFTcontract_rho_mgga_kernel(double *rho, double *bra, double *ket, int ngr
     const int threadIdx_y = item.get_local_id(0);
     const int grid_id = item.get_global_id(1);
     using tile_t = double[BLKSIZEX*(BLKSIZEY+1)];
-    tile_t& buf = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    tile_t& buf = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
     const int ix = item.get_local_id(1);
     const int iy = item.get_local_id(0);
     const int blockDim_y = item.get_group_range(1);
@@ -406,7 +406,7 @@ int GDFTcontract_rho_gga(cudaStream_t stream, double *rho, double *bra, double *
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks(1, (ngrids+BLKSIZEX-1)/BLKSIZEX);
     stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-	GDFTcontract_rho_gga_kernel<<<blocks, threads, 0, stream>>>(rho, bra, ket, ngrids, nao, item);
+      GDFTcontract_rho_gga_kernel(rho, bra, ket, ngrids, nao, item);
     });
 #else
     dim3 threads(BLKSIZEX, BLKSIZEY);
@@ -471,7 +471,7 @@ int GDFTscale_ao(cudaStream_t stream, double *out, double *ket, double *wv,
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks((nao+BLKSIZEY-1)/BLKSIZEY, (ngrids+BLKSIZEX-1)/BLKSIZEX);
     stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-	GDFTscale_ao_kernel(out, ket, wv, ngrids, nao, nvar, item);
+      GDFTscale_ao_kernel(out, ket, wv, ngrids, nao, nvar);
     });
 #else
     dim3 threads(BLKSIZEX, BLKSIZEY);

@@ -40,7 +40,7 @@ void GINTinit_uw_s2(double *uw_buf, BasisProdOffsets *offsets,
 void GINTinit_contraction_types(BasisProdCache *bpcache,
                                 int *bas_pair2shls, int *bas_pairs_locs, int ncptype,
                                 int *atm, int natm, int *bas, int nbas, double *env);
-void GINTsort_bas_coordinates(double *bas_coords, int *atm, int natm,
+void GINTsort_bas_coordinates(double *bas_coords, int *bas_atm, int *atm, int natm,
                               int *bas, int nbas, double *env);
 void GINTinit_aexyz(double *aexyz, BasisProdCache *bpcache, double diag_fac,
                     int *atm, int natm, int *bas, int nbas, double *env);

@@ -18,8 +18,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef USE_SYCL
+#include <cmath>
+#include <cassert>
+#else //USE_SYCL
 #include <math.h>
 #include <assert.h>
+#endif //USE_SYCL
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 #include "gvhf.h"
@@ -29,6 +34,9 @@ template <int NROOTS> __device__
 static void GINTkernel_int3c2e_getj_pass1(GINTEnvVars envs, JKMatrix jk, double* g,
                        int ish, int jsh, int ksh)
 {
+#ifdef USE_SYCL
+    auto c_bpcache = s_bpcache.get();
+#endif
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
@@ -84,6 +92,9 @@ template <int NROOTS> __device__
 static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double* g,
                        int ish, int jsh, int ksh)
 {
+#ifdef USE_SYCL
+    auto c_bpcache = s_bpcache.get();
+#endif
     int *ao_loc = c_bpcache.ao_loc;
     int i0 = ao_loc[ish  ] - jk.ao_offsets_i;
     int i1 = ao_loc[ish+1] - jk.ao_offsets_i;
@@ -136,5 +147,3 @@ static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double*
         }
     }
 }
-
-

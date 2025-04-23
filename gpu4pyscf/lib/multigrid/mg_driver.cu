@@ -17,12 +17,22 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda.h>
 #include <cuda_runtime.h>
+#endif
 #include "multigrid.cuh"
 
+
+#ifdef USE_SYCL
+sycl_device_global<Fold2Index[165]> c_i_in_fold2idx;
+sycl_device_global<Fold3Index[495]> c_i_in_fold3idx;
+#else
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
+#endif
 
 extern "C" {
 int MG_init_constant(int shm_size)
@@ -46,14 +56,20 @@ int MG_init_constant(int shm_size)
             i_in_fold2idx[n2].y = j;
         } }
     }
+
+#ifdef USE_SYCL
+    sycl_get_queue()->memcpy(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
+    sycl_get_queue()->memcpy(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();        
+#else
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
-    cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
+    cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));    
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
                 cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

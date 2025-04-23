@@ -24,11 +24,11 @@
 #include "contract_rho.cuh"
 
 #ifdef USE_SYCL
-#include "sycl_alloc.hpp"
-#else
+#include "gint/sycl_alloc.hpp"
+#else // USE_SYCL
 #include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
-#endif
+#endif // USE_SYCL
 
 #define NG_PER_BLOCK      128
 #define NG_PER_THREADS    1

@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#endif
-
 __global__
 static void GINTint2e_jk_kernel1010(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {

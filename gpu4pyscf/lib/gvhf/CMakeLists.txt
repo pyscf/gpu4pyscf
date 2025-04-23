@@ -32,7 +32,6 @@ if (USE_SYCL)
 
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
 else (USE_SYCL)
-  add_library(gvhf SHARED ${GPU_SRCS})
   set_target_properties(gvhf PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
     CUDA_SEPARABLE_COMPILATION ON)
@@ -44,5 +43,5 @@ endif (USE_SYCL)
 #  set(BUILD_SHARED_LIBS 0)
 #endif()
 
-
+add_library(gvhf SHARED ${GPU_SRCS})
 target_link_libraries(gvhf gint)

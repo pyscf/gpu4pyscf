@@ -21,14 +21,14 @@
 #ifdef USE_SYCL
 #include "sycl_device.hpp"
 
-extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> c_bpcache;
+extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
 extern SYCL_EXTERNAL sycl_device_global<int[TOT_NF*3]> c_idx;
 extern SYCL_EXTERNAL sycl_device_global<int[GPU_LMAX+2]> c_l_locs;
-#else
+#else // USE_SYCL
 //extern __constant__ GINTEnvVars c_envs;
 extern __constant__ BasisProdCache c_bpcache;
 //extern __constant__ int16_t c_idx4c[NFffff*3];
 
 extern __constant__ int c_idx[TOT_NF*3];
 extern __constant__ int c_l_locs[GPU_LMAX+2];
-#endif
+#endif // USE_SYCL

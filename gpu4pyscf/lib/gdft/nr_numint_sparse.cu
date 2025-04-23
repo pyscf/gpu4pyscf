@@ -20,11 +20,11 @@
 #include <string.h>
 #include <assert.h>
 #ifdef USE_SYCL
-#include "sycl_alloc.hpp"
-#else
+#include "gint/sycl_alloc.hpp"
+#else // USE_SYCL
 #include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
-#endif
+#endif // USE_SYCL
 
 #define THREADSX        32
 #define THREADSY        4
@@ -571,7 +571,7 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
 #ifdef USE_SYCL
         sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
         sycl::range<3> blocks(degen_j, degen_i, ntasks);
-	sycl_get_queue->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+	sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
 	    _dot_aow_ao(out, bra, ket, wv, ngrids, nbas, nbins, d_sindex,
 			d_pair2bra+task0, d_pair2ket+task0, d_ao_loc); });
 #else
@@ -626,7 +626,7 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
 #ifdef USE_SYCL
         sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
         sycl::range<3> blocks(degen_j, degen_i, ntasks);
-	sycl_get_queue->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+	sycl_get_queue()->parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
 	    _dot_ao_ao(out, bra, ket, ngrids, nbas, nbins, d_sindex,
 		       d_pair2bra+task0, d_pair2ket+task0, d_ao_loc); });
 #else

@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#endif
-
 template <int NROOTS> __device__
 static void GINTg0_2e_2d4d_ip1(GINTEnvVars envs, double* __restrict__ g, double norm,
                                int ish, int jsh, int ksh, int lsh, int prim_ij, int prim_kl)

@@ -27,6 +27,7 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -81,7 +82,7 @@ static void GINTfill_int2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProd
         }
         gout0 += fac;
     } }
-    
+
     int jstride = eri.stride_j;
     int kstride = eri.stride_k;
     int lstride = eri.stride_l;
@@ -103,6 +104,7 @@ static void GINTfill_int2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisProd
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -224,6 +226,7 @@ static void GINTfill_int2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisProd
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
+    auto c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;

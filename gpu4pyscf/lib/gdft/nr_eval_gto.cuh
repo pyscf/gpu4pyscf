@@ -50,7 +50,7 @@ typedef struct {
 #define NBAS_MAX        6000
 
 #ifdef USE_SYCL
-extern SYCL_EXTERNAL sycl_device_global<GTOValEnvVars> c_envs;
+extern SYCL_EXTERNAL sycl_device_global<GTOValEnvVars> s_envs;
 #else
 __constant__ GTOValEnvVars c_envs;
 #endif

@@ -17,7 +17,7 @@
 #include "constant.cuh"
 
 #ifdef USE_SYCL
-SYCL_EXTERNAL sycl_device_global<BasisProdCache> c_bpcache;
+SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
 //__constant__ int16_t c_idx4c[NFffff*3];
 #else
 __constant__ BasisProdCache c_bpcache;

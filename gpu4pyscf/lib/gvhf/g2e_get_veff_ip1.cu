@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#endif
-
 template<int NROOTS, int GOUTSIZE>
 __global__
 static void GINTint2e_get_veff_ip1_kernel(GINTEnvVars envs,

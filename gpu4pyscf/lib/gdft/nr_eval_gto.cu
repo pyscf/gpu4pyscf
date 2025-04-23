@@ -25,10 +25,10 @@
 
 #ifdef USE_SYCL
 #include "gint/sycl_alloc.hpp"
-#else
+#else // USE_SYCL
 #include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
-#endif
+#endif // USE_SYCL
 
 #define NG_PER_BLOCK      256
 #define LMAX            8
@@ -65,13 +65,9 @@ static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, d
     tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
     const int blockDim_x = item.get_group_range(1);
     const int threadIdx_x = item.get_local_id(1);
+    auto c_envs = s_envs.get();
 #else
-    #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
-    const int grid_id = item.get_global_id(1);
-    #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
-    #endif
     int ish = blockIdx.y + bas_offset;
     __shared__ int sdata[NG_PER_BLOCK];
     const int blockDim_x = blockDim.x;
@@ -334,6 +330,7 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -440,6 +437,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -697,6 +695,7 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -781,6 +780,7 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();    
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -887,6 +887,7 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -1023,6 +1024,7 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -1167,6 +1169,7 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -1495,6 +1498,7 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -1574,6 +1578,7 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
     #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -1675,6 +1680,7 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
     auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     int bas_id = item.get_group(0);
+    auto c_envs = s_envs.get();
 #else
     const int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int bas_id = blockIdx.y;
@@ -1813,7 +1819,11 @@ void GDFTinit_envs(GTOValEnvVars **envs_cache, int *bas_atom, int *bas_exp, int 
     envs->bas_atom = bas_atom;
     envs->bas_exp = bas_exp;
     envs->bas_coeff = bas_coeff;
+#ifdef USE_SYCL
+    sycl_get_queue()->memcpy(s_envs, envs, sizeof(GTOValEnvVars)).wait();
+#else
     checkCudaErrors(cudaMemcpyToSymbol(c_envs, envs, sizeof(GTOValEnvVars)));
+#endif
 }
 
 void GDFTdel_envs(GTOValEnvVars **envs_cache)
@@ -1878,6 +1888,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             continue;
         }
 #endif
+
         switch (deriv) {
 #ifdef USE_SYCL
         case 0:
@@ -1946,7 +1957,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<6> (offsets); }); break;
                 case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<7> (offsets); }); break;
                 case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<8> (offsets); }); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }); break;}
+                default: fprintf(stderr, "l = %d not supported\n", l); break;}
             } else {
                 switch(l){
                 case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<0> (offsets); }); break;
@@ -1958,7 +1969,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<6> (offsets); }); break;
                 case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<7> (offsets); }); break;
                 case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<8> (offsets); }); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
         case 3:
@@ -1973,7 +1984,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<6> (offsets); }); break;
                 case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<7> (offsets); }); break;
                 case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<8> (offsets); }); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
                 switch(l){
                 case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<0> (offsets); }); break;
@@ -1985,7 +1996,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<6> (offsets); }); break;
                 case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<7> (offsets); }); break;
                 case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<8> (offsets); }); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
                 }
             break;
         case 4:
@@ -2000,7 +2011,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
                 case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<6> (offsets); }); break;
                 case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<7> (offsets); }); break;
                 case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<8> (offsets); }); break;
-                default: fprintf(stderr, "l = %d not supported\n", l); }); break; }
+                default: fprintf(stderr, "l = %d not supported\n", l); break; }
             } else {
                 switch(l){
                 case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<0> (offsets); }); break;
@@ -2156,11 +2167,14 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             fprintf(stderr, "deriv %d not supported\n", deriv);
             return 1;
         }
+
+#ifndef USE_SYCL
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
             fprintf(stderr, "CUDA Error of GDFTeval_gto_kernel: %s\n", cudaGetErrorString(err));
             return 1;
         }
+#endif
     }
     //FREE(d_grids);
     return 0;

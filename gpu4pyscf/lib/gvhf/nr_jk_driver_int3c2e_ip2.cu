@@ -238,7 +238,7 @@ int GINTbuild_int3c2e_ip2_jk(cudaStream_t stream, BasisProdCache *bpcache,
 
     // move bpcache to constant memory
     #ifdef USE_SYCL
-    stream.memcpy(c_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
     #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
     #endif

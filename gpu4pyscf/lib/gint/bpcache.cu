@@ -20,10 +20,10 @@
 #include <string.h>
 
 #ifdef USE_SYCL
+#include "sycl_alloc.hpp"
+#else // USE_SYCL
 #include <cuda_runtime.h>
 #include "cuda_alloc.cuh"
-#else // USE_SYCL
-#include "sycl_alloc.hpp"
 #endif
 
 #include "gint.h"
