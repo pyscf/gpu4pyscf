@@ -240,7 +240,7 @@ def _estimate_q_cond(prim_mol):
     ls = cp.asarray(prim_mol._bas[:,ANG_OF])
     es = cp.asarray(prim_mol._env[prim_mol._bas[:,PTR_EXP]])
     cs = abs(cp.asarray(prim_mol._env[prim_mol._bas[:,PTR_COEFF]]))
-    norm = cs * ((2*ls+1)/(4*np.pi))**.5
+    log_cs = cp.log(cs)
     bas_coords = cp.asarray(prim_mol.atom_coords()[prim_mol._bas[:,ATOM_OF]])
     li = ls[:,None]
     lj = ls
@@ -251,9 +251,9 @@ def _estimate_q_cond(prim_mol):
     dr = dist_matrix(bas_coords, bas_coords)
     dri = fj * dr
     drj = fi * dr
-    fac_dri = (li*.5) * cp.log(li * .5/aij + dri**2 + 1.)
-    fac_drj = (lj*.5) * cp.log(lj * .5/aij + drj**2 + 1.)
-    fac_norm = cp.log(norm[:,None]*norm) + 1.5 * cp.log(np.pi/aij)
+    fac_dri = (li*.5) * cp.log(li * .5/aij + dri**2 + 1e-9)
+    fac_drj = (lj*.5) * cp.log(lj * .5/aij + drj**2 + 1e-9)
+    fac_norm = log_cs[:,None]+log_cs + 1.5 * cp.log(np.pi/aij)
     q_cond = fac_norm - theta*dr**2 + fac_dri + fac_drj
     q_cond += .25 * cp.log(2./np.pi * aij)
     return cp.asarray(q_cond, dtype=np.float32)
