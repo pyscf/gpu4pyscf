@@ -280,6 +280,26 @@ class KnownValues(unittest.TestCase):
         dm_loaded = mf_copy.init_guess_by_chkfile()
         # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
         assert np.allclose(dm_stored, dm_loaded, atol = 1e-14) 
+    
+    def test_init_guess(self):
+        atom = [
+            ('X-O', (0.000000, 0.000000, 0.000000)),
+            ('H', (0.000000, 0.757160, 0.586260)),
+            ('H', (0.000000, -0.757160, 0.586260))
+        ]
+        mol = pyscf.M(atom=atom, basis='ccpvdz')
+        mf = scf.RHF(mol)
+        e_tot = mf.kernel()
+        e_ref = mf.to_cpu().kernel()
+        assert np.abs(e_tot - e_ref) < 1e-7
+
+        mol = pyscf.M(atom=' H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
+                    ecp='lanl2dz', verbose=0)
+        mf = scf.RHF(mol)
+        e_tot = mf.kernel()
+        e_ref = mf.to_cpu().kernel()
+        assert np.abs(e_tot - e_ref) < 1e-7
+
     # TODO:
     #test analyze
     #test mulliken_pop

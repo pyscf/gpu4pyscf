@@ -162,11 +162,6 @@ def get_jk(dfobj, dms_tag, mo_coeff, mocc, hermi=0,
     intopt = dfobj.intopt
     dms = intopt.sort_orbitals(dms, axis=[1,2])
 
-    if not has_dpctl:
-        gpunp.cuda.get_current_stream().synchronize()
-    else:
-        dev = get_default_cached_device()
-        get_device_cached_queue(dev).wait()
     occ_coeffs = dms_tag.occ_coeff
     mo1s = dms_tag.mo1
 
@@ -183,6 +178,7 @@ def get_jk(dfobj, dms_tag, mo_coeff, mocc, hermi=0,
     mo_coeff = [intopt.sort_orbitals(mo, axis=[0]) for mo in mo_coeff]
 
     futures = []
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(

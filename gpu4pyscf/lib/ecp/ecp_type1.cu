@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#endif // USE_SYCL
-
 __device__
 void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, double aij, double ur)
 {
@@ -29,7 +25,6 @@ void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, doubl
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
     #endif
-
     const double kaij = k / (2*aij);
     const double fac = kaij * kaij * aij;
     double r = 0.0;
@@ -63,7 +58,6 @@ void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, doubl
             block_reduce(rur*bval[i], rad_all+lab*LIJ1+i);
         }
     }
-    __syncthreads();
 }
 /*
 template <int l> __device__
@@ -115,7 +109,6 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
     #endif
-
     double unitr[3];
     if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
         unitr[0] = 0;
@@ -170,7 +163,75 @@ void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, c
     }
 }
 
+template <int LIJ> __device__
+void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac)
+{
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
+    #else
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+    #endif
+    double unitr[3];
+    if (r[0]*r[0] + r[1]*r[1] + r[2]*r[2] < 1e-16){
+        unitr[0] = 0;
+        unitr[1] = 0;
+        unitr[2] = 0;
+    } else {
+        double norm_r = -rnorm3d(r[0], r[1], r[2]);
+        unitr[0] = r[0] * norm_r;
+        unitr[1] = r[1] * norm_r;
+        unitr[2] = r[2] * norm_r;
+    }
+
+    // loop over i+j+k<=LIJ
+    // TODO: find a closed form?
+    for (int n = threadIdx_x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim_x){
+        const int i = n/(LIJ+1)/(LIJ+1);
+        const int j = n/(LIJ+1)%(LIJ+1);
+        const int k = n%(LIJ+1);
+        if (i+j+k > LIJ || (i+j+k)%2 == 1){
+            continue;
+        }
+        // need_even to ensure (i+j+k+lmb) is even
+        double s = 0.0;
+        double *prad = rad_all + (i+j+k)*(LIJ+1);
+        if constexpr (LIJ >= 0) s += prad[0] * type1_ang_nuc_l<0>(i, j, k, unitr);
+        if constexpr (LIJ >= 2) s += prad[2] * type1_ang_nuc_l<2>(i, j, k, unitr);
+        if constexpr (LIJ >= 4) s += prad[4] * type1_ang_nuc_l<4>(i, j, k, unitr);
+        if constexpr (LIJ >= 6) s += prad[6] * type1_ang_nuc_l<6>(i, j, k, unitr);
+        if constexpr (LIJ >= 8) s += prad[8] * type1_ang_nuc_l<8>(i, j, k, unitr);
+        if constexpr (LIJ >= 10)s += prad[10]* type1_ang_nuc_l<10>(i, j, k, unitr);
+        rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
+        //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
+    }
+
+    for (int n = threadIdx_x; n < (LIJ+1)*(LIJ+1)*(LIJ+1); n+=blockDim_x){
+        const int i = n/(LIJ+1)/(LIJ+1);
+        const int j = n/(LIJ+1)%(LIJ+1);
+        const int k = n%(LIJ+1);
+        if (i+j+k > LIJ || (i+j+k)%2 == 0){
+            continue;
+        }
+        // need_even to ensure (i+j+k+lmb) is even
+        double s = 0.0;
+        double *prad = rad_all + (i+j+k)*(LIJ+1);
+        if constexpr (LIJ >= 1) s += prad[1] * type1_ang_nuc_l<1>(i, j, k, unitr);
+        if constexpr (LIJ >= 3) s += prad[3] * type1_ang_nuc_l<3>(i, j, k, unitr);
+        if constexpr (LIJ >= 5) s += prad[5] * type1_ang_nuc_l<5>(i, j, k, unitr);
+        if constexpr (LIJ >= 7) s += prad[7] * type1_ang_nuc_l<7>(i, j, k, unitr);
+        if constexpr (LIJ >= 9) s += prad[9] * type1_ang_nuc_l<9>(i, j, k, unitr);
+        rad_ang[i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k] += fac*s;
+        //atomicAdd(rad_ang + i*(LIJ+1)*(LIJ+1) + j*(LIJ+1) + k, fac*s);
+    }
+}
+
 template <int LI, int LJ> __global__
+#ifdef USE_SYCL
+SYCL_EXTERNAL
+#endif
 void type1_cart(double *gctr,
                 const int *ao_loc, const int nao,
                 const int *tasks, const int ntasks,
@@ -181,15 +242,15 @@ void type1_cart(double *gctr,
 
 #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
-    const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);    
     auto thread_block = item.get_group();
     const int task_id = thread_block.get_group_id(0); //item.get_group(0);
+    const int threadIdx_x = item.get_local_id(0);
+    const int blockDim_x = item.get_local_range(0);
     double (&rad_ang)[LIJ1*LIJ1*LIJ1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[LIJ1*LIJ1*LIJ1]>(thread_block);
 #else // USE_SYCL
     const int task_id = blockIdx_x;
     const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;    
+    const int blockDim_x = blockDim.x;
     __shared__ double rad_ang[LIJ1*LIJ1*LIJ1];
 #endif // USE_SYCL
     if (task_id >= ntasks){
@@ -245,10 +306,12 @@ void type1_cart(double *gctr,
             __shared__ double rad_all[LIJ1*LIJ1];
             #endif
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
+            __syncthreads();
 
             const double eij = exp(-ai[ip]*r2ca - aj[jp]*r2cb);
             const double ceij = eij * ci[ip] * cj[jp];
-            type1_rad_ang(rad_ang, LI+LJ, rij, rad_all, fac*ceij);
+            type1_rad_ang<LI+LJ>(rad_ang, rij, rad_all, fac*ceij);
+            //type1_rad_ang(rad_ang, LI+LJ, rij, rad_all, fac*ceij);
             __syncthreads();
         }
     }
@@ -256,9 +319,9 @@ void type1_cart(double *gctr,
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
     double fi[3*nfi];
+    cache_fac<LI>(fi, rca);
     double fj[3*nfj];
-    cache_fac(fi, LI, rca);
-    cache_fac(fj, LJ, rcb);
+    cache_fac<LJ>(fj, rcb);
 
     for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int mi = ij%nfi;
@@ -284,11 +347,11 @@ void type1_cart(double *gctr,
         for (int i1 = 0; i1 <= ix; i1++){
         for (int i2 = 0; i2 <= iy; i2++){
         for (int i3 = 0; i3 <= iz; i3++){
-            double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
+            const double ifac = fx_i[i1] * fy_i[i2] * fz_i[i3];
             for (int j1 = 0; j1 <= jx; j1++){
             for (int j2 = 0; j2 <= jy; j2++){
             for (int j3 = 0; j3 <= jz; j3++){
-                double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
+                const double jfac = fx_j[j1] * fy_j[j2] * fz_j[j3];
                 const int ijr = (i1+j1)*LIJ1*LIJ1 + (i2+j2)*LIJ1 + (i3+j3);
                 tmp += ifac * jfac * rad_ang[ijr];
             }}}
@@ -320,11 +383,11 @@ void type1_cart(double *gctr,
 #ifdef USE_SYCL
     const int task_id = item.get_group(0);
     const int threadIdx_x = item.get_local_id(0);
-    const int blockDim_x = item.get_local_range(0);    
+    const int blockDim_x = item.get_local_range(0);
 #else
     const int task_id = blockIdx_x;
     const int threadIdx_x = threadIdx.x;
-    const int blockDim_x = blockDim.x;    
+    const int blockDim_x = blockDim.x;
     extern __shared__ double smem[];
 #endif
     if (task_id >= ntasks){
@@ -378,6 +441,7 @@ void type1_cart(double *gctr,
             const double k = 2.0 * norm3d(rij[0], rij[1], rij[2]);
             const double aij = ai_prim + aj_prim;
             type1_rad_part(rad_all, LI+LJ, k, aij, ur);
+            __syncthreads();
 
             const double eij = exp(-ai_prim*r2ca - aj_prim*r2cb);
             const double ceij = eij * ci[ip] * cj[jp];
@@ -395,8 +459,8 @@ void type1_cart(double *gctr,
     const int nfj = (LJ+1) * (LJ+2) / 2;
     for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         double fi[3*NF_MAX];
-        double fj[3*NF_MAX];
         cache_fac(fi, LI, rca);
+        double fj[3*NF_MAX];
         cache_fac(fj, LJ, rcb);
 
         const int mi = ij%nfi;

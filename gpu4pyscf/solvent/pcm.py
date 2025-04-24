@@ -21,21 +21,20 @@ import numpy
 
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
-    import cupy as gpunp
+    import cupy
     import cupyx.scipy as scipy
     from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
+    from cupyx.scipy.linalg import lu_factor, lu_solve
 else:
     import dpctl
-    import dpnp as gpunp
+    import dpnp as cupy
     from gpu4pyscf.lib.dpnp_helper import dist_matrix, load_library
     from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
     from dpctl._sycl_queue_manager import get_device_cached_queue
-    
 from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid
 from pyscf.data import radii
-from pyscf.solvent import ddcosmo
 from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
@@ -256,10 +255,9 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
-        'equilibrium_solvation', 'e', 'v',
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
-    kernel = ddcosmo.DDCOSMO.kernel
 
     def __init__(self, mol):
         self.mol = mol
@@ -286,7 +284,7 @@ class PCM(lib.StreamObject):
 
         self.e = None
         self.v = None
-        self._dm = None
+        self.v_grids_n = None
 
     def dump_flags(self, verbose=None):
         logger.info(self, '******** %s ********', self.__class__)
@@ -316,40 +314,53 @@ class PCM(lib.StreamObject):
         self.surface = gen_surface(mol, rad=self.radii_table, ng=ng)
         self._intermediates = {}
         F, A = get_F_A(self.surface)
-        D, S = get_D_S(self.surface, with_S=True, with_D=True)
+        D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
 
         epsilon = self.eps
         if self.method.upper() in ['C-PCM', 'CPCM']:
             f_epsilon = (epsilon-1.)/epsilon
             K = S
-            R = -f_epsilon * gpunp.eye(K.shape[0])
+            S = None
+            # R = -f_epsilon * cupy.eye(K.shape[0])
         elif self.method.upper() == 'COSMO':
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
             K = S
-            R = -f_epsilon * gpunp.eye(K.shape[0])
+            S = None
+            # R = -f_epsilon * cupy.eye(K.shape[0])
         elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
             DAS = gpunp.dot(DA, S)
             K = S - f_epsilon/(2.0*PI) * DAS
-            R = -f_epsilon * (gpunp.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
+            # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
         elif self.method.upper() == 'SS(V)PE':
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
             DAS = gpunp.dot(DA, S)
             K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
-            R = -f_epsilon * (gpunp.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
+            # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
         else:
             raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
 
-        intermediates = {
-            'S': gpunp.asarray(S),
-            'D': gpunp.asarray(D),
-            'A': gpunp.asarray(A),
-            'K': gpunp.asarray(K),
-            'R': gpunp.asarray(R),
-            'f_epsilon': f_epsilon
-        }
+        # Warning: lu_factor function requires a work space of the same size as K
+        K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
+        K = None
+
+        if self.if_method_in_CPCM_category:
+            intermediates = {
+                'K_LU': cupy.asarray(K_LU),
+                'K_LU_pivot': cupy.asarray(K_LU_pivot),
+                'f_epsilon': f_epsilon,
+            }
+        else:
+            intermediates = {
+                'S': cupy.asarray(S),
+                'D': cupy.asarray(D),
+                'A': cupy.asarray(A),
+                'K_LU': cupy.asarray(K_LU),
+                'K_LU_pivot': cupy.asarray(K_LU_pivot),
+                'f_epsilon': f_epsilon,
+            }
         self._intermediates.update(intermediates)
 
         charge_exp  = self.surface['charge_exp']
@@ -368,36 +379,78 @@ class PCM(lib.StreamObject):
         v_grids_n = numpy.dot(atom_charges, v_ng)
         self.v_grids_n = gpunp.asarray(v_grids_n)
 
+    def kernel(self, dm):
+        self.e, self.v = self._get_vind(dm)
+        return self.e, self.v
+
     def _get_vind(self, dms):
+        if not self._intermediates:
+            self.build()
+        assert dms is not None
+        nao = dms.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+        if dms.shape[0] == 2:
+            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
+        if not isinstance(dms, cupy.ndarray):
+            dms = cupy.asarray(dms)
+        v_grids_e = self._get_v(dms)
+        v_grids = self.v_grids_n - v_grids_e
+
+        b = self.left_multiply_R(v_grids.T)
+        q = self.left_solve_K(b).T
+
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        qt = self.left_multiply_R(vK_1, R_transpose = True).T
+        q_sym = (q + qt)/2.0
+
+        vmat = self._get_vmat(q_sym)
+        epcm = 0.5 * cupy.dot(v_grids[0], q_sym[0])
+
+        self._intermediates['q'] = q[0]
+        self._intermediates['q_sym'] = q_sym[0]
+        self._intermediates['v_grids'] = v_grids[0]
+        return epcm, vmat[0]
+
+    def _get_qsym(self, dms, with_nuc = False):
         if not self._intermediates:
             self.build()
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
         if dms.shape[0] == 2:
             dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
-        if not isinstance(dms, gpunp.ndarray):
-            dms = gpunp.asarray(dms)
-        K = self._intermediates['K']
-        R = self._intermediates['R']
+        if not isinstance(dms, cupy.ndarray):
+            dms = cupy.asarray(dms)
         v_grids_e = self._get_v(dms)
-        v_grids = self.v_grids_n - v_grids_e
+        if with_nuc:
+            v_grids = self.v_grids_n - v_grids_e
+        else:
+            v_grids = -1.0 * v_grids_e
 
-        b = gpunp.dot(R, v_grids.T)
-        q = gpunp.linalg.solve(K, b).T
+        b = self.left_multiply_R(v_grids.T)
+        q = self.left_solve_K(b).T
 
-        vK_1 = gpunp.linalg.solve(K.T, v_grids.T)
-        qt = gpunp.dot(R.T, vK_1).T
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        qt = self.left_multiply_R(vK_1, R_transpose = True).T
         q_sym = (q + qt)/2.0
 
-        vmat = self._get_vmat(q_sym)
-        epcm = 0.5 * gpunp.dot(v_grids[0], q_sym[0])
+        return q_sym[0], q[0]
 
-        self._intermediates['K'] = K
-        self._intermediates['R'] = R
-        self._intermediates['q'] = q[0]
-        self._intermediates['q_sym'] = q_sym[0]
-        self._intermediates['v_grids'] = v_grids[0]
-        return epcm, vmat[0]
+    def _get_vgrids(self, dms, with_nuc = False):
+        if not self._intermediates:
+            self.build()
+        nao = dms.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+        if dms.shape[0] == 2:
+            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
+        if not isinstance(dms, cupy.ndarray):
+            dms = cupy.asarray(dms)
+        v_grids_e = self._get_v(dms)
+        if with_nuc:
+            v_grids = self.v_grids_n - v_grids_e
+        else:
+            v_grids = -1.0 * v_grids_e
+
+        return v_grids[0]
 
     def _get_v(self, dms):
         '''
@@ -450,16 +503,38 @@ class PCM(lib.StreamObject):
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
 
-        K = self._intermediates['K']
-        R = self._intermediates['R']
         v_grids = -self._get_v(dms)
 
-        b = gpunp.dot(R, v_grids.T)
-        q = gpunp.linalg.solve(K, b).T
+        b = self.left_multiply_R(v_grids.T)
+        q = self.left_solve_K(b).T
 
-        vK_1 = gpunp.linalg.solve(K.T, v_grids.T)
-        qt = gpunp.dot(R.T, vK_1).T
+        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        qt = self.left_multiply_R(vK_1, R_transpose = True).T
         q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
         return vmat.reshape(out_shape)
+
+    @property
+    def if_method_in_CPCM_category(self):
+        return self.method.upper() in ['C-PCM', 'CPCM', "COSMO"]
+
+    def left_multiply_R(self, right_vector, R_transpose = False):
+        f_epsilon = self._intermediates['f_epsilon']
+        if self.if_method_in_CPCM_category:
+            # R = -f_epsilon * cupy.eye(K.shape[0])
+            return -f_epsilon * right_vector
+        else:
+            # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
+            A = self._intermediates['A']
+            D = self._intermediates['D']
+            DA = D*A
+            if R_transpose:
+                DA = DA.T
+            return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
+
+    def left_solve_K(self, right_vector, K_transpose = False):
+        ''' K^{-1} @ right_vector '''
+        K_LU       = self._intermediates['K_LU']
+        K_LU_pivot = self._intermediates['K_LU_pivot']
+        return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)

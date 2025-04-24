@@ -13,39 +13,26 @@
 # limitations under the License.
 
 
-<<<<<<< HEAD
-import os
-import numpy as np
-# import cupy
-import functools
-=======
 import functools
 import numpy as np
 import cupy as cp
 import scipy.linalg
->>>>>>> origin/master
 from pyscf import gto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
 
 PTR_BAS_COORD = 7
 
-# from importlib.util import find_spec
-# has_dpctl = find_spec("dpctl")
-# if not has_dpctl:
-#     import cupy as gpunp
-# else:
-#     import dpctl
-#     import dpnp as gpunp
+_c2s = {}
 
-@functools.lru_cache(20)
 def cart2sph_by_l(l, normalized='sp'):
-    c2s = gto.mole.cart2sph(l, normalized='sp')
-    return cp.asarray(c2s, order='C')
+    device_id = cp.cuda.Device().id
+    if (l, device_id, normalized) not in _c2s:
+        c2s = gto.mole.cart2sph(l, normalized=normalized)
+        _c2s[l,device_id,normalized] = cp.asarray(c2s, order='C')
+    return _c2s[l,device_id,normalized]
 
-<<<<<<< HEAD
-=======
-def basis_seg_contraction(mol, allow_replica=1):
+def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
     '''transform generally contracted basis to segment contracted basis
     Kwargs:
         allow_replica:
@@ -119,18 +106,23 @@ def basis_seg_contraction(mol, allow_replica=1):
                 continue
 
         _bas.append(bas_of_ia)
-        contr_coeff.extend(coeff)
+        if not sparse_coeff:
+            contr_coeff.extend(coeff)
 
     pmol = mol.copy()
     pmol.cart = True
     pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
-    contr_coeff = block_diag(contr_coeff)
 
-    if not mol.cart:
-        c2s = block_diag([cart2sph_by_l(l) for l in pmol._bas[:,ANG_OF]])
-        contr_coeff = contr_coeff.dot(c2s)
-    return pmol, contr_coeff
+    if not sparse_coeff:
+        contr_coeff = block_diag(contr_coeff)
+
+        if not mol.cart:
+            c2s = block_diag([cart2sph_by_l(l) for l in pmol._bas[:,ANG_OF]])
+            contr_coeff = contr_coeff.dot(c2s)
+        return pmol, contr_coeff
+    else:
+        return pmol, None
 
 def sort_atoms(mol):
     """
@@ -176,14 +168,17 @@ def sort_atoms(mol):
 
     return [x for heavy_list in full_path for x in heavy_list]
 
-def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False):
+def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False, sparse_coeff=False):
     '''Group basis functions according to their [l, nprim] patterns.
 
     bas_mapping is the index that transforms _bas from sorted_mol to mol:
     mol._bas = sorted_mol._bas[bas_mapping]
     '''
     from gpu4pyscf.lib import logger
-    mol, coeff = basis_seg_contraction(mol)
+    original_mol = mol
+
+    mol, coeff = basis_seg_contraction(mol, sparse_coeff = sparse_coeff)
+
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.
     l_ctrs = mol._bas[:,[ANG_OF, NPRIM_OF]]
@@ -194,9 +189,15 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False):
         l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
     uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
 
-    nao_orig = coeff.shape[1]
-    ao_loc = mol.ao_loc
-    coeff = cp.split(coeff, ao_loc[1:-1], axis=0)
+    if not sparse_coeff:
+        nao_orig = coeff.shape[1]
+        ao_loc = mol.ao_loc
+        coeff = cp.split(coeff, ao_loc[1:-1], axis=0)
+    else:
+        ao_loc = mol.ao_loc_nr(cart=original_mol.cart)
+        ao_idx = np.array_split(np.arange(original_mol.nao), ao_loc[1:-1])
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
+        ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
 
     pad_bas = []
     if tile > 1:
@@ -218,13 +219,14 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False):
 
             l = l_ctr[0]
             nf = (l + 1) * (l + 2) // 2
-            coeff.extend([cp.zeros((nf, nao_orig))] * padding)
+            if not sparse_coeff:
+                coeff.extend([cp.zeros((nf, nao_orig))] * padding)
 
         inv_idx = np.hstack([inv_idx.ravel(), pad_inv_idx])
 
     sorted_idx = np.argsort(inv_idx.ravel(), kind='stable').astype(np.int32)
-    coeff = cp.vstack([coeff[i] for i in sorted_idx])
-    assert coeff.shape[0] < 32768
+
+    if_pad_bas = np.array([False] * mol.nbas + [True] * len(pad_bas))[sorted_idx]
 
     max_nprims = uniq_l_ctr[:,1].max()
     mol._env = np.append(mol._env, np.zeros(max_nprims))
@@ -250,10 +252,24 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False):
 
     # PTR_BAS_COORD is required by various CUDA kernels
     mol._bas[:,PTR_BAS_COORD] = mol._atm[mol._bas[:,ATOM_OF],PTR_COORD]
-    if return_bas_mapping:
-        return mol, coeff, uniq_l_ctr, l_ctr_counts, sorted_idx.argsort()
+
+    if not sparse_coeff:
+        coeff = cp.vstack([coeff[i] for i in sorted_idx])
+        assert coeff.shape[0] < 32768
+        if return_bas_mapping:
+            return mol, coeff, uniq_l_ctr, l_ctr_counts, sorted_idx.argsort()
+        else:
+            return mol, coeff, uniq_l_ctr, l_ctr_counts
     else:
-        return mol, coeff, uniq_l_ctr, l_ctr_counts
+        n_cartesian = sum([(l+1)*(l+2)//2 for l in mol._bas[:,ANG_OF]])
+        assert n_cartesian < 32768
+        l_ctr_offsets = np.cumsum(l_ctr_counts)[:-1]
+        if_pad_bas_per_l_ctr = np.split(if_pad_bas, l_ctr_offsets)
+        l_ctr_pad_counts = np.array([np.sum(if_pad) for if_pad in if_pad_bas_per_l_ctr])
+        if return_bas_mapping:
+            return mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts, sorted_idx.argsort()
+        else:
+            return mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts
 
 def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     '''Splits l_ctr patterns into small groups with group_size the maximum
@@ -316,4 +332,3 @@ def extract_pgto_params(mol, op='diffused'):
     else:
         raise RuntimeError(f'Unsupported operation {op}')
     return np.array(es), np.array(cs)
->>>>>>> origin/master

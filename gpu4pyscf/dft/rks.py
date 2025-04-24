@@ -18,10 +18,10 @@ from importlib.util import find_spec
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array
+    from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 else:
     import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+    from gpu4pyscf.lib.dpnp_helper import tag_array, asarray
 from pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
@@ -33,37 +33,12 @@ __all__ = [
 ]
 
 def prune_small_rho_grids_(ks, mol, dm, grids):
-    rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
-
-    threshold = ks.small_rho_cutoff
     '''Prune grids if the electron density on the grid is small'''
+    threshold = ks.small_rho_cutoff
     if threshold == 0:
         return grids
-    mol = grids.mol
-
-    n = gpunp.dot(rho, grids.weights)
-    if abs(n-mol.nelectron) < gen_grid.NELEC_ERROR_TOL*n:
-        rho *= grids.weights
-        idx = gpunp.abs(rho) > threshold / grids.weights.size
-
-        grids.coords  = gpunp.asarray(grids.coords [idx], order='C')
-        grids.weights = gpunp.asarray(grids.weights[idx], order='C')
-        logger.debug(grids, 'Drop grids %d', rho.size - grids.weights.size)
-        if grids.alignment:
-            padding = gen_grid._padding_size(grids.size, grids.alignment)
-            logger.debug(ks, 'prune_by_density_: %d padding grids', padding)
-            if padding > 0:
-                pad = gpunp.array(padding * [[1e4, 1e4, 1e4]])
-                grids.coords = gpunp.vstack(
-                        [grids.coords, pad])
-                grids.weights = gpunp.hstack([grids.weights, gpunp.zeros(padding)])
-
-        # make_mask has to be executed on cpu for now.
-        #grids.non0tab = grids.make_mask(mol, grids.coords)
-        #grids.screen_index = grids.non0tab
-        #if ks._numint.use_sparsity:
-        #    ks._numint.build(mol, grids.coords)
-    return grids
+    rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
+    return grids.prune_by_density_(rho, threshold)
 
 def initialize_grids(ks, mol=None, dm=None):
     # Initialize self.grids the first time call get_veff
@@ -72,8 +47,8 @@ def initialize_grids(ks, mol=None, dm=None):
         t0 = logger.init_timer(ks)
         ks.grids.build()
         #ks.grids.build(with_non0tab=True)
-        ks.grids.weights = gpunp.asarray(ks.grids.weights)
-        ks.grids.coords = gpunp.asarray(ks.grids.coords)
+        ks.grids.weights = asarray(ks.grids.weights)
+        ks.grids.coords = asarray(ks.grids.coords)
         ground_state = getattr(dm, 'ndim', 0) == 2
         if ks.small_rho_cutoff > 1e-20 and ground_state:
             # Filter grids the first time setup grids
@@ -85,8 +60,8 @@ def initialize_grids(ks, mol=None, dm=None):
                 t0 = logger.init_timer(ks)
                 #ks.nlcgrids.build(with_non0tab=True)
                 ks.nlcgrids.build()
-                ks.nlcgrids.weights = gpunp.asarray(ks.nlcgrids.weights)
-                ks.nlcgrids.coords = gpunp.asarray(ks.nlcgrids.coords)
+                ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
+                ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
                 if ks.small_rho_cutoff > 1e-20 and ground_state:
                     # Filter grids the first time setup grids
                     ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
@@ -238,6 +213,9 @@ class KohnShamDFT(rks.KohnShamDFT):
     to_uks = NotImplemented
     to_gks = NotImplemented
 
+    # Use rho to filter grids
+    small_rho_cutoff = getattr(__config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
+
     def __init__(self, xc='LDA,VWN'):
         self.xc = xc
         self.disp = None
@@ -256,10 +234,6 @@ class KohnShamDFT(rks.KohnShamDFT):
         self.cphf_grids = gen_grid.Grids(self.mol)
         self.cphf_grids.prune = gen_grid.sg1_prune
         self.cphf_grids.atom_grid = (50,194)
-        
-        # Use rho to filter grids
-        self.small_rho_cutoff = getattr(
-            __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
 ##################################################
 # don't modify the following attributes, they are not input options
         self._numint = numint.NumInt()

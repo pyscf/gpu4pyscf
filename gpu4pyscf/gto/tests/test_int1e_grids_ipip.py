@@ -45,6 +45,8 @@ H	-0.8190	-0.8170	0.4220
     zs = np.arange(-2.03, 2.0, 0.5)
     grid_points = lib.cartesian_prod([xs, ys, zs])
 
+    grid_points = np.vstack([grid_points, mol_sph.atom_coords()])
+
     # All of the following thresholds bound the max value of the corresponding matrix / tensor.
     integral_threshold = 1e-12
     density_contraction_threshold = 1e-10

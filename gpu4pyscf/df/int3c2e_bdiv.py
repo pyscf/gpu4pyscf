@@ -23,10 +23,10 @@ from importlib.util import find_spec
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import load_library, contract
+    from gpu4pyscf.lib.cupy_helper import load_library, contract, dist_matrix
 else:
     import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import load_library, contract
+    from gpu4pyscf.lib.dpnp_helper import load_library, contract, dist_matrix
     from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
     from dpctl._sycl_queue_manager import get_device_cached_queue
 from pyscf import lib
@@ -163,7 +163,9 @@ class Int3c2eOpt:
             lj = uniq_l[j]
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish, jsh = np.where(mask[ish0:ish1,jsh0:jsh1])
+            ish, jsh = cp.where(mask[ish0:ish1,jsh0:jsh1])
+            if len(ish) == 0:
+                continue
             ish += ish0
             jsh += jsh0
             idx = ish * nbas + jsh
@@ -224,9 +226,11 @@ class Int3c2eOpt:
         kern_counts = 0
 
         for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
+            npair_ij = len(bas_ij_idx)
+            if npair_ij == 0:
+                continue
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            npair_ij = len(bas_ij_idx)
             bas_ij_idx = cp.asarray(bas_ij_idx, dtype=np.int32)
             li = uniq_l[i]
             lj = uniq_l[j]
@@ -331,25 +335,24 @@ class Int3c2eOpt:
         ao_pair_mapping indicates the ij addresses in eri3c[k,i,j];
         '''
         mol = self.sorted_mol
-        ao_loc = mol.ao_loc_nr(cart)
+        ao_loc = cp.asarray(mol.ao_loc_nr(cart))
         nao = ao_loc[-1]
         uniq_l = self.uniq_l_ctr[:,0]
         if cart:
             nf = (uniq_l + 1) * (uniq_l + 2) // 2
         else:
             nf = uniq_l * 2 + 1
+        carts = [cp.arange(n) for n in nf]
         n_groups = len(uniq_l)
         ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
         nbas = mol.nbas
         ao_pair_mapping = []
         for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
             ish, jsh = divmod(bas_ij_idx, nbas)
-            nfi = nf[i]
-            nfj = nf[j]
-            iaddr = ao_loc[ish,None] + np.arange(nfi)
-            jaddr = ao_loc[jsh,None] + np.arange(nfj)
+            iaddr = ao_loc[ish,None] + carts[i]
+            jaddr = ao_loc[jsh,None] + carts[j]
             ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
-        return np.hstack(ao_pair_mapping)
+        return cp.hstack(ao_pair_mapping)
 
     def orbital_pair_cart2sph(self, compressed_eri3c, inplace=True):
         '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
@@ -479,8 +482,10 @@ def create_nst_lookup_table():
 def estimate_shl_ovlp(mol):
     # consider only the most diffused component of a basis
     exps, cs = extract_pgto_params(mol, 'diffused')
-    ls = mol._bas[:,ANG_OF]
-    bas_coords = mol.atom_coords()[mol._bas[:,ATOM_OF]]
+    exps = cp.asarray(exps)
+    cs = cp.asarray(cs)
+    ls = cp.asarray(mol._bas[:,ANG_OF])
+    bas_coords = cp.asarray(mol.atom_coords()[mol._bas[:,ATOM_OF]])
 
     norm = cs * ((2*ls+1)/(4*np.pi))**.5
     aij = exps[:,None] + exps
@@ -488,8 +493,7 @@ def estimate_shl_ovlp(mol):
     fj = exps[None,:] / aij
     theta = exps[:,None] * fj
 
-    rirj = bas_coords[:,None,:] - bas_coords
-    dr = np.linalg.norm(rirj, axis=2)
+    dr = dist_matrix(bas_coords, bas_coords)
     dri = fj * dr
     drj = fi * dr
     li = ls[:,None]
@@ -497,5 +501,5 @@ def estimate_shl_ovlp(mol):
     fac_dri = (li * .5/aij + dri**2) ** (li*.5)
     fac_drj = (lj * .5/aij + drj**2) ** (lj*.5)
     fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
-    ovlp = fac_norm * np.exp(-theta*dr**2) * fac_dri * fac_drj
+    ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj
     return ovlp

@@ -16,12 +16,14 @@
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.scf import _response_functions # noqa
 from pyscf import __config__
 
@@ -34,7 +36,251 @@ __all__ = [
 ]
 
 
-def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
+    r'''A and B matrices for TDDFT response function.
+
+    A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
+    B[i,a,j,b] = (ai||bj)
+
+    Ref: Chem Phys Lett, 256, 454
+    '''
+
+    if mo_energy is None:
+        mo_energy = mf.mo_energy
+    if mo_coeff is None:
+        mo_coeff = mf.mo_coeff
+    if mo_occ is None:
+        mo_occ = mf.mo_occ
+
+    mo_energy = cp.asarray(mo_energy)
+    mo_coeff = cp.asarray(mo_coeff)
+    mo_occ = cp.asarray(mo_occ)
+    mol = mf.mol
+    nao, nmo = mo_coeff.shape
+    occidx = cp.where(mo_occ==2)[0]
+    viridx = cp.where(mo_occ==0)[0]
+    orbv = mo_coeff[:,viridx]
+    orbo = mo_coeff[:,occidx]
+    nvir = orbv.shape[1]
+    nocc = orbo.shape[1]
+    mo = cp.hstack((orbo,orbv))
+
+    e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+    a = cp.diag(e_ia.ravel()).reshape(nocc,nvir,nocc,nvir)
+    b = cp.zeros_like(a)
+
+    def add_solvent_(a, b, pcmobj):
+        charge_exp  = pcmobj.surface['charge_exp']
+        grid_coords = pcmobj.surface['grid_coords']
+
+        vmat = -int1e_grids(pcmobj.mol, grid_coords, charge_exponents = charge_exp**2, intopt = pcmobj.intopt)
+        K_LU = pcmobj._intermediates['K_LU']
+        K_LU_pivot = pcmobj._intermediates['K_LU_pivot']
+        if not isinstance(K_LU, cp.ndarray):
+            K_LU = cp.asarray(K_LU)
+        if not isinstance(K_LU_pivot, cp.ndarray):
+            K_LU_pivot = cp.asarray(K_LU_pivot)
+        ngrid_surface = K_LU.shape[0]
+        L = cp.tril(K_LU, k=-1) + cp.eye(ngrid_surface)  
+        U = cp.triu(K_LU)                
+
+        P = cp.eye(ngrid_surface)
+        for i in range(ngrid_surface):
+            pivot = int(K_LU_pivot[i].get())
+            if K_LU_pivot[i] != i:
+                P[[i, pivot]] = P[[pivot, i]]
+        K = P.T @ L @ U
+        Kinv = cp.linalg.inv(K)
+        f_epsilon = pcmobj._intermediates['f_epsilon']
+        if pcmobj.if_method_in_CPCM_category:
+            R = -f_epsilon * cp.eye(K.shape[0])
+        else:
+            A = pcmobj._intermediates['A']
+            D = pcmobj._intermediates['D']
+            DA = D*A
+            R = -f_epsilon * (cp.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
+        Q = Kinv @ R
+        Qs = 0.5*(Q+Q.T)
+        
+        q_sym = cp.einsum('gh,hkl->gkl', Qs, vmat)
+        kEao = contract('gij,gkl->ijkl', vmat, q_sym)
+        kEmo = contract('pjkl,pi->ijkl', kEao, orbo.conj())
+        kEmo = contract('ipkl,pj->ijkl', kEmo, mo)
+        kEmo = contract('ijpl,pk->ijkl', kEmo, mo.conj())
+        kEmo = contract('ijkp,pl->ijkl', kEmo, mo)
+        kEmo = kEmo.reshape(nocc,nmo,nmo,nmo)
+        if singlet:
+            a += cp.einsum('iabj->iajb', kEmo[:nocc,nocc:,nocc:,:nocc])*2
+            b += cp.einsum('iajb->iajb', kEmo[:nocc,nocc:,:nocc,nocc:])*2
+        else:
+            raise RuntimeError("There is no solvent response for singlet-triplet excitat")
+
+
+    def add_hf_(a, b, hyb=1):
+        if getattr(mf, 'with_df', None):
+            from gpu4pyscf.df import int3c2e
+            auxmol = mf.with_df.auxmol
+            naux = auxmol.nao
+            int3c = int3c2e.get_int3c2e(mol, auxmol)
+            int2c2e = auxmol.intor('int2c2e')
+            int3c = cp.asarray(int3c)
+            int2c2e = cp.asarray(int2c2e)
+            df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+            df_coef = df_coef.reshape(naux, nao, nao)
+            eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
+        else:
+            eri = mol.intor('int2e_sph', aosym='s8')
+            eri= ao2mo.restore(1, eri, nao)
+            eri = cp.asarray(eri)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+        if singlet:
+            a += cp.einsum('iabj->iajb', eri_mo[:nocc,nocc:,nocc:,:nocc]) * 2
+            a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b += cp.einsum('iajb->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * 2
+            b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
+        else:
+            a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * hyb
+
+    if getattr(td, 'with_solvent', None):
+        pcmobj = td.with_solvent
+        add_solvent_(a, b, pcmobj)
+
+    if isinstance(mf, scf.hf.KohnShamDFT):
+        grids = mf.grids
+        ni = mf._numint
+        if mf.do_nlc():
+            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
+                        'derivative is not available. Its contribution is '
+                        'not included in the response function.')
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+
+        add_hf_(a, b, hyb)
+        if omega != 0:  # For RSH
+            if getattr(mf, 'with_df', None):
+                from gpu4pyscf.df import int3c2e
+                auxmol = mf.with_df.auxmol
+                naux = auxmol.nao
+                int3c = int3c2e.get_int3c2e(mol, auxmol, omega=omega)
+                with auxmol.with_range_coulomb(omega):
+                    int2c2e = auxmol.intor('int2c2e')
+                int3c = cp.asarray(int3c)
+                int2c2e = cp.asarray(int2c2e)
+                df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+                df_coef = df_coef.reshape(naux, nao, nao)
+                eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
+            else:
+                with mol.with_range_coulomb(omega):
+                    eri = mol.intor('int2e_sph', aosym='s8')
+                    eri= ao2mo.restore(1, eri, nao)
+                    eri = cp.asarray(eri)
+            eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+            eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+            eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+            eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+            eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+            k_fac = alpha - hyb
+            a -= cp.einsum('ijba->iajb', eri_mo[:nocc,:nocc,nocc:,nocc:]) * k_fac
+            b -= cp.einsum('jaib->iajb', eri_mo[:nocc,nocc:,:nocc,nocc:]) * k_fac
+
+        xctype = ni._xc_type(mf.xc)
+        opt = getattr(ni, 'gdftopt', None)
+        if opt is None:
+            ni.build(mol, grids.coords)
+            opt = ni.gdftopt
+        _sorted_mol = opt._sorted_mol
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+        orbo = opt.sort_orbitals(orbo, axis=[0])
+        orbv = opt.sort_orbitals(orbv, axis=[0])
+        if xctype == 'LDA':
+            ao_deriv = 0
+            for ao, mask, weight, coords \
+                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, blksize=67200):
+                mo_coeff_mask = mo_coeff[mask]
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                    mo_occ, mask, xctype, with_lapl=False)
+                if singlet or singlet is None:
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    wfxc = fxc[0,0] * weight
+                else:
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                    wfxc = (fxc[0, 0, 0, 0] - fxc[1, 0, 0, 0]) * 0.5 * weight
+                orbo_mask = orbo[mask]
+                orbv_mask = orbv[mask]
+                rho_o = contract('pr,pi->ri', ao, orbo_mask)
+                rho_v = contract('pr,pi->ri', ao, orbv_mask)
+                rho_ov = contract('ri,ra->ria', rho_o, rho_v)
+                w_ov = contract('ria,r->ria', rho_ov, wfxc)
+                iajb = contract('ria,rjb->iajb', rho_ov, w_ov) * 2
+                a += iajb
+                b += iajb
+
+        elif xctype == 'GGA':
+            ao_deriv = 1
+            for ao, mask, weight, coords \
+                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                mo_coeff_mask = mo_coeff[mask]
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                   mo_occ, mask, xctype, with_lapl=False)
+                if singlet or singlet is None:
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    wfxc = fxc * weight
+                else:
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                    wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
+                orbo_mask = orbo[mask]
+                orbv_mask = orbv[mask]
+                rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                a += iajb
+                b += iajb
+
+        elif xctype == 'HF':
+            pass
+
+        elif xctype == 'NLC':
+            raise NotImplementedError('NLC')
+
+        elif xctype == 'MGGA':
+            ao_deriv = 1
+            for ao, mask, weight, coords \
+                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                mo_coeff_mask = mo_coeff[mask]
+                rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                   mo_occ, mask, xctype, with_lapl=False)
+                if singlet or singlet is None:
+                    fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                    wfxc = fxc * weight
+                else:
+                    fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho))*0.5, deriv=2, xctype=xctype)[2]
+                    wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
+                orbo_mask = orbo[mask]
+                orbv_mask = orbv[mask]
+                rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                tau_ov = contract('xri,xra->ria', rho_o[1:4], rho_v[1:4]) * .5
+                rho_ov = cp.vstack([rho_ov, tau_ov[cp.newaxis]])
+                w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                a += iajb
+                b += iajb
+
+    else:
+        add_hf_(a, b)
+
+    return a.get(), b.get()
+
+def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute A x
     '''
     assert fock_ao is None
@@ -52,7 +298,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
     hdiag = hdiag.ravel()
-    vresp = mf.gen_response(singlet=singlet, hermi=0)
+    vresp = td.gen_response(singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
     def vind(zs):
@@ -95,7 +341,15 @@ class TDBase(lib.StreamObject):
     _finalize = tdhf_cpu.TDBase._finalize
 
     gen_vind = NotImplemented
-    get_ab = NotImplemented
+
+    def gen_response(self, singlet=True, hermi=0):
+        '''Generate function to compute A x'''
+        return self._scf.gen_response(singlet=singlet, hermi=hermi)
+    
+    def get_ab(self, mf=None):
+        if mf is None:
+            mf = self._scf
+        return get_ab(self, mf, singlet=self.singlet)
 
     def get_precond(self, hdiag):
         threshold_t=1.0e-4
@@ -110,7 +364,14 @@ class TDBase(lib.StreamObject):
             return x/diagd
         return precond
 
-    nuc_grad_method = NotImplemented
+    def nuc_grad_method(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tdrhf
+            return tdrhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrhf
+            return tdrhf.Gradients(self)
+
     as_scanner = tdhf_cpu.as_scanner
 
     oscillator_strength = tdhf_cpu.oscillator_strength
@@ -187,7 +448,7 @@ class TDA(TDBase):
         '''Generate function to compute Ax'''
         if mf is None:
             mf = self._scf
-        return gen_tda_operation(mf, singlet=self.singlet)
+        return gen_tda_operation(self, mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         '''
@@ -265,7 +526,7 @@ class TDA(TDBase):
 CIS = TDA
 
 
-def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute
 
     [ A   B ][X]
@@ -283,7 +544,7 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     orbo = mo_coeff[:,occidx]
 
     e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
-    vresp = mf.gen_response(singlet=singlet, hermi=0)
+    vresp = td.gen_response(singlet=singlet, hermi=0)
     nocc, nvir = e_ia.shape
 
     def vind(zs):
@@ -317,7 +578,7 @@ class TDHF(TDBase):
     def gen_vind(self, mf=None):
         if mf is None:
             mf = self._scf
-        return gen_tdhf_operation(mf, singlet=self.singlet)
+        return gen_tdhf_operation(self, mf, singlet=self.singlet)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         assert not return_symmetry

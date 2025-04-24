@@ -12,31 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_30 -rdc=true")
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60 --ptxas-options=-v")
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_50 --ptxas-options=-v -maxrregcount=255")
-
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(GPU_SRCS
-    g2e.c
-    pair_data.c
-    bpcache.cu
-    constant.cu
-    nr_fill_ao_ints.cu
-    nr_fill_ao_int3c1e.cu
-    nr_fill_ao_int3c1e_ip.cu
-    nr_fill_ao_int3c1e_ipip.cu
-    nr_fill_ao_int3c2e.cu
-    nr_fill_ao_int3c2e_ip1.cu
-    nr_fill_ao_int3c2e_ip2.cu
-    nr_fill_ao_int3c2e_ipip1.cu
-    nr_fill_ao_int3c2e_ipip2.cu
-    nr_fill_ao_int3c2e_ip1ip2.cu
-    nr_fill_ao_int3c2e_ipvip1.cu
-    j_engine_matrix_reorder.c
-    rys_roots_dat.cu
+  g2e.c
+  pair_data.c
+  bpcache.cu
+  constant.cu
+  nr_fill_ao_ints.cu
+  nr_fill_ao_int3c1e.cu
+  nr_fill_ao_int3c1e_ip.cu
+  nr_fill_ao_int3c1e_ipip.cu
+  nr_fill_ao_int3c2e.cu
+  nr_fill_ao_int3c2e_ip1.cu
+  nr_fill_ao_int3c2e_ip2.cu
+  nr_fill_ao_int3c2e_ipip1.cu
+  nr_fill_ao_int3c2e_ipip2.cu
+  nr_fill_ao_int3c2e_ip1ip2.cu
+  nr_fill_ao_int3c2e_ipvip1.cu
+  j_engine_matrix_reorder.c
+  rys_roots_dat.cu
+  cart2sph.cu
   )
 
 add_library(gint SHARED ${GPU_SRCS})
@@ -50,6 +46,8 @@ if (USE_SYCL)
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
 else()
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
+
   set_target_properties(gint PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
     CUDA_SEPARABLE_COMPILATION ON)

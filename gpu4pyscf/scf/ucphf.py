@@ -20,10 +20,10 @@ Unrestricted coupled pertubed Hartree-Fock solver
 import numpy
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
-    import cupy as gpunp
+    import cupy
     from gpu4pyscf.lib.cupy_helper import krylov
 else:
-    import dpnp as gpunp
+    import dpnp as cupy
     from gpu4pyscf.lib.dpnp_helper import krylov
 
 from pyscf import lib
@@ -48,41 +48,45 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
     '''For field independent basis. First order overlap matrix is zero'''
     log = logger.new_logger(verbose=verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
-    nocca = gpunp.sum(mo_occ[0] > 0)
-    noccb = gpunp.sum(mo_occ[1] > 0)
 
-    nvira = mo_occ[0].size - nocca
-    nvirb = mo_occ[1].size - noccb
-
+    occidxa = mo_occ[0] > 0
+    occidxb = mo_occ[1] > 0
+    viridxa = ~occidxa
+    viridxb = ~occidxb
+    nocca = int(cupy.count_nonzero(occidxa))
+    noccb = int(cupy.count_nonzero(occidxb))
+    nvira = int(mo_occ[0].size - nocca)
+    nvirb = int(mo_occ[1].size - noccb)
     mo_ea, mo_eb = mo_energy
-    e_a = mo_ea[mo_occ[0]==0]
-    e_i = mo_ea[mo_occ[0]>0]
-    ea_ai = 1 / (e_a[:,None] + level_shift - e_i)
-
-    e_a = mo_eb[mo_occ[1]==0]
-    e_i = mo_eb[mo_occ[1]>0]
-    eb_ai = 1 / (e_a[:,None] + level_shift - e_i)
-
-    e_ai = gpunp.hstack([ea_ai.ravel(),eb_ai.ravel()])
-
-    mo1base = gpunp.hstack((h1[0].reshape(-1, nvira*nocca),
-                            h1[1].reshape(-1,nvirb*noccb)))
+    e_ai = cupy.hstack(
+        ((mo_ea[viridxa,None]+level_shift - mo_ea[occidxa]).ravel(),
+         (mo_eb[viridxb,None]+level_shift - mo_eb[occidxb]).ravel()))
+    e_ai = 1 / e_ai
+    mo1base = cupy.hstack((h1[0].reshape(-1,nvira*nocca),
+                           h1[1].reshape(-1,nvirb*noccb)))
     mo1base *= -e_ai
+    nov = e_ai.size
 
     def vind_vo(mo1):
-        v = fvind(mo1.reshape(h1.shape)).reshape(h1.shape)
+        nd = mo1.shape[0]
+        v = fvind(mo1).reshape(nd, nov)
         if level_shift != 0:
             v -= mo1 * level_shift
         v *= e_ai
-        return v.ravel()
-    mo1 = krylov(vind_vo, mo1base.ravel(),
+        return v.reshape(-1, nov)
+    mo1 = krylov(vind_vo, mo1base.reshape(-1, nov),
                      tol=tol, max_cycle=max_cycle, hermi=hermi, verbose=log)
-    log.timer('krylov solver in UCPHF', *t0)
+    log.timer('krylov solver in CPHF', *t0)
+
     mo1 = mo1.reshape(mo1base.shape)
     mo1_a = mo1[:,:nvira*nocca].reshape(-1,nvira,nocca)
     mo1_b = mo1[:,nvira*nocca:].reshape(-1,nvirb,noccb)
-    mo1 = (mo1_a, mo1_b)
-    return mo1.reshape(h1.shape), None
+    if isinstance(h1[0], cupy.ndarray) and h1[0].ndim == 2:
+        mo1 = (mo1_a[0], mo1_b[0])
+    else:
+        assert h1[0].ndim == 3
+        mo1 = (mo1_a, mo1_b)
+    return mo1, None
 
 # h1 shape is (:,nocc+nvir,nocc)
 def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
@@ -109,8 +113,8 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     viridxa = mo_occ[0] == 0
     viridxb = mo_occ[1] == 0
 
-    nocca = gpunp.sum(mo_occ[0] > 0).get()
-    noccb = gpunp.sum(mo_occ[1] > 0).get()
+    nocca = cupy.sum(mo_occ[0] > 0).get()
+    noccb = cupy.sum(mo_occ[1] > 0).get()
     nmoa, nmob = mo_occ[0].size, mo_occ[1].size
 
     mo_ea, mo_eb = mo_energy
@@ -134,7 +138,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     mo1base_b[:,viridxb] *= -eai_b
     mo1base_a[:,occidxa] = -s1_a[:,occidxa] * .5
     mo1base_b[:,occidxb] = -s1_b[:,occidxb] * .5
-    mo1base = gpunp.hstack((mo1base_a.reshape(nset,-1), mo1base_b.reshape(nset,-1)))
+    mo1base = cupy.hstack((mo1base_a.reshape(nset,-1), mo1base_b.reshape(nset,-1)))
 
     def vind_vo(mo1):
         mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)

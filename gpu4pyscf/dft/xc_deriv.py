@@ -197,7 +197,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
         if order == 0:
             vp = _stack_frrr(frrr).reshape(2,nvar, 2,nvar, 2,nvar, ngrids).transpose(1,3,5,0,2,4,6)
         else:
-            vp = gpunp.empty((2,nvar, 2,nvar, 2,nvar, ngrids)).transpose(1,3,5,0,2,4,6)
+            vp = cupy.empty((2,nvar, 2,nvar, 2,nvar, ngrids)).transpose(1,3,5,0,2,4,6)
             vp[0,0,0] = _stack_frrr(frrr)
             i3 = np.arange(3)
             qggg = _stack_fggg(fggg)
@@ -205,7 +205,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             qggg = contract('xbcdefg,cyg->xybdefg', qggg, rho[:,1:4])
             qggg = contract('xybdefg,ezg->xyzbdfg', qggg, rho[:,1:4])
             # qggg = _stack_fggg(fggg, rho=rho).transpose(1,3,5,0,2,4,6)
-            # qggg = gpunp.asarray(qggg)
+            # qggg = cupy.asarray(qggg)
             qgg = _stack_fgg(fgg)
             qgg = contract('abcdg,axg->xbcdg', qgg, rho[:,1:4])
             for i in range(3):
@@ -220,7 +220,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             qrgg = contract('xrbcdg,cyg->xyrbdg', qrgg, rho[:,1:4])
             # qrgg = _stack_fgg(frgg.get(), axis=1, rho=rho.get()).transpose(2,4,0,1,3,5)
             qrg = _stack_fg(frg.reshape(2,3,ngrids), axis=1)
-            # qrgg = gpunp.asarray(qrgg)
+            # qrgg = cupy.asarray(qrgg)
             qrgg[i3,i3] += qrg
             vp[0,1:4,1:4] = qrgg
             vp[1:4,0,1:4] = qrgg.transpose(0,1,3,2,4,5)
@@ -231,7 +231,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             qrrg = _stack_fg(qrrg, axis=2)
             qrrg = contract('rsabg,axg->rsxbg', qrrg, rho[:,1:4]).transpose(2,0,1,3,4)
             # qrrg = _stack_fg(qrrg.get(), axis=2, rho=rho.get()).transpose(3,0,1,2,4)
-            # qrrg = gpunp.asarray(qrrg)
+            # qrrg = cupy.asarray(qrrg)
             vp[0,0,1:4] = qrrg
             vp[0,1:4,0] = qrrg.transpose(0,1,3,2,4)
             vp[1:4,0,0] = qrrg.transpose(0,3,1,2,4)

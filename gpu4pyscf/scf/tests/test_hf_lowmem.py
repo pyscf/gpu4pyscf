@@ -18,9 +18,9 @@ import numpy as np
 from importlib.util import find_spec
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
-    import cupy as gpunp
+    import cupy
 else:
-    import dpnp as gpunp
+    import dpnp as cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf.scf import hf_lowmem
@@ -54,7 +54,7 @@ class KnownValues(unittest.TestCase):
         e_tot = mf.kernel()
         e_ref = -76.02676567311744
         assert np.abs(e_tot - e_ref) < 1e-8
-        assert all(isinstance(x, np.ndarray) and not isinstance(x, gpunp.ndarray)
+        assert all(isinstance(x, np.ndarray) and not isinstance(x, cupy.ndarray)
                    for x in mf.diis._buffer.values())
 
 if __name__ == "__main__":

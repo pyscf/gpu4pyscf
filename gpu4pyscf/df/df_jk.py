@@ -46,35 +46,6 @@ def _pin_memory(array):
     ret[...] = array
     return ret
 
-def init_workflow(mf, dm0=None):
-    # build CDERI for omega = 0 and omega ! = 0
-    def build_df():
-        mf.with_df.build()
-        if hasattr(mf, '_numint'):
-            omega, _, _ = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mf.mol.spin)
-            if abs(omega) <= 1e-10: return
-            key = '%.6f' % omega
-            if key in mf.with_df._rsh_df:
-                rsh_df = mf.with_df._rsh_df[key]
-            else:
-                rsh_df = mf.with_df._rsh_df[key] = mf.with_df.copy().reset()
-            rsh_df.build(omega=omega)
-        return
-
-    mf.h1e = gpunp.asarray(mf.get_hcore(mf.mol))
-    mf.s1e = gpunp.asarray(mf.get_ovlp(mf.mol))
-    # pre-compute h1e and s1e and cderi for async workflow
-    with lib.call_in_background(build_df) as build:
-        build()
-        # for DFT object
-        if hasattr(mf, '_numint'):
-            ni = mf._numint
-            rks.initialize_grids(mf, mf.mol, dm0)
-            ni.build(mf.mol, mf.grids.coords)
-            mf._numint.xcfuns = numint._init_xcfuns(mf.xc, dm0.ndim==3)
-    dm0 = gpunp.asarray(dm0)
-    return
-
 def _density_fit(mf, auxbasis=None, with_df=None, only_dfj=False):
     '''For the given SCF object, update the J, K matrix constructor with
     corresponding density fitting integrals.
@@ -154,8 +125,6 @@ class _DFHF:
     def reset(self, mol=None):
         self.with_df.reset(mol)
         return super().reset(mol)
-
-    init_workflow = init_workflow
 
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):
@@ -532,23 +501,6 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         if vk is not None:
             vk = vk.get()
         return vj, vk
-
-def _get_jk(dfobj, dm, hermi=1, with_j=True, with_k=True,
-            direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),
-            omega=None):
-    if omega is None:
-        return get_jk(dfobj, dm, hermi, with_j, with_k, direct_scf_tol)
-
-    # A temporary treatment for RSH-DF integrals
-    key = '%.6f' % omega
-    if key in dfobj._rsh_df:
-        rsh_df = dfobj._rsh_df[key]
-    else:
-        rsh_df = dfobj._rsh_df[key] = dfobj.copy().reset()
-        logger.info(dfobj, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
-
-    with rsh_df.mol.with_range_coulomb(omega):
-        return get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol)
 
 def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
     intopt = getattr(dfobj, 'intopt', None)

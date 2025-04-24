@@ -1,18 +1,28 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
+
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
 
 __device__
-void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_000(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -24,8 +34,6 @@ void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -38,7 +46,6 @@ void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -130,11 +137,21 @@ void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_100(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -146,8 +163,6 @@ void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -160,7 +175,6 @@ void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -267,11 +281,21 @@ void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_110(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -283,8 +307,6 @@ void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -297,7 +319,6 @@ void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -432,11 +453,21 @@ void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_200(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -448,8 +479,6 @@ void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -462,7 +491,6 @@ void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -582,11 +610,21 @@ void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_210(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -598,8 +636,6 @@ void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -612,7 +648,6 @@ void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -780,11 +815,21 @@ void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_220(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -796,8 +841,6 @@ void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -810,7 +853,6 @@ void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -1047,11 +1089,21 @@ void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_001(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -1063,8 +1115,6 @@ void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -1077,7 +1127,6 @@ void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -1184,11 +1233,21 @@ void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_101(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -1200,8 +1259,6 @@ void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -1214,7 +1271,6 @@ void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -1350,11 +1406,21 @@ void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_111(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -1366,8 +1432,6 @@ void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -1380,7 +1444,6 @@ void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -1589,11 +1652,21 @@ void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_201(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -1605,8 +1678,6 @@ void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -1619,7 +1690,6 @@ void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -1789,11 +1859,21 @@ void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_211(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -1805,8 +1885,6 @@ void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -1819,7 +1897,6 @@ void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -2121,10 +2198,20 @@ void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_221(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int thread_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int thread_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -2136,7 +2223,6 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int thread_id = threadIdx.x;
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int *bas = envs.bas;
@@ -2148,8 +2234,7 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int nroots = 3;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + st_id;
+    double *rw = rw_buffer + st_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
@@ -2618,11 +2703,21 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_002(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -2634,8 +2729,6 @@ void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -2648,7 +2741,6 @@ void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -2768,11 +2860,21 @@ void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_102(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -2784,8 +2886,6 @@ void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -2798,7 +2898,6 @@ void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -2968,11 +3067,21 @@ void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_112(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -2984,8 +3093,6 @@ void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -2998,7 +3105,6 @@ void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -3304,11 +3410,21 @@ void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_202(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -3320,8 +3436,6 @@ void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int nst_per_block = blockDim.x;
-    int st_id = threadIdx.x;
     int *bas = envs.bas;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -3334,7 +3448,6 @@ void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     if (omega < 0) {
         nroots *= 2;
     }
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw + nst_per_block * nroots*2;
     int naux = bounds.naux;
@@ -3568,10 +3681,20 @@ void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_212(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int thread_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int thread_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -3583,7 +3706,6 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int thread_id = threadIdx.x;
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int *bas = envs.bas;
@@ -3595,8 +3717,7 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int nroots = 3;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
-    double *rw = rw_cache + st_id;
+    double *rw = rw_buffer + st_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
@@ -4054,10 +4175,20 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 }
 
 __device__
-int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+int int3c2e_bdiv_unrolled(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
+  #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
+    int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+  #else
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int nst_per_block = blockDim.x;
+    int st_id = threadIdx.x;
+  #endif
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
     int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
@@ -4070,23 +4201,23 @@ int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bound
     int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
-    case 0:  int3c2e_bdiv_000(out, envs, bounds); break;
-    case 5:  int3c2e_bdiv_100(out, envs, bounds); break;
-    case 6:  int3c2e_bdiv_110(out, envs, bounds); break;
-    case 10: int3c2e_bdiv_200(out, envs, bounds); break;
-    case 11: int3c2e_bdiv_210(out, envs, bounds); break;
-    case 12: int3c2e_bdiv_220(out, envs, bounds); break;
-    case 25: int3c2e_bdiv_001(out, envs, bounds); break;
-    case 30: int3c2e_bdiv_101(out, envs, bounds); break;
-    case 31: int3c2e_bdiv_111(out, envs, bounds); break;
-    case 35: int3c2e_bdiv_201(out, envs, bounds); break;
-    case 36: int3c2e_bdiv_211(out, envs, bounds); break;
-    case 37: int3c2e_bdiv_221(out, envs, bounds); break;
-    case 50: int3c2e_bdiv_002(out, envs, bounds); break;
-    case 55: int3c2e_bdiv_102(out, envs, bounds); break;
-    case 56: int3c2e_bdiv_112(out, envs, bounds); break;
-    case 60: int3c2e_bdiv_202(out, envs, bounds); break;
-    case 61: int3c2e_bdiv_212(out, envs, bounds); break;
+    case 0:  int3c2e_bdiv_000(rw_buffer, out, envs, bounds); break;
+    case 5:  int3c2e_bdiv_100(rw_buffer, out, envs, bounds); break;
+    case 6:  int3c2e_bdiv_110(rw_buffer, out, envs, bounds); break;
+    case 10: int3c2e_bdiv_200(rw_buffer, out, envs, bounds); break;
+    case 11: int3c2e_bdiv_210(rw_buffer, out, envs, bounds); break;
+    case 12: int3c2e_bdiv_220(rw_buffer, out, envs, bounds); break;
+    case 25: int3c2e_bdiv_001(rw_buffer, out, envs, bounds); break;
+    case 30: int3c2e_bdiv_101(rw_buffer, out, envs, bounds); break;
+    case 31: int3c2e_bdiv_111(rw_buffer, out, envs, bounds); break;
+    case 35: int3c2e_bdiv_201(rw_buffer, out, envs, bounds); break;
+    case 36: int3c2e_bdiv_211(rw_buffer, out, envs, bounds); break;
+    case 37: int3c2e_bdiv_221(rw_buffer, out, envs, bounds); break;
+    case 50: int3c2e_bdiv_002(rw_buffer, out, envs, bounds); break;
+    case 55: int3c2e_bdiv_102(rw_buffer, out, envs, bounds); break;
+    case 56: int3c2e_bdiv_112(rw_buffer, out, envs, bounds); break;
+    case 60: int3c2e_bdiv_202(rw_buffer, out, envs, bounds); break;
+    case 61: int3c2e_bdiv_212(rw_buffer, out, envs, bounds); break;
     default: return 0;
     }
     return 1;

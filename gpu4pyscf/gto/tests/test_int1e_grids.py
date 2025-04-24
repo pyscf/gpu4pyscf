@@ -29,20 +29,18 @@ H	-0.8190	-0.8170	0.4220
 '''
     bas='def2-qzvpp'
 
-    mol_sph = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-    mol_sph.output = '/dev/null'
-    mol_sph.verbose = 0
-    mol_sph.build()
+    mol_sph = pyscf.M(atom=atom, basis=bas, max_memory=32000,
+                      output='/dev/null', verbose=0)
 
-    mol_cart = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=True)
-    mol_cart.output = '/dev/null'
-    mol_cart.verbose = 0
-    mol_cart.build()
+    mol_cart = pyscf.M(atom=atom, basis=bas, max_memory=32000, cart=True,
+                       output='/dev/null', verbose=0)
 
     xs = np.arange(-2.01, 2.0, 0.5)
     ys = np.arange(-2.02, 2.0, 0.5)
     zs = np.arange(-2.03, 2.0, 0.5)
     grid_points = lib.cartesian_prod([xs, ys, zs])
+
+    grid_points = np.vstack([grid_points, mol_sph.atom_coords()])
 
     # All of the following thresholds bound the max value of the corresponding matrix / tensor.
     integral_threshold = 1e-12

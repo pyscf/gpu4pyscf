@@ -16,6 +16,10 @@
 
 #include <stdio.h>
 
+#ifdef USE_SYCL
+#include "sycl_device.hpp"
+#endif
+
 template<int L>
 __device__
 static void cart2sph(const double *gcart, double *gsph, const int cart_stride)
@@ -776,19 +780,19 @@ extern "C" {
 
 		#ifdef USE_SYCL
                 const sycl::range<2> threads(16, 16);
-                const sycl::range<2> blocks((n_ao_cartesian + threads[1] - 1) / threads[1], (n_bas + threads[0] - 1) / threads[0]);
+                const sycl::range<2> blocks((n_bas + threads[0] - 1) / threads[0], (n_ao_cartesian + threads[1] - 1) / threads[1]);
                 switch (l_i) {
-                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 0> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 1> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 2> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 3> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 4> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 5> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 6> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 7> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 8> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 9> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace<10> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
+                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 0> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 1> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 2> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 3> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 4> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 5> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 6> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 7> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 8> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace< 9> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2sph_inplace<10> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
@@ -826,19 +830,19 @@ extern "C" {
 
 		#ifdef USE_SYCL
                 const sycl::range<2> threads(16, 16);
-                const sycl::range<2> blocks((n_ao_cartesian + threads[1] - 1) / threads[1], (n_bas + threads[0] - 1) / threads[0]);
+                const sycl::range<2> blocks((n_bas + threads[0] - 1) / threads[0], (n_ao_cartesian + threads[1] - 1) / threads[1]);
                 switch (l_i) {
-                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 0> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 1> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 2> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 3> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 4> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 5> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 6> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 7> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 8> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 9> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace<10> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
+                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 0> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 1> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 2> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 3> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 4> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 5> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 6> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 7> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 8> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace< 9> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_cart2sph_inplace<10> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_CT_with_padding(), max_L = 10\n", l_i);
@@ -883,12 +887,12 @@ extern "C" {
 
 		    #ifdef USE_SYCL
                     const sycl::range<2> threads(32, 32);
-                    const sycl::range<2> blocks((n_bas_i + threads[1] - 1) / threads[1], (n_bas_j + threads[0] - 1) / threads[0]);
+                    const sycl::range<2> blocks((n_bas_j + threads[0] - 1) / threads[0], (n_bas_i + threads[1] - 1) / threads[1]);
                     stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-			copy_spherical_cart2sph(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
-						l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
-						l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
-						d_ao_idx, item); });
+                      copy_spherical_cart2sph(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
+                                              l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
+                                              l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
+                                              d_ao_idx); });
 		    #else
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
@@ -919,12 +923,12 @@ extern "C" {
 
 		    #ifdef USE_SYCL
 		    const sycl::range<2> threads(32, 32);
-                    const sycl::range<2> blocks((n_bas_i + threads[1] - 1) / threads[1], (n_bas_j + threads[0] - 1) / threads[0]);
+                    const sycl::range<2> blocks((n_bas_j + threads[1] - 1) / threads[1], (n_bas_i + threads[0] - 1) / threads[0]);
                     stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
 			copy_cartesian_pad_to_unpad(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
 						    l_i, n_bas_i, i_pad_offset, i_unpad_offset,
 						    l_j, n_bas_j, j_pad_offset, j_unpad_offset,
-						    d_ao_idx, item); });
+						    d_ao_idx); });
 		    #else
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
@@ -966,12 +970,12 @@ extern "C" {
 
 		    #ifdef USE_SYCL
 		    const sycl::range<2> threads(32, 32);
-                    const sycl::range<2> blocks((n_bas_i + threads[1] - 1) / threads[1], (n_bas_j + threads[0] - 1) / threads[0]);
+                    const sycl::range<2> blocks((n_bas_j + threads[1] - 1) / threads[1], (n_bas_i + threads[0] - 1) / threads[0]);
                     stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
 			copy_spherical_sph2cart(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
 						l_i, n_bas_i, i_cartesian_offset, i_spherical_offset,
 						l_j, n_bas_j, j_cartesian_offset, j_spherical_offset,
-						d_ao_idx, item); });
+						d_ao_idx); });
 		    #else
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
@@ -995,7 +999,7 @@ extern "C" {
 
 		#ifdef USE_SYCL
                 const sycl::range<2> threads(16, 16);
-                const sycl::range<2> blocks((n_ao_cartesian + threads[1] - 1) / threads[1], (n_bas + threads[0] - 1) / threads[0]);
+                const sycl::range<2> blocks((n_bas + threads[0] - 1) / threads[0], (n_ao_cartesian + threads[1] - 1) / threads[1]);
                 switch (l_i) {
                     case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart_inplace< 0> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
                     case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart_inplace< 1> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
@@ -1045,19 +1049,19 @@ extern "C" {
 
 #ifdef USE_SYCL
                 const sycl::range<2> threads(16, 16);
-                const sycl::range<2> blocks((n_ao_cartesian + threads[1] - 1) / threads[1], (n_bas + threads[0] - 1) / threads[0]);
+                const sycl::range<2> blocks((n_bas + threads[0] - 1) / threads[0], (n_ao_cartesian + threads[1] - 1) / threads[1]);
                 switch (l_i) {
-                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 0> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 1> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 2> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 3> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 4> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 5> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 6> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 7> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 8> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 9> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
-                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace<10> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset, item); }); break;
+                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 0> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 1> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 2> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 3> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 4> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 5> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 6> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 7> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 8> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace< 9> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
+                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { right_sph2cart_inplace<10> (cartesian_matrix, n_ao_cartesian, n_bas, i_cartesian_offset); }); break;
                     default:
                         printf("l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_CT_mat_C_with_padding(), max_L = 10\n", l_i);
@@ -1102,12 +1106,12 @@ extern "C" {
 
 		    #ifdef USE_SYCL
                     const sycl::range<2> threads(32, 32);
-                    const sycl::range<2> blocks((n_bas_i + threads[1] - 1) / threads[1], (n_bas_j + threads[0] - 1) / threads[0]);
+                    const sycl::range<2> blocks((n_bas_j + threads[1] - 1) / threads[1], (n_bas_i + threads[0] - 1) / threads[0]);
                     stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
 			copy_cartesian_unpad_to_pad(cartesian_matrix, spherical_matrix, n_ao_cartesian, n_ao_spherical,
 						    l_i, n_bas_i, i_pad_offset, i_unpad_offset,
 						    l_j, n_bas_j, j_pad_offset, j_unpad_offset,
-						    d_ao_idx, item); });
+						    d_ao_idx); });
 		    #else
                     const dim3 threads(32, 32);
                     const dim3 blocks((n_bas_i + threads.x - 1) / threads.x, (n_bas_j + threads.y - 1) / threads.y);
@@ -1145,17 +1149,17 @@ extern "C" {
                 const sycl::range<2> threads(16, 16);
                 const sycl::range<2> blocks((n_bas + threads[0] - 1) / threads[0], (n_right + threads[1] - 1) / threads[1]);
                 switch (l_i) {
-                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 0> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 1> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 2> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 3> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 4> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 5> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 6> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 7> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 8> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 9> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
-                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart<10> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx, item); }); break;
+                    case  0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 0> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 1> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 2> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 3> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 4> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 5> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 6> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 7> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 8> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case  9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart< 9> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
+                    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_sph2cart<10> (cartesian_matrix, spherical_matrix, n_right, n_bas, i_cartesian_offset, i_spherical_offset, d_ao_idx); }); break;
                     default:
                         printf("l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);
                         fprintf(stderr, "l_i = %d not supported for cart2sph_C_mat_with_padding(), max_L = 10\n", l_i);
@@ -1196,9 +1200,10 @@ extern "C" {
 
 		#ifdef USE_SYCL
                 const sycl::range<2> threads(16, 16);
-                const sycl::range<2> blocks((n_right + threads[1] - 1) / threads[1], (n_bas * n_cartesian_of_l + threads[0] - 1) / threads[0]);
-                stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { left_cart2cart(cartesian_matrix, spherical_matrix,
-														  n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx); });
+                const sycl::range<2> blocks((n_bas * n_cartesian_of_l + threads[0] - 1) / threads[0], (n_right + threads[1] - 1) / threads[1]);
+                stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                  left_cart2cart(cartesian_matrix, spherical_matrix,
+                                 n_right, n_bas * n_cartesian_of_l, i_pad_offset, i_unpad_offset, d_ao_idx); });
 		#else
                 const dim3 threads(16, 16);
                 const dim3 blocks((n_right + threads.x - 1) / threads.x, (n_bas * n_cartesian_of_l + threads.y - 1) / threads.y);

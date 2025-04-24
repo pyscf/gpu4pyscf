@@ -16,20 +16,25 @@ import numpy as np
 from importlib.util import find_spec
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
-    import cupy as gpunp
+    import cupy
     from gpu4pyscf.lib.cupy_helper import (
-        eigh, tag_array, return_gpunp_array, cond, asarray, get_avail_mem)
+        eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
+        block_diag, sandwich_dot)
 else:
-    import dpnp as gpunp
+    import dpnp as cupy
     from gpu4pyscf.lib.dpnp_helper import (
-        eigh, tag_array, return_gpunp_array, cond, asarray, get_avail_mem)
+        eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
+        block_diag, sandwich_dot)
     from dpctl._sycl_queue_manager import get_device_cached_queue
 import h5py
+import h5py
+import itertools
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
+from gpu4pyscf.gto.ecp import get_ecp
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf import diis, jk
@@ -46,7 +51,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
     '''
     with mol.with_range_coulomb(omega):
         vj, vk = jk.get_jk(mol, dm, hermi, vhfopt, with_j, with_k, verbose)
-    if not isinstance(dm, gpunp.ndarray):
+    if not isinstance(dm, cupy.ndarray):
         if with_j: vj = vj.get()
         if with_k: vk = vk.get()
     return vj, vk
@@ -62,19 +67,19 @@ def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
     return vj, vk
 
 def make_rdm1(mo_coeff, mo_occ):
-    mo_coeff = gpunp.asarray(mo_coeff)
-    mo_occ = gpunp.asarray(mo_occ)
+    mo_coeff = cupy.asarray(mo_coeff)
+    mo_occ = cupy.asarray(mo_occ)
     is_occ = mo_occ > 0
     mocc = mo_coeff[:, is_occ]
-    dm = gpunp.dot(mocc*mo_occ[is_occ], mocc.conj().T)
+    dm = cupy.dot(mocc*mo_occ[is_occ], mocc.conj().T)
     occ_coeff = mo_coeff[:, is_occ]
     return tag_array(dm, occ_coeff=occ_coeff, mo_occ=mo_occ, mo_coeff=mo_coeff)
 
 def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mo_energy is None: mo_energy = mf.mo_energy
-    e_idx = gpunp.argsort(mo_energy)
+    e_idx = cupy.argsort(mo_energy)
     nmo = mo_energy.size
-    mo_occ = gpunp.zeros(nmo)
+    mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
     mo_occ[e_idx[:nocc]] = 2
     return mo_occ
@@ -85,41 +90,59 @@ def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=No
         vj, vk = mf.get_jk(mol, dm, hermi)
         return vj - vk * .5
     else:
-        ddm = gpunp.asarray(dm) - gpunp.asarray(dm_last)
+        ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
         vj, vk = mf.get_jk(mol, ddm, hermi)
         return vj - vk * .5 + vhf_last
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
     viridx = ~occidx
-    g = reduce(gpunp.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
+    g = reduce(cupy.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
                            mo_coeff[:,occidx])) * 2
     return g.ravel()
 
 def damping(s, d, f, factor):
-    dm_vir = gpunp.eye(s.shape[0]) - gpunp.dot(s, d)
-    f0 = reduce(gpunp.dot, (dm_vir, f, d, s))
+    dm_vir = cupy.eye(s.shape[0]) - cupy.dot(s, d)
+    f0 = reduce(cupy.dot, (dm_vir, f, d, s))
     f0 = (f0+f0.conj().T) * (factor/(factor+1.))
     return f - f0
 
 def level_shift(s, d, f, factor):
-    dm_vir = s - reduce(gpunp.dot, (s, d, s))
+    dm_vir = s - reduce(cupy.dot, (s, d, s))
     return f + dm_vir * factor
+
+def get_hcore(mol):
+    h = mol.intor_symmetric('int1e_kin')
+    if mol._pseudo:
+        # Although mol._pseudo for GTH PP is only available in Cell, GTH PP
+        # may exist if mol is converted from cell object.
+        from pyscf.gto import pp_int
+        h += pp_int.get_gth_pp(mol)
+        h = asarray(h)
+    else:
+        assert not mol.nucmod
+        #:h+= mol.intor_symmetric('int1e_nuc')
+        from gpu4pyscf.gto.int3c1e import int1e_grids
+        h = asarray(h)
+        h += int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
+    if len(mol._ecpbas) > 0:
+        h += get_ecp(mol)
+    return h
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    h1e = gpunp.asarray(h1e)
-    vhf = gpunp.asarray(vhf)
+    h1e = cupy.asarray(h1e)
+    vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f
 
     if s1e is None: s1e = mf.get_ovlp()
     if dm is None: dm = mf.make_rdm1()
-    s1e = gpunp.asarray(s1e)
-    dm = gpunp.asarray(dm)
+    s1e = cupy.asarray(s1e)
+    dm = cupy.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -143,8 +166,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if dm is None: dm = self.make_rdm1()
     if h1e is None: h1e = self.get_hcore()
     if vhf is None: vhf = self.get_veff(self.mol, dm)
-    e1 = gpunp.einsum('ij,ji->', h1e, dm).real
-    e_coul = gpunp.einsum('ij,ji->', vhf, dm).real * .5
+    e1 = cupy.einsum('ij,ji->', h1e, dm).real
+    e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
     e1 = e1.get()[()]
     e_coul = e_coul.get()[()]
     self.scf_summary['e1'] = e1
@@ -157,31 +180,33 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     conv_tol = mf.conv_tol
     mol = mf.mol
     verbose = mf.verbose
-    log = logger.new_logger(mol, verbose)
-    t0 = log.init_timer()
+    log = logger.new_logger(mf, verbose)
+    t0 = t1 = log.init_timer()
     if(conv_tol_grad is None):
         conv_tol_grad = conv_tol**.5
-        logger.info(mf, 'Set gradient conv threshold to %g', conv_tol_grad)
+        log.info('Set gradient conv threshold to %g', conv_tol_grad)
 
     if dm0 is None:
         dm0 = mf.get_init_guess(mol, mf.init_guess)
+        t1 = log.timer_debug1('generating initial guess', *t1)
 
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
         if dm0.ndim == 2:
-            mo_coeff = gpunp.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
-            mo_occ = gpunp.asarray(dm0.mo_occ[dm0.mo_occ>0])
+            mo_coeff = cupy.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
+            mo_occ = cupy.asarray(dm0.mo_occ[dm0.mo_occ>0])
             dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
         else:
             # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
             dm0 = asarray(dm0, order='C')
 
-    dm, dm0 = asarray(dm0, order='C'), None
-    h1e = gpunp.asarray(mf.get_hcore(mol))
-    s1e = gpunp.asarray(mf.get_ovlp(mol))
+    h1e = cupy.asarray(mf.get_hcore(mol))
+    s1e = cupy.asarray(mf.get_ovlp(mol))
+    t1 = log.timer_debug1('hcore', *t1)
 
+    dm, dm0 = asarray(dm0, order='C'), None
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
-    logger.info(mf, 'init E= %.15g', e_tot)
+    log.info('init E= %.15g', e_tot)
     t1 = log.timer_debug1('total prep', *t0)
     scf_conv = False
 
@@ -227,13 +252,17 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('veff', *t1)
 
         fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        norm_gorb = gpunp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         e_tot = mf.energy_tot(dm, h1e, vhf)
 
-        norm_ddm = gpunp.linalg.norm(dm-dm_last)
+        fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
+        e_tot = mf.energy_tot(dm, h1e, vhf)
+
+        norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
-        logger.info(mf, 'cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
-                    cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
+                 cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
 
         if dump_chk:
             mf.dump_chk(locals())
@@ -243,7 +272,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             scf_conv = True
             break
     else:
-        logger.warn(mf, "SCF failed to converge")
+        log.warn("SCF failed to converge")
 
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
@@ -265,7 +294,7 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
             mf.scf_summary['dispersion'] = e_disp
             e_tot += e_disp
     mf.scf_summary['nuc'] = nuc.real
-    if isinstance(e_tot, gpunp.ndarray):
+    if isinstance(e_tot, cupy.ndarray):
         e_tot = e_tot.get()
     return e_tot
 
@@ -307,16 +336,163 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     coreidx = mo_occ == 2
     viridx = mo_occ == 0
     openidx = ~(coreidx | viridx)
-    mo = gpunp.empty_like(mo_coeff)
-    mo_e = gpunp.empty(mo_occ.size)
+    mo = cupy.empty_like(mo_coeff)
+    mo_e = cupy.empty(mo_occ.size)
     for idx in (coreidx, openidx, viridx):
-        if gpunp.any(idx) > 0:
+        if cupy.any(idx) > 0:
             orb = mo_coeff[:,idx]
             f1 = orb.conj().T.dot(fock).dot(orb)
-            e, c = gpunp.linalg.eigh(f1)
+            e, c = cupy.linalg.eigh(f1)
             mo[:,idx] = orb.dot(c)
             mo_e[idx] = e
     return mo_e, mo
+
+def init_guess_by_minao(mol):
+    '''Generate initial guess density matrix based on ANO basis, then project
+    the density matrix to the basis set defined by ``mol``
+
+    Note: this function is inconsistent with the latest PySCF (v2.9) and eariler versions.
+    This function returns block diagonal density matrix associated with each atom.
+    While the function in PySCF projects the density matrix into the full space of atomic basis
+
+    Returns:
+        Density matrix, 2D ndarray
+    '''
+    from pyscf.scf import atom_hf
+    from pyscf.scf import addons
+
+    def minao_basis(symb, nelec_ecp):
+        occ = []
+        basis_ano = []
+        if gto.is_ghost_atom(symb):
+            return occ, basis_ano
+
+        stdsymb = gto.mole._std_symbol(symb)
+        basis_add = gto.basis.load('ano', stdsymb)
+# coreshl defines the core shells to be removed in the initial guess
+        coreshl = gto.ecp.core_configuration(nelec_ecp, atom_symbol=stdsymb)
+        # coreshl = (0,0,0,0)  # it keeps all core electrons in the initial guess
+        for l in range(4):
+            ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+            if ndocc >= coreshl[l]:
+                degen = l * 2 + 1
+                occ_l = [2, ]*(ndocc-coreshl[l]) + [frac, ]
+                occ.append(np.repeat(occ_l, degen))
+                basis_ano.append([l] + [b[:1] + b[1+coreshl[l]:ndocc+2]
+                                        for b in basis_add[l][1:]])
+            else:
+                logger.debug(mol, '*** ECP incorporates partially occupied '
+                             'shell of l = %d for atom %s ***', l, symb)
+        occ = np.hstack(occ)
+
+        if nelec_ecp > 0:
+            if symb in mol._basis:
+                input_basis = mol._basis[symb]
+            elif stdsymb in mol._basis:
+                input_basis = mol._basis[stdsymb]
+            else:
+                raise KeyError(symb)
+
+            basis4ecp = [[] for i in range(4)]
+            for bas in input_basis:
+                l = bas[0]
+                if l < 4:
+                    basis4ecp[l].append(bas)
+
+            occ4ecp = []
+            for l in range(4):
+                nbas_l = sum((len(bas[1]) - 1) for bas in basis4ecp[l])
+                ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+                ndocc -= coreshl[l]
+                assert ndocc <= nbas_l
+
+                if nbas_l > 0:
+                    occ_l = np.zeros(nbas_l)
+                    occ_l[:ndocc] = 2
+                    if frac > 0:
+                        occ_l[ndocc] = frac
+                    occ4ecp.append(np.repeat(occ_l, l * 2 + 1))
+
+            occ4ecp = np.hstack(occ4ecp)
+            basis4ecp = list(itertools.chain.from_iterable(basis4ecp))
+
+# Compared to ANO valence basis, to check whether the ECP basis set has
+# reasonable AO-character contraction.  The ANO valence AO should have
+# significant overlap to ECP basis if the ECP basis has AO-character.
+            atm1 = gto.Mole()
+            atm2 = gto.Mole()
+            atom = [[symb, (0.,0.,0.)]]
+            atm1._atm, atm1._bas, atm1._env = atm1.make_env(atom, {symb:basis4ecp}, [])
+            atm2._atm, atm2._bas, atm2._env = atm2.make_env(atom, {symb:basis_ano}, [])
+            atm1._built = True
+            atm2._built = True
+            s12 = gto.intor_cross('int1e_ovlp', atm1, atm2)
+            if abs(np.linalg.det(s12[occ4ecp>0][:,occ>0])) > .1:
+                occ, basis_ano = occ4ecp, basis4ecp
+            else:
+                logger.debug(mol, 'Density of valence part of ANO basis '
+                             'will be used as initial guess for %s', symb)
+        return occ, basis_ano
+
+    # Issue 548
+    if any(gto.charge(mol.atom_symbol(ia)) > 96 for ia in range(mol.natm)):
+        from pyscf.scf.hf import init_guess_by_atom
+        logger.info(mol, 'MINAO initial guess is not available for super-heavy '
+                    'elements. "atom" initial guess is used.')
+        return init_guess_by_atom(mol)
+
+    nelec_ecp_dic = {mol.atom_symbol(ia): mol.atom_nelec_core(ia)
+                          for ia in range(mol.natm)}
+
+    basis = {}
+    occdic = {}
+    for symb, nelec_ecp in nelec_ecp_dic.items():
+        occ_add, basis_add = minao_basis(symb, nelec_ecp)
+        occdic[symb] = occ_add
+        basis[symb] = basis_add
+
+    mol1 = gto.Mole()
+    mol1._built = True
+    mol2 = mol.copy()
+
+    aoslice = mol.aoslice_by_atom()
+    atm_conf = {}
+    dm = []
+    mo_coeff = []
+    mo_occ = []
+    for ia in range(mol.natm):
+        symb = mol.atom_symbol(ia)
+        if gto.is_ghost_atom(symb):
+            i0, i1 = aoslice[ia,2:]
+            n = i1 - i0
+            dm.append(cupy.zeros((n, n)))
+            mo_coeff.append(cupy.zeros((n, 0)))
+            mo_occ.append(cupy.zeros(0))
+            continue
+
+        if symb not in atm_conf:
+            nelec_ecp = mol.atom_nelec_core(ia)
+            occ, basis = minao_basis(symb, nelec_ecp)
+            mol1._atm, mol1._bas, mol1._env = mol1.make_env(
+                [mol._atom[ia]], {symb: basis}, [])
+            i0, i1 = aoslice[ia,:2]
+            mol2._bas = mol._bas[i0:i1]
+            s22 = mol2.intor_symmetric('int1e_ovlp')
+            s21 = gto.mole.intor_cross('int1e_ovlp', mol2, mol1)
+            c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
+            c = cupy.asarray(c[:,occ>0])
+            occ = cupy.asarray(occ[occ>0])
+            atm_conf[symb] = occ, c
+
+        occ, c = atm_conf[symb]
+        dm.append((c*occ).dot(c.conj().T))
+        mo_coeff.append(c)
+        mo_occ.append(occ)
+
+    dm = block_diag(dm)
+    mo_coeff = block_diag(mo_coeff)
+    mo_occ = cupy.hstack(mo_occ)
+    return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 def as_scanner(mf):
     if isinstance(mf, pyscf_lib.SinglePointScanner):
@@ -346,7 +522,7 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
             dm0 = None
         else:
             dm0 = None
-            if gpunp.array_equal(self._last_mol_fp, mol.ao_loc):
+            if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
                 dm0 = self.make_rdm1()
             elif self.chkfile and h5py.is_hdf5(self.chkfile):
                 dm0 = self.from_chk(self.chkfile)
@@ -409,25 +585,23 @@ class SCF(pyscf_lib.StreamObject):
 
     def check_sanity(self):
         s1e = self.get_ovlp()
-        if isinstance(s1e, gpunp.ndarray) and s1e.ndim == 2:
+        if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
             c = cond(s1e)
         else:
-            c = gpunp.asarray([cond(xi) for xi in s1e])
+            c = cupy.asarray([cond(xi) for xi in s1e])
         logger.debug(self, 'cond(S) = %s', c)
-        if gpunp.max(c)*1e-17 > self.conv_tol:
+        if cupy.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
-                        'SCF may be inaccurate and hard to converge.', gpunp.max(c))
+                        'SCF may be inaccurate and hard to converge.', cupy.max(c))
         return super().check_sanity()
 
     build                    = hf_cpu.SCF.build
     opt                      = NotImplemented
     dump_flags               = hf_cpu.SCF.dump_flags
-    get_hcore                = return_gpunp_array(hf_cpu.SCF.get_hcore)
-    get_ovlp                 = return_gpunp_array(hf_cpu.SCF.get_ovlp)
+    get_ovlp                 = return_cupy_array(hf_cpu.SCF.get_ovlp)
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
-    init_guess_by_minao      = hf_cpu.SCF.init_guess_by_minao
     init_guess_by_atom       = hf_cpu.SCF.init_guess_by_atom
     init_guess_by_huckel     = hf_cpu.SCF.init_guess_by_huckel
     init_guess_by_mod_huckel = hf_cpu.SCF.init_guess_by_mod_huckel
@@ -473,6 +647,14 @@ class SCF(pyscf_lib.StreamObject):
     mulliken_pop             = NotImplemented
     mulliken_meta            = NotImplemented
 
+    def init_guess_by_minao(self, mol=None):
+        if mol is None: mol = self.mol
+        return init_guess_by_minao(mol)
+
+    def get_hcore(self, mol=None):
+        if mol is None: mol = self.mol
+        return get_hcore(mol)
+
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_occ is None: mo_occ = self.mo_occ
         if mo_coeff is None: mo_coeff = self.mo_coeff
@@ -509,8 +691,8 @@ class SCF(pyscf_lib.StreamObject):
         if self.chkfile:
             chkfile.dump_scf(
                 self.mol, self.chkfile, envs['e_tot'],
-                gpunp.asnumpy(envs['mo_energy']), gpunp.asnumpy(envs['mo_coeff']),
-                gpunp.asnumpy(envs['mo_occ']), overwrite_mol=False)
+                cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
+                cupy.asnumpy(envs['mo_occ']), overwrite_mol=False)
 
 class KohnShamDFT:
     '''

@@ -15,6 +15,14 @@
  */
 
 #include <stdint.h>
+
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#include "gvhf-rys/vhf.cuh" // following header is needed for LMAX1
+#else //USE_SYCL
+#include <cuda_runtime.h>
+#endif // USE_SYCL
+
 #define BATCHES_PER_BLOCK       16
 #define L_AUX_MAX       6
 
@@ -67,9 +75,16 @@ typedef struct {
     int *nst_lookup;
 } BDiv3c2eBounds;
 
+#ifdef USE_SYCL
+extern SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx; // corresponding to LMAX=4
+extern SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
+extern SYCL_EXTERNAL sycl_device_global<int[252]> s_g_cart_idx; // corresponding to LMAX=6
+#else //USE_SYCL
 #ifdef __CUDACC__
 extern __constant__ int c_g_pair_idx[];
 extern __constant__ int c_g_pair_offsets[];
 extern __constant__ int c_g_cart_idx[];
-#endif
+#endif //__CUDACC__
+#endif // USE_SYCL
+
 #endif

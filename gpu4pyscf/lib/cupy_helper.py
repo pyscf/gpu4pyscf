@@ -23,6 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
+from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
@@ -107,30 +108,30 @@ def reduce_to_device(array_list, inplace=False):
     assert len(array_list) == num_devices
     if num_devices == 1:
         return array_list[0]
-    
+
     out_shape = array_list[0].shape
     for s in _streams:
         s.synchronize()
-        
+
     if inplace:
         result = array_list[0]
     else:
         result = array_list[0].copy()
-    
+
     # Transfer data chunk by chunk, reduce memory footprint,
     result = result.reshape(-1)
     for device_id, matrix in enumerate(array_list):
         if device_id == 0:
             continue
-        
+
         assert matrix.device.id == device_id
         matrix = matrix.reshape(-1)
         blksize = 1024*1024*1024 // matrix.itemsize # 1GB
         for p0, p1 in lib.prange(0,len(matrix), blksize):
             result[p0:p1] += copy_array(matrix[p0:p1])
-            #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
+            #result[p0:p1] += cupy.asarray(matrix[p0:p1])
     return result.reshape(out_shape)
-    
+
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -167,14 +168,38 @@ def tag_array(a, **kwargs):
     return t
 
 def asarray(a, **kwargs):
-    '''Similar to cupy.asarray, when the object is an instance of
-    CPArrayWithTag, this function will remove the attributes within
-    the tagged array'''
-    if isinstance(a, CPArrayWithTag):
+    '''
+    Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
+    If the input object is an instance of `CPArrayWithTag`, this function will remove any
+    associated attributes from the tagged array during the transfer.
+
+    Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
+    host memory deallocation before transfer completion, this function
+    eliminates that buffer for efficiency.
+    '''
+    if isinstance(a, np.ndarray):
+        # CuPy always allocates pinned memory as a temporary buffer during array transfer.
+        # This leads to additional memory usage, and the buffer is not managed by CuPy's
+        # memory pool or Python's GC.
+        # See the `cdef _ndarray_base _array_default` function in
+        # cupy/_core/core.pyx, where memory buffer is allocated via
+        # mem = _alloc_async_transfer_buffer(nbytes)
+
+        allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
+        # a must be C-contiguous or F-contiguous
+        if not a.flags.c_contiguous and not a.flags.f_contiguous:
+            allow_fast_transfer = False
+        if allow_fast_transfer:
+            out = cupy.empty_like(a)
+            out.set(a)
+            if kwargs.get('blocking', False):
+                cupy.cuda.get_current_stream().synchronize()
+            return out
+
+    elif isinstance(a, CPArrayWithTag):
         a = a.view(cupy.ndarray)
-    if kwargs:
-        a = cupy.asarray(a, **kwargs)
-    return a
+
+    return cupy.asarray(a, **kwargs)
 
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
@@ -222,7 +247,7 @@ def pack_tril(a, stream=None):
         a_tril = a_tril[0]
     return a_tril
 
-def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
+def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
     assert cderi_tril.flags.c_contiguous
     assert hermi in (1, 2)
     ndim = cderi_tril.ndim
@@ -230,37 +255,39 @@ def unpack_tril(cderi_tril, cderi=None, stream=None, hermi=1):
     if ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
-    if cderi is None:
+    if out is None:
         nao = int((2*cderi_tril.shape[1])**.5)
-        cderi = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
+        out = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
     else:
-        nao = cderi.shape[1]
+        nao = out.shape[1]
+        assert out.flags.c_contiguous
+        out = out.reshape(count, nao, nao)
 
     if cderi_tril.dtype != np.float64:
         idx = cupy.arange(nao)
         mask = idx[:,None] >= idx
-        cderiT = cderi.transpose(0,2,1)
+        cderiT = out.transpose(0,2,1)
         if hermi == 1:
             cderiT[:,mask] = cderi_tril.conj()
         else:
             raise NotImplementedError
-        cderi [:,mask] = cderi_tril
-        return cderi
+        out [:,mask] = cderi_tril
+        return out
 
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.unpack_tril(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(cderi_tril.data.ptr, ctypes.c_void_p),
-        ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao),
         ctypes.c_int(count),
         ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in unpack_tril kernel')
     if ndim == 1:
-        cderi = cderi[0]
-    return cderi
+        out = out[0]
+    return out
 
 def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
     if stream is None:
@@ -294,6 +321,7 @@ def add_sparse(a, b, indices):
     assert a.flags.c_contiguous
     assert b.flags.c_contiguous
     if len(indices) == 0: return a
+    indices = cupy.asarray(indices, dtype=np.int32)
     n = a.shape[-1]
     m = b.shape[-1]
     if a.ndim > 2:
@@ -339,7 +367,7 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-@functools.lru_cache(1)
+@lru_cache(1)
 def _initialize_c2s_data():
     from gpu4pyscf.gto import mole
     c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]
@@ -350,7 +378,7 @@ def _initialize_c2s_data():
 def block_c2s_diag(angular, counts):
     '''
     Diagonal blocked cartesian to spherical transformation
-    Args: 
+    Args:
         angular (list): angular momentum type, e.g. [0,1,2,3]
         counts (list): count of each angular momentum
     '''
@@ -367,7 +395,7 @@ def block_c2s_diag(angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
-    
+
     ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')

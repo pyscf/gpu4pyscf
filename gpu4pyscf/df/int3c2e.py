@@ -149,6 +149,10 @@ class VHFOpt(_vhf.VHFOpt):
 
         _tot_mol = _sorted_mol + fake_mol + _sorted_auxmol
         _tot_mol.cart = True
+
+        # shift atom indices back to actual atom indices
+        nbas = _sorted_mol.nbas + 1
+        _tot_mol._bas[nbas:, gto.ATOM_OF] -= (mol.natm+1) 
         self._tot_mol = _tot_mol
 
         # Initialize vhfopt after reordering mol._bas
@@ -320,7 +324,7 @@ class VHFOpt(_vhf.VHFOpt):
                 indices = aux_idx
             else:
                 indices = np.arange(n)
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
+            idx_shape = shape_ones[:dim] + (n,) + shape_ones[dim+1:]
             fancy_index.append(indices.reshape(idx_shape))
         mat = gpunp.empty_like(sorted_mat)
         mat[tuple(fancy_index)] = sorted_mat
@@ -441,8 +445,8 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
 
     fn = getattr(libgvhf, 'GINTbuild_int3c2e_' + ip_type + '_jk')
     nao = intopt._sorted_mol.nao
+    natm = intopt._sorted_mol.natm
     n_dm = 1
-
     cp_kl_id = cp_aux_id + len(intopt.log_qs)
     log_q_kl = intopt.aux_log_qs[cp_aux_id]
 
@@ -450,25 +454,25 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
     ao_offsets = np.array([0,0,nao+1+k0,nao], dtype=np.int32)
     nk = k1 - k0
 
-    vj_ptr = vk_ptr = lib.c_null_ptr()
+    ej_ptr = ek_ptr = lib.c_null_ptr()
     rhoj_ptr = rhok_ptr = lib.c_null_ptr()
-    vj = vk = None
+    ej = ek = None
     if rhoj is not None:
         assert(rhoj.flags['C_CONTIGUOUS'])
         rhoj_ptr = ctypes.cast(rhoj.data.ptr, ctypes.c_void_p)
         if ip_type == 'ip1':
-            vj = gpunp.zeros([3, nao], order='C')
+            ej = cupy.zeros([natm,3], order='C')
         elif ip_type == 'ip2':
-            vj = gpunp.zeros([3, nk], order='C')
-        vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
+            ej = cupy.zeros([natm,3], order='C')
+        ej_ptr = ctypes.cast(ej.data.ptr, ctypes.c_void_p)
     if rhok is not None:
         assert(rhok.flags['C_CONTIGUOUS'])
         rhok_ptr = ctypes.cast(rhok.data.ptr, ctypes.c_void_p)
         if ip_type == 'ip1':
-            vk = gpunp.zeros([3, nao], order='C')
+            ek = cupy.zeros([natm,3], order='C')
         elif ip_type == 'ip2':
-            vk = gpunp.zeros([3, nk], order='C')
-        vk_ptr = ctypes.cast(vk.data.ptr, ctypes.c_void_p)
+            ek = cupy.zeros([natm,3], order='C')
+        ek_ptr = ctypes.cast(ek.data.ptr, ctypes.c_void_p)
     num_cp_ij = [len(log_qs) for log_qs in intopt.log_qs]
     bins_locs_ij = np.append(0, np.cumsum(num_cp_ij)).astype(np.int32)
     ntasks_kl = len(log_q_kl)
@@ -476,8 +480,8 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
     err = fn(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         intopt.bpcache,
-        vj_ptr,
-        vk_ptr,
+        ej_ptr,
+        ek_ptr,
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         rhoj_ptr,
         rhok_ptr,
@@ -492,8 +496,7 @@ def get_int3c2e_ip_jk(intopt, cp_aux_id, ip_type, rhoj, rhok, dm, omega=None, st
         ctypes.c_double(omega))
     if err != 0:
         raise RuntimeError(f'GINT_getjk_int2e_ip failed, err={err}')
-
-    return vj, vk
+    return ej, ek
 
 def loop_int3c2e_general(intopt, task_list=None, ip_type='', omega=None, stream=None):
     '''
@@ -1497,23 +1500,14 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
 
 def get_dh1e(mol, dm0):
     '''
-    contract 'int1e_iprinv', with density matrix
+    Contract 'int1e_iprinv', with density matrix
     xijk,ij->kx
     '''
-    natm = mol.natm
     coords = mol.atom_coords()
-    charges = gpunp.asarray(mol.atom_charges(), dtype=np.float64)
-    fakemol = gto.fakemol_for_charges(coords)
-    fakemol.output = mol.output
-    fakemol.verbose = mol.verbose
-    fakemol.stdout = mol.stdout
-    intopt = VHFOpt(mol, fakemol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    dm0_sorted = intopt.sort_orbitals(dm0, axis=[0,1])
-    dh1e = gpunp.zeros([natm,3])
-    for i0,i1,j0,j1,k0,k1,int3c_blk in loop_int3c2e_general(intopt, ip_type='ip1'):
-        dh1e[k0:k1,:3] += contract('xkji,ij->kx', int3c_blk, dm0_sorted[i0:i1,j0:j1])
-    return 2.0 * contract('kx,k->kx', dh1e, -charges)
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
+    from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip2
+    de0 = int1e_grids_ip2(mol, coords, charges=charges, dm=dm0)
+    return de0.T
 
 def get_d2h1e(mol, dm0):
     natm = mol.natm

@@ -183,19 +183,12 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
 #ifdef UNROLL_INT3C2E
 #endif
         default: {
+            const int li_ceil = li + 1;
+            const int gsize = 3*nrys_roots*(li_ceil+1)*(lj+1)*(lk+1);
+
 	    #ifdef USE_SYCL
             sycl::range<2> threads(1, THREADSX*THREADSY);
             sycl::range<2> blocks(ntasks_kl, ntasks_ij);
-            const int li_ceil = li + 1;
-            const int gsize = 3*nrys_roots*(li_ceil+1)*(lj+1)*(lk+1);
-            // cudaError_t err = cudaFuncSetAttribute(
-            //     GINTfill_int3c2e_ip1_general_kernel,
-            //     cudaFuncAttributeMaxDynamicSharedMemorySize,
-            //     (gsize+16)*sizeof(double));
-            // if (err != cudaSuccess) {
-            //     fprintf(stderr, "cudaFuncSetAttribute error: %s\n", cudaGetErrorString(err));
-            //     return 1;
-            // }
 	    stream.submit([&](sycl::handler &cgh) {
 		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize), cgh);
 		cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
@@ -205,8 +198,6 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
 	    #else
             dim3 threads(THREADSX*THREADSY);
             dim3 blocks(ntasks_ij, ntasks_kl);
-            const int li_ceil = li + 1;
-            const int gsize = 3*nrys_roots*(li_ceil+1)*(lj+1)*(lk+1);
             cudaError_t err = cudaFuncSetAttribute(
                 GINTfill_int3c2e_ip1_general_kernel,
                 cudaFuncAttributeMaxDynamicSharedMemorySize,

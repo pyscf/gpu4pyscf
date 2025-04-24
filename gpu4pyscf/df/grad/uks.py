@@ -63,82 +63,76 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, vxc_tmp = uks_grad.get_vxc_full_response(ni, mol, grids, mf.xc, dm,
+        exc, exc1 = uks_grad.get_exc_full_response(ni, mol, grids, mf.xc, dm,
                                          max_memory=max_memory,
                                          verbose=ks_grad.verbose)
         if mf.do_nlc():
             raise NotImplementedError
     else:
-        exc, vxc_tmp = uks_grad.get_vxc(ni, mol, grids, mf.xc, dm,
+        exc, exc1 = uks_grad.get_exc(ni, mol, grids, mf.xc, dm,
                            max_memory=max_memory, verbose=ks_grad.verbose)
         if mf.do_nlc():
             if ni.libxc.is_nlc(mf.xc):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            enlc, vnlc = uks_grad.get_nlc_vxc(
+            enlc, exc1_nlc = uks_grad.get_nlc_exc(
                 ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ,
                 max_memory=max_memory, verbose=ks_grad.verbose)
-            vxc_tmp[0] += vnlc
-            vxc_tmp[1] += vnlc
+            exc1 += exc1_nlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
-    mo_coeff_alpha = mf.mo_coeff[0]
-    mo_coeff_beta = mf.mo_coeff[1]
-    occ_coeff0 = gpunp.asarray(mo_coeff_alpha[:, mf.mo_occ[0]>0.5], order='C')
-    occ_coeff1 = gpunp.asarray(mo_coeff_beta[:, mf.mo_occ[1]>0.5], order='C')
-    tmp = contract('nij,jk->nik', vxc_tmp[0], occ_coeff0)
-    vxc = contract('nik,ik->ni', tmp, occ_coeff0)
-    tmp = contract('nij,jk->nik', vxc_tmp[1], occ_coeff1)
-    vxc+= contract('nik,ik->ni', tmp, occ_coeff1)
-
     aoslices = mol.aoslice_by_atom()
-    vxc = [vxc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    vxc = gpunp.asarray(vxc)
+    exc1 = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+    exc1 = cupy.asarray(exc1)
 
     if not ni.libxc.is_hybrid_xc(mf.xc):
         mo_a, mo_b = ks_grad.base.mo_coeff
         mo_occa, mo_occb = ks_grad.base.mo_occ
-        vj0, vjaux0 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)
-        vj1, vjaux1 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb)
-        vj0_m1, vjaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa, dm2=dm[1])
-        vj1_m0, vjaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb, dm2=dm[0])
+        ej0, ejaux0 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)
+        ej1, ejaux1 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb)
+        ej0_m1, ejaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa, dm2=dm[1])
+        ej1_m0, ejaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb, dm2=dm[0])
         if ks_grad.auxbasis_response:
-            e1_aux = vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0
-        vxc += vj0 + vj1 + vj0_m1 + vj1_m0
+            e1_aux = ejaux0 + ejaux1 + ejaux0_m1 + ejaux1_m0
+        exc1 += ej0 + ej1 + ej0_m1 + ej1_m0
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
         mo_a, mo_b = ks_grad.base.mo_coeff
         mo_occa, mo_occb = ks_grad.base.mo_occ
-        vj0, vk0, vjaux0, vkaux0 = ks_grad.get_jk(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)
-        vj1, vk1, vjaux1, vkaux1 = ks_grad.get_jk(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb)
-        vj0_m1, vjaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa, dm2=dm[1])
-        vj1_m0, vjaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb, dm2=dm[0])
-        vj = vj0 + vj1 + vj0_m1 + vj1_m0
-        vk = (vk0 + vk1) * hyb
+        ej0, ek0, ejaux0, ekaux0 = ks_grad.get_jk(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa)
+        ej1, ek1, ejaux1, ekaux1 = ks_grad.get_jk(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb)
+        ej0_m1, ejaux0_m1 = ks_grad.get_j(mol, dm[0], mo_coeff=mo_a, mo_occ=mo_occa, dm2=dm[1])
+        ej1_m0, ejaux1_m0 = ks_grad.get_j(mol, dm[1], mo_coeff=mo_b, mo_occ=mo_occb, dm2=dm[0])
+        ej = ej0 + ej1 + ej0_m1 + ej1_m0
+        ek = (ek0 + ek1) * hyb
         if ks_grad.auxbasis_response:
-            vj_aux = vjaux0 + vjaux1 + vjaux0_m1 + vjaux1_m0
-            vk_aux = (vkaux0+vkaux1) * hyb
+            ej_aux = ejaux0 + ejaux1 + ejaux0_m1 + ejaux1_m0
+            ek_aux = (ekaux0+ekaux1) * hyb
 
         if omega != 0:
-            vk_lr0, vkaux_lr0 = ks_grad.get_k(mol, dm[0], mo_coeff=ks_grad.base.mo_coeff[0], mo_occ=ks_grad.base.mo_occ[0], omega=omega)
-            vk_lr1, vkaux_lr1 = ks_grad.get_k(mol, dm[1], mo_coeff=ks_grad.base.mo_coeff[1], mo_occ=ks_grad.base.mo_occ[1], omega=omega)
-            vk += (vk_lr0 + vk_lr1) * (alpha-hyb)
+            mocc0 = ks_grad.base.mo_occ[0]
+            mocc1 = ks_grad.base.mo_occ[1]
+            mo_coeff0 = ks_grad.base.mo_coeff[0]
+            mo_coeff1 = ks_grad.base.mo_coeff[1]
+            ek_lr0, ekaux_lr0 = ks_grad.get_k(mol, dm[0], mo_coeff=mo_coeff0, mo_occ=mocc0, omega=omega)
+            ek_lr1, ekaux_lr1 = ks_grad.get_k(mol, dm[1], mo_coeff=mo_coeff1, mo_occ=mocc1, omega=omega)
+            ek += (ek_lr0 + ek_lr1) * (alpha-hyb)
             if ks_grad.auxbasis_response:
-                vk_aux += (vkaux_lr0 + vkaux_lr1) * (alpha-hyb)
+                ek_aux += (ekaux_lr0 + ekaux_lr1) * (alpha-hyb)
 
-        vxc += vj - vk
+        exc1 += ej - ek
         if ks_grad.auxbasis_response:
-            e1_aux = vj_aux - vk_aux
+            e1_aux = ej_aux - ek_aux
 
     if ks_grad.auxbasis_response:
         logger.debug1(ks_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
     else:
         e1_aux = None
 
-    vxc = tag_array(vxc, aux=e1_aux, exc1_grid=exc)
+    exc1 = tag_array(exc1, aux=e1_aux, exc1_grid=exc)
 
-    return vxc
+    return exc1
 
 
 class Gradients(uks_grad.Gradients):

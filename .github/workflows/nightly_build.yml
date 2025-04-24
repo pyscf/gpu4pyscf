@@ -16,70 +16,74 @@ jobs:
     runs-on: [self-hosted, Linux, X64, v100]
     steps:
     - uses: actions/checkout@v3
-    - name: Install dependencies
+
+    - name: Pull CUDA Devel Image
       run: |
-        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-        python3 -m pip install --upgrade pip
-        pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
-        pip3 install pytest-benchmark
-        pip3 install pyscf --upgrade
-        pip3 install numpy --upgrade
-        pip3 install scipy --upgrade
-        pip3 install cupy-cuda12x --upgrade
-        pip3 install gpu4pyscf-libxc-cuda12x --upgrade
-        git config --global core.compression 9
+        docker pull wxj6000/gpu4pyscf:latest
+
     - name: Run RKS tests
       run: |
-        export CUDA_HOME=/usr/local/cuda
-        export PATH=${CUDA_HOME}/bin:${PATH}
-        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
-        sh build.sh
-        pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
-  
+        docker run --gpus all \
+          -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
+          -e HTTP_PROXY=$HTTP_PROXY \
+          -e HTTPS_PROXY=$HTTPS_PROXY \
+          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
+          /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+
   test_uks:
     runs-on: [self-hosted, Linux, X64, v100]
     steps:
     - uses: actions/checkout@v3
-    - name: Install dependencies
+
+    - name: Pull CUDA Devel Image
       run: |
-        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-        python3 -m pip install --upgrade pip
-        pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
-        pip3 install pytest-benchmark
-        pip3 install pyscf --upgrade
-        pip3 install numpy --upgrade
-        pip3 install scipy --upgrade
-        pip3 install cupy-cuda12x --upgrade
-        pip3 install gpu4pyscf-libxc-cuda12x --upgrade
-        git config --global core.compression 9
+        docker pull wxj6000/gpu4pyscf:latest
+
     - name: Run UKS tests
       run: |
-        export CUDA_HOME=/usr/local/cuda
-        export PATH=${CUDA_HOME}/bin:${PATH}
-        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
-        sh build.sh
-        pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
-  
+        docker run --gpus all \
+          -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
+          -e HTTP_PROXY=$HTTP_PROXY \
+          -e HTTPS_PROXY=$HTTPS_PROXY \
+          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
+          /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+
   test_tddft:
     runs-on: [self-hosted, Linux, X64, v100]
     steps:
     - uses: actions/checkout@v3
-    - name: Install dependencies
+
+    - name: Pull CUDA Devel Image
       run: |
-        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-        python3 -m pip install --upgrade pip
-        pip3 install flake8 pytest coverage pytest-cov pyscf-dispersion
-        pip3 install pytest-benchmark
-        pip3 install pyscf --upgrade
-        pip3 install numpy --upgrade
-        pip3 install scipy --upgrade
-        pip3 install cupy-cuda12x --upgrade
-        pip3 install gpu4pyscf-libxc-cuda12x --upgrade
-        git config --global core.compression 9
+        docker pull wxj6000/gpu4pyscf:latest
+
     - name: Run TDDFT tests
       run: |
-        export CUDA_HOME=/usr/local/cuda
-        export PATH=${CUDA_HOME}/bin:${PATH}
-        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
-        sh build.sh
-        pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m "not slow and not high_memory" --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/
+        docker run --gpus all \
+          -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
+          -e HTTP_PROXY=$HTTP_PROXY \
+          -e HTTPS_PROXY=$HTTPS_PROXY \
+          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
+          /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+
+  test_ecp:
+    runs-on: [self-hosted, Linux, X64, v100]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Pull CUDA Devel Image
+      run: |
+        docker pull wxj6000/gpu4pyscf:latest
+    
+    - name: Run ECP tests
+      run: |
+        docker run --gpus all \
+          -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
+          -e HTTP_PROXY=$HTTP_PROXY \
+          -e HTTPS_PROXY=$HTTPS_PROXY \
+          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
+          /bin/bash -c "cd /workspace && source build.sh && pytest gpu4pyscf/tests/test_benchmark_ecp.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_ecp_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+

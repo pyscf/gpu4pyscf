@@ -147,3 +147,5 @@ static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double*
         }
     }
 }
+
+

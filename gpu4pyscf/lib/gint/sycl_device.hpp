@@ -13,6 +13,9 @@
 
 #include <sycl/sycl.hpp>
 
+#define CUDA_VERSION 12040
+#define __maxnreg__(x)
+
 #define __forceinline__ __attribute__((always_inline))
 #define __global__ __attribute__((always_inline))
 #define __device__ __attribute__((always_inline))

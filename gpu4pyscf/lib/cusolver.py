@@ -21,13 +21,8 @@ from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 from cupy.cuda import device
 
-<<<<<<< HEAD
-_handle = device.get_cusolver_handle()
-libcusolver = ctypes.CDLL('libcusolver.so')
-=======
 libcusolver = find_library('cusolver')
 libcusolver = ctypes.CDLL(libcusolver)
->>>>>>> origin/master
 
 CUSOLVER_EIG_TYPE_1 = 1
 CUSOLVER_EIG_TYPE_2 = 2
@@ -110,12 +105,6 @@ def eigh(h, s):
     assert h.dtype == s.dtype
     assert h.dtype in (np.float64, np.complex128)
     n = h.shape[0]
-    w = cupy.zeros(n)
-<<<<<<< HEAD
-    A = h.copy()
-    B = s.copy()
-    
-=======
     if h.dtype == np.complex128 and h.flags.c_contiguous:
         # zhegvd requires the matrices in F-order. For hermitian matrices,
         # .T.copy() is equivalent to .conj()
@@ -125,8 +114,8 @@ def eigh(h, s):
         A = h.copy()
         B = s.copy()
     _handle = device.get_cusolver_handle()
+    w = cupy.zeros(n)
 
->>>>>>> origin/master
     # TODO: reuse workspace
     if (h.dtype, n) in _buffersize:
         lwork = _buffersize[h.dtype, n]
@@ -150,10 +139,7 @@ def eigh(h, s):
             ctypes.byref(lwork)
         )
         lwork = lwork.value
-<<<<<<< HEAD
-    
-    work = cupy.empty(lwork)
-=======
+        _buffersize[h.dtype, n] = lwork
 
         if status != 0:
             raise RuntimeError("failed in buffer size")
@@ -163,7 +149,6 @@ def eigh(h, s):
     else:
         fn = libcusolver.cusolverDnZhegvd
     work = cupy.empty(lwork, dtype=h.dtype)
->>>>>>> origin/master
     devInfo = cupy.empty(1, dtype=np.int32)
     status = fn(
         _handle,
@@ -178,7 +163,7 @@ def eigh(h, s):
         w.data.ptr,
         work.data.ptr,
         lwork,
-        devInfo.data.ptr
+        devInfo.data.ptr,
     )
 
     if status != 0:

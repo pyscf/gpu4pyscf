@@ -213,20 +213,20 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 
 __device__
 static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
-  #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
-  const int tx = item.get_local_id(1);
-  const int ty = item.get_local_id(0);
-  using tile_t = double[THREADSX][THREADSY];
-  tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
-  auto c_bpcache = s_bpcache.get();
-  #else
-  const int tx = threadIdx.x;
-  const int ty = threadIdx.y;
-  __shared__ double sdata[THREADSX][THREADSY];
-  #endif
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    const int tx = item.get_local_id(1);
+    const int ty = item.get_local_id(0);
+    using tile_t = double[THREADSX][THREADSY];
+    tile_t& sdata = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
+    auto c_bpcache = s_bpcache.get();
+    #else
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    __shared__ double sdata[THREADSX][THREADSY];
+    #endif
 
-  int *bas_atm = c_bpcache.bas_atm;
+    int *bas_atm = c_bpcache.bas_atm;
     const int atm_id = bas_atm[ksh];
     double *vj = jk.vj;
     double *vk = jk.vk;

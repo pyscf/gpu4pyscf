@@ -22,7 +22,7 @@ else:
 import unittest
 import pytest
 import pyscf
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf import scf as cpu_scf
 from gpu4pyscf import scf as gpu_scf
 from pyscf.grad import rhf as rhf_grad_cpu
@@ -119,6 +119,19 @@ class KnownValues(unittest.TestCase):
         for n, (i0, i1) in enumerate(mol.aoslice_by_atom()[:,2:]):
             ref[n] = np.einsum('xpq,pq->x', veff[:,i0:i1], dm[i0:i1])
         self.assertAlmostEqual(abs(ejk - ref).max(), 0, 9)
+
+    def test_ecp_grad(self):
+        mol = gto.M(atom=' H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
+                    ecp='lanl2dz', verbose=0)
+        mf = gpu_scf.RHF(mol)
+        g_scan = mf.nuc_grad_method().as_scanner()
+        g = g_scan(mol.atom)[1]
+        self.assertAlmostEqual(lib.fp(g), 0.012310573162997052, 7)
+        
+        mfs = mf.as_scanner()
+        e1 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0 -0.001'))
+        e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0  0.001'))
+        self.assertAlmostEqual(g[1,2], (e2-e1)/0.002*lib.param.BOHR, 6)
 
 if __name__ == "__main__":
     print("Full Tests for RHF Gradient")

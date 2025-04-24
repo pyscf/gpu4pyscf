@@ -20,7 +20,7 @@ if not has_dpctl:
     import cupy as gpunp
     from gpu4pyscf.lib.cupy_helper import tag_array
 else:
-    import dpnp as gpunp
+    import dpnp as cupy
     from gpu4pyscf.lib.dpnp_helper import tag_array
 from pyscf.scf import uhf as uhf_cpu
 from pyscf import __config__
@@ -42,8 +42,8 @@ def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''
     mo_a = mo_coeff[0]
     mo_b = mo_coeff[1]
-    dm_a = gpunp.dot(mo_a*mo_occ[0], mo_a.conj().T)
-    dm_b = gpunp.dot(mo_b*mo_occ[1], mo_b.conj().T)
+    dm_a = cupy.dot(mo_a*mo_occ[0], mo_a.conj().T)
+    dm_b = cupy.dot(mo_b*mo_occ[1], mo_b.conj().T)
     return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 
@@ -56,11 +56,11 @@ def spin_square(mo, s=1):
     mo_a, mo_b = mo
     nocc_a = mo_a.shape[1]
     nocc_b = mo_b.shape[1]
-    s = reduce(gpunp.dot, (mo_a.conj().T, gpunp.asarray(s), mo_b))
-    ssxy = (nocc_a+nocc_b) * .5 - gpunp.einsum('ij,ij->', s.conj(), s)
+    s = reduce(cupy.dot, (mo_a.conj().T, cupy.asarray(s), mo_b))
+    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s)
     ssz = (nocc_b-nocc_a)**2 * .25
     ss = (ssxy + ssz).real
-    s = gpunp.sqrt(ss+.25) - .5
+    s = cupy.sqrt(ss+.25) - .5
     return ss, s*2+1
 
 
@@ -68,8 +68,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
-    h1e = gpunp.asarray(h1e)
-    vhf = gpunp.asarray(vhf)
+    h1e = cupy.asarray(h1e)
+    vhf = cupy.asarray(vhf)
     f = h1e + vhf
     if f.ndim == 2:
         f = (f, f)
@@ -78,8 +78,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
 
     if s1e is None: s1e = mf.get_ovlp()
     if dm is None: dm = mf.make_rdm1()
-    s1e = gpunp.asarray(s1e)
-    dm = gpunp.asarray(dm)
+    s1e = cupy.asarray(s1e)
+    dm = cupy.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -115,7 +115,7 @@ def get_grad(mo_coeff, mo_occ, fock_ao):
 
     ga = mo_coeff[0][:,viridxa].conj().T.dot(fock_ao[0].dot(mo_coeff[0][:,occidxa]))
     gb = mo_coeff[1][:,viridxb].conj().T.dot(fock_ao[1].dot(mo_coeff[1][:,occidxb]))
-    return gpunp.hstack((ga.ravel(), gb.ravel()))
+    return cupy.hstack((ga.ravel(), gb.ravel()))
 
 def energy_elec(mf, dm=None, h1e=None, vhf=None):
     '''Electronic energy of Unrestricted Hartree-Fock
@@ -128,16 +128,16 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     if dm is None: dm = mf.make_rdm1()
     if h1e is None:
         h1e = mf.get_hcore()
-    if isinstance(dm, gpunp.ndarray) and dm.ndim == 2:
-        dm = gpunp.array((dm*.5, dm*.5))
+    if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
+        dm = cupy.array((dm*.5, dm*.5))
     if vhf is None:
         vhf = mf.get_veff(mf.mol, dm)
     if h1e[0].ndim < dm[0].ndim:  # get [0] because h1e and dm may not be ndarrays
         h1e = (h1e, h1e)
-    e1 = gpunp.einsum('ij,ji->', h1e[0], dm[0])
-    e1+= gpunp.einsum('ij,ji->', h1e[1], dm[1])
-    e_coul =(gpunp.einsum('ij,ji->', vhf[0], dm[0]) +
-             gpunp.einsum('ij,ji->', vhf[1], dm[1])) * .5
+    e1 = cupy.einsum('ij,ji->', h1e[0], dm[0])
+    e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
+    e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
+             cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
     e1 = e1.get()[()]
     e_coul = e_coul.get()[()]
     e_elec = (e1 + e_coul).real
@@ -150,7 +150,7 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
     virtual subspaces separatedly (without change occupancy).
     '''
-    mo_occ = gpunp.asarray(mo_occ)
+    mo_occ = cupy.asarray(mo_occ)
     assert mo_occ.ndim == 2
     if fock is None:
         dm = mf.make_rdm1(mo_coeff, mo_occ)
@@ -161,15 +161,15 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     viridxb = mo_occ[1] == 0
 
     def eig_(fock, mo_coeff, idx, es, cs):
-        if gpunp.any(idx) > 0:
+        if cupy.any(idx) > 0:
             orb = mo_coeff[:,idx]
             f1 = orb.conj().T.dot(fock).dot(orb)
-            e, c = gpunp.linalg.eigh(f1)
+            e, c = cupy.linalg.eigh(f1)
             es[idx] = e
-            cs[:,idx] = gpunp.dot(orb, c)
+            cs[:,idx] = cupy.dot(orb, c)
 
-    mo = gpunp.empty_like(mo_coeff)
-    mo_e = gpunp.empty(mo_occ.shape)
+    mo = cupy.empty_like(mo_coeff)
+    mo_e = cupy.empty(mo_occ.shape)
     eig_(fock[0], mo_coeff[0], occidxa, mo_e[0], mo[0])
     eig_(fock[0], mo_coeff[0], viridxa, mo_e[0], mo[0])
     eig_(fock[1], mo_coeff[1], occidxb, mo_e[1], mo[1])
@@ -254,23 +254,23 @@ class UHF(hf.SCF):
     def eig(self, fock, s):
         e_a, c_a = self._eigh(fock[0], s)
         e_b, c_b = self._eigh(fock[1], s)
-        return gpunp.stack((e_a,e_b)), gpunp.stack((c_a,c_b))
+        return cupy.stack((e_a,e_b)), cupy.stack((c_a,c_b))
 
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
 
-        if isinstance(dm, gpunp.ndarray) and dm.ndim == 2:
-            dm = gpunp.asarray((dm*.5,dm*.5))
+        if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
+            dm = cupy.asarray((dm*.5,dm*.5))
 
         if self._eri is not None or not self.direct_scf:
-            vj, vk = self.get_jk(mol, gpunp.asarray(dm), hermi)
+            vj, vk = self.get_jk(mol, cupy.asarray(dm), hermi)
             vhf = vj[0] + vj[1] - vk
         else:
-            ddm = gpunp.asarray(dm) - gpunp.asarray(dm_last)
+            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
             vj, vk = self.get_jk(mol, ddm, hermi)
             vhf = vj[0] + vj[1] - vk
-            vhf += gpunp.asarray(vhf_last)
+            vhf += cupy.asarray(vhf_last)
         return vhf
 
     def spin_square(self, mo_coeff=None, s=None):

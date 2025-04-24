@@ -19,15 +19,16 @@ SMD solvent model
 import numpy as np
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
-    import cupy as gpunp
+    import cupy
 else:
-    import dpnp as gpunp
+    import dpnp as cupy
 from pyscf import lib, gto
 from pyscf.data import radii
 from pyscf.dft import gen_grid
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import int3c1e
+from cupyx.scipy.linalg import lu_factor
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -377,16 +378,17 @@ class SMD(pcm.PCM):
         epsilon = self.eps
         f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
         DA = D*A
-        DAS = gpunp.dot(DA, S)
+        DAS = cupy.dot(DA, S)
         K = S - f_epsilon/(2.0*np.pi) * DAS
-        R = -f_epsilon * (gpunp.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
+        K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
+        K = None
 
         intermediates = {
-            'S': gpunp.asarray(S),
-            'D': gpunp.asarray(D),
-            'A': gpunp.asarray(A),
-            'K': gpunp.asarray(K),
-            'R': gpunp.asarray(R),
+            'S': cupy.asarray(S),
+            'D': cupy.asarray(D),
+            'A': cupy.asarray(A),
+            'K_LU': cupy.asarray(K_LU),
+            'K_LU_pivot': cupy.asarray(K_LU_pivot),
             'f_epsilon': f_epsilon
         }
         self._intermediates.update(intermediates)
@@ -406,7 +408,7 @@ class SMD(pcm.PCM):
         fakemol_nuc = gto.fakemol_for_charges(atom_coords)
         v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol_charge)
         v_grids_n = np.dot(atom_charges, v_ng)
-        self.v_grids_n = gpunp.asarray(v_grids_n)
+        self.v_grids_n = cupy.asarray(v_grids_n)
 
     def get_cds(self):
         return get_cds_legacy(self)[0]

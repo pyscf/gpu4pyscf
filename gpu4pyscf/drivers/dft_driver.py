@@ -28,6 +28,8 @@ from pyscf import dft, scf
 from pyscf.hessian import thermo
 from pyscf.lib import logger
 
+from gpu4pyscf.tools import get_default_config, method_from_config
+
 def warmup(atom=None):
     """
     Perform a warm-up calculation to initialize the GPU.
@@ -71,41 +73,20 @@ H                 -3.93210821    0.28874990   -1.89865997
 
     return
 
-default_config = {
-    'input_dir': './',
-    'output_dir': './',
-    'molecule': 'molecule.xyz',
-    'threads': 8,
-    'max_memory': 32000,
-
-    'charge': 0,
-    'spin': None,
-    'xc': 'b3lyp',
-    'disp': None,
-    'grids': {'atom_grid': (99,590)},
-    'nlcgrids': {'atom_grid': (50,194)},
-    'basis': 'def2-tzvpp',
-    'verbose': 4,
-    'scf_conv_tol': 1e-10,
-    'direct_scf_tol': 1e-14,
-    'with_df': True,
-    'auxbasis': None,
-    'with_gpu': True,
-
+output_config = {
     'with_grad': True,
     'with_hess': True,
     'with_thermo': False,
     'save_density': False,
-
-    'with_solvent': False,
-    'solvent': {'method': 'iefpcm', 'eps': 78.3553, 'solvent': 'water'},
 }
 
 def run_dft(config):
-    ''' Perform DFT calculations based on the configuration file.
+    """"
+    "Perform DFT calculations based on the configuration file.
     Saving the results, timing, and log to a HDF5 file.
-    '''
-    config = {**default_config, **config}
+    """    
+    pyscf_default_config = get_default_config()
+    config = {**pyscf_default_config, **output_config, **config}
 
     mol_name = config['molecule']
     assert isinstance(mol_name, str)
@@ -116,67 +97,13 @@ def run_dft(config):
         raise RuntimeError(f'Input file {input_dir}/{mol_name} does not exist.')
 
     # I/O
-    logfile = mol_name[:-4] + '_pyscf.log'
-    data_file = mol_name[:-4] + '_pyscf.h5'
     os.makedirs(output_dir, exist_ok=True)
-
-    lib.num_threads(config['threads'])
+    
+    # Build PySCF object
+    config['logfile'] = mol_name[:-4] + '_pyscf.log'
+    config['atom'] = f'{input_dir}/{mol_name}'
     start_time = time.time()
-    mol = pyscf.M(
-        atom=f'{input_dir}/{mol_name}',
-        basis=config['basis'],
-        max_memory=float(config['max_memory']),
-        verbose=config['verbose'],
-        charge=config['charge'],
-        spin=config['spin'],
-        output=f'{output_dir}/{logfile}')
-
-    # To match default LDA in Q-Chem
-    xc = config['xc']
-    if xc == 'LDA':
-        xc = 'LDA,VWN5'
-
-    if xc.lower() == 'hf':
-        mf = scf.HF(mol)
-    else:
-        mf = dft.KS(mol, xc=xc)
-        grids = config['grids']
-        nlcgrids = config['nlcgrids']
-        if 'atom_grid' in grids: mf.grids.atom_grid = grids['atom_grid']
-        if 'level' in grids:     mf.grids.level     = grids['level']
-        if mf._numint.libxc.is_nlc(mf.xc):
-            if 'atom_grid' in nlcgrids: mf.nlcgrids.atom_grid = nlcgrids['atom_grid']
-            if 'level' in nlcgrids:     mf.nlcgrids.level     = nlcgrids['level']
-    mf.disp = config['disp']
-    if config['with_df']:
-        auxbasis = config['auxbasis']
-        if auxbasis == "RIJK-def2-tzvp":
-            auxbasis = 'def2-tzvp-jkfit'
-        mf = mf.density_fit(auxbasis=auxbasis)
-
-    if config['with_gpu']:
-        cupy.get_default_memory_pool().free_all_blocks()
-        mf = mf.to_gpu()
-
-    mf.chkfile = None
-    if config['with_solvent']:
-        solvent = config['solvent']
-        if solvent['method'].endswith(('PCM', 'pcm')):
-            mf = mf.PCM()
-            mf.with_solvent.lebedev_order = 29
-            mf.with_solvent.method = solvent['method'].replace('PCM','-PCM')
-            mf.with_solvent.eps = solvent['eps']
-        elif solvent['method'].endswith(('smd', 'SMD')):
-            mf = mf.SMD()
-            mf.with_solvent.lebedev_order = 29
-            mf.with_solvent.method = 'SMD'
-            mf.with_solvent.solvent = solvent['solvent']
-        else:
-            raise NotImplementedError
-
-    mf.direct_scf_tol = config['direct_scf_tol']
-    mf.chkfile = None
-    mf.conv_tol = float(config['scf_conv_tol'])
+    mf = method_from_config(config)
     e_tot = mf.kernel()
 
     if not mf.converged:
@@ -191,6 +118,7 @@ def run_dft(config):
     e_disp    = mf.scf_summary.get('dispersion', 0.0)
     e_solvent = mf.scf_summary.get('e_solvent',  0.0)
 
+    data_file = mol_name[:-4] + '_pyscf.h5'
     with h5py.File(f'{output_dir}/{data_file}', 'w') as h5f:
         h5f.create_dataset('e_tot',     data=e_tot)
         h5f.create_dataset('e1',        data=e1)
@@ -204,7 +132,7 @@ def run_dft(config):
         if isinstance(dm, cupy.ndarray): dm = dm.get()
         h5f.create_dataset('dm',       data=dm)
 
-        if config['save_density'] and xc.lower() != 'hf':
+        if config['save_density'] and config['xc'].lower() != 'hf':
             weights = mf.grids.weights
             coords = mf.grids.coords
             dm0 = dm[0] + dm[1] if dm.ndim == 3 else dm
@@ -257,7 +185,7 @@ def run_dft(config):
     #################### Hessian Calculation ###############################
     h = None
     if config['with_hess']:
-        natm = mol.natm
+        natm = mf.mol.natm
         start_time = time.time()
         h = mf.Hessian()
         h.auxbasis_response = 2
@@ -269,7 +197,7 @@ def run_dft(config):
         if config['with_thermo']:
             # harmonic analysis
             start_time = time.time()
-            normal_mode = thermo.harmonic_analysis(mol, _h_dft)
+            normal_mode = thermo.harmonic_analysis(mf.mol, _h_dft)
 
             thermo_dat = thermo.thermo(
                 mf,                            # GPU4PySCF object

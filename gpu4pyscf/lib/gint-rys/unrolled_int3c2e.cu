@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
-#include <cuda.h>
+
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
@@ -13,11 +12,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_000(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_000(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -27,7 +37,6 @@ void int3c2e_000(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -125,11 +134,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_100(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_100(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -139,7 +159,6 @@ void int3c2e_100(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -252,11 +271,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_110(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_110(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -266,7 +296,6 @@ void int3c2e_110(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -407,11 +436,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_200(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_200(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -421,7 +461,6 @@ void int3c2e_200(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -547,11 +586,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -561,7 +611,6 @@ void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -731,11 +780,22 @@ void int3c2e_210(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_220(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_220(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -745,7 +805,6 @@ void int3c2e_220(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -988,11 +1047,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_001(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_001(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1002,7 +1072,6 @@ void int3c2e_001(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -1115,11 +1184,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1129,7 +1209,6 @@ void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -1267,11 +1346,22 @@ void int3c2e_101(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_111(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_111(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1281,7 +1371,6 @@ void int3c2e_111(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -1496,11 +1585,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1510,7 +1610,6 @@ void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -1682,11 +1781,22 @@ void int3c2e_201(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -1696,7 +1806,6 @@ void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -2000,11 +2109,22 @@ void int3c2e_211(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_221(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_221(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int st_id = item.get_local_id(1);
+    int gout_id = item.get_local_id(0);
+    int batch_id = item.get_group(1);
+    #else
     int st_id = threadIdx.x;
     int gout_id = threadIdx.y;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -2015,7 +2135,6 @@ void int3c2e_221(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
@@ -2490,11 +2609,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_002(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_002(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -2504,7 +2634,6 @@ void int3c2e_002(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -2630,11 +2759,22 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -2644,7 +2784,6 @@ void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -2816,11 +2955,22 @@ void int3c2e_102(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -2830,7 +2980,6 @@ void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -3138,11 +3287,22 @@ void int3c2e_112(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int st_id = item.get_local_id(1);
+    int batch_id = item.get_group(1);
+    #else
     int nst_per_block = blockDim.x;
     int st_id = threadIdx.x;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -3152,7 +3312,6 @@ void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
 
     int nksh = bounds.nksh;
@@ -3388,11 +3547,22 @@ void int3c2e_202(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_212(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_212(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, double *rw_cache
+                 #endif
+                 )
 {
+    #ifdef USE_SYCL
+    int st_id = item.get_local_id(1);
+    int gout_id = item.get_local_id(0);
+    int batch_id = item.get_group(1);
+    #else
     int st_id = threadIdx.x;
     int gout_id = threadIdx.y;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_cache[];
+    #endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -3403,7 +3573,6 @@ void int3c2e_212(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     int nbas = envs.nbas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 1152;
@@ -3900,10 +4069,54 @@ int int3c2e_unrolled(double *out, Int3c2eEnvVars *envs, Int3c2eBounds *bounds)
     }
 #endif
 
-    dim3 threads(nst_per_block, gout_stride);
     int tasks_per_block = BATCHES_PER_BLOCK * nst_per_block;
     int st_blocks = (nksh*nshl_pair + tasks_per_block - 1) / tasks_per_block;
     int buflen = nroots*2 * nst_per_block;
+#ifdef USE_SYCL
+    sycl::range<2> blocks(1, st_blocks);
+    sycl::range<2> threads(gout_stride, nst_per_block);
+    sycl::queue &stream = *sycl_get_queue();
+    switch (kij) {
+    case 0:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_000(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 5:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_100(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 6:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_110(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 10:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_200(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 11:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_210(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 12:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_220(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 25:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_001(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 30:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_101(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 31:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_111(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 35:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_201(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 36:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_211(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 37:
+        buflen += 3904;
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_221(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 50:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_002(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 55:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_102(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 56:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_112(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 60:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_202(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    case 61:
+        buflen += 3904;
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { int3c2e_212(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));  }); }); break;
+    default: return 0;
+    }
+#else // USE_SYCL
+    dim3 threads(nst_per_block, gout_stride);
     switch (kij) {
     case 0:
         int3c2e_000<<<st_blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
@@ -3943,5 +4156,7 @@ int int3c2e_unrolled(double *out, Int3c2eEnvVars *envs, Int3c2eBounds *bounds)
         int3c2e_212<<<st_blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
     default: return 0;
     }
+#endif // USE_SYCL
+
     return 1;
 }

@@ -26,8 +26,23 @@ __all__ = [
     'TDA', 'TDDFT', 'TDRKS', 'CasidaTDDFT', 'TDDFTNoHybrid',
 ]
 
-TDA = tdhf_gpu.TDA
-TDDFT = tdhf_gpu.TDHF
+class TDA(tdhf_gpu.TDA):
+    def nuc_grad_method(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tdrks
+            return tdrks.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrks
+            return tdrks.Gradients(self)
+
+class TDDFT(tdhf_gpu.TDHF):
+    def nuc_grad_method(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tdrks
+            return tdrks.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrks
+            return tdrks.Gradients(self)
 TDRKS = TDDFT
 
 class CasidaTDDFT(TDDFT):
@@ -54,7 +69,7 @@ class CasidaTDDFT(TDDFT):
         d_ia = e_ia ** .5
         ed_ia = e_ia * d_ia
         hdiag = e_ia.ravel() ** 2
-        vresp = mf.gen_response(singlet=singlet, hermi=1)
+        vresp = self.gen_response(singlet=singlet, hermi=1)
         nocc, nvir = e_ia.shape
 
         def vind(zs):
@@ -130,10 +145,6 @@ class CasidaTDDFT(TDDFT):
         log.timer('TDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
-
-    def nuc_grad_method(self):
-        from pyscf.grad import tdrks
-        return tdrks.Gradients(self)
 
 TDDFTNoHybrid = CasidaTDDFT
 

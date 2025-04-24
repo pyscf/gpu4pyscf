@@ -52,9 +52,9 @@ def parse_3c(xc_name):
         return 'r2scan', 0, 'def2-mtzvpp', None, ('r2scan-3c', 'D4'), 'r2scan3c'
     elif xc_name == 'wb97x3c':
         # 'Grimme vDZP' is available is BSE, but pyscf 2.8 is not able to parse ECP properly
-        # basis = 'Grimme vDZP'
+        basis = 'Grimme vDZP'
         # ecp = 'Grimme vDZP'
-        basis = os.path.join(CURRENT_DIR, 'basis_vDZP_NWCHEM.dat')
+        # basis = os.path.join(CURRENT_DIR, 'basis_vDZP_NWCHEM.dat')
         ecp = os.path.join(CURRENT_DIR, 'ecp_vDZP_NWCHEM.dat')
         return 'wb97x-v', 0, basis, ecp, ('wb97x-3c', 'D4'), None
     else:
@@ -244,7 +244,6 @@ def run_dft(mol_name, config, charge=None, spin=0):
     mf.chkfile = None
     mf.conv_tol = scf_conv_tol
     e_tot = mf.kernel()
-    
     if not mf.converged:
         logger.warn(mf, 'SCF failed to converge')
 

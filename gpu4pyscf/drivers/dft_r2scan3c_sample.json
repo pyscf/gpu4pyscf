@@ -9,7 +9,7 @@
         "h2o.xyz"
     ],
     "xc": "r2scan3c",
-    "auxbasis": "def2-universal-JFIT",
+    "auxbasis": "def2-mtzvpp-rij",
     "verbose": 4,
     "with_solvent": false,
     "with_thermo": false,

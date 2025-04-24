@@ -15,7 +15,7 @@
 import unittest
 import numpy as np
 import pyscf
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf import scf
 
 def setUpModule():

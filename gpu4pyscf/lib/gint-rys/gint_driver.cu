@@ -17,22 +17,36 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
 
+#ifndef USE_SYCL
 __constant__ int c_g_pair_idx[3675]; // corresponding to LMAX=4
 __constant__ int c_g_pair_offsets[LMAX1*LMAX1];
 __constant__ int c_g_cart_idx[252]; // corresponding to LMAX=6
+#endif
 
 extern __global__
-void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds);
+#ifdef USE_SYCL
+SYCL_EXTERNAL
+#endif
+void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *rw_buffer
+                    #endif
+                    );
 int int3c2e_unrolled(double *out, Int3c2eEnvVars *envs, Int3c2eBounds *bounds);
 
 extern __global__
-void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds);
+#ifdef USE_SYCL
+SYCL_EXTERNAL
+#endif
+void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *rw_buffer
+                    #endif
+                         );
 
 extern "C" {
 int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice,
@@ -74,17 +88,32 @@ int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice
     if (!int3c2e_unrolled(out, envs, &bounds)) {
         int nst_per_block = scheme[0];
         int gout_stride = scheme[1];
-        dim3 threads(nst_per_block, gout_stride);
         int tasks_per_block = BATCHES_PER_BLOCK * nst_per_block;
         int st_blocks = (nksh*nshl_pair + tasks_per_block - 1) / tasks_per_block;
         int buflen = (nroots*2+g_size*3+7) * nst_per_block * sizeof(double);
+
+        #ifdef USE_SYCL
+        sycl::range<2> threads(gout_stride, nst_per_block);
+        sycl::range<2> blocks(1, st_blocks);
+        sycl_get_queue()->submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
+          cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            int3c2e_kernel(out, *envs, bounds,
+                           item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          }); });
+        #else
+        dim3 threads(nst_per_block, gout_stride);
         int3c2e_kernel<<<st_blocks, threads, buflen>>>(out, *envs, bounds);
+        #endif
     }
+
+    #ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -97,6 +126,16 @@ int fill_int3c2e_bdiv(double *out, Int3c2eEnvVars *envs, int shm_size, int naux,
     BDiv3c2eBounds bounds = {naux, bas_ij_idx, shl_pair_offsets, ao_pair_loc,
         ksh_offsets, nst_lookup};
     int threads = 256;
+#ifdef USE_SYCL
+    sycl::range<2> thread(1, threads);
+    sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<double, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      cgh.parallel_for(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
+        int3c2e_bdiv_kernel(out, *envs, bounds,
+                            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      }); });
+#else // USE_SYCL
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     int3c2e_bdiv_kernel<<<blocks, threads, shm_size>>>(out, *envs, bounds);
     cudaError_t err = cudaGetLastError();
@@ -104,14 +143,20 @@ int fill_int3c2e_bdiv(double *out, Int3c2eEnvVars *envs, int shm_size, int naux,
         fprintf(stderr, "CUDA Error in int3c2e_bdiv_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif // USE_SYCL
     return 0;
 }
 
 int init_constant(int *g_pair_idx, int *offsets,
                   double *env, int env_size, int shm_size)
 {
+    #ifdef USE_SYCL
+    sycl_get_queue()->memcpy(s_g_pair_idx, g_pair_idx, 3675*sizeof(int)).wait();
+    sycl_get_queue()->memcpy(s_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1).wait();
+    #else
     cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
     cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);
+    #endif
 
     int *g_cart_idx = (int *)malloc(252*sizeof(int));
     int *idx, *idy, *idz;
@@ -129,8 +174,10 @@ int init_constant(int *g_pair_idx, int *offsets,
         } }
         idx += nf * 3;
     }
+    #ifdef USE_SYCL
+    sycl_get_queue()->memcpy(s_g_cart_idx, g_cart_idx, 252*sizeof(int)).wait();
+    #else
     cudaMemcpyToSymbol(c_g_cart_idx, g_cart_idx, 252*sizeof(int));
-    free(g_cart_idx);
 
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(int3c2e_bdiv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -140,6 +187,9 @@ int init_constant(int *g_pair_idx, int *offsets,
                 cudaGetErrorString(err));
         return 1;
     }
+    #endif // USE_SYCL
+
+    free(g_cart_idx);
     return 0;
 }
 }

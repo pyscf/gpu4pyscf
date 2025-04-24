@@ -25,12 +25,13 @@ has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     import cupy as cp
     from gpu4pyscf.lib.cupy_helper import (
-        contract, eigh, sandwich_dot, pack_tril, unpack_tril)
+        contract, eigh, sandwich_dot, pack_tril, unpack_tril, get_avail_mem,
+        asarray)
 else:
     import dpnp as cp
     from gpu4pyscf.lib.dpnp_helper import (
-        contract, eigh, sandwich_dot, pack_tril, unpack_tril)
-
+        contract, eigh, sandwich_dot, pack_tril, unpack_tril, get_avail_mem,
+        asarray)
 import scipy.linalg
 import scipy.optimize
 import pyscf.scf.diis as cpu_diis
@@ -59,6 +60,9 @@ class CDIIS(lib.diis.DIIS):
         if self.incore is None:
             mem_avail = get_avail_mem()
             self.incore = errvec.nbytes*2 * (20+self.space) < mem_avail
+            if self.incore:
+                logger.debug(self, 'Large system detected. DIIS intermediates '
+                             'are saved in the host memory')
         nao = self.Corth.shape[1]
         errvec = pack_tril(errvec.reshape(-1,nao,nao))
         f_tril = pack_tril(f.reshape(-1,nao,nao))
@@ -90,7 +94,7 @@ class CDIIS(lib.diis.DIIS):
                     self.Corth = cp.empty_like(s)
                     for k, (fk, sk) in enumerate(zip(f[0], s)):
                         self.Corth[k] = eigh(fk, sk)[1]
-                Corth = cp.asarray(self.Corth)
+                Corth = asarray(self.Corth)
                 sdf = cp.empty_like(f)
                 tmp = None
                 tmp = contract('Kij,Kjk->Kik', d[0], f[0], out=tmp)
@@ -118,7 +122,7 @@ class CDIIS(lib.diis.DIIS):
                         self.Corth[k] = eigh(fk, sk)[1]
                 sd = contract('Kij,Kjk->Kik', s, d)
                 sdf = contract('Kij,Kjk->Kik', sd, f)
-                Corth = cp.asarray(self.Corth)
+                Corth = asarray(self.Corth)
                 sdf = contract('Kpq,Kqj->Kpj', sdf, Corth)
                 sdf = contract('Kpj,Kpi->Kij', sdf, Corth.conj())
                 errvec = sdf - sdf.conj().transpose(0,2,1)

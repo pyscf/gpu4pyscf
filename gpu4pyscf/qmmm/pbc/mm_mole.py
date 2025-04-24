@@ -58,7 +58,9 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             rho(r) = charge * Norm * exp(-zeta * r^2)
 
     '''
-    def __init__(self, atoms, a, 
+    set_geom_ = NotImplemented
+
+    def __init__(self, atoms, a,
             rcut_ewald=None, rcut_hcore=None,
             charges=None, zeta=None):
         pbc.gto.Cell.__init__(self)
@@ -149,7 +151,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
 
         ew_eta, ew_cut = self.get_ewald_params()
         mesh = self.mesh
-        
+
         logger.debug(self, f"Ewald exponent {ew_eta}")
 
         # TODO Lall should respect ew_rcut
@@ -169,14 +171,14 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             ewovrl1 = cp.zeros((len(coords1), 3))
             ewovrl2 = cp.zeros((len(coords1), 3, 3))
         else:
-            ewovrl00 = cp.zeros((len(coords1), len(coords1))) 
-            ewovrl01 = cp.zeros((len(coords1), len(coords1), 3)) 
-            ewovrl11 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
-            ewovrl02 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
-            ewself00 = cp.zeros((len(coords1), len(coords1))) 
-            ewself01 = cp.zeros((len(coords1), len(coords1), 3)) 
-            ewself11 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
-            ewself02 = cp.zeros((len(coords1), len(coords1), 3, 3)) 
+            ewovrl00 = cp.zeros((len(coords1), len(coords1)))
+            ewovrl01 = cp.zeros((len(coords1), len(coords1), 3))
+            ewovrl11 = cp.zeros((len(coords1), len(coords1), 3, 3))
+            ewovrl02 = cp.zeros((len(coords1), len(coords1), 3, 3))
+            ewself00 = cp.zeros((len(coords1), len(coords1)))
+            ewself01 = cp.zeros((len(coords1), len(coords1), 3))
+            ewself11 = cp.zeros((len(coords1), len(coords1), 3, 3))
+            ewself02 = cp.zeros((len(coords1), len(coords1), 3, 3))
 
         mem_avail = cupy_helper.get_avail_mem()
         blksize = int(mem_avail/64/3/len(all_coords2))
@@ -187,7 +189,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
             r = cp.linalg.norm(R, axis=-1)
             r[r<1e-16] = 1e100
             rmax_qm = max(cp.linalg.norm(coords1 - cp.mean(coords1, axis=0), axis=-1))
-    
+
             # substract the real-space Coulomb within rcut_hcore
             mask = dist2 <= self.rcut_hcore**2
             Tij, Tija, Tijab = get_multipole_tensors_pp(R[:,mask], [0,1,2], r[:,mask])
@@ -215,7 +217,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 ewovrl01[i0:i1] +=  Tija
                 ewovrl11[i0:i1] +=  Tijab
                 ewovrl02[i0:i1] += -Tijab / 3
-    
+
             # difference between MM gaussain charges and MM point charges
             if all_charges2 is not None and self.charge_model == 'gaussian':
                 zetas = cp.asarray(zetas2)
@@ -232,7 +234,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                     ewovrl0[i0:i1] -= contract('ij,j->i', Tij, all_charges2[mask])
                     ewovrl1[i0:i1] -= contract('j,ija->ia', all_charges2[mask], Tija)
                     ewovrl2[i0:i1] -= contract('j,ijab->iab', all_charges2[mask], Tijab) / 3
-    
+
             # ewald real-space sum
             if all_charges2 is not None:
                 cut2 = (ew_cut + rmax_qm)**2
@@ -246,7 +248,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 r_ = r
                 R_ = R
             Tij, Tija, Tijab = get_multipole_tensors_pg(R_, ew_eta, [0,1,2], r_)
-    
+
             if all_charges2 is not None:
                 ewovrl0[i0:i1] += contract('ij,j->i', Tij, all_charges2_)
                 ewovrl1[i0:i1] += contract('j,ija->ia', all_charges2_, Tija)
@@ -260,7 +262,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                 ewovrl11[i0:i1] -= Tijab
                 ewovrl02[i0:i1] += Tijab / 3
             Tij = Tijab = None
-    
+
             if all_charges2 is not None:
                 pass
             else:
@@ -273,7 +275,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                         * 4 * ew_eta**3 / 3 / cp.sqrt(cp.pi)
 
             r_ = R_ = all_charges2_ = None
-    
+
         R = r = dist2 = all_charges2 = mask = None
 
         # g-space sum (using g grid)
@@ -358,7 +360,7 @@ class Cell(qmmm.mm_mole.Mole, pbc.gto.Cell):
                    ewovrl11 + ewself11 + ewg11, \
                    ewovrl02 + ewself02 + ewg02
 
-def create_mm_mol(atoms_or_coords, a, charges=None, radii=None, 
+def create_mm_mol(atoms_or_coords, a, charges=None, radii=None,
         rcut_ewald=None, rcut_hcore=None, unit='Angstrom'):
     '''Create an MM object based on the given coordinates and charges of MM
     particles.

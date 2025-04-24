@@ -120,7 +120,6 @@ def _check_dft_hessian(mf, h, ix=0, iy=0, tol=1e-3):
     _, g1 = g_scanner(pmol)
 
     h_fd = (g0 - g1)/2.0/eps
-
     print(f'Norm of analytical - finite difference Hessian H({ix},{iy})', np.linalg.norm(h[ix,:,iy,:] - h_fd))
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
@@ -305,13 +304,14 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
-
+    
     def test_hessian_qz(self):
         mol = pyscf.M(atom=atom, basis='def2-qzvpp', max_memory=32000, cart=0,
                       output='/dev/null', verbose=1)
 
         mf = scf.RHF(mol).density_fit()
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-14
+        mf.conv_tol_cpscf = 1e-7
         mf.kernel()
 
         hobj = mf.Hessian()
@@ -319,7 +319,8 @@ class KnownValues(unittest.TestCase):
         h = hobj.kernel()
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
-    
+        mol.stdout.close()
+        
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")
     unittest.main()

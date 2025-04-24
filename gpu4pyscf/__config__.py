@@ -81,10 +81,10 @@ for device_id in range(num_devices):
 
 props = cupy.cuda.runtime.getDeviceProperties(0)
 GB = 1024*1024*1024
-min_ao_blksize = 128
-min_grid_blksize = 128*128
-ao_aligned = 32
-grid_aligned = 256
+min_ao_blksize = 256        # maxisum batch size of AOs
+min_grid_blksize = 128*128  # maximum batch size of grids for DFT
+ao_aligned = 32             # global AO alignment for slicing
+grid_aligned = 256          # 256 alignment for grids globally
 
 # Use smaller blksize for old gaming GPUs
 if props['totalGlobalMem'] < 16 * GB:

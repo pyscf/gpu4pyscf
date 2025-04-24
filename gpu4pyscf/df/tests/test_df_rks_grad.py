@@ -151,6 +151,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
         _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-7)
+        _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-7, grid_response=True)
     
     def test_grad_cart(self):
         print('------ Cart testing--------')

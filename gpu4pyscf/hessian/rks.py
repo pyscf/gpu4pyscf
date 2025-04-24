@@ -32,6 +32,10 @@ from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.hessian import jk
+from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
+import ctypes
+
+libgdft = numint.libgdft
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -47,9 +51,6 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = cupy.dot(mocc, mocc.T) * 2
-
-    if mf.do_nlc():
-        raise NotImplementedError("2nd derivative of NLC is not implemented.")
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -103,6 +104,9 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
 
+    if mf.do_nlc():
+        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+
     log.timer('RKS partial hessian', *time0)
     return de2
 
@@ -114,11 +118,15 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     dm0 = numpy.dot(mocc, mocc.T) * 2
     avail_mem = get_avail_mem()
     max_memory = avail_mem * .8e-6
-    h1mo = _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
-    h1mo += rhf_grad.get_grad_hcore(hessobj.base.Gradients())
 
     mf = hessobj.base
     ni = mf._numint
+
+    h1mo = _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    if mf.do_nlc():
+        h1mo += _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    h1mo += rhf_grad.get_grad_hcore(hessobj.base.Gradients())
+
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
@@ -535,6 +543,52 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     vmat_dm = reduce_to_device(vmat_dm_dist, inplace=True)
     return vmat_dm
 
+def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = numpy.dot(mocc, mocc.T) * 2
+
+    de2 = cupy.empty([mol.natm, mol.natm, 3, 3])
+
+    def get_nlc_de(grad_obj, dm):
+        from gpu4pyscf.grad.rks import _get_denlc
+        mol = grad_obj.mol
+        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
+        denlc = 2 * denlc_orbital
+        if grad_obj.grid_response:
+            assert denlc_grid is not None
+            denlc += denlc_grid
+        return denlc
+
+    dx = 1e-3
+    mol_copy = mol.copy()
+    mf_copy = mf.copy()
+    grad_obj_copy = mf_copy.Gradients()
+    grad_obj_copy.grid_response = True
+    if not grad_obj_copy.grid_response:
+        from gpu4pyscf.lib.cupy_helper import tag_array
+        dm0 = tag_array(dm0, mo_coeff = mo_coeff, mo_occ = mo_occ)
+
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            grad_obj_copy.reset(mol_copy)
+            de_p = get_nlc_de(grad_obj_copy, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            grad_obj_copy.reset(mol_copy)
+            de_m = get_nlc_de(grad_obj_copy, dm0)
+
+            de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
+
+    return de2
+
 def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id=0):
     mol = hessobj.mol
     mf = hessobj.base
@@ -700,6 +754,51 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     vmat = reduce_to_device(vmat_dist, inplace=True)
     return vmat
 
+def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = numpy.dot(mocc, mocc.T) * 2
+
+    nao = mol.nao
+    vmat = cupy.empty([mol.natm, 3, nao, nao])
+
+    def get_nlc_vmat(mol, mf, dm):
+        ni = mf._numint
+        if ni.libxc.is_nlc(mf.xc):
+            xc = mf.xc
+        else:
+            assert ni.libxc.is_nlc(mf.nlc)
+            xc = mf.nlc
+        mf.nlcgrids.build()
+        _, _, vnlc = ni.nr_nlc_vxc(mol, mf.nlcgrids, xc, dm)
+        return vnlc
+
+    dx = 1e-3
+    mol_copy = mol.copy()
+    mf_copy = mf.copy()
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            mol_copy.build()
+            mf_copy.reset(mol_copy)
+            vmat_p = get_nlc_vmat(mol_copy, mf_copy, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            mf_copy.reset(mol_copy)
+            vmat_m = get_nlc_vmat(mol_copy, mf_copy, dm0)
+
+            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
+
+    vmat = contract('Adij,jq->Adiq', vmat, mocc)
+    vmat = contract('Adiq,ip->Adpq', vmat, mo_coeff)
+    return vmat
+
 def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
                         verbose=None, hermi=1, device_id=0):
     with cupy.cuda.Device(device_id), _streams[device_id]:
@@ -794,7 +893,7 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
         mocc = opt.sort_orbitals(dms.occ_coeff, axis=[0])
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
-    
+
     futures = []
     cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -815,6 +914,171 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     t0 = log.timer_debug1('nr_rks_fxc', *t0)
     return cupy.asarray(vmat)
 
+def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
+    """
+        Equation notation follows:
+        Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
+        VV10-containing density functionals: Theory, efficient implementation, and
+        benchmark assessments. J Chem Phys. 2023 May 28;158(20):204109. doi: 10.1063/5.0152838.
+
+        mo_coeff, mo_occ are 0-th order
+        dm1s is first order
+
+        TODO: check the effect of different grid, using mf.nlcgrids right now
+    """
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = 2 * mocc @ mocc.T
+
+    grids = mf.nlcgrids
+
+    n_dm1 = dm1s.shape[0]
+
+    ni = mf._numint
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+    if ni.libxc.is_nlc(mf.xc):
+        xc_code = mf.xc
+    else:
+        xc_code = mf.nlc
+    nlc_coefs = ni.nlc_coeff(xc_code)
+    if len(nlc_coefs) != 1:
+        raise NotImplementedError('Additive NLC')
+    nlc_pars, fac = nlc_coefs[0]
+
+    kappa_prefactor = nlc_pars[0] * 1.5 * numpy.pi * (9 * numpy.pi)**(-1.0/6.0)
+    C_in_omega = nlc_pars[1]
+
+    with opt.gdft_envs_cache():
+        ao = ni.eval_ao(mol, grids.coords, deriv = 1, gdftopt = opt, transpose = False)
+        rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+
+        rho_i = rho_drho[0,:]
+
+        rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
+
+        rho_i = rho_i[rho_nonzero_mask]
+        nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+        grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
+        grids_weights = grids.weights[rho_nonzero_mask]
+        ngrids = grids_coords.shape[0]
+
+        ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
+
+        gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
+        omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
+        kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+
+        U_i = cupy.empty(ngrids)
+        W_i = cupy.empty(ngrids)
+        A_i = cupy.empty(ngrids)
+        B_i = cupy.empty(ngrids)
+        C_i = cupy.empty(ngrids)
+
+        stream = cupy.cuda.get_current_stream()
+        libgdft.VXC_vv10nlc_hess_eval_UWABC(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids)
+        )
+
+        domega_drho_i         = cupy.empty(ngrids)
+        domega_dgamma_i       = cupy.empty(ngrids)
+        d2omega_drho2_i       = cupy.empty(ngrids)
+        d2omega_dgamma2_i     = cupy.empty(ngrids)
+        d2omega_drho_dgamma_i = cupy.empty(ngrids)
+        libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(C_in_omega),
+            ctypes.c_int(ngrids)
+        )
+        dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
+        d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
+
+        f_gamma_i = rho_i * domega_dgamma_i * W_i
+
+        rho_drho_t = cupy.empty([n_dm1, 4, ngrids])
+        for i_dm in range(n_dm1):
+            dm1 = dm1s[i_dm, :, :]
+            rho_drho_1 = numint.eval_rho(mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
+            rho_drho_t[i_dm, :, :] = rho_drho_1[:, rho_nonzero_mask]
+
+        rho_t_i = rho_drho_t[:, 0, :]
+        nabla_rho_t_i = rho_drho_t[:, 1:4, :]
+        gamma_t_i = nabla_rho_i[0, :] * nabla_rho_t_i[:, 0, :] \
+                    + nabla_rho_i[1, :] * nabla_rho_t_i[:, 1, :] \
+                    + nabla_rho_i[2, :] * nabla_rho_t_i[:, 2, :]
+
+        rho_t_i   = cupy.ascontiguousarray(rho_t_i)
+        gamma_t_i = cupy.ascontiguousarray(gamma_t_i)
+        f_rho_t_i   = cupy.empty([n_dm1, ngrids], order = "C")
+        f_gamma_t_i = cupy.empty([n_dm1, ngrids], order = "C")
+
+        libgdft.VXC_vv10nlc_hess_eval_f_t(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(f_rho_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(f_gamma_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gamma_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(n_dm1),
+        )
+
+        fxc_rho = f_rho_t_i * grids_weights
+        fxc_gamma = 2 * (contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i) +
+                         nabla_rho_t_i * f_gamma_i) * grids_weights
+
+        vmat_mo = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
+        for i_dm in range(n_dm1):
+            # \mu \nu
+            fxc_dot_ao = ao_nonzero_rho[0] * fxc_rho[i_dm, :]
+            V_munu = contract("ig,jg->ij", ao_nonzero_rho[0], fxc_dot_ao)
+
+            # \mu \nabla\nu + \nabla\mu \nu
+            nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", fxc_gamma[i_dm, :, :], ao_nonzero_rho[1:4])
+            V_munu_gamma = contract("ig,jg->ij", ao_nonzero_rho[0], nabla_fxc_dot_nabla_ao)
+            V_munu += V_munu_gamma
+            V_munu += V_munu_gamma.T
+
+            vmat_mo[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
+
+    return vmat_mo
+
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     mol = hessobj.mol
     mf = hessobj.base
@@ -832,7 +1096,6 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     ni = mf._numint
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     hybrid = ni.libxc.is_hybrid_xc(mf.xc)
-    assert not mf.do_nlc()
     hermi = 1
 
     mocc = mo_coeff[:,mo_occ>0]
@@ -844,7 +1107,11 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     v1 = nr_rks_fxc_mo(ni, mol, grids, mf.xc, None, dms, mo_coeff, 0, hermi,
                                     rho0, vxc, fxc, max_memory=None)
     v1 = v1.reshape(-1,nmo*nocc)
-    
+
+    if mf.do_nlc():
+        vnlc = nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dms)
+        v1 += vnlc.reshape(-1,nmo*nocc)
+
     if hybrid:
         vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb

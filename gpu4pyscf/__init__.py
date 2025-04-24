@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-from . import lib, grad, hessian, solvent, scf, dft
-
-__version__ = '0.7.8'
-=======
 # Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +12,6 @@ __version__ = '0.7.8'
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = '1.3.2'
->>>>>>> origin/master
+__version__ = '1.4.0'
 
-from . import lib, grad, hessian, solvent, scf, dft
+from . import lib, grad, hessian, solvent, scf, dft, tdscf

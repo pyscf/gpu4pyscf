@@ -170,7 +170,7 @@ if(BUILD_SOLVENT)
 endif()
 
 
-option(BUILD_GINT_RYS "Using gint-rys" OFF)
+option(BUILD_GINT_RYS "Using gint-rys" ON)
 if(BUILD_GINT_RYS)
   add_subdirectory(gint-rys)
 endif()

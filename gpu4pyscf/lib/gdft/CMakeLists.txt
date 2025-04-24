@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 set(GPU_SRCS
   nr_eval_gto.cu
   contract_rho.cu

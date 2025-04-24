@@ -33,6 +33,7 @@ from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import rks as rks_hess
+from gpu4pyscf.hessian.rks import _get_enlc_deriv2, _get_vnlc_deriv1
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.df.hessian.rhf import _get_jk_ip, _partial_hess_ejk
 from gpu4pyscf.lib import logger
@@ -51,9 +52,6 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = numpy.dot(mocc, mocc.T) * 2
-
-    if mf.do_nlc():
-        raise NotImplementedError("2nd derivative of NLC is not implemented.")
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = mf._numint.libxc.is_hybrid_xc(mf.xc)
@@ -87,6 +85,10 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             de2[i0,j0] += 2.0*gpunp.sum(veff_dm[:,:,q0:q1], axis=2)
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
+
+    if mf.do_nlc():
+        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+
     log.timer('RKS partial hessian', *time0)
     return de2
 
@@ -117,6 +119,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 
     h1mo += rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
     h1mo += rks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+    if mf.do_nlc():
+        h1mo += _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
     return h1mo
 
 class Hessian(rks_hess.Hessian):

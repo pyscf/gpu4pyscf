@@ -20,10 +20,10 @@ from importlib.util import find_spec
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, sandwich_dot, reduce_to_device
+    from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device, transpose_sum
 else:
     import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import tag_array, contract, condense, sandwich_dot, reduce_to_device
+    from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device, transpose_sum
     from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
     from dpctl._sycl_queue_manager import get_device_cached_queue
 import numpy
@@ -31,6 +31,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
+from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -66,7 +67,7 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
                  device_id=0, verbose=0):
     n_dm = dms.shape[0]
     assert n_dm <= 2
-    nao, _ = vhfopt.coeff.shape
+    nao = vhfopt.sorted_mol.nao
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
@@ -75,12 +76,12 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
 
     timing_counter = Counter()
     kern_counts = 0
-    #with cp.cuda.Device(device_id), _streams[device_id]:
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    init_constant(mol)
+    with cp.cuda.Device(device_id), _streams[device_id]:
+        log = logger.new_logger(mol, verbose)
+        cput0 = log.init_timer()
+        init_constant(mol)
 
-    dms = cp.asarray(dms)
+        dms = cp.asarray(dms)
 
     tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
     q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
@@ -89,6 +90,18 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
 
     ejk = cp.zeros((mol.natm, 3))
+
+    ao_loc = mol.ao_loc
+    dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+    log_max_dm = float(dm_cond.max())
+    log_cutoff = math.log(vhfopt.direct_scf_tol)
+    tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
+                                             log_cutoff-log_max_dm)
+    workers = gpu_specs['multiProcessorCount']
+    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+    dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
+    info = cp.empty(2, dtype=np.uint32)
+    t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
     ao_loc = mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
@@ -155,13 +168,13 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
     mol = vhfopt.sorted_mol
-    nao, nao_orig = vhfopt.coeff.shape
+    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
 
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.coeff.T)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
     uniq_l_ctr = vhfopt.uniq_l_ctr
@@ -232,17 +245,30 @@ def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     return n, gout_stride
 
 def get_dh1e_ecp(mol, dm):
-    natom = mol.natm
-    dh1e_ecp = gpunp.zeros([natom,3])
+    '''
+    Nuclear gradients of core Hamiltonian due to ECP
+    '''
     with_ecp = mol.has_ecp()
     if not with_ecp:
-        return dh1e_ecp
-    ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
-    for ia in ecp_atoms:
-        with mol.with_rinv_at_nucleus(ia):
-            ecp = mol.intor('ECPscalar_iprinv', comp=3)
-            dh1e_ecp[ia] = contract('xij,ij->x', gpunp.asarray(ecp), dm)
+        raise RuntimeWarning("ECP not found")
+    
+    h1_ecp = get_ecp_ip(mol)
+    dh1e_ecp = contract('nxij,ij->nx', h1_ecp, dm)
     return 2.0 * dh1e_ecp
+
+def get_hcore(mf, mol, exclude_ecp=False):
+    '''
+    Nuclear gradients of core Hamiltonian
+    '''
+    h = mol.intor('int1e_ipkin', comp=3)
+    if mol._pseudo:
+        NotImplementedError('Nuclear gradients for GTH PP')
+    else:
+        h += mol.intor('int1e_ipnuc', comp=3)
+    h = cp.asarray(h)
+    if not exclude_ecp and mol.has_ecp():
+        h += get_ecp_ip(mol).sum(axis=0)
+    return -h
 
 def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     '''
@@ -260,7 +286,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
     log = logger.Logger(mf_grad.stdout, mf_grad.verbose)
-    t0 = log.init_timer()
+    t0 = t3 = log.init_timer()
 
     mo_energy = gpunp.asarray(mo_energy)
     mo_occ = gpunp.asarray(mo_occ)
@@ -269,15 +295,21 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
     # (\nabla i | hcore | j) - (\nabla i | j)
-    h1 = gpunp.asarray(mf_grad.get_hcore(mol))
-    s1 = gpunp.asarray(mf_grad.get_ovlp(mol))
+    h1 = cp.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
+    s1 = cp.asarray(mf_grad.get_ovlp(mol))
 
     # (i | \nabla hcore | j)
-    t3 = log.init_timer()
     dh1e = int3c2e.get_dh1e(mol, dm0)
 
+    # Calculate ECP contributions in (i | \nabla hcore | j) and 
+    # (\nabla i | hcore | j) simultaneously
     if mol.has_ecp():
-        dh1e += get_dh1e_ecp(mol, dm0)
+        # TODO: slice ecp_atoms
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
+        h1 -= h1_ecp.sum(axis=0)
+
+        dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0)
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
     dvhf = mf_grad.get_veff(mol, dm0)
@@ -309,7 +341,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
 def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     '''
-    derivatives of Hcore in MO bases
+    Calculate derivatives of Hcore in MO bases
     '''
     mf = mf_grad.base
     mol = mf.mol
@@ -338,24 +370,24 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     dh1e = contract('kxjo,jp->kxpo', dh1e, mo_coeff_sorted)
 
     # derivative w.r.t. atomic orbitals
-    h1 = mf_grad.get_hcore(mol)
+    h1 = cp.asarray(mf_grad.get_hcore(mol))
     aoslices = mol.aoslice_by_atom()
-    with_ecp = mol.has_ecp()
-    if with_ecp:
-        ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
-    else:
-        ecp_atoms = ()
+    
     for atm_id in range(natm):
-        shl0, shl1, p0, p1 = aoslices[atm_id]
-        h1ao = numpy.zeros([3,nao,nao])
-        with mol.with_rinv_at_nucleus(atm_id):
-            if with_ecp and atm_id in ecp_atoms:
-                h1ao += mol.intor('ECPscalar_iprinv', comp=3)
-        h1ao[:,p0:p1] += h1[:,p0:p1]
-        h1ao += h1ao.transpose([0,2,1])
-        h1ao = gpunp.asarray(h1ao)
-        h1mo = contract('xij,jo->xio', h1ao, orbo)
-        dh1e[atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff)
+        p0, p1 = aoslices[atm_id][2:]
+        h1mo = contract('xij,jo->xio', h1[:,p0:p1], orbo)
+        dh1e[atm_id] += contract('xio,ip->xpo', h1mo, mo_coeff[p0:p1])
+        h1mo = contract('xij,jp->xpi', h1[:,p0:p1], mo_coeff)
+        dh1e[atm_id] += contract('xpi,io->xpo', h1mo, orbo[p0:p1])
+
+    # Contributions due to ECP
+    if mol.has_ecp():
+        ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+        h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
+        h1_ecp = h1_ecp + h1_ecp.transpose([0,1,3,2])
+        h1mo = contract('nxij,jo->nxio', h1_ecp, orbo)
+        dh1e[ecp_atoms] += contract('nxio,ip->nxpo', h1mo, mo_coeff)
+
     return dh1e
 
 def as_scanner(mf_grad):
@@ -401,7 +433,7 @@ class GradientsBase(lib.StreamObject):
     dump_flags  = rhf_grad_cpu.GradientsBase.dump_flags
 
     reset       = rhf_grad_cpu.GradientsBase.reset
-    get_hcore   = rhf_grad_cpu.GradientsBase.get_hcore
+    get_hcore   = get_hcore
     get_ovlp    = rhf_grad_cpu.GradientsBase.get_ovlp
     get_jk      = NotImplemented
     get_j       = NotImplemented
@@ -428,7 +460,7 @@ class Gradients(GradientsBase):
 
     make_rdm1e = rhf_grad_cpu.Gradients.make_rdm1e
     grad_elec = grad_elec
-
+    
     def get_veff(self, mol=None, dm=None, verbose=None):
         '''
         Computes the first-order derivatives of the energy contributions from

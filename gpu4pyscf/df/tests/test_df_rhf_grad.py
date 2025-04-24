@@ -97,7 +97,7 @@ def _vs_cpu(mol, grid_response=False, tol=1e-9):
     g.auxbasis_response = True
     g.grid_response = grid_response
     g_analy = g.kernel()
-
+    
     g_cpu = g.to_cpu()
     ref = g_cpu.kernel()
     print('CPU - GPU:', abs(g_analy - ref).max())

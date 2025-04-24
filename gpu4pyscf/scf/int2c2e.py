@@ -84,6 +84,7 @@ def get_int2c2e_ip_sorted(mol, auxmol, intopt=None, direct_scf_tol=1e-13, intor=
     '''
     TODO: WIP
     '''
+    raise NotImplementedError
     if stream is None: stream = cupy.cuda.get_current_stream()
     if intopt is None:
         intopt = VHFOpt(mol, auxmol, 'int2e')

@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
+
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
@@ -26,17 +26,41 @@
 // TODO: benchmark performance for 32, 38, 40, 45, 54
 #define GOUT_WIDTH      45
 
-__device__ int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds);
+__device__ int int3c2e_bdiv_unrolled(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds);
 
 __global__
-void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
+#ifdef USE_SYCL
+                         , sycl::nd_item<2> &item, double* rw_buffer
+#endif
+                         )
 {
-    if (int3c2e_bdiv_unrolled(out, envs, bounds)) {
+  #ifdef USE_SYCL
+    int blockDim_x = item.get_local_range(1);
+    int threadIdx_x = item.get_local_id(1);
+    int blockIdx_x = item.get_group(1);
+    int blockIdx_y = item.get_group(0);
+    int gridDim_x = item.get_group_range(1);
+    int gridDim_y = item.get_group_range(0);
+    auto c_g_pair_offsets = s_g_pair_offsets.get();
+    auto c_g_pair_idx = s_g_pair_idx.get();
+    auto c_g_cart_idx = s_g_cart_idx.get();
+  #else
+    int blockDim_x = blockDim.x;
+    int threadIdx_x = threadIdx.x;
+    int blockIdx_x = blockIdx.x;
+    int blockIdx_y = blockIdx.y;
+    int gridDim_x = gridDim.x;
+    int gridDim_y = gridDim.y;
+    extern __shared__ double rw_buffer[];
+  #endif
+
+    if (int3c2e_bdiv_unrolled(rw_buffer, out, envs, bounds)) {
         return;
     }
     // For better load balance, consume blocks in the reversed order
-    int sp_block_id = gridDim.x - blockIdx.x - 1;
-    int ksh_block_id = gridDim.y - blockIdx.y - 1;
+    int sp_block_id = gridDim_x - blockIdx_x - 1;
+    int ksh_block_id = gridDim_y - blockIdx_y - 1;
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
@@ -74,12 +98,12 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     int ijprim = iprim * jprim;
     int ijkprim = ijprim * kprim;
 
-    int nst_per_block = blockDim.x;
+    int nst_per_block = blockDim_x;
     if (lij + lk > 2) {
         nst_per_block = bounds.nst_lookup[(lk*LMAX1+lj)*LMAX1+li];
     }
-    int gout_stride = blockDim.x / nst_per_block;
-    int thread_id = threadIdx.x;
+    int gout_stride = blockDim_x / nst_per_block;
+    int thread_id = threadIdx_x;
     int st_id = thread_id % nst_per_block;
     int gout_id = thread_id / nst_per_block;
     double *env = envs.env;
@@ -88,7 +112,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
         nroots *= 2;
     }
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *g = rw + nst_per_block * nroots*2;
     double *gx = g;

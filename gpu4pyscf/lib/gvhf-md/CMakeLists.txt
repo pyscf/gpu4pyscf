@@ -1,7 +1,8 @@
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
 add_library(gvhf_md SHARED
-  md_contract_j.cu md_j_driver.cu md_pairdata.c unrolled_md_j.cu
+  md_contract_j.cu unrolled_md_j.cu
+  md_indices.cu md_j_driver.cu md_pairdata.c 
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

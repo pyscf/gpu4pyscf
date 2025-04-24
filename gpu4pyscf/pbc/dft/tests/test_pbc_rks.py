@@ -98,8 +98,8 @@ class KnownValues(unittest.TestCase):
     def test_gga_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='pbe0', kpt=k).run()
-        mf_ref = mf.to_cpu().run()
+        mf = pbcdft.RKS(cell, xc='pbe0', kpt=k).run(conv_tol=1e-10)
+        mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
         # test bands
@@ -113,8 +113,8 @@ class KnownValues(unittest.TestCase):
     def test_rsh_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='camb3lyp', kpt=k).run(conv_tol=1e-8)
-        mf_ref = mf.to_cpu().run()
+        mf = pbcdft.RKS(cell, xc='camb3lyp', kpt=k).run(conv_tol=1e-10)
+        mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
         # test bands

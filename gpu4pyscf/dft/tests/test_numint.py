@@ -75,12 +75,15 @@ class KnownValues(unittest.TestCase):
     def _check_vxc(self, method, xc):
         ni = NumInt()
         fn = getattr(ni, method)
-        n, e, v = fn(mol, grids_gpu, xc, dm1, hermi=1)
+        dm = dm1
+        if method == 'nr_rks':
+            dm = dm0
+        n, e, v = fn(mol, grids_gpu, xc, dm, hermi=1)
         v = [x.get() for x in v]
 
         ni_pyscf = pyscf_numint()
         fn = getattr(ni_pyscf, method)
-        nref, eref, vref = fn(mol, grids_cpu, xc, dm1, hermi=1)
+        nref, eref, vref = fn(mol, grids_cpu, xc, dm, hermi=1)
 
         v = gpunp.asarray(v)
         vref = gpunp.asarray(vref)

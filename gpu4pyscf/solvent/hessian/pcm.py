@@ -21,10 +21,12 @@ import numpy
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     import cupy as gpunp
+    from gpu4pyscf.lib.cupy_helper import contract
 else:
     import dpnp as gpunp
     from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
     from dpctl._sycl_queue_manager import get_device_cached_queue
+    from gpu4pyscf.lib.dpnp_helper import contract
 import ctypes
 from pyscf import lib, gto
 from gpu4pyscf import scf
@@ -38,6 +40,7 @@ from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ipip1, int1e_grids_ipvip1, in
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from pyscf import lib as pyscf_lib
+
 
 def gradgrad_switch_h(x):
     ''' 2nd derivative of h(x) '''
@@ -88,8 +91,8 @@ def get_d2F_d2A(surface):
         d2fiJ = gradgrad_switch_h(diJ)
         terms_size_ngrids_natm = d2fiJ / (norm_si_rJ**2 * R_sw_J) - dfiJ / (norm_si_rJ**3)
         si_rJJ = si_rJ[:, :, :, gpunp.newaxis] * si_rJ[:, :, gpunp.newaxis, :]
-        d2fiJK_diagonal = gpunp.einsum('qA,qAdD->qAdD', terms_size_ngrids_natm, si_rJJ)
-        d2fiJK_diagonal += gpunp.einsum('qA,dD->qAdD', dfiJ / norm_si_rJ, gpunp.eye(3))
+        d2fiJK_diagonal = contract('qA,qAdD->qAdD', terms_size_ngrids_natm, si_rJJ)
+        d2fiJK_diagonal += contract('qA,dD->qAdD', dfiJ / norm_si_rJ, gpunp.eye(3))
         d2fiJK_diagonal /= (fiJ * R_sw_J)[:, :, gpunp.newaxis, gpunp.newaxis]
 
         d2fiJK = d2fiJK_offdiagonal
@@ -99,18 +102,18 @@ def get_d2F_d2A(surface):
         Fi = switch_fun[p0:p1]
         Ai = area[p0:p1]
 
-        d2F[p0:p1, :, :, :, :] += gpunp.einsum('q,qABdD->qABdD', Fi, d2fiJK)
-        d2A[p0:p1, :, :, :, :] += gpunp.einsum('q,qABdD->qABdD', Ai, d2fiJK)
+        d2F[p0:p1, :, :, :, :] += contract('q,qABdD->qABdD', Fi, d2fiJK)
+        d2A[p0:p1, :, :, :, :] += contract('q,qABdD->qABdD', Ai, d2fiJK)
 
         d2fiJK_grid_atom_offdiagonal = -gpunp.einsum('qABdD->qAdD', d2fiJK)
-        d2F[p0:p1, i_grid_atom, :, :, :] = gpunp.einsum('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
-        d2F[p0:p1, :, i_grid_atom, :, :] = gpunp.einsum('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal)
-        d2A[p0:p1, i_grid_atom, :, :, :] = gpunp.einsum('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
-        d2A[p0:p1, :, i_grid_atom, :, :] = gpunp.einsum('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal)
+        d2F[p0:p1, i_grid_atom, :, :, :] = contract('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
+        d2F[p0:p1, :, i_grid_atom, :, :] = contract('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal)
+        d2A[p0:p1, i_grid_atom, :, :, :] = contract('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
+        d2A[p0:p1, :, i_grid_atom, :, :] = contract('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal)
 
         d2fiJK_grid_atom_diagonal = -gpunp.einsum('qAdD->qdD', d2fiJK_grid_atom_offdiagonal)
-        d2F[p0:p1, i_grid_atom, i_grid_atom, :, :] = gpunp.einsum('q,qdD->qdD', Fi, d2fiJK_grid_atom_diagonal)
-        d2A[p0:p1, i_grid_atom, i_grid_atom, :, :] = gpunp.einsum('q,qdD->qdD', Ai, d2fiJK_grid_atom_diagonal)
+        d2F[p0:p1, i_grid_atom, i_grid_atom, :, :] = contract('q,qdD->qdD', Fi, d2fiJK_grid_atom_diagonal)
+        d2A[p0:p1, i_grid_atom, i_grid_atom, :, :] = contract('q,qdD->qdD', Ai, d2fiJK_grid_atom_diagonal)
 
     d2F = d2F.transpose(1,2,3,4,0)
     d2A = d2A.transpose(1,2,3,4,0)
@@ -286,8 +289,8 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     d2I_dA2 = int1e_grids_ipip1(mol, grid_coords, charges = q_sym, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
         p0,p1 = aoslice[i_atom, 2:]
-        d2e_from_d2I[i_atom, i_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[p0:p1, :], d2I_dA2[:, :, p0:p1, :])
-        d2e_from_d2I[i_atom, i_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[:, p0:p1], d2I_dA2[:, :, p0:p1, :].transpose(0,1,3,2))
+        d2e_from_d2I[i_atom, i_atom, :, :] += contract('ij,dDij->dD', dm[p0:p1, :], d2I_dA2[:, :, p0:p1, :])
+        d2e_from_d2I[i_atom, i_atom, :, :] += contract('ij,dDij->dD', dm[:, p0:p1], d2I_dA2[:, :, p0:p1, :].transpose(0,1,3,2))
     d2I_dA2 = None
 
     # d2I_dAdB = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1', direct_scf_tol=1e-14)
@@ -298,8 +301,8 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
         pi0,pi1 = aoslice[i_atom, 2:]
         for j_atom in range(mol.natm):
             pj0,pj1 = aoslice[j_atom, 2:]
-            d2e_from_d2I[i_atom, j_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[pi0:pi1, pj0:pj1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1])
-            d2e_from_d2I[i_atom, j_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[pj0:pj1, pi0:pi1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1].transpose(0,1,3,2))
+            d2e_from_d2I[i_atom, j_atom, :, :] += contract('ij,dDij->dD', dm[pi0:pi1, pj0:pj1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1])
+            d2e_from_d2I[i_atom, j_atom, :, :] += contract('ij,dDij->dD', dm[pj0:pj1, pi0:pi1], d2I_dAdB[:, :, pi0:pi1, pj0:pj1].transpose(0,1,3,2))
     d2I_dAdB = None
 
     for j_atom in range(mol.natm):
@@ -311,11 +314,11 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
 
         for i_atom in range(mol.natm):
             p0,p1 = aoslice[i_atom, 2:]
-            d2e_from_d2I[i_atom, j_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :])
-            d2e_from_d2I[i_atom, j_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(0,1,3,2))
+            d2e_from_d2I[i_atom, j_atom, :, :] += contract('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :])
+            d2e_from_d2I[i_atom, j_atom, :, :] += contract('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(0,1,3,2))
 
-            d2e_from_d2I[j_atom, i_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,2,3))
-            d2e_from_d2I[j_atom, i_atom, :, :] += gpunp.einsum('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,3,2))
+            d2e_from_d2I[j_atom, i_atom, :, :] += contract('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,2,3))
+            d2e_from_d2I[j_atom, i_atom, :, :] += contract('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,3,2))
     d2I_dAdC = None
 
     # d2I_dC2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip2', direct_scf_tol=1e-14)
@@ -341,17 +344,17 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     t1 = log.timer_debug1('solvent hessian d(dI/dx * q)/dx contribution', *t1)
     return d2e
 
-def einsum_ij_Adj_Adi_inverseK(K, Adj_term):
+def einsum_ij_Adj_Adi_inverseK(pcmobj, Adj_term, K_transpose = False):
     nA, nd, nj = Adj_term.shape
-    # return gpunp.einsum('ij,Adj->Adi', gpunp.linalg.inv(K), Adj_term)
-    return gpunp.linalg.solve(K, Adj_term.reshape(nA * nd, nj).T).T.reshape(nA, nd, nj)
-def einsum_Adi_ij_Adj_inverseK(Adi_term, K):
-    nA, nd, nj = Adi_term.shape
-    # return gpunp.einsum('Adi,ij->Adj', Adi_term, gpunp.linalg.inv(K))
-    return gpunp.linalg.solve(K.T, Adi_term.reshape(nA * nd, nj).T).T.reshape(nA, nd, nj)
+    # return cupy.einsum('ij,Adj->Adi', cupy.linalg.inv(K), Adj_term)
+    # return cupy.linalg.solve(K, Adj_term.reshape(nA * nd, nj).T).T.reshape(nA, nd, nj)
+    return pcmobj.left_solve_K(Adj_term.reshape(nA * nd, nj).T, K_transpose = K_transpose).T.reshape(nA, nd, nj)
+def einsum_Adi_ij_Adj_inverseK(Adi_term, pcmobj, K_transpose = False):
+    # return cupy.einsum('Adi,ij->Adj', Adi_term, cupy.linalg.inv(K))
+    return einsum_ij_Adj_Adi_inverseK(pcmobj, Adi_term, K_transpose = not K_transpose)
 
 def get_dS_dot_q(dS, dSii, q, atmlst, gridslice):
-    output = gpunp.einsum('diA,i->Adi', dSii[:,:,atmlst], q)
+    output = contract('diA,i->Adi', dSii[:,:,atmlst], q)
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
         output[i_atom, :, g0:g1] += dS[:,g0:g1,:] @ q
@@ -362,7 +365,7 @@ def get_dST_dot_q(dS, dSii, q, atmlst, gridslice):
     return get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
 
 def get_dA_dot_q(dA, q, atmlst):
-    return gpunp.einsum('diA,i->Adi', dA[:,:,atmlst], q)
+    return contract('diA,i->Adi', dA[:,:,atmlst], q)
 
 def get_dD_dot_q(dD, q, atmlst, gridslice, ngrids):
     output = gpunp.zeros([len(atmlst), 3, ngrids])
@@ -380,7 +383,7 @@ def get_v_dot_d2S_dot_q(d2S, d2Sii, v_left, q_right, natom, gridslice):
         gi0,gi1 = gridslice[i_atom]
         for j_atom in range(natom):
             gj0,gj1 = gridslice[j_atom]
-            d2S_atom_ij = gpunp.einsum('q,dDq->dD', v_left[gi0:gi1], d2S[:,:,gi0:gi1,gj0:gj1] @ q_right[gj0:gj1])
+            d2S_atom_ij = contract('q,dDq->dD', v_left[gi0:gi1], d2S[:,:,gi0:gi1,gj0:gj1] @ q_right[gj0:gj1])
             output[i_atom, i_atom, :, :] += d2S_atom_ij
             output[j_atom, j_atom, :, :] += d2S_atom_ij
             output[i_atom, j_atom, :, :] -= d2S_atom_ij
@@ -399,7 +402,7 @@ def get_v_dot_d2D_dot_q(d2D, v_left, q_right, natom, gridslice):
         gi0,gi1 = gridslice[i_atom]
         for j_atom in range(natom):
             gj0,gj1 = gridslice[j_atom]
-            d2D_atom_ij = gpunp.einsum('q,dDq->dD', v_left[gi0:gi1], d2D[:,:,gi0:gi1,gj0:gj1] @ q_right[gj0:gj1])
+            d2D_atom_ij = contract('q,dDq->dD', v_left[gi0:gi1], d2D[:,:,gi0:gi1,gj0:gj1] @ q_right[gj0:gj1])
             output[i_atom, i_atom, :, :] += d2D_atom_ij
             output[j_atom, j_atom, :, :] += d2D_atom_ij
             output[i_atom, j_atom, :, :] -= d2D_atom_ij
@@ -425,33 +428,32 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
     gridslice    = pcmobj.surface['gslice_by_atom']
     v_grids      = pcmobj._intermediates['v_grids']
-    A            = pcmobj._intermediates['A']
-    D            = pcmobj._intermediates['D']
-    S            = pcmobj._intermediates['S']
-    K            = pcmobj._intermediates['K']
-    R            = pcmobj._intermediates['R']
     q            = pcmobj._intermediates['q']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
+    if not pcmobj.if_method_in_CPCM_category:
+        A = pcmobj._intermediates['A']
+        D = pcmobj._intermediates['D']
+        S = pcmobj._intermediates['S']
 
     ngrids = q.shape[0]
 
-    vK_1 = gpunp.linalg.solve(K.T, v_grids)
+    vK_1 = pcmobj.left_solve_K(v_grids, K_transpose = True)
 
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
-        dF, _ = get_dF_dA(pcmobj.surface)
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False)
         dSii = get_dSii(pcmobj.surface, dF)
 
         # dR = 0, dK = dS
         # d(S-1 R) = - S-1 dS S-1 R
         # d2(S-1 R) = (S-1 dS S-1 dS S-1 R) + (S-1 dS S-1 dS S-1 R) - (S-1 d2S S-1 R)
         dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
-        S_1_dSdx_dot_q = einsum_ij_Adj_Adi_inverseK(K, dSdx_dot_q)
+        S_1_dSdx_dot_q = einsum_ij_Adj_Adi_inverseK(pcmobj, dSdx_dot_q)
         dSdx_dot_q = None
         VS_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
         dS = None
         dSii = None
-        d2e_from_d2KR = gpunp.einsum('Adi,BDi->ABdD', VS_1_dot_dSdx, S_1_dSdx_dot_q) * 2
+        d2e_from_d2KR = contract('Adi,BDi->ABdD', VS_1_dot_dSdx, S_1_dSdx_dot_q) * 2
 
         _, d2S = get_d2D_d2S(pcmobj.surface, with_D=False, with_S=True)
         d2F, _ = get_d2F_d2A(pcmobj.surface)
@@ -463,7 +465,8 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         d2Sii = None
 
         dK_1Rv = -S_1_dSdx_dot_q
-        dvK_1R = -einsum_Adi_ij_Adj_inverseK(VS_1_dot_dSdx, K) @ R
+        R = -f_epsilon
+        dvK_1R = -einsum_Adi_ij_Adj_inverseK(VS_1_dot_dSdx, pcmobj) * R
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
@@ -485,27 +488,27 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
         dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
         DA = D*A
-        dKdx_dot_q = dSdx_dot_q - f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
+        dKdx_dot_q = dSdx_dot_q - f_eps_over_2pi * contract('ij,Adj->Adi', DA, dSdx_dot_q)
         dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
-        dKdx_dot_q -= f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
+        dKdx_dot_q -= f_eps_over_2pi * contract('ij,Adj->Adi', D, dAdx_dot_Sq)
         AS = (A * S.T).T # It's just diag(A) @ S
         ASq = AS @ q
         dDdx_dot_ASq = get_dD_dot_q(dD, ASq, atmlst, gridslice, ngrids)
         dKdx_dot_q -= f_eps_over_2pi * dDdx_dot_ASq
         dDdx_dot_ASq = None
 
-        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
         dKdx_dot_q = None
 
         vK_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
         vK_1_dot_dKdx = vK_1_dot_dSdx
         vK_1_dot_dSdx = None
         vK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
-        vK_1_dot_dKdx -= f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', AS.T, vK_1_dot_dDdx)
+        vK_1_dot_dKdx -= f_eps_over_2pi * contract('ij,Adj->Adi', AS.T, vK_1_dot_dDdx)
         AS = None
         vK_1D = D.T @ vK_1
         vK_1D_dot_dAdx = get_dA_dot_q(dA, vK_1D, atmlst)
-        vK_1_dot_dKdx -= f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', S.T, vK_1D_dot_dAdx)
+        vK_1_dot_dKdx -= f_eps_over_2pi * contract('ij,Adj->Adi', S.T, vK_1D_dot_dAdx)
         vK_1DA = DA.T @ vK_1
         DA = None
         vK_1DA_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1DA, atmlst, gridslice)
@@ -514,8 +517,8 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         vK_1_dot_dKdx -= f_eps_over_2pi * vK_1DA_dot_dSdx
         vK_1DA_dot_dSdx = None
 
-        d2e_from_d2KR  = gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
-        d2e_from_d2KR += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+        d2e_from_d2KR  = contract('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+        d2e_from_d2KR += contract('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
 
         d2F, d2A = get_d2F_d2A(pcmobj.surface)
         vK_1_d2K_q  = get_v_dot_d2A_dot_q(d2A, vK_1D, S @ q)
@@ -529,12 +532,12 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         vK_1_d2R_V += get_v_dot_d2D_dot_q(d2D, vK_1, A * v_grids, natom, gridslice)
         d2D = None
         vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1DA, q, natom, gridslice)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx * A, dSdx_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dDdx * A, dSdx_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1_dot_dDdx * A, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1_dot_dDdx * A, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
         vK_1_d2K_q *= -f_eps_over_2pi
         vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, natom, gridslice)
         d2S = None
@@ -544,17 +547,17 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
         dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
         dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
-        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_V))
+        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + contract('ij,Adj->Adi', D, dAdx_dot_V))
         dDdx_dot_AV = None
 
-        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
         dRdx_dot_V = None
 
-        d2e_from_d2KR -= gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
-        d2e_from_d2KR -= gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+        d2e_from_d2KR -= contract('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+        d2e_from_d2KR -= contract('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
 
-        vK_1_d2R_V += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_V)
-        vK_1_d2R_V += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V += contract('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V += contract('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_V)
         vK_1_d2R_V *= f_eps_over_2pi
 
         d2e_from_d2KR += vK_1_d2R_V
@@ -565,7 +568,9 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         VK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
         VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
 
-        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, K) @ R + VK_1_dot_dRdx
+        DA = D*A
+        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, pcmobj) @ R + VK_1_dot_dRdx
 
     elif pcmobj.method.upper() in ['SS(V)PE']:
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
@@ -583,33 +588,33 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
         dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
         DA = D*A
-        dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
+        dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * contract('ij,Adj->Adi', DA, dSdx_dot_q)
         dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
-        dKdx_dot_q -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
+        dKdx_dot_q -= f_eps_over_4pi * contract('ij,Adj->Adi', D, dAdx_dot_Sq)
         AS = (A * S.T).T # It's just diag(A) @ S
         ASq = AS @ q
         dDdx_dot_ASq = get_dD_dot_q(dD, ASq, atmlst, gridslice, ngrids)
         dKdx_dot_q -= f_eps_over_4pi * dDdx_dot_ASq
         dDdx_dot_ASq = None
         dDdxT_dot_q = get_dDT_dot_q(dD, q, atmlst, gridslice, ngrids)
-        dKdx_dot_q -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', AS.T, dDdxT_dot_q)
+        dKdx_dot_q -= f_eps_over_4pi * contract('ij,Adj->Adi', AS.T, dDdxT_dot_q)
         dAdxT_dot_DT_q = get_dA_dot_q(dA, D.T @ q, atmlst)
-        dKdx_dot_q -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', S.T, dAdxT_dot_DT_q)
+        dKdx_dot_q -= f_eps_over_4pi * contract('ij,Adj->Adi', S.T, dAdxT_dot_DT_q)
         AT_DT_q = DA.T @ q
         dSdxT_dot_AT_DT_q = get_dS_dot_q(dS, dSii, AT_DT_q, atmlst, gridslice)
         dKdx_dot_q -= f_eps_over_4pi * dSdxT_dot_AT_DT_q
         dSdxT_dot_AT_DT_q = None
 
-        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        K_1_dot_dKdx_dot_q = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
         dKdx_dot_q = None
 
         vK_1_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1, atmlst, gridslice)
         vK_1_dot_dKdx = vK_1_dot_dSdx
         vK_1_dot_dSdx = None
         vK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
-        vK_1_dot_dKdx -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', AS.T, vK_1_dot_dDdx)
+        vK_1_dot_dKdx -= f_eps_over_4pi * contract('ij,Adj->Adi', AS.T, vK_1_dot_dDdx)
         vK_1D_dot_dAdx = get_dA_dot_q(dA, D.T @ vK_1, atmlst)
-        vK_1_dot_dKdx -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', S.T, vK_1D_dot_dAdx)
+        vK_1_dot_dKdx -= f_eps_over_4pi * contract('ij,Adj->Adi', S.T, vK_1D_dot_dAdx)
         vK_1DA = DA.T @ vK_1
         vK_1DA_dot_dSdx = get_dST_dot_q(dS, dSii, vK_1DA, atmlst, gridslice)
         vK_1_dot_dKdx -= f_eps_over_4pi * vK_1DA_dot_dSdx
@@ -617,18 +622,18 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         vK_1_dot_dSdxT = get_dS_dot_q(dS, dSii, vK_1, atmlst, gridslice)
         dS = None
         dSii = None
-        vK_1_dot_dKdx -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', DA, vK_1_dot_dSdxT)
+        vK_1_dot_dKdx -= f_eps_over_4pi * contract('ij,Adj->Adi', DA, vK_1_dot_dSdxT)
         DA = None
         vK_1_ST_dot_dAdxT = get_dA_dot_q(dA, (S @ vK_1).T, atmlst)
-        vK_1_dot_dKdx -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', D, vK_1_ST_dot_dAdxT)
+        vK_1_dot_dKdx -= f_eps_over_4pi * contract('ij,Adj->Adi', D, vK_1_ST_dot_dAdxT)
         vK_1_ST_AT = AS @ vK_1
         AS = None
         vK_1_ST_AT_dot_dDdxT = get_dD_dot_q(dD, vK_1_ST_AT, atmlst, gridslice, ngrids)
         vK_1_dot_dKdx -= f_eps_over_4pi * vK_1_ST_AT_dot_dDdxT
         vK_1_ST_AT_dot_dDdxT = None
 
-        d2e_from_d2KR  = gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
-        d2e_from_d2KR += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+        d2e_from_d2KR  = contract('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
+        d2e_from_d2KR += contract('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
 
         d2F, d2A = get_d2F_d2A(pcmobj.surface)
         vK_1_d2K_q  = get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, S @ q)
@@ -645,18 +650,18 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         d2D = None
         vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1DA, q, natom, gridslice)
         vK_1_d2K_q += get_v_dot_d2ST_dot_q(d2S, d2Sii, vK_1, AT_DT_q, natom, gridslice)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx * A, dSdx_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dSdxT * A, dDdxT_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->ABdD', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dDdx * A, dSdx_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dSdxT * A, dDdxT_dot_q)
-        vK_1_d2K_q += gpunp.einsum('Adi,BDi->BADd', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1_dot_dDdx * A, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1_dot_dSdxT * A, dDdxT_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->ABdD', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_Sq)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1_dot_dDdx * A, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1D_dot_dAdx, dSdx_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1_dot_dSdxT, dAdxT_dot_DT_q)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1_dot_dSdxT * A, dDdxT_dot_q)
+        vK_1_d2K_q += contract('Adi,BDi->BADd', vK_1_ST_dot_dAdxT, dDdxT_dot_q)
         vK_1_d2K_q *= -f_eps_over_4pi
         vK_1_d2K_q += get_v_dot_d2S_dot_q(d2S, d2Sii, vK_1, q, natom, gridslice)
         d2S = None
@@ -666,16 +671,16 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
         dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
         dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
-        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_V))
+        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + contract('ij,Adj->Adi', D, dAdx_dot_V))
         dDdx_dot_AV = None
 
-        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        K_1_dot_dRdx_dot_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
 
-        d2e_from_d2KR -= gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
-        d2e_from_d2KR -= gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+        d2e_from_d2KR -= contract('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
+        d2e_from_d2KR -= contract('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dRdx_dot_V)
 
-        vK_1_d2R_V += gpunp.einsum('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_V)
-        vK_1_d2R_V += gpunp.einsum('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V += contract('Adi,BDi->ABdD', vK_1_dot_dDdx, dAdx_dot_V)
+        vK_1_d2R_V += contract('Adi,BDi->BADd', vK_1_dot_dDdx, dAdx_dot_V)
         vK_1_d2R_V *= f_eps_over_2pi
 
         d2e_from_d2KR += vK_1_d2R_V
@@ -686,7 +691,9 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         VK_1_dot_dDdx = get_dDT_dot_q(dD, vK_1, atmlst, gridslice, ngrids)
         VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
 
-        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, K) @ R + VK_1_dot_dRdx
+        DA = D*A
+        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, pcmobj) @ R + VK_1_dot_dRdx
 
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
@@ -697,8 +704,8 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
     intopt_derivative.build(cutoff = 1e-14, aosym = False)
 
     dVdx = get_dvgrids(pcmobj, dm, range(mol.natm), intopt_derivative)
-    d2e -= gpunp.einsum('Adi,BDi->BADd', dvK_1R, dVdx)
-    d2e -= gpunp.einsum('Adi,BDi->ABdD', dVdx, dK_1Rv)
+    d2e -= contract('Adi,BDi->BADd', dvK_1R, dVdx)
+    d2e -= contract('Adi,BDi->ABdD', dVdx, dK_1Rv)
 
     d2e *= 0.5
     d2e = d2e.get()
@@ -710,27 +717,26 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
 
     gridslice    = pcmobj.surface['gslice_by_atom']
     v_grids      = pcmobj._intermediates['v_grids']
-    A            = pcmobj._intermediates['A']
-    D            = pcmobj._intermediates['D']
-    S            = pcmobj._intermediates['S']
-    K            = pcmobj._intermediates['K']
-    R            = pcmobj._intermediates['R']
     q            = pcmobj._intermediates['q']
     q_sym        = pcmobj._intermediates['q_sym']
     f_epsilon    = pcmobj._intermediates['f_epsilon']
+    if not pcmobj.if_method_in_CPCM_category:
+        A = pcmobj._intermediates['A']
+        D = pcmobj._intermediates['D']
+        S = pcmobj._intermediates['S']
 
     ngrids = q_sym.shape[0]
 
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
-        dF, _ = get_dF_dA(pcmobj.surface)
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False)
         dSii = get_dSii(pcmobj.surface, dF)
         dF = None
 
         # dR = 0, dK = dS
         dSdx_dot_q = get_dS_dot_q(dS, dSii, q_sym, atmlst, gridslice)
 
-        dqdx_fix_Vq = einsum_ij_Adj_Adi_inverseK(K, dSdx_dot_q)
+        dqdx_fix_Vq = einsum_ij_Adj_Adi_inverseK(pcmobj, dSdx_dot_q)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dF, dA = get_dF_dA(pcmobj.surface)
@@ -746,42 +752,43 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
 
         DA = D*A
-        dKdx_dot_q = dSdx_dot_q - f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
+        dKdx_dot_q = dSdx_dot_q - f_eps_over_2pi * contract('ij,Adj->Adi', DA, dSdx_dot_q)
 
         dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
-        dKdx_dot_q -= f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
+        dKdx_dot_q -= f_eps_over_2pi * contract('ij,Adj->Adi', D, dAdx_dot_Sq)
 
         AS = (A * S.T).T # It's just diag(A) @ S
         dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice, ngrids)
         dKdx_dot_q -= f_eps_over_2pi * dDdx_dot_ASq
 
-        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
 
         dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
 
         dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
 
-        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_V))
-        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + contract('ij,Adj->Adi', D, dAdx_dot_V))
+        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
 
-        invKT_V = gpunp.linalg.solve(K.T, v_grids)
+        invKT_V = pcmobj.left_solve_K(v_grids, K_transpose = True)
         dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice, ngrids)
 
         DT_invKT_V = D.T @ invKT_V
         dAdxT_dot_DT_invKT_V = get_dA_dot_q(dA, DT_invKT_V, atmlst)
-        dqdx_fix_Vq += f_eps_over_2pi * (gpunp.einsum('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
+        dqdx_fix_Vq += f_eps_over_2pi * (contract('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
 
         dSdxT_dot_invKT_V = get_dST_dot_q(dS, dSii, invKT_V, atmlst, gridslice)
         dKdxT_dot_invKT_V = dSdxT_dot_invKT_V
 
-        dKdxT_dot_invKT_V -= f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', AS.T, dDdxT_dot_invKT_V)
-        dKdxT_dot_invKT_V -= f_eps_over_2pi * gpunp.einsum('ij,Adj->Adi', S.T, dAdxT_dot_DT_invKT_V)
+        dKdxT_dot_invKT_V -= f_eps_over_2pi * contract('ij,Adj->Adi', AS.T, dDdxT_dot_invKT_V)
+        dKdxT_dot_invKT_V -= f_eps_over_2pi * contract('ij,Adj->Adi', S.T, dAdxT_dot_DT_invKT_V)
 
         dSdxT_dot_AT_DT_invKT_V = get_dST_dot_q(dS, dSii, DA.T @ invKT_V, atmlst, gridslice)
         dKdxT_dot_invKT_V -= f_eps_over_2pi * dSdxT_dot_AT_DT_invKT_V
-        invKT_dKdxT_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(K.T, dKdxT_dot_invKT_V)
+        invKT_dKdxT_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdxT_dot_invKT_V, K_transpose = True)
 
-        dqdx_fix_Vq += -gpunp.einsum('ij,Adj->Adi', R.T, invKT_dKdxT_dot_invKT_V)
+        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        dqdx_fix_Vq += -contract('ij,Adj->Adi', R.T, invKT_dKdxT_dot_invKT_V)
 
         dqdx_fix_Vq *= -0.5
 
@@ -793,25 +800,25 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
 
         f_eps_over_4pi = f_epsilon/(4.0*PI)
+        DA = D*A
 
         def dK_dot_q(q):
             dSdx_dot_q = get_dS_dot_q(dS, dSii, q, atmlst, gridslice)
 
-            DA = D*A
-            dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', DA, dSdx_dot_q)
+            dKdx_dot_q = dSdx_dot_q - f_eps_over_4pi * contract('ij,Adj->Adi', DA, dSdx_dot_q)
 
             dAdx_dot_Sq = get_dA_dot_q(dA, S @ q, atmlst)
-            dKdx_dot_q -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_Sq)
+            dKdx_dot_q -= f_eps_over_4pi * contract('ij,Adj->Adi', D, dAdx_dot_Sq)
 
             AS = (A * S.T).T # It's just diag(A) @ S
             dDdx_dot_ASq = get_dD_dot_q(dD, AS @ q, atmlst, gridslice, ngrids)
             dKdx_dot_q -= f_eps_over_4pi * dDdx_dot_ASq
 
             dDdxT_dot_q = get_dDT_dot_q(dD, q, atmlst, gridslice, ngrids)
-            dKdx_dot_q -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', AS.T, dDdxT_dot_q)
+            dKdx_dot_q -= f_eps_over_4pi * contract('ij,Adj->Adi', AS.T, dDdxT_dot_q)
 
             dAdxT_dot_DT_q = get_dA_dot_q(dA, D.T @ q, atmlst)
-            dKdx_dot_q -= f_eps_over_4pi * gpunp.einsum('ij,Adj->Adi', S.T, dAdxT_dot_DT_q)
+            dKdx_dot_q -= f_eps_over_4pi * contract('ij,Adj->Adi', S.T, dAdxT_dot_DT_q)
 
             dSdxT_dot_AT_DT_q = get_dST_dot_q(dS, dSii, DA.T @ q, atmlst, gridslice)
             dKdx_dot_q -= f_eps_over_4pi * dSdxT_dot_AT_DT_q
@@ -821,26 +828,27 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         f_eps_over_2pi = f_epsilon/(2.0*PI)
 
         dKdx_dot_q = dK_dot_q(q)
-        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(K, dKdx_dot_q)
+        dqdx_fix_Vq = -einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_q)
 
         dAdx_dot_V = get_dA_dot_q(dA, v_grids, atmlst)
 
         dDdx_dot_AV = get_dD_dot_q(dD, A * v_grids, atmlst, gridslice, ngrids)
 
-        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + gpunp.einsum('ij,Adj->Adi', D, dAdx_dot_V))
-        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(K, dRdx_dot_V)
+        dRdx_dot_V = f_eps_over_2pi * (dDdx_dot_AV + contract('ij,Adj->Adi', D, dAdx_dot_V))
+        dqdx_fix_Vq += einsum_ij_Adj_Adi_inverseK(pcmobj, dRdx_dot_V)
 
-        invKT_V = gpunp.linalg.solve(K.T, v_grids)
+        invKT_V = pcmobj.left_solve_K(v_grids, K_transpose = True)
         dDdxT_dot_invKT_V = get_dDT_dot_q(dD, invKT_V, atmlst, gridslice, ngrids)
 
         DT_invKT_V = D.T @ invKT_V
         dAdxT_dot_DT_invKT_V = get_dA_dot_q(dA, DT_invKT_V, atmlst)
-        dqdx_fix_Vq += f_eps_over_2pi * (gpunp.einsum('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
+        dqdx_fix_Vq += f_eps_over_2pi * (contract('i,Adi->Adi', A, dDdxT_dot_invKT_V) + dAdxT_dot_DT_invKT_V)
 
         dKdx_dot_invKT_V = dK_dot_q(invKT_V)
-        invKT_dKdx_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(K.T, dKdx_dot_invKT_V)
+        invKT_dKdx_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_invKT_V, K_transpose = True)
 
-        dqdx_fix_Vq += -gpunp.einsum('ij,Adj->Adi', R.T, invKT_dKdx_dot_invKT_V)
+        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        dqdx_fix_Vq += -contract('ij,Adj->Adi', R.T, invKT_dKdx_dot_invKT_V)
 
         dqdx_fix_Vq *= -0.5
 
@@ -866,13 +874,13 @@ def get_dvgrids(pcmobj, dm, atmlst, intopt_derivative):
     int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
     v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
     v_ng_ip1 = gpunp.array(v_ng_ip1)
-    dV_on_charge_dx = gpunp.einsum('dAq,A->Adq', v_ng_ip1, atom_charges)
+    dV_on_charge_dx = contract('dAq,A->Adq', v_ng_ip1, atom_charges)
 
     v_ng_ip2 = gto.mole.intor_cross(int2c2e_ip1, fakemol, fakemol_nuc)
     v_ng_ip2 = gpunp.array(v_ng_ip2)
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
-        dV_on_charge_dx[i_atom,:,g0:g1] += gpunp.einsum('dqA,A->dq', v_ng_ip2[:,g0:g1,:], atom_charges)
+        dV_on_charge_dx[i_atom,:,g0:g1] += contract('dqA,A->dq', v_ng_ip2[:,g0:g1,:], atom_charges)
 
     dIdA = int1e_grids_ip1(mol, grid_coords, dm = dm + dm.T, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     dV_on_charge_dx[atmlst,:,:] -= dIdA[atmlst,:,:]
@@ -886,12 +894,26 @@ def get_dvgrids(pcmobj, dm, atmlst, intopt_derivative):
 
 def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, intopt_derivative):
     dV_on_charge_dx = get_dvgrids(pcmobj, dm, atmlst, intopt_derivative)
-    K = pcmobj._intermediates['K']
-    R = pcmobj._intermediates['R']
-    R_dVdx = gpunp.einsum('ij,Adj->Adi', R, dV_on_charge_dx)
-    K_1_R_dVdx = einsum_ij_Adj_Adi_inverseK(K, R_dVdx)
-    K_1T_dVdx = einsum_ij_Adj_Adi_inverseK(K.T, dV_on_charge_dx)
-    RT_K_1T_dVdx = gpunp.einsum('ij,Adj->Adi', R.T, K_1T_dVdx)
+
+    f_epsilon = pcmobj._intermediates['f_epsilon']
+    if pcmobj.if_method_in_CPCM_category:
+        R = -f_epsilon
+        R_dVdx = R * dV_on_charge_dx
+    else:
+        A = pcmobj._intermediates['A']
+        D = pcmobj._intermediates['D']
+        DA = D * A
+        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        R_dVdx = contract('ij,Adj->Adi', R, dV_on_charge_dx)
+
+    K_1_R_dVdx = einsum_ij_Adj_Adi_inverseK(pcmobj, R_dVdx)
+    K_1T_dVdx = einsum_ij_Adj_Adi_inverseK(pcmobj, dV_on_charge_dx, K_transpose = True)
+
+    if pcmobj.if_method_in_CPCM_category:
+        RT_K_1T_dVdx = R * K_1T_dVdx
+    else:
+        RT_K_1T_dVdx = contract('ij,Adj->Adi', R.T, K_1T_dVdx)
+
     dqdx_fix_K_R = 0.5 * (K_1_R_dVdx + RT_K_1T_dVdx)
 
     return dqdx_fix_K_R
@@ -943,9 +965,9 @@ def analytical_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None
         # dIdx[i_atom, :, p0:p1, :] += dIdA[:, p0:p1, :]
         # dIdx[i_atom, :, :, p0:p1] += dIdA[:, p0:p1, :].transpose(0,2,1)
         dIdA_mo = dIdA[:, p0:p1, :] @ mocc
-        dIdA_mo = gpunp.einsum('ip,dpj->dij', mo_coeff[p0:p1, :].T, dIdA_mo)
+        dIdA_mo = contract('ip,dpj->dij', mo_coeff[p0:p1, :].T, dIdA_mo)
         dIdB_mo = dIdA[:, p0:p1, :].transpose(0,2,1) @ mocc[p0:p1, :]
-        dIdB_mo = gpunp.einsum('ip,dpj->dij', mo_coeff.T, dIdB_mo)
+        dIdB_mo = contract('ip,dpj->dij', mo_coeff.T, dIdB_mo)
         dIdx_mo[i_atom, :, :, :] = dIdA_mo + dIdB_mo
 
     for i_atom in atmlst:
@@ -953,7 +975,7 @@ def analytical_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None
         dIdC = int1e_grids_ip2(mol, grid_coords[g0:g1,:], charges = q_sym[g0:g1],
                                intopt = intopt_derivative, charge_exponents = charge_exp[g0:g1]**2)
         dIdC_mo = dIdC @ mocc
-        dIdC_mo = gpunp.einsum('ip,dpj->dij', mo_coeff.T, dIdC_mo)
+        dIdC_mo = contract('ip,dpj->dij', mo_coeff.T, dIdC_mo)
         dIdx_mo[i_atom, :, :, :] += dIdC_mo
 
     dV_on_molecule_dx_mo = dIdx_mo
@@ -1003,7 +1025,7 @@ class WithSolventHess:
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         dm = kwargs.pop('dm', None)
         if dm is None:
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         is_equilibrium = self.base.with_solvent.equilibrium_solvation
@@ -1021,7 +1043,7 @@ class WithSolventHess:
             atmlst = range(self.mol.natm)
         h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
         if isinstance(self.base, scf.hf.RHF):
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
             dv = analytical_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
             for i0, ia in enumerate(atmlst):
                 h1ao[i0] += dv[i0]
@@ -1029,7 +1051,7 @@ class WithSolventHess:
         elif isinstance(self.base, scf.uhf.UHF):
             h1aoa, h1aob = h1ao
             solvent = self.base.with_solvent
-            dm = self.base.make_rdm1(ao_repr=True)
+            dm = self.base.make_rdm1()
             dm = dm[0] + dm[1]
             dva = analytical_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
             dvb = analytical_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
@@ -1067,4 +1089,3 @@ class WithSolventHess:
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.
         pass
-

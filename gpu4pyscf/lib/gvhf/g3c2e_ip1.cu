@@ -223,6 +223,7 @@ static void write_int3c2e_ip1_jk(JKMatrix jk, double* j3, double* k3, int ish){
     const int ty = threadIdx.y;
     __shared__ double sdata[THREADSX][THREADSY];
     #endif
+
     int *bas_atm = c_bpcache.bas_atm;
     const int atm_id = bas_atm[ish];
     double *vj = jk.vj;
@@ -256,7 +257,8 @@ template <int LI, int LJ, int LK>
 #ifdef USE_SYCL
 SYCL_EXTERNAL
 #endif
-__global__ void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
+__global__
+void GINTint3c2e_ip1_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;

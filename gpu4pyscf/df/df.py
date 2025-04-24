@@ -18,14 +18,16 @@ from importlib.util import find_spec
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import (cholesky, tag_array, get_avail_mem,
-                                           cart2sph, p2p_transfer, copy_array)
+    from gpu4pyscf.lib.cupy_helper import (
+        cholesky, tag_array, get_avail_mem, cart2sph, p2p_transfer, copy_array,
+        asarray)
     from cupyx.scipy.linalg import solve_triangular
 else:
     import dpnp as gpunp
     import dpctl.memory as dpmem
-    from gpu4pyscf.lib.dpnp_helper import (cholesky, tag_array, get_avail_mem,
-                                           cart2sph, p2p_transfer, copy_array)
+    from gpu4pyscf.lib.dpnp_helper import (
+        cholesky, tag_array, get_avail_mem, cart2sph, p2p_transfer, copy_array,
+        asarray)
     from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
     from dpctl._sycl_queue_manager import get_device_cached_queue
 from concurrent.futures import ThreadPoolExecutor
@@ -135,7 +137,7 @@ class DF(lib.StreamObject):
                 j2c_cpu = auxmol.intor('int2c2e', hermi=1)
         else:
             j2c_cpu = auxmol.intor('int2c2e', hermi=1)
-        j2c = gpunp.asarray(j2c_cpu, order='C')
+        j2c = asarray(j2c_cpu)
         t0 = log.timer_debug1('2c2e', *t0)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(direct_scf_tol, diag_block_with_triu=False, aosym=True,
@@ -216,8 +218,8 @@ class DF(lib.StreamObject):
             if isinstance(cderi_sparse, np.ndarray):
                 # first block
                 if buf_prefetch is None:
-                    buf = gpunp.asarray(cderi_sparse[p0:p1,:])
-                buf_prefetch = gpunp.empty([p2-p1,cderi_sparse.shape[1]])
+                    buf = asarray(cderi_sparse[p0:p1,:])
+                buf_prefetch = cupy.empty([p2-p1,cderi_sparse.shape[1]])
             if isinstance(cderi_sparse, np.ndarray) and p1 < p2:
                 buf_prefetch.set(cderi_sparse[p1:p2,:])
             if unpack:
@@ -349,7 +351,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
         cd_low_tag = cd_low.tag
-        cd_low = gpunp.asarray(cd_low)
+        cd_low = asarray(cd_low)
 
         cart_ao_loc = intopt.cart_ao_loc
         aux_ao_loc = intopt.aux_ao_loc
@@ -438,7 +440,7 @@ def _cholesky_eri_bdiv(intopt, omega=None):
     if intopt.mol.cart:
         eri3c = intopt.orbital_pair_cart2sph(eri3c)
     auxmol = intopt.auxmol
-    j2c = gpunp.asarray(auxmol.intor('int2c2e', hermi=1), order='C')
+    j2c = asarray(auxmol.intor('int2c2e', hermi=1), order='C')
     cd_low = cholesky(j2c)
     aux_coeff = gpunp.array(intopt.aux_coeff, copy=True)
     cd_low = solve_triangular(cd_low, aux_coeff.T, lower=True, overwrite_b=True)

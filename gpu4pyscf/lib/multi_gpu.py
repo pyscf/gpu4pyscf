@@ -14,11 +14,16 @@
 
 
 from concurrent.futures import ThreadPoolExecutor
+import functools
 import cupy as cp
 import numpy as np
 from pyscf.lib import prange
 from gpu4pyscf.lib.memcpy import p2p_transfer
 from gpu4pyscf.__config__ import num_devices
+
+__all__ = [
+    'run', 'map', 'reduce', 'array_reduce', 'array_broadcast', 'lru_cache'
+]
 
 def run(func, args=(), kwargs={}, non_blocking=False):
     '''Execute a function on each GPU.
@@ -151,3 +156,16 @@ def array_reduce(array_list, inplace=False):
                         dst[p0:p1] += p2p_transfer(buf[:p1-p0], src[p0:p1])
         step *= 2
     return array_list[0].reshape(out_shape)
+
+def lru_cache(size):
+    '''LRU cache for multiple devices'''
+    def to_cache(fn):
+        @functools.lru_cache(size)
+        def fn_with_device_id(device_id, *args, **kwargs):
+            return fn(*args, **kwargs)
+        @functools.wraps(fn)
+        def fn_on_device(*args, **kwargs):
+            device_id = cp.cuda.Device().id
+            return fn_with_device_id(device_id, *args, **kwargs)
+        return fn_on_device
+    return to_cache

@@ -12,16 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import numpy
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array
+    from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
 else:
     import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+    from gpu4pyscf.lib.dpnp_helper import tag_array, pack_tril
 from pyscf import lib
 from pyscf.lib import logger
 from gpu4pyscf import scf
+from gpu4pyscf.scf.hf_lowmem import WaveFunction
 
 def _for_scf(mf, solvent_obj, dm=None):
     '''Add solvent model to SCF (HF and DFT) method.
@@ -78,33 +80,44 @@ class SCFWithSolvent(_Solvation):
         self.with_solvent.reset(mol)
         return super().reset(mol)
 
-    def get_veff(self, mol=None, dm=None, *args, **kwargs):
-        vhf = super().get_veff(mol, dm, *args, **kwargs)
+    def get_veff(self, mol=None, dm_or_wfn=None, *args, **kwargs):
+        veff = super().get_veff(mol, dm_or_wfn, *args, **kwargs)
         with_solvent = self.with_solvent
         if not with_solvent.frozen:
+            if dm_or_wfn is None:
+                dm = self.make_rdm1()
+            elif isinstance(dm_or_wfn, WaveFunction):
+                dm = dm_or_wfn.make_rdm1()
+            else:
+                dm = dm_or_wfn
             with_solvent.e, with_solvent.v = with_solvent.kernel(dm)
         e_solvent, v_solvent = with_solvent.e, with_solvent.v
-        return tag_array(vhf, e_solvent=e_solvent, v_solvent=v_solvent)
+        if veff.shape[-1] != v_solvent.shape[-1]:
+            # lowmem mode, only lower triangular part of Fock matrix is stored
+            nao = v_solvent.shape[-1]
+            assert not isinstance(veff, cupy.ndarray)
+            assert veff.ndim == 1 and veff.shape[0] == nao * (nao + 1) // 2
+            v_solvent = pack_tril(v_solvent).get()
+            veff = lib.tag_array(veff, e_solvent=e_solvent, v_solvent=v_solvent)
+        else:
+            veff = tag_array(veff, e_solvent=e_solvent, v_solvent=v_solvent)
+        return veff
 
-    def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1,
+    def get_fock(self, h1e=None, s1e=None, vhf=None, dm_or_wfn=None, cycle=-1,
                  diis=None, diis_start_cycle=None,
                  level_shift_factor=None, damp_factor=None, fock_last=None):
-        if dm is None: dm = self.make_rdm1()
         # DIIS was called inside oldMF.get_fock. v_solvent, as a function of
         # dm, should be extrapolated as well. To enable it, v_solvent has to be
         # added to the fock matrix before DIIS was called.
         if getattr(vhf, 'v_solvent', None) is None:
-            vhf = self.get_veff(self.mol, dm)
-        return super().get_fock(h1e, s1e, vhf+vhf.v_solvent, dm, cycle, diis,
+            vhf = self.get_veff(self.mol, dm_or_wfn)
+        return super().get_fock(h1e, s1e, vhf+vhf.v_solvent, dm_or_wfn, cycle, diis,
                                 diis_start_cycle, level_shift_factor, damp_factor)
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        if dm is None:
-            dm = self.make_rdm1()
+    def energy_elec(self, dm_or_wfn=None, h1e=None, vhf=None):
         if getattr(vhf, 'e_solvent', None) is None:
-            vhf = self.get_veff(self.mol, dm)
-
-        e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
+            vhf = self.get_veff(self.mol, dm_or_wfn)
+        e_tot, e_coul = super().energy_elec(dm_or_wfn, h1e, vhf)
         e_solvent = vhf.e_solvent
         if isinstance(e_solvent, gpunp.ndarray):
             e_solvent = e_solvent.get()[()]
@@ -130,6 +143,34 @@ class SCFWithSolvent(_Solvation):
         grad_method = super().nuc_grad_method()
         return self.with_solvent.nuc_grad_method(grad_method)
 
+    def TDA(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().TDA()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+
+    def TDDFT(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().TDDFT()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+
+    def TDHF(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().TDHF()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+
+    def CasidaTDDFT(self, equilibrium_solvation=None, eps_optical=1.78):
+        if equilibrium_solvation is None:
+            raise ValueError('equilibrium_solvation must be specified')
+        td = super().CasidaTDDFT()
+        from gpu4pyscf.solvent.tdscf import pcm as pcm_td
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+
     Gradients = nuc_grad_method
 
     def Hessian(self):
@@ -146,8 +187,8 @@ class SCFWithSolvent(_Solvation):
             v = vind(dm1)
             if self.with_solvent.equilibrium_solvation:
                 if is_uhf:
-                    v_solvent = self.with_solvent._B_dot_x(dm1)
-                    v += v_solvent[0] + v_solvent[1]
+                    v_solvent = self.with_solvent._B_dot_x(dm1[0]+dm1[1])
+                    v += v_solvent
                 elif singlet:
                     v += self.with_solvent._B_dot_x(dm1)
             return v

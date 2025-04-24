@@ -1,8 +1,28 @@
+v1.4.0 (2025-03-27)
+-------------------
+* New Features
+  - RKS and UKS TDDFT Gradients for density fitting and direct-SCF methods.
+  - ECP integrals and its first and second derivatives accelerated on GPU.
+  - Multigrid algorithm for Coulomb matrix and LDA, GGA, MGGA functionals computation.
+  - PBC Gaussian density fitting integrals.
+  - ASE interface for molecular systems.
+* Improvements
+  - Reduce memory footprint in SCF driver.
+  - Reduce memory requirements for PCM energy and gradients.
+  - Reduce memory requirements for DFT gradients.
+  - Utilize the sparsity in cart2sph coefficients in the cart2sph transformation in scf.jk kernel
+  - Molecular 3c2e integrals generated using the block-divergent alogrithm.
+  - Support I orbitals in DFT.
+* Fixes
+  - LRU cached cart2sph under the multiple GPU environment.
+  - A maxDynamicSharedMemorySize setting bug in gradient and hessian calculation under the multiple GPU environment.
+  - Remove the limits of 6000 GTO shells in DFT numerical integration module.
+
 v1.3.2 (2025-03-10)
 -------------------
 * Improvements
   - Dump xc info and grids into to log file
-  - Optimize 4-center integral evalulation CUDA kernels using warp divergent algorithm
+  - Optimize 4-center integral evaluation CUDA kernels using warp divergent algorithm
   - Support up to I orbitals in DFT
   - Fix out-of-bound issue in DFT hessian for heavy atoms (>=19)
 * Deprecation

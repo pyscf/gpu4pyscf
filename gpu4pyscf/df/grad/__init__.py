@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import rhf, rks, uhf, uks
+from . import rhf, rks, uhf, uks, tdrhf, tdrks, tduhf, tduks
 
 RHF = rhf.Gradients
 RKS = rks.Gradients
 UHF = uhf.Gradients
 UKS = uks.Gradients
+TDRHF = tdrhf.Gradients
+TDRKS = tdrks.Gradients
+TDUHF = tduhf.Gradients
+TDUKS = tduks.Gradients

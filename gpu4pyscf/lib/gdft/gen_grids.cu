@@ -30,13 +30,10 @@
 
 __global__
 void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, double *a,
-                            int *atm_idx, int ngrids, int natm
-			    #ifdef USE_SYCL
-			    , sycl::nd_item<2> &item
-			    #endif
-    )
+                            int *atm_idx, int ngrids, int natm)
 {
 #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
     sycl::group thread_block = item.get_group();
     int tx = item.get_local_id(1);
     int ty = item.get_local_id(0);
@@ -188,17 +185,14 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
 }
 
 __global__
-void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const double* coords, int natm, int ngrids
-#ifdef USE_SYCL
-			    , sycl::nd_item<2> &item
-#endif
-    )
+void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const double* coords, int natm, int ngrids)
 {
 #ifdef USE_SYCL
-    const int grid_id = item.get_global_id(1);
-    const int tx = item.get_local_id(1);
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    const int grid_id = item.get_global_id(0);
+    const int tx = item.get_local_id(0);
     sycl::group thread_block = item.get_group();
-    const int blockDim_x = item.get_group_range(1);
+    const int blockDim_x = item.get_group_range(0);
     using tile_t = double[NATOM_PER_BLOCK];
     tile_t& x_atom = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
     tile_t& y_atom = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
@@ -252,7 +246,7 @@ int GDFTbecke_partition_weights(double *weights, double *coords, double *atm_coo
     sycl::range<2> threads(TILE, TILE);
     sycl::range<2> blocks(1, (ngrids+TILE*TILE-1)/(TILE*TILE));
     sycl_get_queue()->parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-	GDFTgrid_weight_kernel(weights, coords, atm_coords, a, atm_idx, ngrids, natm, item);
+	GDFTgrid_weight_kernel(weights, coords, atm_coords, a, atm_idx, ngrids, natm);
     });
 #else
     dim3 threads(TILE, TILE);
@@ -276,10 +270,10 @@ int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coor
         return 1;
     }
 #ifdef USE_SYCL
-    sycl::range<2> threads(1, NATOM_PER_BLOCK);
-    sycl::range<2> blocks(1, (ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
-    sycl_get_queue()->parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-	GDFTgroup_grids_kernel(group_ids, atom_coords, coords, natm, ngrids, item);
+    sycl::range<1> threads(NATOM_PER_BLOCK);
+    sycl::range<1> blocks((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
+    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+	GDFTgroup_grids_kernel(group_ids, atom_coords, coords, natm, ngrids);
     });
 #else
     dim3 threads(NATOM_PER_BLOCK);

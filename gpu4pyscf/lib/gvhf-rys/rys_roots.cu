@@ -16,6 +16,10 @@
 
 #include "gvhf-rys/rys_roots.cuh"
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#endif
+
 #define SQRTPIE4        .8862269254527580136
 #define PIE4            .7853981633974483096
 
@@ -56,7 +60,12 @@ static void rys_roots(int nroots, double x, double *rw,
         return;
     }
 
+    #ifdef USE_SYCL
+    double *nonconst_ROOT_RW_DATA = const_cast<double*>(ROOT_RW_DATA);
+    double *datax = nonconst_ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
+    #else
     double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
+    #endif
     int it = (int)(x * .4);
     double u = (x - it * 2.5) * 0.8 - 1.;
     double u2 = u * 2.;
@@ -89,6 +98,9 @@ __device__
 static void rys_roots_rs(int nroots, double theta, double rr, double omega,
                          double *rw, int block_size, int rt_id, int stride)
 {
+    #ifdef USE_SYCL
+    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    #endif
     double theta_rr = theta * rr;
     if (omega == 0) {
         rys_roots(nroots, theta_rr, rw, block_size, rt_id, stride);

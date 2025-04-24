@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda_runtime.h>
+
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
@@ -27,13 +27,29 @@
 #define GOUT_WIDTH      45
 
 __global__
-void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
+void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
+                    #ifdef USE_SYCL
+                    , sycl::nd_item<2> &item, double *rw_buffer
+                    #endif
+                    )
 {
+  #ifdef USE_SYCL
+    int nst_per_block = item.get_local_range(1);
+    int gout_stride = item.get_local_range(0);
+    int st_id = item.get_local_id(1);
+    int gout_id = item.get_local_id(0);
+    int batch_id = item.get_group(1);
+    auto c_g_pair_offsets = s_g_pair_offsets.get();
+    auto c_g_pair_idx = s_g_pair_idx.get();
+    auto c_g_cart_idx = s_g_cart_idx.get();
+  #else
     int nst_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int st_id = threadIdx.x;
     int gout_id = threadIdx.y;
     int batch_id = blockIdx.x;
+    extern __shared__ double rw_buffer[];
+  #endif
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -62,7 +78,6 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds)
     double omega = env[PTR_RANGE_OMEGA];
 
     int gx_len = g_size * nst_per_block;
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *g = rw + nst_per_block * nroots*2;
     double *gx = g;

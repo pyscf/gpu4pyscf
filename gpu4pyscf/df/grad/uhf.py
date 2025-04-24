@@ -45,7 +45,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     '''
     if mol is None: mol = mf_grad.mol
     #TODO: dm has to be the SCF density matrix in this version.  dm should be
-    # extended to any 1-particle density matrix
+    # extended to any 1-particle density matrix. The get_jk in tddft supports this function.
 
     if(dm0 is None): dm0 = mf_grad.base.make_rdm1()
     mf = mf_grad.base
@@ -103,6 +103,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     auxslices = auxmol.aoslice_by_atom()
     aux_cart2sph = intopt.aux_cart2sph
     low_t = low.T.copy()
+    ejaux = ekaux = None
     if with_j:
         if low.tag == 'eig':
             rhoj = gpunp.dot(low_t.T, rhoj)
@@ -126,7 +127,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
             vjaux = -contract('xp,p->xp', tmp, rhoj2)
         else:
             vjaux = -contract('xp,p->xp', tmp, rhoj)
-        vjaux_2c = gpunp.array([-vjaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
+        ejaux = cupy.array([-vjaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         rhoj = vjaux = tmp = None
     if with_k:
         if low.tag == 'eig':
@@ -137,7 +138,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
         tmp = contract('pij,qij->pq', rhok, rhok)
         tmp = intopt.unsort_orbitals(tmp, aux_axis=[0,1])
         vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
-        vkaux_2c = gpunp.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
+        ekaux = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
         vkaux = tmp = None
         if not auxmol.cart:
             rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
@@ -173,39 +174,17 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     dm = orbo = None
 
     with_df._cderi = None  # release GPU memory
-    vj, vk, vjaux, vkaux = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
+    ej, ek, ejaux_3c, ekaux_3c = get_grad_vjk(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbo_cart,
                                         with_j=with_j, with_k=with_k, omega=omega)
-
-    # NOTE: vj and vk are still in cartesian
-    _sorted_mol = intopt._sorted_mol
-    natm = _sorted_mol.natm
-    ao2atom = np.zeros([nao_cart, natm])
-    ao_loc = _sorted_mol.ao_loc
-    for ibas, iatm in enumerate(_sorted_mol._bas[:,gto.ATOM_OF]):
-        ao2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
-    ao2atom = gpunp.asarray(ao2atom)
+    
     if with_j:
-        vj = -ao2atom.T @ vj.T
+        ej = -ej
+        ejaux -= ejaux_3c
     if with_k:
-        vk = -ao2atom.T @ vk.T
+        ek = -ek
+        ekaux -= ekaux_3c
     t0 = log.timer_debug1('(di,j|P) and (i,j|dP)', *t0)
-
-    _sorted_auxmol = intopt._sorted_auxmol
-    natm = _sorted_auxmol.natm
-    naux_cart = _sorted_auxmol.nao
-    aux2atom = np.zeros([naux_cart, natm])
-    ao_loc = _sorted_auxmol.ao_loc
-    for ibas, iatm in enumerate(_sorted_auxmol._bas[:,gto.ATOM_OF]):
-        aux2atom[ao_loc[ibas]:ao_loc[ibas+1],iatm] = 1
-    aux2atom = gpunp.asarray(aux2atom)
-    if with_j:
-        vjaux_3c = aux2atom.T @ vjaux.T
-        vjaux = vjaux_2c - vjaux_3c
-
-    if with_k:
-        vkaux_3c = aux2atom.T @ vkaux.T
-        vkaux = vkaux_2c - vkaux_3c
-    return vj, vk, vjaux, vkaux
+    return ej, ek, ejaux, ekaux
 
 class Gradients(uhf_grad.Gradients):
     '''Unrestricted density-fitting Hartree-Fock gradients'''

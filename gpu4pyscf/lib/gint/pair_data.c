@@ -65,7 +65,7 @@ void GINTinit_contraction_types(BasisProdCache *bpcache,
         }
 }
 
-void GINTsort_bas_coordinates(double *bas_coords, int *bas_atm,
+void GINTsort_bas_coordinates(double *bas_coords, int *bas_atm, 
         int *atm, int natm,
         int *bas, int nbas, double *env)
 {
