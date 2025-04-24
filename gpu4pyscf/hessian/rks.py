@@ -826,7 +826,7 @@ def contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, ni, dm0, fw_rho, fw_gamma,
             drhodr_dot_d2mudAdr = None
             d2gamma_dAdB = contract('dDg,g->dD', d2gamma_dAdB, fw_gamma)
             d2e_gamma_dAdB[i_atom, j_atom, :, :] += d2gamma_dAdB
-            d2e_gamma_dAdB[j_atom, i_atom, :, :] += d2gamma_dAdB
+            d2e_gamma_dAdB[j_atom, i_atom, :, :] += d2gamma_dAdB.T
             d2gamma_dAdB = None
 
     d2rho_dAdr = get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
