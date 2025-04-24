@@ -932,21 +932,19 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
         f_gamma_i = rho_i * domega_dgamma_i * W_i
 
-        # TODO: reduce memory footprint from here on
-
         drho_dA, dgamma_dA = get_drhodA_dgammadA(mol, grids_coords, ni, dm0, opt)
         d2e = contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, ni, dm0,
                                              f_rho_i * grids_weights, f_gamma_i * grids_weights, opt)
 
         drho_dA   = cupy.ascontiguousarray(drho_dA)
         dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
-        dfdrho_drhodA     = cupy.empty([mol.natm, 3, ngrids], order = "C")
-        dfdgamma_dgammadA = cupy.empty([mol.natm, 3, ngrids], order = "C")
+        f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
+        f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
 
         libgdft.VXC_vv10nlc_hess_eval_f_t(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(dfdrho_drhodA.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dfdgamma_dgammadA.data.ptr, ctypes.c_void_p),
+            ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
             ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
@@ -970,8 +968,8 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.c_int(3 * mol.natm),
         )
 
-        d2e += contract("Adg,BDg->ABdD",   drho_dA,     dfdrho_drhodA * grids_weights)
-        d2e += contract("Adg,BDg->ABdD", dgamma_dA, dfdgamma_dgammadA * grids_weights)
+        d2e += contract("Adg,BDg->ABdD",   drho_dA,   f_rho_A_i * grids_weights)
+        d2e += contract("Adg,BDg->ABdD", dgamma_dA, f_gamma_A_i * grids_weights)
 
     d2e_numerical = _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory)
 
@@ -1294,13 +1292,13 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
         drho_dA   = cupy.ascontiguousarray(drho_dA)
         dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
-        dfdrho_drhodA     = cupy.empty([mol.natm, 3, ngrids], order = "C")
-        dfdgamma_dgammadA = cupy.empty([mol.natm, 3, ngrids], order = "C")
+        f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
+        f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
 
         libgdft.VXC_vv10nlc_hess_eval_f_t(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(dfdrho_drhodA.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dfdgamma_dgammadA.data.ptr, ctypes.c_void_p),
+            ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
             ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
@@ -1324,42 +1322,81 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.c_int(3 * mol.natm),
         )
 
-        # TODO: reduce memory footprint from here on
-
-        vmat = cupy.zeros([mol.natm, 3, nao, nao])
-
         mu = ao_nonzero_rho[0, :, :]
         dmu_dr = ao_nonzero_rho[1:4, :, :]
         d2mu_dr2 = get_d2mu_dr2(ao_nonzero_rho)
 
         aoslices = mol.aoslice_by_atom()
 
-        # w_i 2 f_i^\gamma \nabla_A \nabla\rho \cdot \nabla(\phi_\mu \phi_nu)_i
-        d2rho_dAdr = get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
-        dmunu_dr = cupy.einsum('dig,jg->dijg', dmu_dr, mu) + cupy.einsum('dig,jg->djig', dmu_dr, mu)
-        vmat += 2 * cupy.einsum('AdDg,Dijg,g->Adij', d2rho_dAdr, dmunu_dr, f_gamma_i * grids_weights)
+        vmat_mo = cupy.empty([mol.natm, 3, mo_coeff.shape[1], mocc.shape[1]])
 
+        d2rho_dAdr = get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
+        drhodr_dot_dmudr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * grids_weights)
+        for i_atom in range(natm):
+            # # w_i 2 f_i^\gamma \nabla_A \nabla\rho \cdot \nabla(\phi_\mu \phi_nu)_i
+            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dDg,Dig,jg,g->dij', d2rho_dAdr[i_atom, :, :, :], dmu_dr, mu, f_gamma_i * grids_weights)
+            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dDg,Dig,jg,g->dji', d2rho_dAdr[i_atom, :, :, :], dmu_dr, mu, f_gamma_i * grids_weights)
+            d2rhodAdr_dot_dmudr = contract('dDg,Dig->dig', d2rho_dAdr[i_atom, :, :, :], dmu_dr)
+            dF  = contract('dig,jg->dij', d2rhodAdr_dot_dmudr, mu * f_gamma_i * grids_weights)
+            d2rhodAdr_dot_dmudr = None
+
+            # # w_i 2 (\nabla\rho)_i \cdot (\nabla(\phi_\mu \phi_nu))_i f_i^{\gamma, A}
+            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dg,Dig,jg,Dg->dij', f_gamma_A_i[i_atom, :, :], dmu_dr, mu, nabla_rho_i * grids_weights)
+            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dg,Dig,jg,Dg->dji', f_gamma_A_i[i_atom, :, :], dmu_dr, mu, nabla_rho_i * grids_weights)
+            f_gamma_A_i_mu = contract('dg,ig->dig', f_gamma_A_i[i_atom, :, :], mu)
+            dF += contract('dig,jg->dij', f_gamma_A_i_mu, drhodr_dot_dmudr)
+            f_gamma_A_i_mu = None
+
+            dF += dF.transpose(0,2,1)
+            dF *= 2
+
+            # # w_i \phi_{\mu i} \phi_{\nu i} f_i^{\rho, A}
+            # vmat[i_atom, :, :, :] += cupy.einsum('dg,ig,jg,g->dij', f_rho_A_i[i_atom, :, :], mu, mu, grids_weights)
+            f_rho_A_i_mu = contract('dg,ig->dig', f_rho_A_i[i_atom, :, :], mu)
+            dF += contract('dig,jg->dij', f_rho_A_i_mu, mu * grids_weights)
+            f_rho_A_i_mu = None
+
+            vmat_mo[i_atom, :, :, :] = jk._ao2mo(dF, mocc, mo_coeff)
+            dF = None
+        d2rho_dAdr = None
+        drhodr_dot_dmudr_dot_weight = None
+
+        mu_dot_drhodr = contract('ig,dg->dig', mu, nabla_rho_i * f_gamma_i * grids_weights)
+        dmudr_dot_drhodr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
         for i_atom in range(natm):
             p0, p1 = aoslices[i_atom][2:]
-            # w_i f_i^\rho \nabla_A (\phi_\mu \phi_nu)_i
-            vmat[i_atom, :, p0:p1, :] += cupy.einsum('dig,jg->dij', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
-            vmat[i_atom, :, :, p0:p1] += cupy.einsum('dig,jg->dji', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
+            # # w_i f_i^\rho \nabla_A (\phi_\mu \phi_nu)_i
+            # vmat[i_atom, :, p0:p1, :] += cupy.einsum('dig,jg->dij', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
+            # vmat[i_atom, :, :, p0:p1] += cupy.einsum('dig,jg->dji', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
+            f_rho_dmudA_nu = contract('dig,jg->dij', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
 
-            # w_i 2 f_i^\gamma \nabla\rho \cdot \nabla_A \nabla(\phi_\mu \phi_nu)_i
-            vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dDig,jg,Dg->dij', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
-            vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dDig,jg,Dg->dji', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
-            vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dig,Djg,Dg->dij', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
-            vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dig,Djg,Dg->dji', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
+            # # w_i 2 f_i^\gamma \nabla\rho \cdot \nabla_A \nabla(\phi_\mu \phi_nu)_i
+            # vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dDig,jg,Dg->dij', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
+            # vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dDig,jg,Dg->dji', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
+            # vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dig,Djg,Dg->dij', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
+            # vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dig,Djg,Dg->dji', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
+            f_gamma_d2mudr2_nu = contract('dDig,Djg->dij', -d2mu_dr2[:, :, p0:p1, :], mu_dot_drhodr)
+            f_gamma_dmudr_dnudr = contract('dig,jg->dij', -dmu_dr[:, p0:p1, :], dmudr_dot_drhodr)
 
-        vmat += cupy.einsum('Adg,ig,jg,g->Adij', dfdrho_drhodA, mu, mu, grids_weights)
-        vmat += 2 * cupy.einsum('Adg,Dijg,Dg->Adij', dfdgamma_dgammadA, dmunu_dr, nabla_rho_i * grids_weights)
+            dF_ao = f_rho_dmudA_nu + 2 * (f_gamma_d2mudr2_nu + f_gamma_dmudr_dnudr)
+            f_rho_dmudA_nu = None
+            f_gamma_d2mudr2_nu = None
+            f_gamma_dmudr_dnudr = None
 
-    vmat = contract('Adij,jq->Adiq', vmat, mocc)
-    vmat = contract('Adiq,ip->Adpq', vmat, mo_coeff)
+            dF_mo = dF_ao @ mocc
+            dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[p0:p1, :])
+            vmat_mo[i_atom, :, :, :] += dF_mo
+            dF_mo = dF_ao.transpose(0,2,1) @ mocc[p0:p1, :]
+            dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff)
+            vmat_mo[i_atom, :, :, :] += dF_mo
+            dF_ao = None
+            dF_mo = None
+        mu_dot_drhodr = None
+        dmudr_dot_drhodr = None
 
     vmat_numerical = _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory)
 
-    print(cupy.max(cupy.abs(vmat - vmat_numerical)))
+    print(cupy.max(cupy.abs(vmat_mo - vmat_numerical)))
 
     return vmat_numerical
 
