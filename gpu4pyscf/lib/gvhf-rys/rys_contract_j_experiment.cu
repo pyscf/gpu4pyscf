@@ -533,7 +533,7 @@ void rys_j_kernel_experiment(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 extern int rys_j_unrolled_experiment(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds);
 
 extern "C" {
-int RYS_build_j1(double *vj, double *dm, int n_dm, int nao,
+int RYS_build_j_experiment(double *vj, double *dm, int n_dm, int nao,
                 RysIntEnvVars envs, int *scheme, int *shls_slice,
                 int npairs_ij, int npairs_kl,
                 int *pair_ij_mapping, int *pair_kl_mapping,
