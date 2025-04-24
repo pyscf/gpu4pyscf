@@ -27,10 +27,7 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-bas='631g'
-
-mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-mol.build()
+mol = pyscf.M(atom=atom, basis='631g', max_memory=32000)
 
 mf = rks.RKS(mol, xc='b3lyp')
 e_gpu = mf.kernel() #  -76.3849465432042
