@@ -20,23 +20,25 @@
 #include <string.h>
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
+#include "gvhf-md/md_j.cuh"
 
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
 
-extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
-extern __global__ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+extern __global__ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds);
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds);
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int nao,
                 RysIntEnvVars envs, int *scheme, int *shls_slice,
                 int npairs_ij, int npairs_kl,
                 int *pair_ij_mapping, int *pair_kl_mapping,
+                int *pair_ij_loc, int *pair_kl_loc,
                 float **qd_ij_max, float **qd_kl_max,
-                float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                float *q_cond, float q_cutoff, float qd_cutoff,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -50,10 +52,10 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
     uint8_t order = li + lj + lk + ll;
     float *tile16_qd_ij_max = qd_ij_max[4];
     float *tile16_qd_kl_max = qd_kl_max[4];
-    BoundsInfo bounds = {li, lj, lk, ll,
-        0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0 , 0,
+    MDBoundsInfo bounds = {li, lj, lk, ll,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, tile16_qd_ij_max, s_estimator, tile16_qd_kl_max, cutoff};
+        pair_ij_loc, pair_kl_loc, tile16_qd_ij_max, tile16_qd_kl_max,
+        q_cond, q_cutoff, qd_cutoff};
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 

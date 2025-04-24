@@ -17,22 +17,20 @@ J engine using McMurchie-Davidson algorithm
 '''
 
 import ctypes
-import functools
 import math
 import numpy as np
 import cupy as cp
-import scipy.linalg
 from pyscf import lib
-from pyscf import __config__
+from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, PTR_EXP, PTR_COEFF
+from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, sandwich_dot, transpose_sum, asarray)
-from gpu4pyscf.__config__ import props as gpu_specs
+    load_library, condense, dist_matrix, transpose_sum, hermi_triu, asarray)
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (
-    _make_j_engine_pair_locs, _make_pair_qd_cond,
-    RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
+    _make_pair_qd_cond, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
+from gpu4pyscf.gto.mole import group_basis
 
 __all__ = [
     'get_j',
@@ -55,57 +53,81 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.sorted_mol
-    nao, nao_orig = vhfopt.decontract_coeff.shape
+    nao_orig = mol.nao
+    sorted_mol = vhfopt.sorted_mol
+    prim_mol = vhfopt.prim_mol
+    nao = sorted_mol.nao
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
     n_dm = dms.shape[0]
     assert n_dm == 1
-    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = sandwich_dot(dms, vhfopt.decontract_coeff.T)
-    dms = cp.asarray(dms, order='C')
     if hermi != 1:
         dms = transpose_sum(dms)
     else:
         dms *= 2.
 
-    ao_loc = mol.ao_loc
+    p2c_mapping = vhfopt.prim_to_ctr_mapping
+    ao_loc = sorted_mol.ao_loc
     dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
     log_max_dm = float(dm_cond.max())
     log_cutoff = math.log(vhfopt.direct_scf_tol)
+    q_cutoff = log_cutoff - log_max_dm
+    dm_cond = dm_cond[p2c_mapping[:,None],p2c_mapping]
 
+    l_counts = np.bincount(prim_mol._bas[:,ANG_OF])
+    n_groups = len(l_counts)
+    l_ctr_bas_loc = np.cumsum(np.append(0, l_counts))
+    l_symb = lib.param.ANGULAR
+    q_cond = vhfopt.q_cond
+    pair_mappings = _make_pair_qd_cond(prim_mol, l_ctr_bas_loc, q_cond, dm_cond, q_cutoff)
+    dm_cond = None
+
+    pair_lst = []
+    task_offsets = {} # the pair_loc offsets for each ij pair
+    p0 = p1 = 0
+    for i in range(n_groups):
+        for j in range(i+1):
+            pair_ij_mapping = pair_mappings[i,j][0]
+            pair_lst.append(pair_ij_mapping)
+            p0, p1 = p1, p1 + pair_ij_mapping.size
+            task_offsets[i,j] = p0
+    pair_lst = cp.asarray(cp.hstack(pair_lst), dtype=np.int32)
+
+    ls = cp.asarray(prim_mol._bas[:,ANG_OF], dtype=np.int32)
+    ll = ls[:,None] + ls
+    ll = ll.ravel()[pair_lst] # drops the pairs that do not contribute to integrals
+    xyz_size = (ll+1)*(ll+2)*(ll+3)//6
+    pair_loc_on_gpu = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
+    xyz_size = None
+
+    pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)
+    pair_loc = pair_loc_on_gpu.get()
     dms = dms.get()
-    pair_loc = _make_j_engine_pair_locs(mol)
     dm_xyz = np.zeros(pair_loc[-1])
     # Must use this modified _env to ensure the consistency with GPU kernel
     # In this _env, normalization coefficients for s and p funcitons are scaled.
-    #_env = vhfopt._mol_gpu[2].get()
-    _env = _scale_sp_ctr_coeff(mol)
+    _env = _scale_sp_ctr_coeff(prim_mol)
     libvhf_md.Et_dot_dm(
         dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
-        mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
+        pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
+        p2c_mapping.ctypes,
+        ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
+        prim_mol._bas.ctypes, _env.ctypes)
     dm_xyz = asarray(dm_xyz)
-    vj_xyz = cp.zeros_like(dm_xyz)
 
-    pair_loc_on_gpu = asarray(pair_loc)
+    _atm_gpu = cp.asarray(prim_mol._atm)
+    _bas_gpu = cp.asarray(prim_mol._bas)
+    _env_gpu = cp.asarray(_env)
     rys_envs = RysIntEnvVars(
-        mol.natm, mol.nbas,
-        vhfopt.rys_envs.atm, vhfopt.rys_envs.bas, vhfopt.rys_envs.env,
-        pair_loc_on_gpu.data.ptr,
+        prim_mol.natm, prim_mol.nbas,
+        _atm_gpu.data.ptr, _bas_gpu.data.ptr, _env_gpu.data.ptr, 0,
     )
 
     err = libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
     if err != 0:
         raise RuntimeError('CUDA kernel initialization')
-    uniq_l_ctr = vhfopt.uniq_l_ctr
-    uniq_l = uniq_l_ctr[:,0]
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
-    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    n_groups = len(uniq_l_ctr)
-
-    q_cond = vhfopt.q_cond
-    pair_mappings = _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond,
-                                       dm_cond, log_cutoff-log_max_dm)
+    vj_xyz = cp.zeros_like(dm_xyz)
     t1 = t2 = log.timer_debug1('q_cond and dm_cond', *cput0)
 
     timing_collection = {}
@@ -117,6 +139,9 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
             ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
                        l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
             pair_ij_mapping, qd_ij_addrs = pair_mappings[i,j][:2]
+            pair_ij_loc = pair_loc_on_gpu[task_offsets[i,j]:]
+            if len(pair_ij_mapping) == 0:
+                continue
             for k in range(i+1):
                 for l in range(k+1):
                     if i == k and j < l: continue
@@ -124,7 +149,10 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
                     kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
                                l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
                     pair_kl_mapping, qd_kl_addrs = pair_mappings[k,l][:2]
-                    scheme = _md_j_engine_quartets_scheme(uniq_l_ctr[[i, j, k, l], 0])
+                    pair_kl_loc = pair_loc_on_gpu[task_offsets[k,l]:]
+                    if len(pair_kl_mapping) == 0:
+                        continue
+                    scheme = _md_j_engine_quartets_scheme((i, j, k, l))
                     err = kern(
                         ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
@@ -135,14 +163,14 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
                         ctypes.c_int(pair_kl_mapping.size),
                         ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
                         ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_ij_loc.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_kl_loc.data.ptr, ctypes.c_void_p),
                         (ctypes.c_void_p*6)(*qd_ij_addrs),
                         (ctypes.c_void_p*6)(*qd_kl_addrs),
                         ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                        lib.c_null_ptr(),
-                        lib.c_null_ptr(),
-                        ctypes.c_float(log_cutoff),
-                        mol._atm.ctypes, ctypes.c_int(mol.natm),
-                        mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
+                        ctypes.c_float(q_cutoff), ctypes.c_float(log_cutoff),
+                        prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
+                        prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas), _env.ctypes)
                     if err != 0:
                         raise RuntimeError(f'MD_build_j kernel for {llll} failed')
                     if log.verbose >= logger.DEBUG1:
@@ -164,14 +192,71 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     vj = np.zeros_like(dms)
     libvhf_md.jengine_dot_Et(
         vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
-        mol._bas.ctypes, ctypes.c_int(mol.nbas), _env.ctypes)
+        pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
+        p2c_mapping.ctypes,
+        ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
+        prim_mol._bas.ctypes, _env.ctypes)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
-    vj = sandwich_dot(vj, vhfopt.decontract_coeff)
-    vj = transpose_sum(vj)
+    vj = transpose_sum(asarray(vj))
+    vj = vhfopt.apply_coeff_CT_mat_C(vj)
+
+    h_shls = vhfopt.h_shls
+    if h_shls:
+        mol = vhfopt.sorted_mol
+        log.debug3('Integrals for %s functions on CPU',
+                   lib.param.ANGULAR[LMAX+1])
+        scripts = ['ji->s2kl']
+        shls_excludes = [0, h_shls[0]] * 4
+        vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
+                                 dms, 1, mol._atm, mol._bas, mol._env,
+                                 shls_excludes=shls_excludes)
+        vj1 = asarray(vs_h[0])
+        vj += hermi_triu(vj1)
+
     vj = vj.reshape(dm.shape)
     log.timer('vj', *cput0)
     return vj
 
+def _to_primitive_bas(sorted_mol):
+    # Note, sorted_mol.decontract_basis cannot be used here as that function
+    # assumes the basis sets are not grouped by atoms
+    prim_mol = sorted_mol.copy()
+    prim_mol.cart = True
+    repeats = sorted_mol._bas[:,NPRIM_OF]
+    prim_mol._bas = np.repeat(sorted_mol._bas, repeats, axis=0)
+
+    address_inc = [np.arange(i) for i in range(repeats.max()+1)]
+    address_inc = np.hstack([address_inc[i] for i in repeats])
+    prim_mol._bas[:,PTR_EXP] += address_inc
+    prim_mol._bas[:,PTR_COEFF] += address_inc
+    prim_mol._bas[:,NPRIM_OF] = 1
+
+    p2c_mapping = np.repeat(np.arange(sorted_mol.nbas), repeats)
+    return prim_mol, np.asarray(p2c_mapping, dtype=np.int32)
+
+# TODO: This approximate q_cond underestimates some integrals for l>=3
+def _estimate_q_cond(prim_mol):
+    '''An approxiamte q_cond based on the overlap of primitive GTO shells'''
+    ls = cp.asarray(prim_mol._bas[:,ANG_OF])
+    es = cp.asarray(prim_mol._env[prim_mol._bas[:,PTR_EXP]])
+    cs = abs(cp.asarray(prim_mol._env[prim_mol._bas[:,PTR_COEFF]]))
+    norm = cs * ((2*ls+1)/(4*np.pi))**.5
+    bas_coords = cp.asarray(prim_mol.atom_coords()[prim_mol._bas[:,ATOM_OF]])
+    li = ls[:,None]
+    lj = ls
+    aij = es[:,None] + es
+    fi = es[:,None] / aij
+    fj = es[None,:] / aij
+    theta = es[:,None] * fj
+    dr = dist_matrix(bas_coords, bas_coords)
+    dri = fj * dr
+    drj = fi * dr
+    fac_dri = (li*.5) * cp.log(li * .5/aij + dri**2 + 1.)
+    fac_drj = (lj*.5) * cp.log(lj * .5/aij + drj**2 + 1.)
+    fac_norm = cp.log(norm[:,None]*norm) + 1.5 * cp.log(np.pi/aij)
+    q_cond = fac_norm - theta*dr**2 + fac_dri + fac_drj
+    q_cond += .25 * cp.log(2./np.pi * aij)
+    return cp.asarray(q_cond, dtype=np.float32)
 
 class _VHFOpt(jk._VHFOpt):
     def __init__(self, mol, cutoff=1e-13):
@@ -179,12 +264,50 @@ class _VHFOpt(jk._VHFOpt):
         self.tile = 1
 
     def build(self, group_size=None, verbose=None):
-        orig_mol = self.mol
-        self.mol, decontract_coeff = orig_mol.decontract_basis(to_cart=True, aggregate=True)
-        jk._VHFOpt.build(self, group_size, verbose)
-        jk_coeff = self.coeff
-        self.mol = orig_mol
-        self.decontract_coeff = jk_coeff.dot(cp.asarray(decontract_coeff))
+        mol = self.mol
+        log = logger.new_logger(mol, verbose)
+        cput0 = log.init_timer()
+        sorted_mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = \
+                group_basis(mol, self.tile, group_size, sparse_coeff=True)
+        self.sorted_mol = sorted_mol
+        self.ao_idx = ao_idx
+        self.l_ctr_pad_counts = l_ctr_pad_counts
+        self.uniq_l_ctr = uniq_l_ctr
+        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+
+        # very high angular momentum basis are processed on CPU
+        lmax = uniq_l_ctr[:,0].max()
+        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
+        l_slices = np.append(0, np.cumsum(nbas_by_l))
+        if lmax > LMAX:
+            self.h_shls = l_slices[LMAX+1:].tolist()
+        else:
+            self.h_shls = []
+
+        prim_mol, self.prim_to_ctr_mapping = _to_primitive_bas(sorted_mol)
+        self.prim_mol = prim_mol
+
+        #q_cond = _estimate_q_cond(prim_mol).get()
+        nbas = prim_mol.nbas
+        ao_loc = prim_mol.ao_loc
+        q_cond = np.empty((nbas,nbas))
+        intor = prim_mol._add_suffix('int2e')
+        _vhf.libcvhf.CVHFnr_int2e_q_cond(
+            getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
+            q_cond.ctypes, ao_loc.ctypes,
+            prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
+            prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas),
+            prim_mol._env.ctypes)
+        q_cond = np.log(q_cond + 1e-300).astype(np.float32)
+        self.q_cond_cpu = q_cond
+
+        tile = self.tile
+        assert tile == 1
+        self._tile_q_cond_cpu = q_cond
+
+        if mol.omega < 0:
+            raise NotImplementedError
+        log.timer('Initialize q_cond', *cput0)
         return self
 
 def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):

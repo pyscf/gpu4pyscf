@@ -46,7 +46,8 @@ def test_j_engine():
 def test_j_engine_integral_screen():
     basis = ([[0,[2**x,1]] for x in range(-1, 5)] +
              [[1,[2**x,1]] for x in range(-1, 3)] +
-             [[2,[2**x,1]] for x in range(-1, 3)])
+             [[3,[2**x,1]] for x in range(-1, 3)]
+            )
     mol = pyscf.M(
         atom = '''
 O  -9.2037 -0.1259  6.4262 

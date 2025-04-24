@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/gamma_inc_unrolled.cu"
+#include "gvhf-md/md_j.cuh"
 
 
 // TILEX=25, TILEY=25
@@ -11,16 +12,16 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 400;
     int task_kl0 = blockIdx.y * 400;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -31,7 +32,8 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -88,8 +90,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 25;
         int task_kl = blockIdx.y * 400 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*400] = dm[kl_loc0+i];
         }
@@ -131,7 +132,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 1; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -146,8 +147,8 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*25] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*25] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*25] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*25] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -216,7 +217,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 1; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -227,8 +228,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 25;
         int task_kl = blockIdx.y * 400 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*400]);
         }
@@ -241,23 +241,24 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 352;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -314,8 +315,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 22;
         int task_kl = blockIdx.y * 352 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*352] = dm[kl_loc0+i];
         }
@@ -357,7 +357,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 4; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -369,8 +369,8 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*22] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*22] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -483,7 +483,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 4; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -494,8 +494,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 22;
         int task_kl = blockIdx.y * 352 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*352]);
         }
@@ -508,16 +507,16 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 144;
     int task_kl0 = blockIdx.y * 144;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -528,7 +527,8 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -585,8 +585,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 9;
         int task_kl = blockIdx.y * 144 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*144] = dm[kl_loc0+i];
         }
@@ -628,7 +627,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 4; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -643,8 +642,8 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*9] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*9] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -818,7 +817,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 4; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -829,8 +828,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 9;
         int task_kl = blockIdx.y * 144 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*144]);
         }
@@ -843,23 +841,24 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 272;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -916,8 +915,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 17;
         int task_kl = blockIdx.y * 272 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*272] = dm[kl_loc0+i];
         }
@@ -959,7 +957,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 10; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -971,8 +969,8 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*17] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*17] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -1184,7 +1182,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 10; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -1195,8 +1193,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 17;
         int task_kl = blockIdx.y * 272 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*272]);
         }
@@ -1209,23 +1206,24 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 112;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -1282,8 +1280,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 7;
         int task_kl = blockIdx.y * 112 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*112] = dm[kl_loc0+i];
         }
@@ -1325,7 +1322,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 10; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -1337,8 +1334,8 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*7] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*7] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -1653,7 +1650,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 10; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -1664,8 +1661,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 7;
         int task_kl = blockIdx.y * 112 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*112]);
         }
@@ -1678,16 +1674,16 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 176;
     int task_kl0 = blockIdx.y * 176;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -1698,7 +1694,8 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -1755,8 +1752,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 11;
         int task_kl = blockIdx.y * 176 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*176] = dm[kl_loc0+i];
         }
@@ -1798,7 +1794,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 10; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -1813,8 +1809,8 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*11] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*11] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -2335,7 +2331,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 10; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -2346,8 +2342,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 11;
         int task_kl = blockIdx.y * 176 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*176]);
         }
@@ -2360,23 +2355,24 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 176;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -2433,8 +2429,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 11;
         int task_kl = blockIdx.y * 176 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*176] = dm[kl_loc0+i];
         }
@@ -2476,7 +2471,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 20; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -2488,8 +2483,8 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -2870,7 +2865,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 20; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -2881,8 +2876,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 11;
         int task_kl = blockIdx.y * 176 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*176]);
         }
@@ -2895,23 +2889,24 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 64;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -2968,8 +2963,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 4;
         int task_kl = blockIdx.y * 64 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*64] = dm[kl_loc0+i];
         }
@@ -3011,7 +3005,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 20; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -3023,8 +3017,8 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*4] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*4] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -3583,7 +3577,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 20; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -3594,8 +3588,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 4;
         int task_kl = blockIdx.y * 64 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*64]);
         }
@@ -3604,23 +3597,24 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
 
 // TILEX=32, TILEY=9
 __global__
-void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 144;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -3677,8 +3671,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 9;
         int task_kl = blockIdx.y * 144 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*144] = dm[kl_loc0+i];
         }
@@ -3720,7 +3713,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 20; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -3732,8 +3725,8 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -4635,7 +4628,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 20; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -4646,8 +4639,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 9;
         int task_kl = blockIdx.y * 144 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*144]);
         }
@@ -4660,23 +4652,24 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 512;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -4733,8 +4726,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 32;
         int task_kl = blockIdx.y * 512 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*512] = dm[kl_loc0+i];
         }
@@ -4776,7 +4768,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 35; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -4788,8 +4780,8 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*32] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*32] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -5429,7 +5421,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 35; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -5440,8 +5432,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 32;
         int task_kl = blockIdx.y * 512 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*512]);
         }
@@ -5450,23 +5441,24 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
 
 // TILEX=32, TILEY=16
 __global__
-void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 256;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -5523,8 +5515,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 16;
         int task_kl = blockIdx.y * 256 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*256] = dm[kl_loc0+i];
         }
@@ -5566,7 +5557,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 35; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -5578,8 +5569,8 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -6508,7 +6499,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 35; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -6519,8 +6510,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 16;
         int task_kl = blockIdx.y * 256 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*256]);
         }
@@ -6529,23 +6519,24 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
 
 // TILEX=32, TILEY=26
 __global__
-void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
+void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
-    int *pair_ij_mapping = bounds.tile_ij_mapping;
-    int *pair_kl_mapping = bounds.tile_kl_mapping;
+    int *pair_ij_mapping = bounds.pair_ij_mapping;
+    int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
     int task_kl0 = blockIdx.y * 416;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     int sq_id = tx + 16 * ty;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -6602,8 +6593,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 26;
         int task_kl = blockIdx.y * 416 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             dm_kl_cache[sq_kl+i*416] = dm[kl_loc0+i];
         }
@@ -6645,7 +6635,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int ij_loc0 = pair_loc[pair_ij];
+        int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 56; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*16] = 0;
@@ -6657,8 +6647,8 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*26] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*26] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -7668,7 +7658,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_loc[pair_ij];
+            int ij_loc0 = pair_ij_loc[task_ij];
             for (int n = ty; n < 56; n += 16) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
             }
@@ -7679,15 +7669,14 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
         int tile = n % 26;
         int task_kl = blockIdx.y * 416 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
             atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*416]);
         }
     }
 }
 
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds)
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds)
 {
     int li = bounds->li;
     int lj = bounds->lj;

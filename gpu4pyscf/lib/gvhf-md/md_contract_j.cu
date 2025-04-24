@@ -22,6 +22,7 @@
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/gamma_inc.cu"
+#include "gvhf-md/md_j.cuh"
 
 #define RT2_MAX 9
 #define KL_SIZE 28
@@ -67,7 +68,7 @@ inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, 
 }
 
 __global__
-void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                  int threadsx, int threadsy, int tilex, int tiley)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
@@ -79,7 +80,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -98,6 +99,10 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
+    int xslots = gout_stride * threadsx;
+    int yslots = gout_stride * threadsy;
+    int xslot_id = gout_id * threadsx + tx;
+    int yslot_id = gout_id * threadsy + ty;
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -107,7 +112,8 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int order = lij + lkl;
     int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -156,27 +162,24 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
     }
 
-#if 0
-    register double vj_kl[KL_SIZE];
-    for (int n = 0; n < KL_SIZE; ++n) {
-        vj_kl[n] = 0;
-    }
+#if 1
+    //register double vj_kl[KL_SIZE];
+    //for (int n = 0; n < KL_SIZE; ++n) {
+    //    vj_kl[n] = 0;
+    //}
 
     int kl_counts = nf3kl * tiley;
-    int slots = gout_stride * threadsx;
-    int slot_id = gout_id * threadsx + tx;
     register double dm_kl[KL_SIZE];
     for (int n = 0; n < KL_SIZE; ++n) {
         dm_kl[n] = 0;
     }
     for (int k = 0; k <= KL_SIZE; ++k) {
-        int n = k * slots + slot_id;
+        int n = k * xslots + xslot_id;
         if (n >= kl_counts) break;
         int tile = n / nf3kl;
         int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int kl = n % nf3kl;
             dm_kl[k] = dm[kl_loc0+kl];
         }
@@ -220,10 +223,8 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int slot_id = gout_id * threadsy + ty;
-        int slots = gout_stride * threadsy;
-        int ij_loc0 = pair_loc[pair_ij];
-        for (int n = slot_id; n < nf3ij; n += slots) {
+        int ij_loc0 = pair_ij_loc[task_ij];
+        for (int n = yslot_id; n < nf3ij; n += yslots) {
             dm_ij_cache[tx+n*threadsx] = dm[ij_loc0+n];
             vj_ij_cache[tx+n*threadsx] = 0;
         }
@@ -237,8 +238,8 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -258,19 +259,17 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
-#if 0
-            int slots = gout_stride * threadsx;
-            int slot_id = gout_id * threadsx + tx;
+#if 1
             // load dm_kl_cache from dm_kl regisers of each thread
             int addr0 = batch_kl * nf3kl;
             int addr1 = addr0 + nf3kl;
-            for (int n = slot_id; n < nf3kl; n += slots) {
+            for (int n = xslot_id; n < nf3kl; n += xslots) {
                 vj_kl_cache[ty+n*threadsy] = 0;
             }
-            switch (addr0 / slots) {
+            switch (addr0 / xslots) {
             case 0:
                 for (int n = 0; n <  3; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -278,7 +277,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 1:
                 for (int n = 1; n <= 4; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -286,7 +285,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 2:
                 for (int n = 2; n <= 5; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -294,7 +293,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 3:
                 for (int n = 3; n <= 6; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -302,7 +301,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 4:
                 for (int n = 4; n <= 7; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -310,7 +309,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 5:
                 for (int n = 5; n <= 8; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -318,7 +317,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 6:
                 for (int n = 6; n <= 9; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -326,7 +325,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 7:
                 for (int n = 7; n <= 10; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -334,7 +333,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 8:
                 for (int n = 8; n <= 11; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -342,7 +341,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 9:
                 for (int n = 9; n <= 12; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -350,7 +349,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 10:
                 for (int n = 10; n <= 13; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -358,7 +357,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 11:
                 for (int n = 11; n <= 14; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -366,7 +365,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 12:
                 for (int n = 12; n <= 15; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -374,7 +373,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 13:
                 for (int n = 13; n <= 16; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -382,7 +381,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 14:
                 for (int n = 14; n <= 17; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -390,7 +389,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 15:
                 for (int n = 15; n <= 18; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -398,7 +397,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 16:
                 for (int n = 16; n <= 19; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -406,7 +405,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 17:
                 for (int n = 17; n <= 20; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -414,7 +413,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 18:
                 for (int n = 18; n <= 21; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -422,7 +421,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 19:
                 for (int n = 19; n <= 22; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -430,7 +429,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 20:
                 for (int n = 20; n <= 23; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -438,7 +437,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 21:
                 for (int n = 21; n <= 24; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -446,7 +445,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 22:
                 for (int n = 22; n <= 25; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -454,7 +453,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 23:
                 for (int n = 23; n <= 26; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -462,7 +461,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 24:
                 for (int n = 24; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -470,7 +469,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 25:
                 for (int n = 25; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -478,7 +477,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 26:
                 for (int n = 26; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -487,14 +486,14 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             case 27:
                 {
                     int n = 27;
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
                 }
                 break;
             default:
-                for (int n = slot_id; n < nf3kl; n += slots) {
+                for (int n = xslot_id; n < nf3kl; n += xslots) {
                     // Assign a special value to dm cache. When the output shows
                     // values ~1e200, this indicates that tiley size is too big.
                     // j_engine scheme function should be adjusted.
@@ -503,10 +502,10 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
 #else
             {
-                int slots = gout_stride * threadsx;
-                int slot_id = gout_id * threadsx + tx;
-                int kl_loc0 = pair_loc[pair_kl];
-                for (int n = slot_id; n < nf3kl; n += slots) {
+                int xslots = gout_stride * threadsx;
+                int xslot_id = gout_id * threadsx + tx;
+                int kl_loc0 = pair_kl_loc[task_kl];
+                for (int n = xslot_id; n < nf3kl; n += xslots) {
                     dm_kl_cache[ty+n*threadsy] = dm[kl_loc0+n];
                     vj_kl_cache[ty+n*threadsy] = 0;
                 }
@@ -662,10 +661,10 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
             __syncthreads();
 #if 0
-            switch (addr0 / slots) {
+            switch (addr0 / xslots) {
             case 0:
                 for (int n = 0; n <  3; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -673,7 +672,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 1:
                 for (int n = 1; n <= 4; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -681,7 +680,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 2:
                 for (int n = 2; n <= 5; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -689,7 +688,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 3:
                 for (int n = 3; n <= 6; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -697,7 +696,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 4:
                 for (int n = 4; n <= 7; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -705,7 +704,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 5:
                 for (int n = 5; n <= 8; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -713,7 +712,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 6:
                 for (int n = 6; n <= 9; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -721,7 +720,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 7:
                 for (int n = 7; n <= 10; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -729,7 +728,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 8:
                 for (int n = 8; n <= 11; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -737,7 +736,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 9:
                 for (int n = 9; n <= 12; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -745,7 +744,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 10:
                 for (int n = 10; n <= 13; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -753,7 +752,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 11:
                 for (int n = 11; n <= 14; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -761,7 +760,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 12:
                 for (int n = 12; n <= 15; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -769,7 +768,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 13:
                 for (int n = 13; n <= 16; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -777,7 +776,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 14:
                 for (int n = 14; n <= 17; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -785,7 +784,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 15:
                 for (int n = 15; n <= 18; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -793,7 +792,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 16:
                 for (int n = 16; n <= 19; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -801,7 +800,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 17:
                 for (int n = 17; n <= 20; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -809,7 +808,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 18:
                 for (int n = 18; n <= 21; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -817,7 +816,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 19:
                 for (int n = 19; n <= 22; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -825,7 +824,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 20:
                 for (int n = 20; n <= 23; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -833,7 +832,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 21:
                 for (int n = 21; n <= 24; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -841,7 +840,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 22:
                 for (int n = 22; n <= 25; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -849,7 +848,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 23:
                 for (int n = 23; n <= 26; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -857,7 +856,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 24:
                 for (int n = 24; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -865,7 +864,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 25:
                 for (int n = 25; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -873,7 +872,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 26:
                 for (int n = 26; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -882,7 +881,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             case 27:
                 {
                     int n = 27;
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
                     }
@@ -893,10 +892,8 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
 #else
             if (task_kl0+ty < npairs_kl) {
-                int slots = gout_stride * threadsx;
-                int slot_id = gout_id * threadsx + tx;
-                int kl_loc0 = pair_loc[pair_kl];
-                for (int n = slot_id; n < nf3kl; n += slots) {
+                int kl_loc0 = pair_kl_loc[task_kl];
+                for (int n = xslot_id; n < nf3kl; n += xslots) {
                     atomicAdd(vj+kl_loc0+n, vj_kl_cache[ty+n*threadsy]);
                 }
             }
@@ -904,10 +901,8 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int slots = gout_stride * threadsy;
-            int slot_id = gout_id * threadsy + ty;
-            int ij_loc0 = pair_loc[pair_ij];
-            for (int n = slot_id; n < nf3ij; n += slots) {
+            int ij_loc0 = pair_ij_loc[task_ij];
+            for (int n = yslot_id; n < nf3ij; n += yslots) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*threadsx]);
             }
         }
@@ -915,16 +910,13 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 #if 0
     {
         int kl_counts = nf3kl * tiley;
-        int slots = gout_stride * threadsx;
-        int slot_id = gout_id * threadsx + tx;
         for (int k = 0; k <= KL_SIZE; ++k) {
-            int n = k * slots + slot_id;
+            int n = k * xslots + xslot_id;
             if (n >= kl_counts) break;
             int tile = n / nf3kl;
             int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
             if (task_kl < npairs_kl) {
-                int pair_kl = pair_kl_mapping[task_kl];
-                int kl_loc0 = pair_loc[pair_kl];
+                int kl_loc0 = pair_kl_loc[task_kl];
                 int kl = n % nf3kl;
                 atomicAdd(vj+kl_loc0+kl, vj_kl[k]);
             }
@@ -935,7 +927,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 
 // 4-fold permutation symmetry
 __global__
-void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                  int threadsx, int threadsy, int tilex, int tiley)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
@@ -947,7 +939,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
         return;
     }
 
@@ -959,6 +951,10 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
+    int xslots = gout_stride * threadsx;
+    int yslots = gout_stride * threadsy;
+    int xslot_id = gout_id * threadsx + tx;
+    int yslot_id = gout_id * threadsy + ty;
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -968,7 +964,8 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int order = lij + lkl;
     int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
     int *bas = envs.bas;
-    int *pair_loc = envs.ao_loc;
+    int *pair_ij_loc = bounds.pair_ij_loc;
+    int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
     double *dm = jk.dm;
@@ -1021,16 +1018,13 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 
     int kl_counts = nf3kl * tiley;
-    int slots = gout_stride * threadsx;
-    int slot_id = gout_id * threadsx + tx;
     for (int k = 0; k <= KL_SIZE; ++k) {
-        int n = k * slots + slot_id;
+        int n = k * xslots + xslot_id;
         if (n >= kl_counts) break;
         int tile = n / nf3kl;
         int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
         if (task_kl < npairs_kl) {
-            int pair_kl = pair_kl_mapping[task_kl];
-            int kl_loc0 = pair_loc[pair_kl];
+            int kl_loc0 = pair_kl_loc[task_kl];
             int kl = n % nf3kl;
             dm_kl[k] = dm[kl_loc0+kl];
         }
@@ -1074,9 +1068,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int ish = pair_ij / nbas;
         int jsh = pair_ij % nbas;
         if (ish == jsh) fac_sym *= .5;
-        int slot_id = gout_id * threadsy + ty;
-        int slots = gout_stride * threadsy;
-        for (int n = slot_id; n < nf3ij; n += slots) {
+        for (int n = yslot_id; n < nf3ij; n += yslots) {
             vj_ij_cache[tx+n*threadsx] = 0;
         }
         for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
@@ -1086,8 +1078,8 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
+            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.qd_cutoff &&
+                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.qd_cutoff) {
                 continue;
             }
 
@@ -1103,15 +1095,13 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int lsh = pair_kl % nbas;
             if (ksh == lsh) fac *= .5;
             __syncthreads();
-            int slots = gout_stride * threadsx;
-            int slot_id = gout_id * threadsx + tx;
             // load dm_kl_cache from dm_kl regisers of each thread
             int addr0 = batch_kl * nf3kl;
             int addr1 = addr0 + nf3kl;
-            switch (addr0 / slots) {
+            switch (addr0 / xslots) {
             case 0:
                 for (int n = 0; n <  3; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1119,7 +1109,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 1:
                 for (int n = 1; n <= 4; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1127,7 +1117,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 2:
                 for (int n = 2; n <= 5; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1135,7 +1125,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 3:
                 for (int n = 3; n <= 6; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1143,7 +1133,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 4:
                 for (int n = 4; n <= 7; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1151,7 +1141,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 5:
                 for (int n = 5; n <= 8; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1159,7 +1149,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 6:
                 for (int n = 6; n <= 9; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1167,7 +1157,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 7:
                 for (int n = 7; n <= 10; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1175,7 +1165,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 8:
                 for (int n = 8; n <= 11; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1183,7 +1173,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 9:
                 for (int n = 9; n <= 12; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1191,7 +1181,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 10:
                 for (int n = 10; n <= 13; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1199,7 +1189,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 11:
                 for (int n = 11; n <= 14; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1207,7 +1197,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 12:
                 for (int n = 12; n <= 15; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1215,7 +1205,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 13:
                 for (int n = 13; n <= 16; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1223,7 +1213,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 14:
                 for (int n = 14; n <= 17; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1231,7 +1221,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 15:
                 for (int n = 15; n <= 18; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1239,7 +1229,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 16:
                 for (int n = 16; n <= 19; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1247,7 +1237,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 17:
                 for (int n = 17; n <= 20; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1255,7 +1245,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 18:
                 for (int n = 18; n <= 21; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1263,7 +1253,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 19:
                 for (int n = 19; n <= 22; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1271,7 +1261,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 20:
                 for (int n = 20; n <= 23; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1279,7 +1269,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 21:
                 for (int n = 21; n <= 24; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1287,7 +1277,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 22:
                 for (int n = 22; n <= 25; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1295,7 +1285,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 23:
                 for (int n = 23; n <= 26; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1303,7 +1293,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 24:
                 for (int n = 24; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1311,7 +1301,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 25:
                 for (int n = 25; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1319,7 +1309,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 break;
             case 26:
                 for (int n = 26; n <= 27; ++n) {
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
@@ -1328,14 +1318,14 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             case 27:
                 {
                     int n = 27;
-                    int addr = n * slots + slot_id;
+                    int addr = n * xslots + xslot_id;
                     if (addr0 <= addr && addr < addr1) {
                         dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
                     }
                 }
                 break;
             default:
-                for (int n = slot_id; n < nf3kl; n += slots) {
+                for (int n = xslot_id; n < nf3kl; n += xslots) {
                     // Assign a special value to dm cache. When the output shows
                     // values ~1e200, this indicates that tiley size is too big.
                     // j_engine scheme function should be adjusted.
@@ -1464,10 +1454,8 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
         // The last tile for ij
         if (task_ij0+tx < npairs_ij) {
-            int slots = gout_stride * threadsy;
-            int slot_id = gout_id * threadsy + ty;
-            int ij_loc0 = pair_loc[pair_ij];
-            for (int n = slot_id; n < nf3ij; n += slots) {
+            int ij_loc0 = pair_ij_loc[task_ij];
+            for (int n = yslot_id; n < nf3ij; n += yslots) {
                 atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*threadsx]);
             }
         }
