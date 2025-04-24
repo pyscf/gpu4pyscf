@@ -14,7 +14,8 @@
 
 __all__ = [
     'density_fit', 'get_j_kpts', 'get_k_kpts',
-    'get_j_kpts_kshift', 'get_k_kpts_kshift'
+    'get_j_kpts_kshift', 'get_k_kpts_kshift',
+    'get_jk'
 ]
 
 import numpy as np
@@ -247,32 +248,10 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     dms = _format_dms(dm, [kpt])
     nset, _, nao = dms.shape[:3]
     dms = dms.reshape(nset,nao,nao)
+    vj = vk = None
     if with_j:
         vj = cp.zeros((nset,nao,nao), dtype=np.complex128)
     if with_k:
-        ''' math
-        Mode 1: DM-based K-build:
-            K(p,q)
-                = V(r,q,p,s) * D(s,r)
-                = V(L,r,q) * V(L,s,p).conj() * D(s,r)    eqn (1)
-
-        (NA) Mode 2: Symm MO-based K-build:
-        In case of Hermitian & PSD DM, eqn (1) can be rewritten as
-            K(p,q)
-                = W(L,i,p).conj() * W(L,i,q)
-        where
-            W(L,i,p) = V(L,s,p) * C(s,i).conj()
-            D(s,r) = C(s,i) * C(r,i).conj()
-
-        (NA) Mode 3: Asymm MO-based K-build:
-        In case of non-Hermitian or Hermitian but non-PSD DM, eqn (1) can be rewritten as
-            K(p,q)
-                = X(L,i,p).conj() * Y(L,i,q)
-            where
-                X(L,i,p) = V(L,s,p) * A(s,i).conj()
-                Y(L,i,q) = V(L,r,q) * B(r,i).conj()
-                D(s,r) = A(s,i) * B(r,i).conj()
-        '''
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
     for Lpq, sign in mydf.sr_loop(0, 0, False):

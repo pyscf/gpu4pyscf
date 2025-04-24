@@ -162,34 +162,7 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                double theta_rr = theta * rr;
-                if (omega == 0) {
-                    rys_roots(nroots, theta_rr, rw, nst_per_block, gout_id, gout_stride);
-                } else if (omega > 0) {
-                    double omega2 = omega * omega;
-                    double theta_fac = omega2 / (omega2 + theta);
-                    rys_roots(nroots, theta_fac*theta_rr, rw, nst_per_block, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = sqrt(theta_fac);
-                    for (int irys = gout_id; irys < nroots; irys+=gout_stride) {
-                        rw[ irys*2   *nst_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nst_per_block] *= sqrt_theta_fac;
-                    }
-                } else {
-                    double omega2 = omega * omega;
-                    double theta_fac = omega2 / (omega2 + theta);
-                    int _nroots = nroots/2;
-                    rys_roots(_nroots, theta_rr, rw+nroots*nst_per_block,
-                              nst_per_block, gout_id, gout_stride);
-                    rys_roots(_nroots, theta_fac*theta_rr, rw,
-                              nst_per_block, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac);
-                    for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {
-                        rw[ irys*2   *nst_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nst_per_block] *= sqrt_theta_fac;
-                    }
-                }
+                rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();

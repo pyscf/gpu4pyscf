@@ -34,7 +34,7 @@ else:
     from dpctl._sycl_queue_manager import get_device_cached_queue
 import scipy.linalg
 from pyscf import lib
-from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD
+from pyscf.gto.mole import ANG_OF, NPRIM_OF, NCTR_OF, ATOM_OF, PTR_COORD
 from pyscf.scf import _vhf
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
@@ -86,42 +86,6 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     else:
         return cp.asarray(out, order='F')
 
-def _bas_overlap_mask(cell, bvkmesh_Ls, Ls):
-    '''integral screening mask for basis product between cell and supmol'''
-    # consider only the most diffused component of a basis
-    exps, cs = extract_pgto_params(cell, 'diffused')
-    ls = cell._bas[:,ANG_OF]
-    bas_coords = cp.asarray(cell.atom_coords()[cell._bas[:,ATOM_OF]])
-
-    ls = cp.asarray(ls)
-    exps = cp.asarray(exps)
-    norm = cp.asarray(cs) * ((2*ls+1)/(4*np.pi))**.5
-    aij = exps[:,None] + exps
-    fi = exps[:,None] / aij
-    fj = exps[None,:] / aij
-    theta = exps[:,None] * fj
-
-    Ls = cp.asarray(Ls)
-    # rj format: (bvk_cell_id, bas_id, lattice_img_id)
-    rj = bvkmesh_Ls[:,None,None,:] + bas_coords[:,None,:] + Ls
-    #:rirj = bas_coords[:,None,None,None,:] - rj
-    #:dr = cp.linalg.norm(rirj, axis=4)
-    dr = dist_matrix(bas_coords, rj.reshape(-1,3))
-    dr = dr.reshape(len(bas_coords), *rj.shape[:3])
-
-    dri = fj[:,None,:,None] * dr
-    drj = fi[:,None,:,None] * dr
-    li = ls[:,None,None,None]
-    lj = ls[None,None,:,None]
-    fac_dri = (li * .5/aij[:,None,:,None] + dri**2) ** (li*.5)
-    fac_drj = (lj * .5/aij[:,None,:,None] + drj**2) ** (lj*.5)
-    rad = cell.vol**(-1./3) * dr + 1
-    surface = 4*np.pi * rad**2
-    fl = cp.where(surface > 1, surface, 1)
-    fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
-    ovlp = fac_norm[:,None,:,None] * cp.exp(-theta[:,None,:,None]*dr**2) * fac_dri * fac_drj * fl
-    return ovlp > cell.precision
-
 def gen_ft_kernel(cell, kpts=None, verbose=None):
     r'''
     Generate the analytical fourier transform kernel for AO products
@@ -137,21 +101,37 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
 class FTOpt:
     def __init__(self, cell, kpts=None, bvk_kmesh=None):
         self.cell = cell
-        cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
-        self.sorted_cell = cell
+        sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
+        self.sorted_cell = sorted_cell
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         self.coeff = cp.asarray(coeff, dtype=np.complex128)
+
+        # TODO: ao_idx from group_basis
+        ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
+        nprims = np.repeat(cell._bas[:,NPRIM_OF], cell._bas[:,NCTR_OF])
+        l_ctrs = np.column_stack((ls, -nprims))
+        _, inv_idx = np.unique(l_ctrs, return_inverse=True, axis=0)
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
+        if cell.cart:
+            dims = (ls + 1) * (ls + 2) // 2
+        else:
+            dims = ls * 2 + 1
+        ao_loc = np.append(0, dims.cumsum())
+        ao_idx = np.array_split(np.arange(ao_loc[-1]), ao_loc[1:-1])
+        # mat[ao_idx[:,None],ao_idx] transforms the matrix in original cell into
+        # the matrix represented in the sorted AOs.
+        self.ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
 
         if bvk_kmesh is None:
             if kpts is None or is_zero(kpts):
                 bvk_kmesh = np.ones(3, dtype=int)
             else:
-                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+                bvk_kmesh = kpts_to_kmesh(sorted_cell, kpts)
         if np.prod(bvk_kmesh) == 1:
-            bvkcell = cell
+            bvkcell = sorted_cell
         else:
-            bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+            bvkcell = pbctools.super_cell(sorted_cell, bvk_kmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
@@ -179,35 +159,47 @@ class FTOpt:
         cput0 = log.init_timer()
         Ls = cp.asarray(bvkcell.get_lattice_Ls())
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+        nimgs = len(Ls)
 
         if bvk_kmesh is None:
+            bvk_ncells = 1
             bvkmesh_Ls = cp.zeros((1, 3))
+            conj_mapping = cp.zeros(1, dtype=np.int32)
         else:
+            bvk_ncells = np.prod(bvk_kmesh)
             bvkmesh_Ls = cp.asarray(
                 k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True))
-
-        # Generate img_idx based on the overlap between shells in cell and super-mol
-        ovlp_mask = _bas_overlap_mask(cell, bvkmesh_Ls, Ls)
-        bvk_ncells, nbas, nimgs = ovlp_mask.shape[1:]
+            conj_mapping = cp.asarray(conj_images_in_bvk_cell(bvk_kmesh), dtype=np.int32)
+        nbas = cell.nbas
         log.debug('bvk_ncells=%d, nbas=%d, nimgs=%d', bvk_ncells, nbas, nimgs)
-        # Number of images for each pair of (bas_i_in_cell0, bas_j_in_bvkcell)
-        img_counts = cp.count_nonzero(ovlp_mask, axis=3)
-        img_offsets = cp.append(0, cp.cumsum(img_counts.ravel())).astype(np.int32)
-        # The image Ids for each pair of (bas_i_in_cell0, bas_j_in_bvkcell)
-        img_idx = cp.nonzero(ovlp_mask.reshape(-1, nimgs))[1].astype(np.int32)
-        bvk_ovlp_mask = ovlp_mask.any(axis=3)
+
+        rcut = cell.rcut
+        vol = cell.vol
+        cell_exp, _, cell_l = most_diffused_pgto(cell)
+        lsum = cell_l * 2 + 1
+        rad = vol**(-1./3) * rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*cell_exp*2) + surface
+        cutoff = cell.precision / lattice_sum_factor
+        log_cutoff = math.log(cutoff)
+        log.debug1('ft_ao min_exp=%g cutoff=%g', cell_exp, cutoff)
+
+        ls = cell._bas[:,ANG_OF]
+        exps, cs = extract_pgto_params(cell, 'diffused')
+        cs *= ((2*ls+1)/(4*np.pi))**.5
+        exps = cp.asarray(exps, dtype=np.float32)
+        log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
 
         _atm = cp.array(bvkcell._atm)
         _bas = cp.array(bvkcell._bas)
         _env = cp.array(_scale_sp_ctr_coeff(bvkcell))
         ao_loc = cp.array(bvkcell.ao_loc)
         aft_envs = AFTIntEnvVars(
-            bvkcell.natm, bvkcell.nbas, bvk_ncells, 0,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
-            Ls.data.ptr, img_idx.data.ptr, img_offsets.data.ptr,
+            cell.natm, cell.nbas, bvk_ncells, nimgs, _atm.data.ptr,
+            _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
         )
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
-        aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls, img_idx, img_offsets)
+        aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
 
         nao, nao_orig = coeff.shape
         ao_loc = bvkcell.ao_loc
@@ -215,19 +207,8 @@ class FTOpt:
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
-        if bvk_kmesh is None:
-            conj_mapping = cp.zeros(1, dtype=np.int32)
-        else:
-            conj_mapping = cp.asarray(conj_images_in_bvk_cell(bvk_kmesh), dtype=np.int32)
-
         init_constant(cell)
         kern = libpbc.build_ft_ao
-        if not has_dpctl:
-            cp.cuda.Stream.null.synchronize()
-        else:
-            dev = get_default_cached_device()
-            get_device_cached_queue(dev).wait()
-        log.timer_debug1('initialize ft_kern', *cput0)
 
         def _ft_sub(Gv, q, kptjs, transform_ao=True):
             '''
@@ -249,12 +230,8 @@ class FTOpt:
             if permutation_symmetry:
                 # symmetry between ish and jsh can be utilized. The triu part is excluded
                 # from computation.
-                ix, iy = cp.triu_indices(nbas, 1)
-                _bvk_ovlp_mask = bvk_ovlp_mask.copy()
-                _bvk_ovlp_mask[ix,:,iy] = False
                 ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
             else:
-                _bvk_ovlp_mask = bvk_ovlp_mask
                 ij_tasks = itertools.product(range(n_groups), range(n_groups))
 
             for i, j in ij_tasks:
@@ -263,26 +240,70 @@ class FTOpt:
                 ll_pattern = f'{l_symb[i]}{l_symb[j]}'
                 ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
                 jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-                mask = _bvk_ovlp_mask[ish0:ish1,:,jsh0:jsh1]
-                sub_img_counts = img_counts[ish0:ish1,:,jsh0:jsh1]
+                nish = ish1 - ish0
+                njsh = jsh1 - jsh0
+                # Number of images for each pair of (bas_i_in_cell0, bas_j_in_bvkcell)
+                img_counts = cp.zeros((nish*bvk_ncells*njsh), dtype=np.int32)
+                err = libpbc.overlap_img_counts(
+                    ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
+                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                    ctypes.byref(aft_envs),
+                    ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.c_int(int(permutation_symmetry)))
+                if err != 0:
+                    raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+                bas_ij = cp.asarray(cp.where(img_counts > 0)[0], dtype=np.int32)
+                npairs = len(bas_ij)
+                if npairs == 0:
+                    continue
+
                 # Sort according to the number of images. In the CUDA kernel,
                 # shell-pairs that have closed number of images are processed on
                 # the same SM processor, ensuring the best parallel execution.
-                idx = cp.argsort(sub_img_counts[mask])[::-1]
-                i_in_pair, bvk_id, j_in_pair = cp.nonzero(mask)
-                i_in_pair = (i_in_pair + ish0).astype(np.int32)[idx]
-                j_in_pair = (j_in_pair + jsh0 + bvk_id*nbas).astype(np.int32)[idx]
+                counts_sorting = (-img_counts[bas_ij]).argsort()
+                bas_ij = bas_ij[counts_sorting]
+                img_counts = img_counts[bas_ij]
+                img_offsets = cp.empty(npairs+1, dtype=np.int32)
+                img_offsets[0] = 0
+                cp.cumsum(img_counts, out=img_offsets[1:])
+                tot_imgs = int(img_offsets[npairs])
+                img_idx = cp.empty(tot_imgs, dtype=np.int32)
+                err = libpbc.overlap_img_idx(
+                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(npairs),
+                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                    ctypes.byref(aft_envs),
+                    ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff))
+                if err != 0:
+                    raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+                t1 = log.timer_debug1('ovlp_img_idx', *t1)
+                img_counts = counts_sorting = None
+
+                # bas_ij stores the non-negligible primitive-pair indices.
+                i, J, j = cp.unravel_index(bas_ij, (nish, bvk_ncells, njsh))
+                i += ish0
+                j += jsh0
+                bas_ij = cp.ravel_multi_index((i, J, j), (nbas, bvk_ncells, nbas))
+                bas_ij = cp.asarray(bas_ij, dtype=np.int32)
 
                 scheme = ft_ao_scheme(cell, li, lj, nGv)
                 log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
                 err = kern(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(0), # Do not remove zero elements
                     ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.c_int(i_in_pair.size), ctypes.c_int(nGv),
-                    ctypes.cast(i_in_pair.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(j_in_pair.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(npairs), ctypes.c_int(nGv),
+                    ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
                     ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                     cell._atm.ctypes, ctypes.c_int(cell.natm),
                     cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
                 if err != 0:
@@ -311,7 +332,7 @@ class FTOpt:
                     ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
                 if err != 0:
-                    raise RuntimeError('ft_aopair_fill_triu kernel failed')
+                    raise RuntimeError('ft_aopair_fill_triu kernel for {ll_pattern} failed')
 
             log.debug1('transform BvK-cell to k-points')
             gamma_point_only = kptjs is None or is_zero(kptjs)
@@ -365,19 +386,24 @@ class FTOpt:
                                f'Required: {out_size*1.2e-9:.2f} GB')
         return ft_kernel
 
+def most_diffused_pgto(cell):
+    exps, cs = extract_pgto_params(cell, 'diffused')
+    ls = cell._bas[:,ANG_OF]
+    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
+    idx = r2.argmax()
+    return exps[idx], cs[idx], ls[idx]
+
 class AFTIntEnvVars(ctypes.Structure):
     _fields_ = [
         ('natm', ctypes.c_uint16),
         ('nbas', ctypes.c_uint16),
         ('bvk_ncells', ctypes.c_uint16),
-        ('padding', ctypes.c_uint16),
+        ('nimgs', ctypes.c_uint16),
         ('atm', ctypes.c_void_p),
         ('bas', ctypes.c_void_p),
         ('env', ctypes.c_void_p),
         ('ao_loc', ctypes.c_void_p),
         ('img_coords', ctypes.c_void_p),
-        ('img_idx', ctypes.c_void_p),
-        ('img_offsets', ctypes.c_void_p),
     ]
 
 def init_constant(cell):

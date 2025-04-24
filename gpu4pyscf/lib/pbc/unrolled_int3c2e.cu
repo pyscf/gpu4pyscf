@@ -27,11 +27,7 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -48,7 +44,7 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -65,71 +61,66 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double gout0 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(1, theta_rr, rw1, 512, 0, 1);
                 rys_roots(1, theta_fac*theta_rr, rw, 512, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 1; ++irys) {
                     rw[ irys*2   *512] *= theta_fac;
                     rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac1;
+                    rw1[(irys*2+1)*512] *= fac;
                 }
                 for (int irys = 0; irys < 2; ++irys) {
                     double wt = rw[(2*irys+1)*512];
@@ -137,24 +128,13 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
+            double *eri_tensor = out + k0*1*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
         }
     }
 }
@@ -178,11 +158,7 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -199,7 +175,7 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -216,11 +192,13 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -228,61 +206,54 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(1, theta_rr, rw1, 512, 0, 1);
                 rys_roots(1, theta_fac*theta_rr, rw, 512, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 1; ++irys) {
                     rw[ irys*2   *512] *= theta_fac;
                     rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac1;
+                    rw1[(irys*2+1)*512] *= fac;
                 }
                 for (int irys = 0; irys < 2; ++irys) {
                     double wt = rw[(2*irys+1)*512];
@@ -301,26 +272,15 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
+            double *eri_tensor = out + k0*3*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
         }
     }
 }
@@ -340,11 +300,7 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -361,7 +317,7 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -378,11 +334,13 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -396,61 +354,54 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout6 = 0;
         double gout7 = 0;
         double gout8 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(2, theta_rr, rw1, 256, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -485,32 +436,21 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout3;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout4;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout6;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout7;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout8;
+            double *eri_tensor = out + k0*9*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
         }
     }
 }
@@ -534,11 +474,7 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -555,7 +491,7 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -572,11 +508,13 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -587,61 +525,54 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout3 = 0;
         double gout4 = 0;
         double gout5 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 2048;
                 rys_roots(2, theta_rr, rw1, 512, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 512, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *512] *= theta_fac;
                     rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac1;
+                    rw1[(irys*2+1)*512] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*512];
@@ -667,29 +598,18 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+0)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout4;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout5;
+            double *eri_tensor = out + k0*6*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
         }
     }
 }
@@ -709,11 +629,7 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -730,7 +646,7 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -747,11 +663,13 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -774,61 +692,54 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout15 = 0;
         double gout16 = 0;
         double gout17 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(2, theta_rr, rw1, 256, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -878,41 +789,30 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+0)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout4;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout6;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout7;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout8;
-            eri_tensor[(3*nKj+1)*naux + 0] = gout9;
-            eri_tensor[(4*nKj+1)*naux + 0] = gout10;
-            eri_tensor[(5*nKj+1)*naux + 0] = gout11;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout12;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout13;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout14;
-            eri_tensor[(3*nKj+2)*naux + 0] = gout15;
-            eri_tensor[(4*nKj+2)*naux + 0] = gout16;
-            eri_tensor[(5*nKj+2)*naux + 0] = gout17;
+            double *eri_tensor = out + k0*18*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
         }
     }
 }
@@ -932,11 +832,7 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -953,7 +849,7 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -970,11 +866,13 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1015,61 +913,54 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout33 = 0;
         double gout34 = 0;
         double gout35 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1536;
                 rys_roots(3, theta_rr, rw1, 256, 0, 1);
                 rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -1152,59 +1043,48 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+0)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout4;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout6;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout7;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout8;
-            eri_tensor[(3*nKj+1)*naux + 0] = gout9;
-            eri_tensor[(4*nKj+1)*naux + 0] = gout10;
-            eri_tensor[(5*nKj+1)*naux + 0] = gout11;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout12;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout13;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout14;
-            eri_tensor[(3*nKj+2)*naux + 0] = gout15;
-            eri_tensor[(4*nKj+2)*naux + 0] = gout16;
-            eri_tensor[(5*nKj+2)*naux + 0] = gout17;
-            eri_tensor[(0*nKj+3)*naux + 0] = gout18;
-            eri_tensor[(1*nKj+3)*naux + 0] = gout19;
-            eri_tensor[(2*nKj+3)*naux + 0] = gout20;
-            eri_tensor[(3*nKj+3)*naux + 0] = gout21;
-            eri_tensor[(4*nKj+3)*naux + 0] = gout22;
-            eri_tensor[(5*nKj+3)*naux + 0] = gout23;
-            eri_tensor[(0*nKj+4)*naux + 0] = gout24;
-            eri_tensor[(1*nKj+4)*naux + 0] = gout25;
-            eri_tensor[(2*nKj+4)*naux + 0] = gout26;
-            eri_tensor[(3*nKj+4)*naux + 0] = gout27;
-            eri_tensor[(4*nKj+4)*naux + 0] = gout28;
-            eri_tensor[(5*nKj+4)*naux + 0] = gout29;
-            eri_tensor[(0*nKj+5)*naux + 0] = gout30;
-            eri_tensor[(1*nKj+5)*naux + 0] = gout31;
-            eri_tensor[(2*nKj+5)*naux + 0] = gout32;
-            eri_tensor[(3*nKj+5)*naux + 0] = gout33;
-            eri_tensor[(4*nKj+5)*naux + 0] = gout34;
-            eri_tensor[(5*nKj+5)*naux + 0] = gout35;
+            double *eri_tensor = out + k0*36*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+18*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+19*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+20*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+21*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+22*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+23*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+24*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+25*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+26*n_ctr_pairs, gout26);
+            atomicAdd(eri_tensor+27*n_ctr_pairs, gout27);
+            atomicAdd(eri_tensor+28*n_ctr_pairs, gout28);
+            atomicAdd(eri_tensor+29*n_ctr_pairs, gout29);
+            atomicAdd(eri_tensor+30*n_ctr_pairs, gout30);
+            atomicAdd(eri_tensor+31*n_ctr_pairs, gout31);
+            atomicAdd(eri_tensor+32*n_ctr_pairs, gout32);
+            atomicAdd(eri_tensor+33*n_ctr_pairs, gout33);
+            atomicAdd(eri_tensor+34*n_ctr_pairs, gout34);
+            atomicAdd(eri_tensor+35*n_ctr_pairs, gout35);
         }
     }
 }
@@ -1228,11 +1108,7 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1249,7 +1125,7 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -1266,11 +1142,13 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1278,61 +1156,54 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout0 = 0;
         double gout1 = 0;
         double gout2 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(1, theta_rr, rw1, 512, 0, 1);
                 rys_roots(1, theta_fac*theta_rr, rw, 512, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 1; ++irys) {
                     rw[ irys*2   *512] *= theta_fac;
                     rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac1;
+                    rw1[(irys*2+1)*512] *= fac;
                 }
                 for (int irys = 0; irys < 2; ++irys) {
                     double wt = rw[(2*irys+1)*512];
@@ -1351,26 +1222,15 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout1;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout2;
+            double *eri_tensor = out + k0*1*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
         }
     }
 }
@@ -1390,11 +1250,7 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1411,7 +1267,7 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -1428,11 +1284,13 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1446,61 +1304,54 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout6 = 0;
         double gout7 = 0;
         double gout8 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(2, theta_rr, rw1, 256, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -1536,32 +1387,21 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout3;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout4;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout5;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout6;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout7;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout8;
+            double *eri_tensor = out + k0*3*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
         }
     }
 }
@@ -1581,11 +1421,7 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1602,7 +1438,7 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -1619,11 +1455,13 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1655,61 +1493,54 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout24 = 0;
         double gout25 = 0;
         double gout26 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(2, theta_rr, rw1, 256, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -1782,50 +1613,39 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout3;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout4;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout6;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout7;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout8;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout10;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout11;
-            eri_tensor[(0*nKj+1)*naux + 1] = gout12;
-            eri_tensor[(1*nKj+1)*naux + 1] = gout13;
-            eri_tensor[(2*nKj+1)*naux + 1] = gout14;
-            eri_tensor[(0*nKj+2)*naux + 1] = gout15;
-            eri_tensor[(1*nKj+2)*naux + 1] = gout16;
-            eri_tensor[(2*nKj+2)*naux + 1] = gout17;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout18;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout19;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout20;
-            eri_tensor[(0*nKj+1)*naux + 2] = gout21;
-            eri_tensor[(1*nKj+1)*naux + 2] = gout22;
-            eri_tensor[(2*nKj+1)*naux + 2] = gout23;
-            eri_tensor[(0*nKj+2)*naux + 2] = gout24;
-            eri_tensor[(1*nKj+2)*naux + 2] = gout25;
-            eri_tensor[(2*nKj+2)*naux + 2] = gout26;
+            double *eri_tensor = out + k0*9*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+18*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+19*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+20*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+21*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+22*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+23*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+24*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+25*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+26*n_ctr_pairs, gout26);
         }
     }
 }
@@ -1845,11 +1665,7 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1866,7 +1682,7 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -1883,11 +1699,13 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1910,61 +1728,54 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout15 = 0;
         double gout16 = 0;
         double gout17 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(2, theta_rr, rw1, 256, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -2016,41 +1827,30 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+0)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout4;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout6;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout7;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout8;
-            eri_tensor[(3*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(4*nKj+0)*naux + 1] = gout10;
-            eri_tensor[(5*nKj+0)*naux + 1] = gout11;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout12;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout13;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout14;
-            eri_tensor[(3*nKj+0)*naux + 2] = gout15;
-            eri_tensor[(4*nKj+0)*naux + 2] = gout16;
-            eri_tensor[(5*nKj+0)*naux + 2] = gout17;
+            double *eri_tensor = out + k0*6*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
         }
     }
 }
@@ -2070,11 +1870,7 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -2091,7 +1887,7 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -2108,11 +1904,13 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -2171,61 +1969,54 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout51 = 0;
         double gout52 = 0;
         double gout53 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1536;
                 rys_roots(3, theta_rr, rw1, 256, 0, 1);
                 rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -2337,77 +2128,66 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+0)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout4;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout6;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout7;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout8;
-            eri_tensor[(3*nKj+1)*naux + 0] = gout9;
-            eri_tensor[(4*nKj+1)*naux + 0] = gout10;
-            eri_tensor[(5*nKj+1)*naux + 0] = gout11;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout12;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout13;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout14;
-            eri_tensor[(3*nKj+2)*naux + 0] = gout15;
-            eri_tensor[(4*nKj+2)*naux + 0] = gout16;
-            eri_tensor[(5*nKj+2)*naux + 0] = gout17;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout18;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout19;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout20;
-            eri_tensor[(3*nKj+0)*naux + 1] = gout21;
-            eri_tensor[(4*nKj+0)*naux + 1] = gout22;
-            eri_tensor[(5*nKj+0)*naux + 1] = gout23;
-            eri_tensor[(0*nKj+1)*naux + 1] = gout24;
-            eri_tensor[(1*nKj+1)*naux + 1] = gout25;
-            eri_tensor[(2*nKj+1)*naux + 1] = gout26;
-            eri_tensor[(3*nKj+1)*naux + 1] = gout27;
-            eri_tensor[(4*nKj+1)*naux + 1] = gout28;
-            eri_tensor[(5*nKj+1)*naux + 1] = gout29;
-            eri_tensor[(0*nKj+2)*naux + 1] = gout30;
-            eri_tensor[(1*nKj+2)*naux + 1] = gout31;
-            eri_tensor[(2*nKj+2)*naux + 1] = gout32;
-            eri_tensor[(3*nKj+2)*naux + 1] = gout33;
-            eri_tensor[(4*nKj+2)*naux + 1] = gout34;
-            eri_tensor[(5*nKj+2)*naux + 1] = gout35;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout36;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout37;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout38;
-            eri_tensor[(3*nKj+0)*naux + 2] = gout39;
-            eri_tensor[(4*nKj+0)*naux + 2] = gout40;
-            eri_tensor[(5*nKj+0)*naux + 2] = gout41;
-            eri_tensor[(0*nKj+1)*naux + 2] = gout42;
-            eri_tensor[(1*nKj+1)*naux + 2] = gout43;
-            eri_tensor[(2*nKj+1)*naux + 2] = gout44;
-            eri_tensor[(3*nKj+1)*naux + 2] = gout45;
-            eri_tensor[(4*nKj+1)*naux + 2] = gout46;
-            eri_tensor[(5*nKj+1)*naux + 2] = gout47;
-            eri_tensor[(0*nKj+2)*naux + 2] = gout48;
-            eri_tensor[(1*nKj+2)*naux + 2] = gout49;
-            eri_tensor[(2*nKj+2)*naux + 2] = gout50;
-            eri_tensor[(3*nKj+2)*naux + 2] = gout51;
-            eri_tensor[(4*nKj+2)*naux + 2] = gout52;
-            eri_tensor[(5*nKj+2)*naux + 2] = gout53;
+            double *eri_tensor = out + k0*18*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+18*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+19*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+20*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+21*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+22*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+23*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+24*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+25*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+26*n_ctr_pairs, gout26);
+            atomicAdd(eri_tensor+27*n_ctr_pairs, gout27);
+            atomicAdd(eri_tensor+28*n_ctr_pairs, gout28);
+            atomicAdd(eri_tensor+29*n_ctr_pairs, gout29);
+            atomicAdd(eri_tensor+30*n_ctr_pairs, gout30);
+            atomicAdd(eri_tensor+31*n_ctr_pairs, gout31);
+            atomicAdd(eri_tensor+32*n_ctr_pairs, gout32);
+            atomicAdd(eri_tensor+33*n_ctr_pairs, gout33);
+            atomicAdd(eri_tensor+34*n_ctr_pairs, gout34);
+            atomicAdd(eri_tensor+35*n_ctr_pairs, gout35);
+            atomicAdd(eri_tensor+36*n_ctr_pairs, gout36);
+            atomicAdd(eri_tensor+37*n_ctr_pairs, gout37);
+            atomicAdd(eri_tensor+38*n_ctr_pairs, gout38);
+            atomicAdd(eri_tensor+39*n_ctr_pairs, gout39);
+            atomicAdd(eri_tensor+40*n_ctr_pairs, gout40);
+            atomicAdd(eri_tensor+41*n_ctr_pairs, gout41);
+            atomicAdd(eri_tensor+42*n_ctr_pairs, gout42);
+            atomicAdd(eri_tensor+43*n_ctr_pairs, gout43);
+            atomicAdd(eri_tensor+44*n_ctr_pairs, gout44);
+            atomicAdd(eri_tensor+45*n_ctr_pairs, gout45);
+            atomicAdd(eri_tensor+46*n_ctr_pairs, gout46);
+            atomicAdd(eri_tensor+47*n_ctr_pairs, gout47);
+            atomicAdd(eri_tensor+48*n_ctr_pairs, gout48);
+            atomicAdd(eri_tensor+49*n_ctr_pairs, gout49);
+            atomicAdd(eri_tensor+50*n_ctr_pairs, gout50);
+            atomicAdd(eri_tensor+51*n_ctr_pairs, gout51);
+            atomicAdd(eri_tensor+52*n_ctr_pairs, gout52);
+            atomicAdd(eri_tensor+53*n_ctr_pairs, gout53);
         }
     }
 }
@@ -2428,11 +2208,7 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -2455,7 +2231,7 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -2468,15 +2244,18 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         }
         atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
+        gy[0] = 1.;
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -2509,68 +2288,61 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout25 = 0;
         double gout26 = 0;
         double s0, s1, s2;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
             __syncthreads();
-            if (gout_id == 0) {
-                double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-                gy[0] = fac;
-            }
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                __syncthreads();
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    if (gout_id == 0) {
-                        gy[0] = 0.;
-                    }
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                if (gout_id == 0) {
+                    gy[0] = 0.;
                 }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double aj_aij = aj / aij;
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            if (gout_id == 0) {
+                double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+                double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+                double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
                 double xpq = xij - rk[0];
                 double ypq = yij - rk[1];
                 double zpq = zij - rk[2];
-                if (gout_id == 0) {
-                    rjri[0] = xjxi;
-                    rjri[64] = yjyi;
-                    rjri[128] = zjzi;
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
-                    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                    double theta_ij = ai * aj_aij;
-                    double Kab = theta_ij * rr_ij;
-                    gx[0] = exp(-Kab);
-                }
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                rjri[0] = xjxi;
+                rjri[64] = yjyi;
+                rjri[128] = zjzi;
+                Rpq[0] = xpq;
+                Rpq[64] = ypq;
+                Rpq[128] = zpq;
+                Rpq[192] = rr;
+            }
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                __syncthreads();
+                if (gout_id == 0) {
+                    double cijk = fac_ij * ck[kp];
+                    gx[0] = cijk / (aij*ak*sqrt(aij+ak));
+                }
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
-                double theta_rr = theta * rr;
+                double theta_rr = theta * Rpq[192];
                 double *rw1 = rw + 384;
                 __syncthreads();
                 rys_roots(3, theta_rr, rw1, 64, gout_id, 4);
@@ -2795,139 +2567,128 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
+            double *eri_tensor = out + k0*36*n_ctr_pairs + pair_mapping[pair_ij_idx];
             switch (gout_id) {
             case 0:
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+2)*naux + 0] = gout4;
-            eri_tensor[(2*nKj+3)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+4)*naux + 0] = gout6;
-            eri_tensor[(4*nKj+4)*naux + 0] = gout7;
-            eri_tensor[(2*nKj+5)*naux + 0] = gout8;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(4*nKj+0)*naux + 1] = gout10;
-            eri_tensor[(2*nKj+1)*naux + 1] = gout11;
-            eri_tensor[(0*nKj+2)*naux + 1] = gout12;
-            eri_tensor[(4*nKj+2)*naux + 1] = gout13;
-            eri_tensor[(2*nKj+3)*naux + 1] = gout14;
-            eri_tensor[(0*nKj+4)*naux + 1] = gout15;
-            eri_tensor[(4*nKj+4)*naux + 1] = gout16;
-            eri_tensor[(2*nKj+5)*naux + 1] = gout17;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout18;
-            eri_tensor[(4*nKj+0)*naux + 2] = gout19;
-            eri_tensor[(2*nKj+1)*naux + 2] = gout20;
-            eri_tensor[(0*nKj+2)*naux + 2] = gout21;
-            eri_tensor[(4*nKj+2)*naux + 2] = gout22;
-            eri_tensor[(2*nKj+3)*naux + 2] = gout23;
-            eri_tensor[(0*nKj+4)*naux + 2] = gout24;
-            eri_tensor[(4*nKj+4)*naux + 2] = gout25;
-            eri_tensor[(2*nKj+5)*naux + 2] = gout26;
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+20*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+24*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+28*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+32*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+36*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+40*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+44*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+48*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+52*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+56*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+60*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+64*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+68*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+72*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+76*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+80*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+84*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+88*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+92*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+96*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+100*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+104*n_ctr_pairs, gout26);
             break;
             case 1:
-            eri_tensor[(1*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(3*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(5*nKj+2)*naux + 0] = gout4;
-            eri_tensor[(3*nKj+3)*naux + 0] = gout5;
-            eri_tensor[(1*nKj+4)*naux + 0] = gout6;
-            eri_tensor[(5*nKj+4)*naux + 0] = gout7;
-            eri_tensor[(3*nKj+5)*naux + 0] = gout8;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(5*nKj+0)*naux + 1] = gout10;
-            eri_tensor[(3*nKj+1)*naux + 1] = gout11;
-            eri_tensor[(1*nKj+2)*naux + 1] = gout12;
-            eri_tensor[(5*nKj+2)*naux + 1] = gout13;
-            eri_tensor[(3*nKj+3)*naux + 1] = gout14;
-            eri_tensor[(1*nKj+4)*naux + 1] = gout15;
-            eri_tensor[(5*nKj+4)*naux + 1] = gout16;
-            eri_tensor[(3*nKj+5)*naux + 1] = gout17;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout18;
-            eri_tensor[(5*nKj+0)*naux + 2] = gout19;
-            eri_tensor[(3*nKj+1)*naux + 2] = gout20;
-            eri_tensor[(1*nKj+2)*naux + 2] = gout21;
-            eri_tensor[(5*nKj+2)*naux + 2] = gout22;
-            eri_tensor[(3*nKj+3)*naux + 2] = gout23;
-            eri_tensor[(1*nKj+4)*naux + 2] = gout24;
-            eri_tensor[(5*nKj+4)*naux + 2] = gout25;
-            eri_tensor[(3*nKj+5)*naux + 2] = gout26;
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+21*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+25*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+29*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+33*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+37*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+41*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+45*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+49*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+53*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+57*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+61*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+65*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+69*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+73*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+77*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+81*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+85*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+89*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+93*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+97*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+101*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+105*n_ctr_pairs, gout26);
             break;
             case 2:
-            eri_tensor[(2*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout1;
-            eri_tensor[(4*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(0*nKj+3)*naux + 0] = gout4;
-            eri_tensor[(4*nKj+3)*naux + 0] = gout5;
-            eri_tensor[(2*nKj+4)*naux + 0] = gout6;
-            eri_tensor[(0*nKj+5)*naux + 0] = gout7;
-            eri_tensor[(4*nKj+5)*naux + 0] = gout8;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(0*nKj+1)*naux + 1] = gout10;
-            eri_tensor[(4*nKj+1)*naux + 1] = gout11;
-            eri_tensor[(2*nKj+2)*naux + 1] = gout12;
-            eri_tensor[(0*nKj+3)*naux + 1] = gout13;
-            eri_tensor[(4*nKj+3)*naux + 1] = gout14;
-            eri_tensor[(2*nKj+4)*naux + 1] = gout15;
-            eri_tensor[(0*nKj+5)*naux + 1] = gout16;
-            eri_tensor[(4*nKj+5)*naux + 1] = gout17;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout18;
-            eri_tensor[(0*nKj+1)*naux + 2] = gout19;
-            eri_tensor[(4*nKj+1)*naux + 2] = gout20;
-            eri_tensor[(2*nKj+2)*naux + 2] = gout21;
-            eri_tensor[(0*nKj+3)*naux + 2] = gout22;
-            eri_tensor[(4*nKj+3)*naux + 2] = gout23;
-            eri_tensor[(2*nKj+4)*naux + 2] = gout24;
-            eri_tensor[(0*nKj+5)*naux + 2] = gout25;
-            eri_tensor[(4*nKj+5)*naux + 2] = gout26;
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+18*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+22*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+26*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+30*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+34*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+38*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+42*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+46*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+50*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+54*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+58*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+62*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+66*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+70*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+74*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+78*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+82*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+86*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+90*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+94*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+98*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+102*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+106*n_ctr_pairs, gout26);
             break;
             case 3:
-            eri_tensor[(3*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout1;
-            eri_tensor[(5*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(1*nKj+3)*naux + 0] = gout4;
-            eri_tensor[(5*nKj+3)*naux + 0] = gout5;
-            eri_tensor[(3*nKj+4)*naux + 0] = gout6;
-            eri_tensor[(1*nKj+5)*naux + 0] = gout7;
-            eri_tensor[(5*nKj+5)*naux + 0] = gout8;
-            eri_tensor[(3*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(1*nKj+1)*naux + 1] = gout10;
-            eri_tensor[(5*nKj+1)*naux + 1] = gout11;
-            eri_tensor[(3*nKj+2)*naux + 1] = gout12;
-            eri_tensor[(1*nKj+3)*naux + 1] = gout13;
-            eri_tensor[(5*nKj+3)*naux + 1] = gout14;
-            eri_tensor[(3*nKj+4)*naux + 1] = gout15;
-            eri_tensor[(1*nKj+5)*naux + 1] = gout16;
-            eri_tensor[(5*nKj+5)*naux + 1] = gout17;
-            eri_tensor[(3*nKj+0)*naux + 2] = gout18;
-            eri_tensor[(1*nKj+1)*naux + 2] = gout19;
-            eri_tensor[(5*nKj+1)*naux + 2] = gout20;
-            eri_tensor[(3*nKj+2)*naux + 2] = gout21;
-            eri_tensor[(1*nKj+3)*naux + 2] = gout22;
-            eri_tensor[(5*nKj+3)*naux + 2] = gout23;
-            eri_tensor[(3*nKj+4)*naux + 2] = gout24;
-            eri_tensor[(1*nKj+5)*naux + 2] = gout25;
-            eri_tensor[(5*nKj+5)*naux + 2] = gout26;
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+19*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+23*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+27*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+31*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+35*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+39*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+43*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+47*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+51*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+55*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+59*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+63*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+67*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+71*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+75*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+79*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+83*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+87*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+91*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+95*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+99*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+103*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+107*n_ctr_pairs, gout26);
             break;
             }
         }
@@ -2953,11 +2714,7 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -2974,7 +2731,7 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -2991,11 +2748,13 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -3006,61 +2765,54 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout3 = 0;
         double gout4 = 0;
         double gout5 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 2048;
                 rys_roots(2, theta_rr, rw1, 512, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 512, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *512] *= theta_fac;
                     rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac1;
+                    rw1[(irys*2+1)*512] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*512];
@@ -3086,29 +2838,18 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout1;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout2;
-            eri_tensor[(0*nKj+0)*naux + 3] = gout3;
-            eri_tensor[(0*nKj+0)*naux + 4] = gout4;
-            eri_tensor[(0*nKj+0)*naux + 5] = gout5;
+            double *eri_tensor = out + k0*1*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
         }
     }
 }
@@ -3128,11 +2869,7 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -3149,7 +2886,7 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -3166,11 +2903,13 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -3193,61 +2932,54 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout15 = 0;
         double gout16 = 0;
         double gout17 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1024;
                 rys_roots(2, theta_rr, rw1, 256, 0, 1);
                 rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -3299,41 +3031,30 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout3;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout4;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout5;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout6;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout7;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout8;
-            eri_tensor[(0*nKj+0)*naux + 3] = gout9;
-            eri_tensor[(1*nKj+0)*naux + 3] = gout10;
-            eri_tensor[(2*nKj+0)*naux + 3] = gout11;
-            eri_tensor[(0*nKj+0)*naux + 4] = gout12;
-            eri_tensor[(1*nKj+0)*naux + 4] = gout13;
-            eri_tensor[(2*nKj+0)*naux + 4] = gout14;
-            eri_tensor[(0*nKj+0)*naux + 5] = gout15;
-            eri_tensor[(1*nKj+0)*naux + 5] = gout16;
-            eri_tensor[(2*nKj+0)*naux + 5] = gout17;
+            double *eri_tensor = out + k0*3*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
         }
     }
 }
@@ -3353,11 +3074,7 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -3374,7 +3091,7 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -3391,11 +3108,13 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -3454,61 +3173,54 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout51 = 0;
         double gout52 = 0;
         double gout53 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1536;
                 rys_roots(3, theta_rr, rw1, 256, 0, 1);
                 rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -3624,77 +3336,66 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout3;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout4;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout6;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout7;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout8;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout10;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout11;
-            eri_tensor[(0*nKj+1)*naux + 1] = gout12;
-            eri_tensor[(1*nKj+1)*naux + 1] = gout13;
-            eri_tensor[(2*nKj+1)*naux + 1] = gout14;
-            eri_tensor[(0*nKj+2)*naux + 1] = gout15;
-            eri_tensor[(1*nKj+2)*naux + 1] = gout16;
-            eri_tensor[(2*nKj+2)*naux + 1] = gout17;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout18;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout19;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout20;
-            eri_tensor[(0*nKj+1)*naux + 2] = gout21;
-            eri_tensor[(1*nKj+1)*naux + 2] = gout22;
-            eri_tensor[(2*nKj+1)*naux + 2] = gout23;
-            eri_tensor[(0*nKj+2)*naux + 2] = gout24;
-            eri_tensor[(1*nKj+2)*naux + 2] = gout25;
-            eri_tensor[(2*nKj+2)*naux + 2] = gout26;
-            eri_tensor[(0*nKj+0)*naux + 3] = gout27;
-            eri_tensor[(1*nKj+0)*naux + 3] = gout28;
-            eri_tensor[(2*nKj+0)*naux + 3] = gout29;
-            eri_tensor[(0*nKj+1)*naux + 3] = gout30;
-            eri_tensor[(1*nKj+1)*naux + 3] = gout31;
-            eri_tensor[(2*nKj+1)*naux + 3] = gout32;
-            eri_tensor[(0*nKj+2)*naux + 3] = gout33;
-            eri_tensor[(1*nKj+2)*naux + 3] = gout34;
-            eri_tensor[(2*nKj+2)*naux + 3] = gout35;
-            eri_tensor[(0*nKj+0)*naux + 4] = gout36;
-            eri_tensor[(1*nKj+0)*naux + 4] = gout37;
-            eri_tensor[(2*nKj+0)*naux + 4] = gout38;
-            eri_tensor[(0*nKj+1)*naux + 4] = gout39;
-            eri_tensor[(1*nKj+1)*naux + 4] = gout40;
-            eri_tensor[(2*nKj+1)*naux + 4] = gout41;
-            eri_tensor[(0*nKj+2)*naux + 4] = gout42;
-            eri_tensor[(1*nKj+2)*naux + 4] = gout43;
-            eri_tensor[(2*nKj+2)*naux + 4] = gout44;
-            eri_tensor[(0*nKj+0)*naux + 5] = gout45;
-            eri_tensor[(1*nKj+0)*naux + 5] = gout46;
-            eri_tensor[(2*nKj+0)*naux + 5] = gout47;
-            eri_tensor[(0*nKj+1)*naux + 5] = gout48;
-            eri_tensor[(1*nKj+1)*naux + 5] = gout49;
-            eri_tensor[(2*nKj+1)*naux + 5] = gout50;
-            eri_tensor[(0*nKj+2)*naux + 5] = gout51;
-            eri_tensor[(1*nKj+2)*naux + 5] = gout52;
-            eri_tensor[(2*nKj+2)*naux + 5] = gout53;
+            double *eri_tensor = out + k0*9*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+18*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+19*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+20*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+21*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+22*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+23*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+24*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+25*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+26*n_ctr_pairs, gout26);
+            atomicAdd(eri_tensor+27*n_ctr_pairs, gout27);
+            atomicAdd(eri_tensor+28*n_ctr_pairs, gout28);
+            atomicAdd(eri_tensor+29*n_ctr_pairs, gout29);
+            atomicAdd(eri_tensor+30*n_ctr_pairs, gout30);
+            atomicAdd(eri_tensor+31*n_ctr_pairs, gout31);
+            atomicAdd(eri_tensor+32*n_ctr_pairs, gout32);
+            atomicAdd(eri_tensor+33*n_ctr_pairs, gout33);
+            atomicAdd(eri_tensor+34*n_ctr_pairs, gout34);
+            atomicAdd(eri_tensor+35*n_ctr_pairs, gout35);
+            atomicAdd(eri_tensor+36*n_ctr_pairs, gout36);
+            atomicAdd(eri_tensor+37*n_ctr_pairs, gout37);
+            atomicAdd(eri_tensor+38*n_ctr_pairs, gout38);
+            atomicAdd(eri_tensor+39*n_ctr_pairs, gout39);
+            atomicAdd(eri_tensor+40*n_ctr_pairs, gout40);
+            atomicAdd(eri_tensor+41*n_ctr_pairs, gout41);
+            atomicAdd(eri_tensor+42*n_ctr_pairs, gout42);
+            atomicAdd(eri_tensor+43*n_ctr_pairs, gout43);
+            atomicAdd(eri_tensor+44*n_ctr_pairs, gout44);
+            atomicAdd(eri_tensor+45*n_ctr_pairs, gout45);
+            atomicAdd(eri_tensor+46*n_ctr_pairs, gout46);
+            atomicAdd(eri_tensor+47*n_ctr_pairs, gout47);
+            atomicAdd(eri_tensor+48*n_ctr_pairs, gout48);
+            atomicAdd(eri_tensor+49*n_ctr_pairs, gout49);
+            atomicAdd(eri_tensor+50*n_ctr_pairs, gout50);
+            atomicAdd(eri_tensor+51*n_ctr_pairs, gout51);
+            atomicAdd(eri_tensor+52*n_ctr_pairs, gout52);
+            atomicAdd(eri_tensor+53*n_ctr_pairs, gout53);
         }
     }
 }
@@ -3714,11 +3415,7 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -3735,7 +3432,7 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -3752,11 +3449,13 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -3797,61 +3496,54 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout33 = 0;
         double gout34 = 0;
         double gout35 = 0;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
-            double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    fac = 0.;
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac1 = fac * exp(-Kab);
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
-                double xpq = xij - rk[0];
-                double ypq = yij - rk[1];
-                double zpq = zij - rk[2];
-                double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                cicj = 0.;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+            double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+            double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
+            double xpq = xij - rk[0];
+            double ypq = yij - rk[1];
+            double zpq = zij - rk[2];
+            double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                double fac = fac_ij * ck[kp] / (aij*ak*sqrt(aij+ak));
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
                 double *rw1 = rw + 1536;
                 rys_roots(3, theta_rr, rw1, 256, 0, 1);
                 rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
-                double sqrt_theta_fac = -sqrt(theta_fac) * fac1;
+                double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
                     rw[ irys*2   *256] *= theta_fac;
                     rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac1;
+                    rw1[(irys*2+1)*256] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
                     double wt = rw[(2*irys+1)*256];
@@ -3931,59 +3623,48 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+0)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+0)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout4;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout5;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout6;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout7;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout8;
-            eri_tensor[(3*nKj+0)*naux + 1] = gout9;
-            eri_tensor[(4*nKj+0)*naux + 1] = gout10;
-            eri_tensor[(5*nKj+0)*naux + 1] = gout11;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout12;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout13;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout14;
-            eri_tensor[(3*nKj+0)*naux + 2] = gout15;
-            eri_tensor[(4*nKj+0)*naux + 2] = gout16;
-            eri_tensor[(5*nKj+0)*naux + 2] = gout17;
-            eri_tensor[(0*nKj+0)*naux + 3] = gout18;
-            eri_tensor[(1*nKj+0)*naux + 3] = gout19;
-            eri_tensor[(2*nKj+0)*naux + 3] = gout20;
-            eri_tensor[(3*nKj+0)*naux + 3] = gout21;
-            eri_tensor[(4*nKj+0)*naux + 3] = gout22;
-            eri_tensor[(5*nKj+0)*naux + 3] = gout23;
-            eri_tensor[(0*nKj+0)*naux + 4] = gout24;
-            eri_tensor[(1*nKj+0)*naux + 4] = gout25;
-            eri_tensor[(2*nKj+0)*naux + 4] = gout26;
-            eri_tensor[(3*nKj+0)*naux + 4] = gout27;
-            eri_tensor[(4*nKj+0)*naux + 4] = gout28;
-            eri_tensor[(5*nKj+0)*naux + 4] = gout29;
-            eri_tensor[(0*nKj+0)*naux + 5] = gout30;
-            eri_tensor[(1*nKj+0)*naux + 5] = gout31;
-            eri_tensor[(2*nKj+0)*naux + 5] = gout32;
-            eri_tensor[(3*nKj+0)*naux + 5] = gout33;
-            eri_tensor[(4*nKj+0)*naux + 5] = gout34;
-            eri_tensor[(5*nKj+0)*naux + 5] = gout35;
+            double *eri_tensor = out + k0*6*n_ctr_pairs + pair_mapping[pair_ij_idx];
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+18*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+19*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+20*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+21*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+22*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+23*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+24*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+25*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+26*n_ctr_pairs, gout26);
+            atomicAdd(eri_tensor+27*n_ctr_pairs, gout27);
+            atomicAdd(eri_tensor+28*n_ctr_pairs, gout28);
+            atomicAdd(eri_tensor+29*n_ctr_pairs, gout29);
+            atomicAdd(eri_tensor+30*n_ctr_pairs, gout30);
+            atomicAdd(eri_tensor+31*n_ctr_pairs, gout31);
+            atomicAdd(eri_tensor+32*n_ctr_pairs, gout32);
+            atomicAdd(eri_tensor+33*n_ctr_pairs, gout33);
+            atomicAdd(eri_tensor+34*n_ctr_pairs, gout34);
+            atomicAdd(eri_tensor+35*n_ctr_pairs, gout35);
         }
     }
 }
@@ -4004,11 +3685,7 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     int kprim = bounds.kprim;
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -4031,7 +3708,7 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 1;
         int pair_ij = pair_ij_idx;
-        if (pair_ij_idx >= bounds.npairs_ij) {
+        if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
@@ -4044,15 +3721,18 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         }
         atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
+        gy[0] = 1.;
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+        double aij = ai + aj;
+        double cicj = ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -4085,68 +3765,61 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         double gout25 = 0;
         double gout26 = 0;
         double s0, s1, s2;
-        for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
-            int ijp = ijkp / kprim;
-            int kp = ijkp % kprim;
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
-            double ak = expk[kp];
-            double aij = ai + aj;
-            double cijk = ci[ip] * cj[jp] * ck[kp];
+        int img_counts = img_counts_in_warp[warp_id];
+        for (int img = 0; img < img_counts; ++img) {
+            int img_id = img0 + img;
             __syncthreads();
-            if (gout_id == 0) {
-                double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
-                gy[0] = fac;
-            }
-            int img_counts = img_counts_in_warp[warp_id];
-            for (int img = 0; img < img_counts; ++img) {
-                int img_id = img0 + img;
-                __syncthreads();
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    if (gout_id == 0) {
-                        gy[0] = 0.;
-                    }
+            if (img_id >= img1) {
+                // ensure the same number of images processed in the same warp
+                img_id = img0;
+                if (gout_id == 0) {
+                    gy[0] = 0.;
                 }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xi = ri[0] + img_coords[iL*3+0];
-                double yi = ri[1] + img_coords[iL*3+1];
-                double zi = ri[2] + img_coords[iL*3+2];
-                double xj = rj[0] + img_coords[jL*3+0];
-                double yj = rj[1] + img_coords[jL*3+1];
-                double zj = rj[2] + img_coords[jL*3+2];
-                double xjxi = xj - xi;
-                double yjyi = yj - yi;
-                double zjzi = zj - zi;
-                double aj_aij = aj / aij;
-                double xij = xjxi * aj_aij + xi;
-                double yij = yjyi * aj_aij + yi;
-                double zij = zjzi * aj_aij + zi;
+            }
+            int img_ij = img_idx[img_id];
+            int iL = img_ij / nimgs;
+            int jL = img_ij % nimgs;
+            double xi = ri[0];
+            double yi = ri[1];
+            double zi = ri[2];
+            double xj = rj[0];
+            double yj = rj[1];
+            double zj = rj[2];
+            double xjxi = xj + img_coords[jL*3+0] - xi;
+            double yjyi = yj + img_coords[jL*3+1] - yi;
+            double zjzi = zj + img_coords[jL*3+2] - zi;
+            double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double Kab = theta_ij * rr_ij;
+            double fac_ij = PI_FAC * cicj * exp(-Kab);
+            if (gout_id == 0) {
+                double xij = xjxi * aj_aij + xi + img_coords[iL*3+0];
+                double yij = yjyi * aj_aij + yi + img_coords[iL*3+1];
+                double zij = zjzi * aj_aij + zi + img_coords[iL*3+2];
                 double xpq = xij - rk[0];
                 double ypq = yij - rk[1];
                 double zpq = zij - rk[2];
-                if (gout_id == 0) {
-                    rjri[0] = xjxi;
-                    rjri[64] = yjyi;
-                    rjri[128] = zjzi;
-                    Rpq[0] = xpq;
-                    Rpq[64] = ypq;
-                    Rpq[128] = zpq;
-                    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                    double theta_ij = ai * aj_aij;
-                    double Kab = theta_ij * rr_ij;
-                    gx[0] = exp(-Kab);
-                }
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
+                rjri[0] = xjxi;
+                rjri[64] = yjyi;
+                rjri[128] = zjzi;
+                Rpq[0] = xpq;
+                Rpq[64] = ypq;
+                Rpq[128] = zpq;
+                Rpq[192] = rr;
+            }
+            for (int kp = 0; kp < kprim; ++kp) {
+                double ak = expk[kp];
                 double theta = aij * ak / (aij + ak);
+                __syncthreads();
+                if (gout_id == 0) {
+                    double cijk = fac_ij * ck[kp];
+                    gx[0] = cijk / (aij*ak*sqrt(aij+ak));
+                }
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
-                double theta_rr = theta * rr;
+                double theta_rr = theta * Rpq[192];
                 double *rw1 = rw + 384;
                 __syncthreads();
                 rys_roots(3, theta_rr, rw1, 64, gout_id, 4);
@@ -4360,139 +4033,128 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
             }
         }
-        if (pair_ij_idx < bounds.npairs_ij) {
+        if (pair_ij_idx < bounds.n_prim_pairs) {
             int *ao_loc = envs.ao_loc;
-            int nbasp = envs.cell0_nbas;
-            int ncells = envs.bvk_ncells;
-            int cell_i = ish / nbasp;
-            int cell0_ish = ish % nbasp;
-            int cell_j = jsh / nbasp;
-            int cell0_jsh = jsh % nbasp;
-            int nrow = bounds.nrow;
-            int ncol = bounds.ncol;
-            size_t naux = bounds.naux;
-            int i0 = ao_loc[cell0_ish] - ao_loc[bounds.ish0];
-            int j0 = ao_loc[cell0_jsh] - ao_loc[bounds.jsh0];
+            int *pair_mapping = bounds.pair_mapping;
+            size_t n_ctr_pairs = bounds.n_ctr_pairs;
             int k0 = ao_loc[ksh] - ao_loc[bounds.ksh0];
-            double *eri_tensor = out + (((cell_i * nrow + i0) * ncells +
-                                          cell_j) * ncol + j0) * naux + k0;
-            int nKj = ncells * ncol;
+            double *eri_tensor = out + k0*18*n_ctr_pairs + pair_mapping[pair_ij_idx];
             switch (gout_id) {
             case 0:
-            eri_tensor[(0*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(4*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(2*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(0*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(4*nKj+2)*naux + 0] = gout4;
-            eri_tensor[(2*nKj+0)*naux + 1] = gout5;
-            eri_tensor[(0*nKj+1)*naux + 1] = gout6;
-            eri_tensor[(4*nKj+1)*naux + 1] = gout7;
-            eri_tensor[(2*nKj+2)*naux + 1] = gout8;
-            eri_tensor[(0*nKj+0)*naux + 2] = gout9;
-            eri_tensor[(4*nKj+0)*naux + 2] = gout10;
-            eri_tensor[(2*nKj+1)*naux + 2] = gout11;
-            eri_tensor[(0*nKj+2)*naux + 2] = gout12;
-            eri_tensor[(4*nKj+2)*naux + 2] = gout13;
-            eri_tensor[(2*nKj+0)*naux + 3] = gout14;
-            eri_tensor[(0*nKj+1)*naux + 3] = gout15;
-            eri_tensor[(4*nKj+1)*naux + 3] = gout16;
-            eri_tensor[(2*nKj+2)*naux + 3] = gout17;
-            eri_tensor[(0*nKj+0)*naux + 4] = gout18;
-            eri_tensor[(4*nKj+0)*naux + 4] = gout19;
-            eri_tensor[(2*nKj+1)*naux + 4] = gout20;
-            eri_tensor[(0*nKj+2)*naux + 4] = gout21;
-            eri_tensor[(4*nKj+2)*naux + 4] = gout22;
-            eri_tensor[(2*nKj+0)*naux + 5] = gout23;
-            eri_tensor[(0*nKj+1)*naux + 5] = gout24;
-            eri_tensor[(4*nKj+1)*naux + 5] = gout25;
-            eri_tensor[(2*nKj+2)*naux + 5] = gout26;
+            atomicAdd(eri_tensor+0*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+4*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+8*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+12*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+16*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+20*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+24*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+28*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+32*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+36*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+40*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+44*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+48*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+52*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+56*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+60*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+64*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+68*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+72*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+76*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+80*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+84*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+88*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+92*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+96*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+100*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+104*n_ctr_pairs, gout26);
             break;
             case 1:
-            eri_tensor[(1*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(5*nKj+0)*naux + 0] = gout1;
-            eri_tensor[(3*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(1*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(5*nKj+2)*naux + 0] = gout4;
-            eri_tensor[(3*nKj+0)*naux + 1] = gout5;
-            eri_tensor[(1*nKj+1)*naux + 1] = gout6;
-            eri_tensor[(5*nKj+1)*naux + 1] = gout7;
-            eri_tensor[(3*nKj+2)*naux + 1] = gout8;
-            eri_tensor[(1*nKj+0)*naux + 2] = gout9;
-            eri_tensor[(5*nKj+0)*naux + 2] = gout10;
-            eri_tensor[(3*nKj+1)*naux + 2] = gout11;
-            eri_tensor[(1*nKj+2)*naux + 2] = gout12;
-            eri_tensor[(5*nKj+2)*naux + 2] = gout13;
-            eri_tensor[(3*nKj+0)*naux + 3] = gout14;
-            eri_tensor[(1*nKj+1)*naux + 3] = gout15;
-            eri_tensor[(5*nKj+1)*naux + 3] = gout16;
-            eri_tensor[(3*nKj+2)*naux + 3] = gout17;
-            eri_tensor[(1*nKj+0)*naux + 4] = gout18;
-            eri_tensor[(5*nKj+0)*naux + 4] = gout19;
-            eri_tensor[(3*nKj+1)*naux + 4] = gout20;
-            eri_tensor[(1*nKj+2)*naux + 4] = gout21;
-            eri_tensor[(5*nKj+2)*naux + 4] = gout22;
-            eri_tensor[(3*nKj+0)*naux + 5] = gout23;
-            eri_tensor[(1*nKj+1)*naux + 5] = gout24;
-            eri_tensor[(5*nKj+1)*naux + 5] = gout25;
-            eri_tensor[(3*nKj+2)*naux + 5] = gout26;
+            atomicAdd(eri_tensor+1*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+5*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+9*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+13*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+17*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+21*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+25*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+29*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+33*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+37*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+41*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+45*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+49*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+53*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+57*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+61*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+65*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+69*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+73*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+77*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+81*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+85*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+89*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+93*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+97*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+101*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+105*n_ctr_pairs, gout26);
             break;
             case 2:
-            eri_tensor[(2*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(0*nKj+1)*naux + 0] = gout1;
-            eri_tensor[(4*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(2*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(0*nKj+0)*naux + 1] = gout4;
-            eri_tensor[(4*nKj+0)*naux + 1] = gout5;
-            eri_tensor[(2*nKj+1)*naux + 1] = gout6;
-            eri_tensor[(0*nKj+2)*naux + 1] = gout7;
-            eri_tensor[(4*nKj+2)*naux + 1] = gout8;
-            eri_tensor[(2*nKj+0)*naux + 2] = gout9;
-            eri_tensor[(0*nKj+1)*naux + 2] = gout10;
-            eri_tensor[(4*nKj+1)*naux + 2] = gout11;
-            eri_tensor[(2*nKj+2)*naux + 2] = gout12;
-            eri_tensor[(0*nKj+0)*naux + 3] = gout13;
-            eri_tensor[(4*nKj+0)*naux + 3] = gout14;
-            eri_tensor[(2*nKj+1)*naux + 3] = gout15;
-            eri_tensor[(0*nKj+2)*naux + 3] = gout16;
-            eri_tensor[(4*nKj+2)*naux + 3] = gout17;
-            eri_tensor[(2*nKj+0)*naux + 4] = gout18;
-            eri_tensor[(0*nKj+1)*naux + 4] = gout19;
-            eri_tensor[(4*nKj+1)*naux + 4] = gout20;
-            eri_tensor[(2*nKj+2)*naux + 4] = gout21;
-            eri_tensor[(0*nKj+0)*naux + 5] = gout22;
-            eri_tensor[(4*nKj+0)*naux + 5] = gout23;
-            eri_tensor[(2*nKj+1)*naux + 5] = gout24;
-            eri_tensor[(0*nKj+2)*naux + 5] = gout25;
-            eri_tensor[(4*nKj+2)*naux + 5] = gout26;
+            atomicAdd(eri_tensor+2*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+6*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+10*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+14*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+18*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+22*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+26*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+30*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+34*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+38*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+42*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+46*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+50*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+54*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+58*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+62*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+66*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+70*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+74*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+78*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+82*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+86*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+90*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+94*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+98*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+102*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+106*n_ctr_pairs, gout26);
             break;
             case 3:
-            eri_tensor[(3*nKj+0)*naux + 0] = gout0;
-            eri_tensor[(1*nKj+1)*naux + 0] = gout1;
-            eri_tensor[(5*nKj+1)*naux + 0] = gout2;
-            eri_tensor[(3*nKj+2)*naux + 0] = gout3;
-            eri_tensor[(1*nKj+0)*naux + 1] = gout4;
-            eri_tensor[(5*nKj+0)*naux + 1] = gout5;
-            eri_tensor[(3*nKj+1)*naux + 1] = gout6;
-            eri_tensor[(1*nKj+2)*naux + 1] = gout7;
-            eri_tensor[(5*nKj+2)*naux + 1] = gout8;
-            eri_tensor[(3*nKj+0)*naux + 2] = gout9;
-            eri_tensor[(1*nKj+1)*naux + 2] = gout10;
-            eri_tensor[(5*nKj+1)*naux + 2] = gout11;
-            eri_tensor[(3*nKj+2)*naux + 2] = gout12;
-            eri_tensor[(1*nKj+0)*naux + 3] = gout13;
-            eri_tensor[(5*nKj+0)*naux + 3] = gout14;
-            eri_tensor[(3*nKj+1)*naux + 3] = gout15;
-            eri_tensor[(1*nKj+2)*naux + 3] = gout16;
-            eri_tensor[(5*nKj+2)*naux + 3] = gout17;
-            eri_tensor[(3*nKj+0)*naux + 4] = gout18;
-            eri_tensor[(1*nKj+1)*naux + 4] = gout19;
-            eri_tensor[(5*nKj+1)*naux + 4] = gout20;
-            eri_tensor[(3*nKj+2)*naux + 4] = gout21;
-            eri_tensor[(1*nKj+0)*naux + 5] = gout22;
-            eri_tensor[(5*nKj+0)*naux + 5] = gout23;
-            eri_tensor[(3*nKj+1)*naux + 5] = gout24;
-            eri_tensor[(1*nKj+2)*naux + 5] = gout25;
-            eri_tensor[(5*nKj+2)*naux + 5] = gout26;
+            atomicAdd(eri_tensor+3*n_ctr_pairs, gout0);
+            atomicAdd(eri_tensor+7*n_ctr_pairs, gout1);
+            atomicAdd(eri_tensor+11*n_ctr_pairs, gout2);
+            atomicAdd(eri_tensor+15*n_ctr_pairs, gout3);
+            atomicAdd(eri_tensor+19*n_ctr_pairs, gout4);
+            atomicAdd(eri_tensor+23*n_ctr_pairs, gout5);
+            atomicAdd(eri_tensor+27*n_ctr_pairs, gout6);
+            atomicAdd(eri_tensor+31*n_ctr_pairs, gout7);
+            atomicAdd(eri_tensor+35*n_ctr_pairs, gout8);
+            atomicAdd(eri_tensor+39*n_ctr_pairs, gout9);
+            atomicAdd(eri_tensor+43*n_ctr_pairs, gout10);
+            atomicAdd(eri_tensor+47*n_ctr_pairs, gout11);
+            atomicAdd(eri_tensor+51*n_ctr_pairs, gout12);
+            atomicAdd(eri_tensor+55*n_ctr_pairs, gout13);
+            atomicAdd(eri_tensor+59*n_ctr_pairs, gout14);
+            atomicAdd(eri_tensor+63*n_ctr_pairs, gout15);
+            atomicAdd(eri_tensor+67*n_ctr_pairs, gout16);
+            atomicAdd(eri_tensor+71*n_ctr_pairs, gout17);
+            atomicAdd(eri_tensor+75*n_ctr_pairs, gout18);
+            atomicAdd(eri_tensor+79*n_ctr_pairs, gout19);
+            atomicAdd(eri_tensor+83*n_ctr_pairs, gout20);
+            atomicAdd(eri_tensor+87*n_ctr_pairs, gout21);
+            atomicAdd(eri_tensor+91*n_ctr_pairs, gout22);
+            atomicAdd(eri_tensor+95*n_ctr_pairs, gout23);
+            atomicAdd(eri_tensor+99*n_ctr_pairs, gout24);
+            atomicAdd(eri_tensor+103*n_ctr_pairs, gout25);
+            atomicAdd(eri_tensor+107*n_ctr_pairs, gout26);
             break;
             }
         }
@@ -4506,7 +4168,7 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
     int lk = bounds->lk;
     int kij = lk*25 + li*5 + lj;
     int nroots = bounds->nroots;
-    int npairs_ij = bounds->npairs_ij;
+    int n_prim_pairs = bounds->n_prim_pairs;
     int nksh = bounds->nksh;
     int nksh_per_block = 32;
     int nsp_per_block = 8;
@@ -4536,7 +4198,7 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
 #endif
 
     dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
-    int sp_blocks = (npairs_ij + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
+    int sp_blocks = (n_prim_pairs + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
         (SPTAKS_PER_BLOCK*nsp_per_block);
     int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
     dim3 blocks(sp_blocks, ksh_blocks);
@@ -4565,7 +4227,7 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
     case 36:
         int3c2e_211<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
     case 37:
-        buflen += 3840;
+        buflen += 3904;
         int3c2e_221<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
     case 50:
         int3c2e_002<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
@@ -4576,7 +4238,7 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
     case 60:
         int3c2e_202<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
     case 61:
-        buflen += 3840;
+        buflen += 3904;
         int3c2e_212<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
     default: return 0;
     }

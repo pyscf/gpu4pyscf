@@ -203,12 +203,10 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
     get_veff = get_veff
     energy_elec = energy_elec
     get_rho = get_rho
+    density_fit = khf.KRHF.density_fit
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
-
-    to_gpu = utils.to_gpu
-    device = utils.device
 
     def to_cpu(self):
         mf = krks_cpu.KRKS(self.cell)

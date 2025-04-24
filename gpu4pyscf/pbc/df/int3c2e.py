@@ -17,6 +17,7 @@ Perodic 3-center 2-electron short-range Coulomb integral helper functions
 '''
 
 import ctypes
+import itertools
 import math
 import numpy as np
 from importlib.util import find_spec
@@ -29,28 +30,33 @@ else:
     from gpu4pyscf.lib.dpnp_helper import contract
 from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
-from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
+from pyscf.gto import (ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF,
+                       PTR_COORD, BAS_SLOTS, conc_env)
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
-from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
+from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
+                                extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.gto.mole import extract_pgto_params
-from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant
+from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant, most_diffused_pgto
 
 __all__ = [
     'sr_aux_e2',
 ]
 
 libpbc.fill_int3c2e.restype = ctypes.c_int
+libpbc.bvk_overlap_img_counts.restype = ctypes.c_int
+libpbc.bvk_overlap_img_idx.restype = ctypes.c_int
+libpbc.sr_int3c2e_img_idx_sparse.restype = ctypes.c_int
+libpbc.conc_img_idx.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 45
 THREADS = 256
-BVK_CELL_SHELLS = 2400
+BVK_CELL_SHELLS = 400
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     r'''
@@ -60,159 +66,255 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     if bvk_kmesh is None and kpts is not None:
         if j_only:
             # Coulomb integrals requires smaller kmesh to converge finite-size effects
-            bvk_kmesh = kpts_to_kmesh(cell, bvk_kmesh)
+            bvk_kmesh = kpts_to_kmesh(cell, kpts)
         else:
             # The remote images may contribute to certain k-point mesh,
             # contributing to the finite-size effects in exchange matrix.
             rcut = estimate_rcut(cell, auxcell, omega).max()
             bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
-    bvk_kmesh, bvk_kmesh_inp = guess_bvk_kmesh(cell, bvk_kmesh), bvk_kmesh
-    logger.debug(cell, 'BvK input %s, set to %s for sr_aux_e2', bvk_kmesh_inp, bvk_kmesh)
+
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh)
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    naux = int3c2e_opt.aux_coeff.shape[0]
+    nao = cell.nao
+    naux = int3c2e_opt.aux_coeff.shape[1]
 
     gamma_point = kpts is None or (kpts.ndim == 1 and is_zero(kpts))
     if gamma_point:
         out = cp.zeros((nao, nao, naux))
+        nL = nkpts = 1
     else:
         kpts = np.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
         nL, nkpts = expLk.shape
         if j_only:
-            expLLk = contract('Lk,Mk->LMk', expLk.conj(), expLk)
+            expLLk = contract('Mk,Lk->MLk', expLk.conj(), expLk)
             expLLk = expLLk.view(np.float64).reshape(nL,nL,nkpts,2)
             out = cp.zeros((nkpts, nao, nao, naux), dtype=np.complex128)
         else:
             out = cp.zeros((nkpts, nkpts, nao, nao, naux), dtype=np.complex128)
 
-    ao_loc = int3c2e_opt.sorted_cell.ao_loc
-    aux_loc = int3c2e_opt.sorted_auxcell.ao_loc
+    c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
+    lmax = len(c_shell_counts) - 1
+    uniq_l = np.arange(lmax+1)
+    if cell.cart:
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    else:
+        nf = uniq_l * 2 + 1
+    c_l_offsets = np.append(0, np.cumsum(c_shell_counts*nf))
+    lmax = cell._bas[:,ANG_OF].max()
+    c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
-    for shls_slice, eri3c in int3c2e_opt.int3c2e_kernel():
-        i0, i1, j0, j1 = ao_loc[list(shls_slice[:4])]
-        k0, k1 = aux_loc[list(shls_slice[4:])]
+    for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_kernel():
+        i0, i1 = c_l_offsets[li:li+2]
+        j0, j1 = c_l_offsets[lj:lj+2]
+        nctri = c_shell_counts[li]
+        nctrj = c_shell_counts[lj]
+        nfi = (li+1)*(li+2)//2
+        nfj = (lj+1)*(lj+2)//2
+        nfij = nfi * nfj
+        n_pairs = len(c_pair_idx)
+        compressed_eri3c = compressed_eri3c.reshape(-1,nfij*n_pairs)
+        compressed_eri3c = compressed_eri3c.T.dot(cp.asarray(int3c2e_opt.aux_coeff))
+        if not cell.cart:
+            compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
+            compressed_eri3c = contract('qj,qpmk->jpmk', c2s[lj], compressed_eri3c)
+            compressed_eri3c = contract('pi,jpmk->jimk', c2s[li], compressed_eri3c)
+            nfi = li * 2 + 1
+            nfj = lj * 2 + 1
+
+        ni = i1 - i0
+        nj = j1 - j0
+        ish, jsh = divmod(c_pair_idx, nL*nctrj)
+        eri3c = cp.zeros((nL*nctri,nfi, nL*nctrj,nfj, naux))
+        compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
+        eri3c[ish,:,jsh] = compressed_eri3c.transpose(2,1,0,3)
+        if i0 == j0:
+            eri3c[jsh,:,ish] = compressed_eri3c.transpose(2,0,1,3)
+        eri3c = eri3c.reshape(nL,ni,nL,nj,naux)
+        compressed_eri3c = None
+
+        i = int3c2e_opt.ao_idx[i0:i1]
+        j = int3c2e_opt.ao_idx[j0:j1]
         if gamma_point:
-            out[i0:i1,j0:j1,k0:k1] = tmp = eri3c.sum(axis=(0,2))
+            eri3c = eri3c.reshape(ni,nj,naux)
+            out[i[:,None],j] = eri3c
             if i0 != j0:
-                out[j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,2)
+                out[j[:,None],i] = eri3c.transpose(1,0,2)
         elif j_only:
-            tmp = contract('LMkz,LpMqr->kpqrz', expLLk, eri3c)
-            tmp = tmp.view(np.complex128)[...,0]
-            out[:,i0:i1,j0:j1,k0:k1] = tmp
+            eri3c = contract('MLkz,MpLqr->kpqrz', expLLk, eri3c)
+            eri3c = eri3c.view(np.complex128)[...,0]
+            out[:,i[:,None],j] = eri3c
             if i0 != j0:
-                out[:,j0:j1,i0:i1,k0:k1] = tmp.transpose(0,2,1,3).conj()
+                out[:,j[:,None],i] = eri3c.transpose(0,2,1,3).conj()
         else:
             expLkz = expLk.view(np.float64).reshape(nL,nkpts,2)
-            tmp = contract('Lkz,MpLqr->Mkpqrz', expLkz, eri3c)
-            tmp = tmp.view(np.complex128)[...,0]
-            tmp = contract('Mk,Mlpqr->klpqr', expLk.conj(), tmp)
-            out[:,:,i0:i1,j0:j1,k0:k1] = tmp
+            eri3c = contract('Lkz,MpLqr->Mkpqrz', expLkz, eri3c)
+            eri3c = eri3c.view(np.complex128)[...,0]
+            eri3c = contract('Mk,Mlpqr->klpqr', expLk.conj(), eri3c)
+            out[:,:,i[:,None],j] = eri3c
             if i0 != j0:
-                out[:,:,j0:j1,i0:i1,k0:k1] = tmp.transpose(1,0,3,2,4).conj()
-        tmp = None
-
-    if kpts is None:
-        out = contract('pqr,rk->pqk', out, int3c2e_opt.aux_coeff)
-        out = contract('pqk,qj->pjk', out, int3c2e_opt.coeff)
-        out = contract('pjk,pi->ijk', out, int3c2e_opt.coeff)
-    elif j_only:
-        #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
-        out = contract('Npqr,rk->Npqk', out, int3c2e_opt.aux_coeff)
-        out = contract('Npqk,qj->Npjk', out, int3c2e_opt.coeff)
-        out = contract('Npjk,pi->Nijk', out, int3c2e_opt.coeff)
-    else:
-        #:out = einsum('MpNqr,pi,qj,rk->MiNjk', out, coeff, coeff, auxcoeff)
-        out = contract('MNpqr,rk->MNpqk', out, int3c2e_opt.aux_coeff)
-        out = contract('MNpqk,qj->MNpjk', out, int3c2e_opt.coeff)
-        out = contract('MNpjk,pi->MNijk', out, int3c2e_opt.coeff)
+                out[:,:,j[:,None],i] = eri3c.transpose(1,0,3,2,4).conj()
+        eri3c = None
     return out
 
-def create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs):
-    '''integral screening'''
-    # consider only the most diffused component of a basis
-    exps, cs = extract_pgto_params(cell, 'diffused')
-    ls = cell._bas[:,ANG_OF]
-    exps = cp.asarray(exps, dtype=np.float32)
-    log_cs = np.log(np.abs(cs * ((2*ls+1)/(4*np.pi))**.5))
-    log_cs = cp.asarray(log_cs, np.float32)
-    nbas = cell.nbas
-    nk = bvkcell.nbas // nbas
+def to_primitive_bas(cell):
+    '''Decontract the cell basis sets into primitive bases'''
+    bas_templates = {}
+    prim_bas = []
+    prim_env = cell._env.copy()
+    shell_offset = 0
+    # Mapping from the primitive shell to the shell in the original cell.
+    prim_to_ctr_mapping = []
+    aoslices = cell.aoslice_by_atom()
+    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
+        ptr_coord = cell._atm[ia,PTR_COORD]
+        key = tuple(cell._bas[ib0:ib1,PTR_COEFF])
+        if key in bas_templates:
+            bas_of_ia, local_shell_mapping = bas_templates[key]
+            bas_of_ia = bas_of_ia.copy()
+            bas_of_ia[:,ATOM_OF] = ia
+            bas_of_ia[:,PTR_BAS_COORD] = ptr_coord
+        else:
+            # Generate the template for decontracted basis
+            local_shell_mapping = []
+            off = 0
+            bas_of_ia = []
+            for shell in cell._bas[ib0:ib1]:
+                l = shell[ANG_OF]
+                nctr = shell[NCTR_OF]
+                nprim = shell[NPRIM_OF]
+                pexp = shell[PTR_EXP]
+                pcoeff = shell[PTR_COEFF]
+                bs = np.empty((nprim*nctr, BAS_SLOTS), dtype=np.int32)
+                bs[:,ATOM_OF] = ia
+                bs[:,ANG_OF] = l
+                bs[:,NPRIM_OF] = 1
+                bs[:,NCTR_OF] = 1
+                bs[:,PTR_EXP] = np.hstack([np.arange(pexp, pexp+nprim)] * nctr)
+                bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr)
+                bs[:,PTR_BAS_COORD] = ptr_coord
+                bas_of_ia.append(bs)
+                idx = np.repeat(np.arange(off, off+nctr), nprim)
+                local_shell_mapping.append(idx)
+                off += nctr
 
-    # Search the most diffused functions on each atom
-    aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
-    aux_ls = auxcell._bas[:,ANG_OF]
-    r2_aux = np.log(aux_cs**2 / cell.precision * 10**aux_ls) / aux_exps
-    atom_aux_exps = []
-    atoms = auxcell._bas[:,ATOM_OF]
-    atom_aux_exps = cp.full(cell.natm, 1e8, dtype=np.float32)
-    for ia in range(cell.natm):
-        bas_mask = atoms == ia
-        es = aux_exps[bas_mask]
-        if len(es) > 0:
-            atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
+            '''TODO
+            # partition the contracted GTO into a compact subset and
+            # multiple primitive shells
+            for shell in cell._bas[ib0:ib1]:
+                l = shell[ANG_OF]
+                nprim = shell[NPRIM_OF]
+                nctr = shell[NCTR_OF]
+                pexp = shell[PTR_EXP]
+                es = prim_env[pexp:pexp+nprim]
+                diffused_idx = np.where(es < 2.)[0]
+                n_diffused = len(diffuse_idx)
+                for ic in range(nctr):
+                    pcoeff = shell[PTR_COEFF] + ic * nprim
+                    bs = shell.copy()
+                    bs[NCTR_OF] = 1
+                    bs[PTR_COEFF] = pcoeff
+                    bs[PTR_BAS_COORD] = ptr_coord
+                    if nprim == 1 or n_diffused == 0:
+                        bas_of_ia.append(bs)
+                        local_shell_mapping.append(off+ic)
+                        continue
 
-    def gen_img_idx(ish0, ish1, jsh0, jsh1):
-        nish = ish1 - ish0
-        njsh = jsh1 - jsh0
-        #TODO: only tril part when i == j
-        ij_pairs = nk * nish * nk * njsh
-        img_counts = cp.zeros(ij_pairs, dtype=np.int32)
-        err = libpbc.int3c2e_img_counts(
-            ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int3c2e_envs),
-            (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-            ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-            ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
-            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nk), ctypes.c_int(cell.natm))
-        if err != 0:
-            raise RuntimeError('int3c2e_img_counts failed')
+                    cs = prim_env[pcoeff:pcoeff+nprim]
+                    compact_idx = np.where(es >= 2)[0]
+                    n_compact = len(compact_idx)
+                    idx = np.hstack(compact_idx, diffuse_idx)
+                    prim_env[pexp:pexp+nprim] = es[idx]
+                    prim_env[pcoeff:pcoeff+n_compact] = cs[compact_idx]
+                    prim_env[pcoeff+n_compact:pcoeff+nprim] = cs[diffused_idx]
+                    if n_compact > 0:
+                        # put compact pGTOs in one shell
+                        bs[NPRIM_OF] = n_compact
+                        bas_of_ia.append(bs.copy())
+                        local_shell_mapping.append(off+ic)
+                        pexp += n_compact
+                        pcoeff += n_compact
+                    # each diffused pGTO as one shell
+                    bs[NPRIM_OF] = 1
+                    for m in range(n_diffused):
+                        bs[PTR_EXP] = pexp + m
+                        bs[PTR_COEFF] = pexp + m
+                        bas_of_ia.append(bs.copy())
+                        local_shell_mapping.append(off+ic)
+                off += nctr
+                '''
 
-        remaining_idx = np.nonzero(img_counts > 0)[0]
-        remaining_idx = remaining_idx[img_counts[remaining_idx].argsort()[::-1]]
-        remaining_idx = cp.asarray(remaining_idx, dtype=np.int32, order='C')
-        ij_pairs = remaining_idx.size
-        img_offsets = cp.empty(ij_pairs+1, dtype=np.int32)
-        cp.cumsum(img_counts[remaining_idx], out=img_offsets[1:])
-        img_offsets[0] = 0
+            if bas_of_ia:
+                bas_of_ia = np.vstack(bas_of_ia)
+                local_shell_mapping = np.hstack(local_shell_mapping)
+                bas_templates[key] = (bas_of_ia, local_shell_mapping)
 
-        img_idx = cp.empty(int(img_offsets[-1]), dtype=np.int32)
-        err = libpbc.int3c2e_img_idx(
-            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(remaining_idx.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ij_pairs),
-            ctypes.byref(int3c2e_envs),
-            (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-            ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-            ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
-            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nk), ctypes.c_int(cell.natm))
-        if err != 0:
-            raise RuntimeError('int3c2e_img_idx failed')
+        if len(bas_of_ia) > 0:
+            prim_bas.append(bas_of_ia)
+            prim_to_ctr_mapping.append(shell_offset + local_shell_mapping)
+            shells_in_atm = cell._bas[ib0:ib1,NCTR_OF].sum()
+            shell_offset += shells_in_atm
 
-        Ki, i, Kj, j = cp.unravel_index(remaining_idx, (nk, nish, nk, njsh))
-        i += ish0
-        j += jsh0
-        # one-dimensional indices corresponding to [Ki,i,Kj,j]
-        bas_ij = cp.ravel_multi_index((Ki, i, Kj, j), (nk, nbas, nk, nbas))
-        bas_ij = cp.asarray(bas_ij, dtype=np.int32)
-        return img_idx, img_offsets, bas_ij
-    return gen_img_idx
+    pcell = cell.copy()
+    pcell._bas = np.asarray(np.vstack(prim_bas), dtype=np.int32)
+    pcell._env = prim_env
+    prim_to_ctr_mapping = np.asarray(np.hstack(prim_to_ctr_mapping), dtype=np.int32)
+
+    p_ls = pcell._bas[:,ANG_OF]
+    lmax = p_ls.max()
+    sorted_idx = np.hstack([np.where(p_ls==l)[0] for l in range(lmax+1)])
+    pcell._bas = pcell._bas[sorted_idx]
+
+    # This sorted_cell is a fictitious cell object, to define the
+    # p2c_mapping for prim_cell. PTRs in sorted_cell are not initialized.
+    # This object should not be used for any integral kernel.
+    sorted_cell = cell.copy()
+    c_ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
+    sorted_idx = np.repeat(np.arange(cell.nbas), cell._bas[:,NCTR_OF])
+    sorted_idx = [sorted_idx[c_ls==l] for l in range(lmax+1)]
+    counts = [len(i) for i in sorted_idx]
+    sorted_idx = np.hstack(sorted_idx)
+    sorted_cell._bas = cell._bas[sorted_idx]
+    sorted_cell._bas[:,NCTR_OF] = 1
+
+    # prim shells are sorted in pcell. The mapping needs to be sorted accordingly.
+    # The lookup stores the mapping for each angular momentum
+    c_shell_offsets = np.append(0, np.cumsum(counts))
+    p2c_mapping = []
+    for l, offset in enumerate(c_shell_offsets[:-1]):
+        i, idx = np.unique(prim_to_ctr_mapping[p_ls==l], return_inverse=True)
+        assert all(i[:-1] < i[1:])
+        p2c_mapping.append(idx + offset)
+    p2c_mapping = np.asarray(np.hstack(p2c_mapping), dtype=np.int32)
+
+    # ao_idx transforms the AOs in sorted_cell into AOs in the original cell
+    if cell.cart:
+        dims = (c_ls + 1) * (c_ls + 2) // 2
+    else:
+        dims = c_ls * 2+ 1
+    ao_loc = np.append(np.int32(0), dims.cumsum(dtype=np.int32))
+    idx = np.hstack([np.where(c_ls==l)[0] for l in range(lmax+1)])
+    ao_idx = np.array_split(np.arange(cell.nao), ao_loc[1:-1])
+    ao_idx = np.hstack([ao_idx[i] for i in idx])
+    return pcell, sorted_cell, p2c_mapping, ao_idx
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
         assert omega < 0
-        self.omega = omega
+        self.omega = -omega
+        assert cell._bas[:,ANG_OF].max() <= LMAX
 
         self.cell = cell
-        cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
-        self.sorted_cell = cell
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        self.coeff = cp.asarray(coeff)
-        self.sorted_cell.omega = omega
+        prim_cell, sorted_cell, self.prim_to_ctr_mapping, self.ao_idx = \
+                to_primitive_bas(cell)
+        self.prim_cell = prim_cell
+        self.prim_cell.omega = omega
+        # This sorted_cell is a fictitious cell object, to define the
+        # p2c_mapping for prim_cell. PTRs in sorted_cell are not initialized.
+        # This object should not be used for any integral kernel.
+        self.sorted_cell = sorted_cell
+
+        self.cell0_prim_l_counts = np.bincount(prim_cell._bas[:,ANG_OF])
+        self.cell0_ctr_l_counts = np.bincount(sorted_cell._bas[:,ANG_OF])
 
         self.auxcell = auxcell
         auxcell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(auxcell, tile=1)
@@ -228,131 +330,351 @@ class SRInt3c2eOpt:
         self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
 
         if np.prod(bvk_kmesh) == 1:
-            bvkcell = cell
+            bvkcell = prim_cell
         else:
-            bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+            bvkcell = pbctools.super_cell(prim_cell, bvk_kmesh, wrap_around=True)
             # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
 
-    def int3c2e_kernel(self, cutoff=None, verbose=None):
-        cell = self.sorted_cell
-        auxcell = self.sorted_auxcell
-        uniq_l_ctr = self.uniq_l_ctr
-        l_ctr_offsets = self.l_ctr_offsets
-        l_ctr_aux_offsets = self.l_ctr_aux_offsets
-        bvkcell = self.bvkcell
+        self.rcut = None
+        self.int3c2e_envs = None
 
-        log = logger.new_logger(cell, verbose)
-        cput0 = log.init_timer()
-        rcut = estimate_rcut(cell, auxcell, self.omega).max()
+    def build(self, verbose=None):
+        '''integral screening'''
+        log = logger.new_logger(self.cell, verbose)
+        pcell = self.prim_cell
+        auxcell = self.sorted_auxcell
+        bvkcell = self.bvkcell
+        bvk_ncells = np.prod(self.bvk_kmesh)
+
+        self.rcut = rcut = estimate_rcut(pcell, auxcell, self.omega).max()
         Ls = cp.asarray(bvkcell.get_lattice_Ls(rcut=rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
         log.debug('int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
 
-        if cutoff is None:
-            omega = cell.omega
-            aux_exp, _, aux_l = most_diffused_pgto(auxcell)
-            cell_exp, _, cell_l = most_diffused_pgto(cell)
-            if omega == 0:
-                theta = 1./(1./cell_exp + 1./aux_exp)
-            else:
-                theta = 1./(1./cell_exp + 1./aux_exp + omega**-2)
-            lsum = cell_l * 2 + aux_l + 1
-            rad = cell.vol**(-1./3) * rcut + 1
-            surface = 4*np.pi * rad**2
-            lattice_sum_factor = 2*np.pi*rcut*lsum/(cell.vol*theta) + surface
-            cutoff = cell.precision / lattice_sum_factor
-            log.debug1('int3c_kernel integral omega=%g theta=%g cutoff=%g',
-                       omega, theta, cutoff)
-
+        # Note: sort_orbitals and unsort_orbitals do not transform the
+        # s and p orbitals. _scale_sp_ctr_coeff apply these special
+        # normalization coefficients to the _env.
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
             bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),
             auxcell._atm, auxcell._bas, _scale_sp_ctr_coeff(auxcell))
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
         off = _bas_cpu[bvkcell.nbas,PTR_EXP] - auxcell._bas[0,PTR_EXP]
         _bas_cpu[bvkcell.nbas:,PTR_BAS_COORD] += off
-
-        bvk_ao_loc = bvkcell.ao_loc
-        aux_loc = auxcell.ao_loc
+        self._atm_cpu = _atm_cpu
+        self._bas_cpu = _bas_cpu
+        self._env_cpu = _env_cpu
 
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
+        bvk_ao_loc = bvkcell.ao_loc
+        aux_loc = auxcell.ao_loc
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
-        bvk_ncells = bvkcell.nbas // cell.nbas
         int3c2e_envs = Int3c2eEnvVars(
-            cell.natm, cell.nbas, bvk_ncells, nimgs,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr,
-            Ls.data.ptr, math.log(cutoff),
+            pcell.natm, pcell.nbas, bvk_ncells, nimgs,
+            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
+            ao_loc.data.ptr, Ls.data.ptr,
         )
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
+        self.int3c2e_envs = int3c2e_envs
 
-        gen_img_idx = create_img_idx(cell, bvkcell, auxcell, Ls, int3c2e_envs)
+        log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
+        log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
+        return self
 
-        uniq_l = uniq_l_ctr[:,0]
-        assert uniq_l.max() <= LMAX
-        n_groups = len(uniq_l)
-        init_constant(cell)
-        kern = libpbc.fill_int3c2e
-        if not has_dpctl:
-            cp.cuda.Stream.null.synchronize()
+    def estimate_cutoff_with_penalty(self):
+        pcell = self.prim_cell
+        auxcell = self.sorted_auxcell
+        vol = self.bvkcell.vol
+        omega = self.omega
+        aux_exp, _, aux_l = most_diffused_pgto(auxcell)
+        cell_exp, _, cell_l = most_diffused_pgto(pcell)
+        if omega == 0:
+            theta = 1./(1./cell_exp*2 + 1./aux_exp)
         else:
-            dev = get_default_cached_device()
-            get_device_cached_queue(dev).wait()
+            theta = 1./(1./cell_exp*2 + 1./aux_exp + omega**-2)
+        lsum = cell_l * 2 + aux_l + 1
+        rad = vol**(-1./3) * self.rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = 2*np.pi*self.rcut*lsum/(vol*theta) + surface
+        cutoff = pcell.precision / lattice_sum_factor
+        logger.debug1(pcell, 'int3c_kernel integral omega=%g theta=%g cutoff=%g',
+                      omega, theta, cutoff)
+        return cutoff
 
+    def generate_img_idx(self, cutoff=None, verbose=None):
+        log = logger.new_logger(self.cell, verbose)
+        cput0 = log.init_timer()
+        int3c2e_envs = self.int3c2e_envs
+        pcell = self.prim_cell
+        auxcell = self.sorted_auxcell
+        bvk_ncells = np.prod(self.bvk_kmesh)
+        nimgs = int3c2e_envs.nimgs
+        p_nbas = pcell.nbas
+
+        ls = pcell._bas[:,ANG_OF]
+        exps, cs = extract_pgto_params(pcell, 'diffused')
+        cs *= ((2*ls+1)/(4*np.pi))**.5
+        exps = cp.asarray(exps, dtype=np.float32)
+        log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+
+        # Search the most diffused functions on each atom
+        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
+        aux_ls = auxcell._bas[:,ANG_OF]
+        r2_aux = np.log(aux_cs**2 / pcell.precision * 10**aux_ls) / aux_exps
+        atoms = auxcell._bas[:,ATOM_OF]
+        atom_aux_exps = np.full(pcell.natm, 1e8, dtype=np.float32)
+        for ia in range(pcell.natm):
+            bas_mask = atoms == ia
+            es = aux_exps[bas_mask]
+            if len(es) > 0:
+                atom_aux_exps[ia] = es[r2_aux[bas_mask].argmax()]
+        atom_aux_exps = cp.asarray(atom_aux_exps, dtype=np.float32)
+        if cutoff is None:
+            cutoff = self.estimate_cutoff_with_penalty()
+        log_cutoff = math.log(cutoff)
+        vol = self.bvkcell.vol
+
+        c_shell_counts = self.cell0_ctr_l_counts
+        c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
+        p_shell_l_offsets = np.append(0, np.cumsum(self.cell0_prim_l_counts))
+        p2c_mapping = cp.asarray(self.prim_to_ctr_mapping, dtype=np.int32)
+
+        def gen_img_idx(li, lj):
+            t0 = log.init_timer()
+            ish0, ish1 = p_shell_l_offsets[li:li+2]
+            jsh0, jsh1 = p_shell_l_offsets[lj:lj+2]
+            nprimi = ish1 - ish0
+            nprimj = jsh1 - jsh0
+            nctri = c_shell_counts[li]
+            nctrj = c_shell_counts[lj]
+
+            # Number of images for each pair of (bas_i_in_bvkcell, bas_j_in_bvkcell)
+            ovlp_img_counts = cp.zeros((bvk_ncells*nprimi*bvk_ncells*nprimj), dtype=np.int32)
+            err = libpbc.bvk_overlap_img_counts(
+                ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),
+                ctypes.cast(p2c_mapping.data.ptr, ctypes.c_void_p),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.byref(int3c2e_envs),
+                ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff))
+            if err != 0:
+                raise RuntimeError('bvk_overlap_img_counts failed')
+
+            bas_ij = cp.asarray(cp.where(ovlp_img_counts > 0)[0], dtype=np.int32)
+            ovlp_npairs = len(bas_ij)
+            if ovlp_npairs == 0:
+                img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
+                return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
+
+            counts_sorting = (-ovlp_img_counts[bas_ij]).argsort()
+            bas_ij = bas_ij[counts_sorting]
+            ovlp_img_counts = ovlp_img_counts[bas_ij]
+            ovlp_img_offsets = cp.empty(ovlp_npairs+1, dtype=np.int32)
+            ovlp_img_offsets[0] = 0
+            cp.cumsum(ovlp_img_counts, out=ovlp_img_offsets[1:])
+            tot_imgs = int(ovlp_img_offsets[ovlp_npairs])
+            ovlp_img_idx = cp.empty(tot_imgs, dtype=np.int32)
+            err = libpbc.bvk_overlap_img_idx(
+                ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ovlp_npairs),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.byref(int3c2e_envs),
+                ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff))
+            if err != 0:
+                raise RuntimeError('bvk_overlap_img_counts failed')
+            log.timer_debug1('ovlp_img_idx', *cput0)
+            nimgs_J = int(ovlp_img_counts[0])
+            ovlp_img_counts = counts_sorting = None
+
+            nimgs_IJ = nimgs + nimgs_J * 6
+            if vol < 216:
+                # If cell is sufficiently large, nimgs+nimgs_J*6 should be
+                # enough for the double lattice sum.
+                # When cell is small, more images may be required in double lattice sum.
+                nimgs_IJ = nimgs + nimgs_J**2
+            img_idx_sparse = cp.empty((nimgs_IJ,ovlp_npairs), dtype=np.int32)
+            img_counts = cp.zeros(ovlp_npairs, dtype=np.int32)
+            err = libpbc.sr_int3c2e_img_idx_sparse(
+                ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ovlp_npairs),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.byref(int3c2e_envs),
+                ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff))
+            if err != 0:
+                raise RuntimeError('sr_int3c2e_img_idx failed')
+
+            n_pairs = int(cp.count_nonzero(img_counts))
+            if n_pairs == 0:
+                img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
+                return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
+
+            counts_sorting = (-img_counts.ravel()).argsort()[:n_pairs]
+            counts_sorting = cp.asarray(counts_sorting, dtype=np.int32)
+            bas_ij = bas_ij[counts_sorting]
+            img_counts = img_counts[counts_sorting]
+            offsets = cp.empty(n_pairs+1, dtype=np.int32)
+            cp.cumsum(img_counts, out=offsets[1:])
+            offsets[0] = 0
+            tot_imgs = int(offsets[n_pairs])
+            img_idx = cp.empty(tot_imgs, dtype=np.int32)
+            err = libpbc.conc_img_idx(
+                ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
+                ctypes.cast(counts_sorting.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_pairs), ctypes.c_int(ovlp_npairs))
+            if err != 0:
+                raise RuntimeError('conc_img_idx failed')
+            log.debug1('ovlp nimgs=%d pairs=%d tot_imgs=%d. '
+                       'double-lattice-sum: largest=%d, medium=%d',
+                       nimgs_J, n_pairs, tot_imgs, img_counts[0], img_counts[n_pairs//2])
+            t1 = log.timer_debug1('int3c2e_img_idx', *t0)
+
+            # bas_ij stores the non-negligible primitive-pair indices.
+            # p2c_mapping converts the bas_ij to contracted GTO-pair indices.
+            I, i, J, j = cp.unravel_index(
+                bas_ij, (bvk_ncells, nprimi, bvk_ncells, nprimj))
+            i += ish0
+            j += jsh0
+            bas_ij = cp.ravel_multi_index(
+                (I, i, J, j), (bvk_ncells, p_nbas, bvk_ncells, p_nbas))
+            bas_ij = cp.asarray(bas_ij, dtype=np.int32)
+            ic = p2c_mapping[i] - c_shell_offsets[li]
+            jc = p2c_mapping[j] - c_shell_offsets[lj]
+            I %= bvk_ncells
+            J %= bvk_ncells
+            reduced_pair_idx = cp.ravel_multi_index(
+                (I, ic, J, jc), (bvk_ncells, nctri, bvk_ncells, nctrj))
+            bvk_nctri = bvk_ncells * nctri
+            bvk_nctrj = bvk_ncells * nctrj
+            c_pair_mask = cp.zeros(bvk_nctri*bvk_nctrj, dtype=bool)
+            c_pair_mask[reduced_pair_idx] = True
+
+            # c_pair_idx indicates the address of the **contracted** pair GTOS
+            # within the (li,lj) sub-block. For each shell-pair, there are
+            # nfij elements. Note, the nfij elements are sorted as [nfj,nfi]
+            # (in F-order) while the shell indices within the c_pair_idx are
+            # composed as i*nbas+j (in C-order). c_pair_idx points to the
+            # address of the first element.
+            c_pair_idx = cp.where(c_pair_mask)[0]
+            n_ctr_pairs = len(c_pair_idx)
+
+            # pair_mapping maps the primitive pair to the contracted pair
+            pair_mapping_lookup = cp.empty(bvk_nctri*bvk_nctrj, dtype=np.int32)
+            pair_mapping_lookup[c_pair_idx] = cp.arange(n_ctr_pairs)
+            pair_mapping = cp.asarray(pair_mapping_lookup[reduced_pair_idx], dtype=np.int32)
+            log.timer_debug1(f'pair_mapping [{li},{lj}]', *t1)
+            return (img_idx.get(), offsets.get(), bas_ij.get(),
+                    pair_mapping.get(), c_pair_idx.get())
+        return gen_img_idx
+
+    def make_img_idx_cache(self, cutoff=None):
+        img_idx_cache = {}
+        gen_img_idx = self.generate_img_idx(cutoff)
+        l_counts = self.cell0_prim_l_counts
+        lmax = len(l_counts) - 1
+        ij_tasks = ((i, j) for i in range(lmax+1) for j in range(i+1))
+        for li, lj in ij_tasks:
+            if l_counts[li] == 0 or l_counts[lj] == 0:
+                continue
+            img_idx_cache[li, lj] = gen_img_idx(li, lj)
+        return img_idx_cache
+
+    def int3c2e_kernel(self, verbose=None, img_idx_cache=None):
+        log = logger.new_logger(self.cell, verbose)
+        cput0 = log.init_timer()
+        if self.int3c2e_envs is None:
+            self.build()
+        pcell = self.prim_cell
+        auxcell = self.sorted_auxcell
+        bvkcell = self.bvkcell
+        l_ctr_aux_offsets = self.l_ctr_aux_offsets
+        aux_loc = auxcell.ao_loc
+        naux = aux_loc[auxcell.nbas]
+        _atm_cpu = self._atm_cpu
+        _bas_cpu = self._bas_cpu
+        _env_cpu = self._env_cpu
+
+        l_counts = self.cell0_prim_l_counts
+        p_shell_l_offsets = np.append(0, np.cumsum(l_counts))
+
+        lmax = len(l_counts) - 1
+        uniq_l = np.arange(lmax+1)
+        nfcart = (uniq_l + 1) * (uniq_l + 2) // 2
+        init_constant(pcell)
+        kern = libpbc.fill_int3c2e
         t1 = log.timer_debug1('initialize int3c2e_kernel', *cput0)
         timing_collection = {}
         kern_counts = 0
 
-        cell_ao_loc = cell.ao_loc
-        di = (cell_ao_loc[l_ctr_offsets[1:]] - cell_ao_loc[l_ctr_offsets[:-1]]).max()
-        dk = (aux_loc[l_ctr_aux_offsets[1:]] - aux_loc[l_ctr_aux_offsets[:-1]]).max()
-        buf = cp.empty((bvk_ncells,di, bvk_ncells,di, dk))
-
-        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
-        for i, j in ij_tasks:
-            li = uniq_l[i]
-            lj = uniq_l[j]
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            nrow = bvk_ao_loc[ish1] - bvk_ao_loc[ish0]
-            ncol = bvk_ao_loc[jsh1] - bvk_ao_loc[jsh0]
-            img_idx, img_offsets, bas_ij_idx = gen_img_idx(ish0, ish1, jsh0, jsh1)
+        ij_tasks = ((i, j) for i in range(lmax+1) for j in range(i+1))
+        if img_idx_cache is None:
+            img_idx_cache = self.make_img_idx_cache()
+        for li, lj in ij_tasks:
+            if l_counts[li] == 0 or l_counts[lj] == 0:
+                continue
+            ish0, ish1 = p_shell_l_offsets[li:li+2]
+            jsh0, jsh1 = p_shell_l_offsets[lj:lj+2]
+            img_idx, img_offsets, bas_ij_idx, pair_mapping, c_pair_idx = \
+                    [cp.asarray(x) for x in img_idx_cache[li, lj]]
+            nfij = nfcart[li] * nfcart[lj]
+            # Note the storage order for ij_pair: i takes the smaller stride.
+            n_ctr_pairs = len(c_pair_idx)
+            n_prim_pairs = len(bas_ij_idx)
+            if n_prim_pairs == 0:
+                continue
+            # eri3c is sorted as (naux, nfj, nfi, n_ctr_pairs)
+            eri3c = cp.zeros((naux, nfij*n_ctr_pairs))
 
             for k, lk in enumerate(self.uniq_l_ctr_aux[:,0]):
                 ksh0, ksh1 = l_ctr_aux_offsets[k:k+2]
-                naux = aux_loc[ksh1] - aux_loc[ksh0]
                 shls_slice = ish0, ish1, jsh0, jsh1, ksh0, ksh1
-                eri3c = cp.ndarray((bvk_ncells, nrow, bvk_ncells, ncol, naux),
-                                   dtype=np.float64, memptr=buf.data)
-                eri3c.fill(0.)
+                k0 = aux_loc[ksh0]
                 lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
                 scheme = int3c2e_scheme(li, lj, lk)
                 log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
                 err = kern(
-                    ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
-                    ctypes.byref(int3c2e_envs), (ctypes.c_int*3)(*scheme),
+                    ctypes.cast(eri3c[k0:].data.ptr, ctypes.c_void_p),
+                    ctypes.byref(self.int3c2e_envs),
+                    (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*6)(*shls_slice),
-                    ctypes.c_int(bvk_ncells), ctypes.c_int(nrow),
-                    ctypes.c_int(ncol), ctypes.c_int(naux),
-                    ctypes.c_int(bas_ij_idx.size),
+                    ctypes.c_int(naux),
+                    ctypes.c_int(n_prim_pairs),
+                    ctypes.c_int(n_ctr_pairs),
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
                     _atm_cpu.ctypes, ctypes.c_int(bvkcell.natm),
                     _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
+
                 if err != 0:
                     raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
                 if log.verbose >= logger.DEBUG1:
-                    t1, t1p = log.timer_debug1(f'processing {lll}', *t1), t1
+                    t1, t1p = log.timer_debug1(f'processing {lll}, pairs={n_prim_pairs}', *t1), t1
                     if lll not in timing_collection:
                         timing_collection[lll] = 0
                     timing_collection[lll] += t1[1] - t1p[1]
                     kern_counts += 1
-                yield shls_slice, eri3c
+            yield li, lj, c_pair_idx, eri3c
+            eri3c = None
 
         if log.verbose >= logger.DEBUG1:
             log.timer('int3c2e', *cput0)
@@ -371,7 +693,6 @@ class Int3c2eEnvVars(ctypes.Structure):
         ('env', ctypes.c_void_p),
         ('ao_loc', ctypes.c_void_p),
         ('img_coords', ctypes.c_void_p),
-        ('log_cutoff', ctypes.c_float),
     ]
 
 def _conc_locs(ao_loc1, ao_loc2):
@@ -383,7 +704,7 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     nroots = (order//2 + 1) * 2
 
     g_size = (li+1)*(lj+1)*(lk+1)
-    unit = g_size*3 + nroots*2 + 6
+    unit = g_size*3 + nroots*2 + 7
     nksp_max = shm_size//(unit*8)
     nksp_max = _nearest_power2(nksp_max)
 
@@ -407,13 +728,6 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
 
     gout_stride = THREADS // (nksh_per_block*nsp_per_block)
     return nksh_per_block, gout_stride, nsp_per_block
-
-def most_diffused_pgto(cell):
-    exps, cs = extract_pgto_params(cell, 'diffused')
-    ls = cell._bas[:,ANG_OF]
-    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
-    idx = r2.argmax()
-    return exps[idx], cs[idx], ls[idx]
 
 # This modified rcut estimation function will be available in pyscf-2.8 or newer
 def estimate_rcut(cell, auxcell, omega):
@@ -462,33 +776,3 @@ def estimate_rcut(cell, auxcell, omega):
     r0 = (np.log(fac * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
-
-def guess_bvk_kmesh(cell, bvk_kmesh, target_size=BVK_CELL_SHELLS):
-    '''Generate a sufficient large bvk cell for fill_int3c2e kernel to achieve
-    better load balance'''
-    if bvk_kmesh is None:
-        bvk_kmesh = np.ones(3, dtype=int)
-    else:
-        bvk_kmesh = bvk_kmesh.copy()
-    bvk_ncells = np.prod(bvk_kmesh)
-
-    # produce a cell with ~2000 shells
-    replica = target_size / (bvk_ncells * cell.nbas)
-    if replica < 1:
-        return bvk_kmesh
-
-    mesh_max = cell.nimgs * 2 + 1
-    bvk_multiplier = mesh_max / bvk_kmesh
-    if cell.dimension == 2:
-        fac = (replica / np.prod(bvk_multiplier[:2]))**.5
-        fac = min(fac, 1)
-        bvk_kmesh[:2] *= (fac * bvk_multiplier[:2]).astype(int)
-    else:
-        # The replica on each axis should be proportional to the required nimg
-        # along each direction.
-        fac = (replica / np.prod(bvk_multiplier))**(1./3)
-        # The replica is not necessary to be more than the required nimg.
-        fac = min(fac, 1)
-        bvk_kmesh *= (fac * bvk_multiplier).astype(int)
-
-    return bvk_kmesh

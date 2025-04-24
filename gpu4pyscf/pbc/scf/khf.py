@@ -406,10 +406,9 @@ class KRHF(KSCF):
             dm_kpts *= (nelectron / ne).reshape(-1,1,1)
         return dm_kpts
 
-    density_fit = pbchf.RHF.density_fit
-
-    to_gpu = utils.to_gpu
-    device = utils.device
+    def density_fit(self, auxbasis=None, with_df=None):
+        from gpu4pyscf.pbc.df.df_jk import density_fit
+        return density_fit(self, auxbasis, with_df)
 
     def to_cpu(self):
         mf = khf_cpu.KRHF(self.cell)

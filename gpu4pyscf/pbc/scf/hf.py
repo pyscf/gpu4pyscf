@@ -230,6 +230,10 @@ class SCF(mol_hf.SCF):
                 fh5['scf/kpt'] = self.kpt
         return self
 
+    to_gpu = utils.to_gpu
+    device = utils.device
+    to_cpu = NotImplemented
+
 
 class KohnShamDFT:
     '''A mock DFT base class
@@ -243,12 +247,11 @@ class KohnShamDFT:
 
 class RHF(SCF):
 
-    to_gpu = utils.to_gpu
-    device = utils.device
-
     def density_fit(self, auxbasis=None, with_df=None):
         from gpu4pyscf.pbc.df.df_jk import density_fit
-        return density_fit(self, auxbasis, with_df)
+        mf = density_fit(self, auxbasis, with_df)
+        mf.with_df.is_gamma_point = (mf.kpt == 0).all()
+        return mf
 
     def to_cpu(self):
         mf = hf_cpu.RHF(self.cell)

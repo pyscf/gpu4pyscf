@@ -322,9 +322,6 @@ class KUHF(khf.KSCF):
 
     density_fit = khf.KRHF.density_fit
 
-    to_gpu = utils.to_gpu
-    device = utils.device
-
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)
         utils.to_cpu(self, out=mf)

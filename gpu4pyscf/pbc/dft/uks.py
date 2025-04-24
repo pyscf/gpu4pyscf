@@ -162,6 +162,7 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
     get_hcore = rks.RKS.get_hcore
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec
+    density_fit = rks.RKS.density_fit
 
     def get_rho(self, dm=None, grids=None, kpt=None):
         if dm is None: dm = self.make_rdm1()
@@ -169,9 +170,6 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
-
-    to_gpu = utils.to_gpu
-    device = utils.device
 
     def to_cpu(self):
         mf = uks_cpu.UKS(self.cell)

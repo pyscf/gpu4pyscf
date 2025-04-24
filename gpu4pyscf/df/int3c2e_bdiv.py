@@ -52,7 +52,7 @@ THREADS = 256
 
 def aux_e2(mol, auxmol):
     r'''
-    Short-range 3-center integrals (ij|k). The auxiliary basis functions are
+    3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()

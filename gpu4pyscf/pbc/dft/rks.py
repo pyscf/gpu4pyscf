@@ -34,6 +34,7 @@ from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import rks as mol_ks
 from gpu4pyscf.pbc.scf import hf as pbchf, khf
+from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.dft import multigrid
@@ -184,26 +185,50 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
         else:
             self._numint = numint.NumInt()
 
-    build = rks_cpu.KohnShamDFT.build
+    def build(self, cell=None):
+        # To handle the attribute kpt or kpts loaded from chkfile
+        if 'kpts' in self.__dict__:
+            self.kpts = self.__dict__.pop('kpts')
+        elif 'kpt' in self.__dict__:
+            self.kpt = self.__dict__.pop('kpt')
+
+        kpts = self.kpts
+        if self.rsjk:
+            raise NotImplementedError('RSJK')
+
+        # for GDF and MDF
+        with_df = self.with_df
+        if (isinstance(with_df, GDF) and
+            self._numint.libxc.is_hybrid_xc(self.xc) and
+            len(kpts) > 1 and getattr(with_df, '_j_only', False)):
+            logger.warn(self, 'df.j_only cannot be used with hybrid functional')
+            self.with_df._j_only = False
+            self.with_df.reset()
+
+        if isinstance(with_df, GDF):
+            if isinstance(self.grids, gen_grid.UniformGrids):
+                cell = self.cell
+                logger.warn(cell, 'Uniform grids are used for the PBC GDF method. '
+                            'Note: this differs from PySCF default settings which employ the Becke grids.')
+                ngrids = np.prod(cell.mesh)
+                if ngrids > 150000 * cell.natm:
+                    logger.warn(cell, '''
+Tight basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
+    from gpu4pyscf.pbc.dft import BeckeGrids
+    mf.grids = BeckeGrids(cell)
+    mf.nlcgrids = BeckeGrids(cell).set(level=1)''')
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        return self
+
     reset = rks_cpu.KohnShamDFT.reset
     dump_flags = rks_cpu.KohnShamDFT.dump_flags
 
     get_veff = NotImplemented
     get_rho = NotImplemented
 
-    def density_fit(self, auxbasis=None, with_df=None):
-        from gpu4pyscf.pbc.df.df_jk import density_fit
-        cell = self.cell
-        mf = density_fit(self, auxbasis, with_df)
-        mf.with_df._j_only = not self._numint.libxc.is_hybrid_xc(self.xc)
-        mf.grids = gen_grid.BeckeGrids(cell)
-        mf.grids.level = getattr(
-            __config__, 'dft_rks_RKS_grids_level', mf.grids.level)
-        mf.nlcgrids = gen_grid.BeckeGrids(cell)
-        mf.nlcgrids.level = getattr(
-            __config__, 'dft_rks_RKS_nlcgrids_level', mf.nlcgrids.level)
-        return mf
-
+    density_fit = NotImplemented
     rs_density_fit = NotImplemented
 
     jk_method = NotImplemented
@@ -233,6 +258,10 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
                     self, self.cell, dm, self.nlcgrids, kpts)
             t0 = logger.timer(self, 'setting up nlc grids', *t0)
         return self
+
+    to_gpu = utils.to_gpu
+    device = utils.device
+    to_cpu = NotImplemented
 
 # Update the KohnShamDFT label in pbc.scf.hf module
 pbchf.KohnShamDFT = KohnShamDFT
@@ -280,9 +309,10 @@ class RKS(KohnShamDFT, pbchf.RHF):
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
     get_rho = get_rho
+    density_fit = pbchf.RHF.density_fit
 
-    to_gpu = utils.to_gpu
-    device = utils.device
+    nuc_grad_method = NotImplemented
+    to_hf = NotImplemented
 
     def to_cpu(self):
         mf = rks_cpu.RKS(self.cell)

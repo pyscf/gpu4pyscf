@@ -80,6 +80,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
+    def test_rsh_gdf(self):
+        mf = pbcdft.UKS(cell, xc='camb3lyp').density_fit().run()
+        mf_ref = mf.to_cpu().run()
+        assert abs(mf.e_tot - mf_ref.e_tot) < 1e-6
+
     def test_lda_fft_with_kpt(self):
         np.random.seed(1)
         k = np.random.random(3)
@@ -167,13 +172,19 @@ class KnownValues(unittest.TestCase):
 
         mf = cell.UKS(xc='pbe0').to_gpu().density_fit().run()
         self.assertTrue(isinstance(mf.with_df, GDF))
+        self.assertAlmostEqual(mf.e_tot, -0.104436032, 7)
+
+        mf.grids = pbcdft.BeckeGrids(cell)
+        mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.10443638, 7)
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
-        kmf = pbcdft.KUKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
+        kmf = pbcdft.KUKS(cell, xc='pbe0', kpts=kpts).density_fit()
+        kmf.grids = pbcdft.BeckeGrids(cell)
+        kmf.run()
         self.assertTrue(isinstance(kmf.with_df, GDF))
         self.assertAlmostEqual(kmf.e_tot, -0.19581151, 7)
         mf_ref = kmf.to_cpu()

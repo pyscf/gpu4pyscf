@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -7,7 +23,7 @@
 #include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
 
-__device__
+__device__ static
 void int3c2e_bdiv_000(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -136,7 +152,7 @@ void int3c2e_bdiv_000(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_100(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -280,7 +296,7 @@ void int3c2e_bdiv_100(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_110(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -452,7 +468,7 @@ void int3c2e_bdiv_110(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_200(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -609,7 +625,7 @@ void int3c2e_bdiv_200(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_210(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -814,7 +830,7 @@ void int3c2e_bdiv_210(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_220(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1088,7 +1104,7 @@ void int3c2e_bdiv_220(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_001(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1232,7 +1248,7 @@ void int3c2e_bdiv_001(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_101(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1405,7 +1421,7 @@ void int3c2e_bdiv_101(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_111(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1651,7 +1667,7 @@ void int3c2e_bdiv_111(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_201(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -1858,7 +1874,7 @@ void int3c2e_bdiv_201(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_211(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -2702,7 +2718,7 @@ void int3c2e_bdiv_221(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_002(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -2859,7 +2875,7 @@ void int3c2e_bdiv_002(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_102(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -3066,7 +3082,7 @@ void int3c2e_bdiv_102(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_112(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -3409,7 +3425,7 @@ void int3c2e_bdiv_112(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
     }
 }
 
-__device__
+__device__ static
 void int3c2e_bdiv_202(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
     // For better load balance, consume blocks in the reversed order
@@ -4201,23 +4217,23 @@ int int3c2e_bdiv_unrolled(double *rw_buffer, double *out, Int3c2eEnvVars envs, B
     int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
-    case 0:  int3c2e_bdiv_000(rw_buffer, out, envs, bounds); break;
-    case 5:  int3c2e_bdiv_100(rw_buffer, out, envs, bounds); break;
-    case 6:  int3c2e_bdiv_110(rw_buffer, out, envs, bounds); break;
-    case 10: int3c2e_bdiv_200(rw_buffer, out, envs, bounds); break;
-    case 11: int3c2e_bdiv_210(rw_buffer, out, envs, bounds); break;
-    case 12: int3c2e_bdiv_220(rw_buffer, out, envs, bounds); break;
-    case 25: int3c2e_bdiv_001(rw_buffer, out, envs, bounds); break;
-    case 30: int3c2e_bdiv_101(rw_buffer, out, envs, bounds); break;
-    case 31: int3c2e_bdiv_111(rw_buffer, out, envs, bounds); break;
-    case 35: int3c2e_bdiv_201(rw_buffer, out, envs, bounds); break;
-    case 36: int3c2e_bdiv_211(rw_buffer, out, envs, bounds); break;
-    case 37: int3c2e_bdiv_221(rw_buffer, out, envs, bounds); break;
-    case 50: int3c2e_bdiv_002(rw_buffer, out, envs, bounds); break;
-    case 55: int3c2e_bdiv_102(rw_buffer, out, envs, bounds); break;
-    case 56: int3c2e_bdiv_112(rw_buffer, out, envs, bounds); break;
-    case 60: int3c2e_bdiv_202(rw_buffer, out, envs, bounds); break;
-    case 61: int3c2e_bdiv_212(rw_buffer, out, envs, bounds); break;
+    case 0: int3c2e_bdiv_000(out, envs, bounds); break;
+    case 5: int3c2e_bdiv_100(out, envs, bounds); break;
+    case 6: int3c2e_bdiv_110(out, envs, bounds); break;
+    case 10: int3c2e_bdiv_200(out, envs, bounds); break;
+    case 11: int3c2e_bdiv_210(out, envs, bounds); break;
+    case 12: int3c2e_bdiv_220(out, envs, bounds); break;
+    case 25: int3c2e_bdiv_001(out, envs, bounds); break;
+    case 30: int3c2e_bdiv_101(out, envs, bounds); break;
+    case 31: int3c2e_bdiv_111(out, envs, bounds); break;
+    case 35: int3c2e_bdiv_201(out, envs, bounds); break;
+    case 36: int3c2e_bdiv_211(out, envs, bounds); break;
+    case 37: int3c2e_bdiv_221(out, envs, bounds); break;
+    case 50: int3c2e_bdiv_002(out, envs, bounds); break;
+    case 55: int3c2e_bdiv_102(out, envs, bounds); break;
+    case 56: int3c2e_bdiv_112(out, envs, bounds); break;
+    case 60: int3c2e_bdiv_202(out, envs, bounds); break;
+    case 61: int3c2e_bdiv_212(out, envs, bounds); break;
     default: return 0;
     }
     return 1;
