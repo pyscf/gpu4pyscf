@@ -1110,7 +1110,7 @@ def Davidson(matrix_vector_product,
                     N_states=20,
                     conv_tol=1e-5,
                     max_iter=25,
-                    GS=False,
+                    GS=True,
                     single=False,
                     verbose=logger.INFO):
     '''
@@ -1311,7 +1311,7 @@ def Davidson_Casida(matrix_vector_product,
                         N_states=20,
                         conv_tol=1e-5,
                         max_iter=25,
-                        GS=False,
+                        GS=True,
                         single=False,
                         verbose=logger.NOTE):
     '''
