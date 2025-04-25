@@ -137,10 +137,10 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     wvo+= reduce(cp.dot, (orbv.T, veffDIJ, orbo))
     # wvo *= 2.0
 
-    vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+    vresp = td_nac.base._scf.gen_response(singlet=None, hermi=0)
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
-        v1ao = vresp(dm + dm.T)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
     z1 = cphf.solve(
         fvind,
@@ -150,9 +150,9 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir, nocc)
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
+    z1ao = 2*reduce(cp.dot, (orbv, z1, orbo.T))
 
-    DIJtilde = DIJ - z1ao # .T is included in z1ao
+    DIJtilde = DIJ - z1ao - z1ao.T # .T is included in z1ao
     P = mf.make_rdm1()
     Ptilde = P + cp.dot(orbv, orbv.T)*2.0
     fmat = mf.get_fock()
