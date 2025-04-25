@@ -13,13 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-###################################
-#  Example of NMR shielding constant
-###################################
+'''
+NMR shielding constant. The unit is dimensionless, scaled by 10^6 to align to
+the PPM unit in chemical shifts.
+'''
 
 import pyscf
-from gpu4pyscf.dft import rks
 from gpu4pyscf.properties import shielding
 
 atom = '''
@@ -28,9 +27,11 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-mol = pyscf.M(atom=atom, basis='631g', max_memory=32000)
+bas='631g'
 
-mf = rks.RKS(mol, xc='b3lyp')
+mol = pyscf.M(atom=atom, basis=bas)
+
+mf = mol.RKS(xc='b3lyp').to_gpu()
 e_gpu = mf.kernel() # -76.3849465432042
 msc_d, msc_p = shielding.eval_shielding(mf)
 msc = (msc_d + msc_p).get()

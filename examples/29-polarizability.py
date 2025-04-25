@@ -13,13 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-###################################
-#  Example of Polarizability
-###################################
+'''
+Static polarizability (unit Bohr^3)
+'''
 
 import pyscf
-from gpu4pyscf.dft import rks
 from gpu4pyscf.properties import polarizability
 
 atom = '''
@@ -28,9 +26,11 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-mol = pyscf.M(atom=atom, basis='631g', max_memory=32000)
+bas='631g'
 
-mf = rks.RKS(mol, xc='b3lyp')
+mol = pyscf.M(atom=atom, basis=bas)
+
+mf = mol.RKS(xc='b3lyp').to_gpu()
 e_gpu = mf.kernel() #  -76.3849465432042
 polar_gpu = polarizability.eval_polarizability(mf)
 print('------------------- Polarizability -----------------------------')

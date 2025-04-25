@@ -13,10 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-###################################
-#  Example of IR intensity
-###################################
+'''
+IR intensity
+'''
 
 import pyscf
 from gpu4pyscf.dft import rks
@@ -28,18 +27,20 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
-mol = pyscf.M(atom=atom, basis='631g', max_memory=32000)
+bas='631g'
 
-mf = rks.RKS(mol, xc='b3lyp')
+mol = pyscf.M(atom=atom, basis=bas)
+
+mf = mol.RKS(xc='b3lyp').to_gpu()
 e_gpu = mf.kernel() # -76.3849465432042
 
 h = mf.Hessian()
 freq, intensity = ir.eval_ir_freq_intensity(mf, h)
 print('------------------- IR frequncy and intensity -----------------------------')
 for i in range(freq.shape[0]):
-    print(f"IR frequency|intensity for {i}-th mode is {freq[i]:.4f}|{intensity[i]:.4f}")
+    print(f"IR frequency|intensity for {i}-th mode is {freq[i]:.4f} (cm^-1) |{intensity[i]:.4f} (km/mol)")
 """
-IR frequency|intensity for 0-th mode is 1613.0866|62.3982
-IR frequency|intensity for 1-th mode is 3874.9540|3.7823
-IR frequency|intensity for 2-th mode is 4006.0173|5.0603
+IR frequency|intensity for 0-th mode is 1613.0866 (cm^-1) |62.3982 (km/mol)
+IR frequency|intensity for 1-th mode is 3874.9540 (cm^-1) |3.7823 (km/mol)
+IR frequency|intensity for 2-th mode is 4006.0173 (cm^-1) |5.0603 (km/mol)
 """
