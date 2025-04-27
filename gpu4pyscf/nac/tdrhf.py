@@ -86,7 +86,7 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     vjxJ2, vkxJ2 = mf.get_jk(mol, RxJ.T, hermi=0)
     vjyJ1, vkyJ1 = mf.get_jk(mol, RyJ, hermi=0)
     vjyJ2, vkyJ2 = mf.get_jk(mol, RyJ.T, hermi=0)
-    vjDIJ, vkDIJ = mf.get_jk(mol, DIJ+DIJ.T, hermi=0)
+    vjDIJ, vkDIJ = mf.get_jk(mol, DIJ, hermi=0)
     if not isinstance(vjxI1, cp.ndarray):
         vjxI1 = cp.asarray(vjxI1)
         vkxI1 = cp.asarray(vkxI1)
@@ -115,24 +115,48 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     veffyJ1 = 2 * vjyJ1 - vkyJ1
     veffyJ2 = 2 * vjyJ2 - vkyJ2
     veffDIJ = 2 * vjDIJ - vkDIJ
+    veffxI1_mo = reduce(cp.dot, (mo_coeff.T, veffxI1, mo_coeff))
+    veffxI2_mo = reduce(cp.dot, (mo_coeff.T, veffxI2, mo_coeff))
+    veffyI1_mo = reduce(cp.dot, (mo_coeff.T, veffyI1, mo_coeff))
+    veffyI2_mo = reduce(cp.dot, (mo_coeff.T, veffyI2, mo_coeff))
+    veffxJ1_mo = reduce(cp.dot, (mo_coeff.T, veffxJ1, mo_coeff))
+    veffxJ2_mo = reduce(cp.dot, (mo_coeff.T, veffxJ2, mo_coeff))
+    veffyJ1_mo = reduce(cp.dot, (mo_coeff.T, veffyJ1, mo_coeff))
+    veffyJ2_mo = reduce(cp.dot, (mo_coeff.T, veffyJ2, mo_coeff))
     # first term of L
-    wvo = reduce(cp.dot, (orbv.T, veffxI1, orbv, xJ)) * 2.0
-    wvo+= reduce(cp.dot, (orbv.T, veffyI1, orbv, yJ)) * 2.0
-    wvo+= reduce(cp.dot, (orbv.T, veffxJ1, orbv, xI)) * 2.0
-    wvo+= reduce(cp.dot, (orbv.T, veffyJ1, orbv, yI)) * 2.0
-    wvo+= reduce(cp.dot, (orbv.T, veffxI2, orbv, yJ)) * 2.0
-    wvo+= reduce(cp.dot, (orbv.T, veffyI2, orbv, xJ)) * 2.0
-    wvo+= reduce(cp.dot, (orbv.T, veffxJ2, orbv, yI)) * 2.0
-    wvo+= reduce(cp.dot, (orbv.T, veffyJ2, orbv, xI)) * 2.0
+    # wvo = reduce(cp.dot, (orbv.T, veffxI1, orbv, xJ)) * 2.0
+    # wvo+= reduce(cp.dot, (orbv.T, veffyI1, orbv, yJ)) * 2.0
+    # wvo+= reduce(cp.dot, (orbv.T, veffxJ1, orbv, xI)) * 2.0
+    # wvo+= reduce(cp.dot, (orbv.T, veffyJ1, orbv, yI)) * 2.0
+    # wvo+= reduce(cp.dot, (orbv.T, veffxI2, orbv, yJ)) * 2.0
+    # wvo+= reduce(cp.dot, (orbv.T, veffyI2, orbv, xJ)) * 2.0
+    # wvo+= reduce(cp.dot, (orbv.T, veffxJ2, orbv, yI)) * 2.0
+    # wvo+= reduce(cp.dot, (orbv.T, veffyJ2, orbv, xI)) * 2.0
+    wvo = veffxI1_mo[nocc:, nocc:]@xJ
+    wvo+= veffyI1_mo[nocc:, nocc:]@yJ
+    wvo+= veffxJ1_mo[nocc:, nocc:]@xI
+    wvo+= veffyJ1_mo[nocc:, nocc:]@yI
+    wvo+= veffxI2_mo[nocc:, nocc:]@yJ
+    wvo+= veffyI2_mo[nocc:, nocc:]@xJ
+    wvo+= veffxJ2_mo[nocc:, nocc:]@yI
+    wvo+= veffyJ2_mo[nocc:, nocc:]@xI
     # second term of L
-    wvo-= reduce(cp.dot, (xJ, orbo.T, veffxI1, orbo)) * 2.0
-    wvo-= reduce(cp.dot, (yJ, orbo.T, veffyI1, orbo)) * 2.0
-    wvo-= reduce(cp.dot, (xI, orbo.T, veffxJ1, orbo)) * 2.0
-    wvo-= reduce(cp.dot, (yI, orbo.T, veffyJ1, orbo)) * 2.0
-    wvo-= reduce(cp.dot, (yJ, orbo.T, veffxI2, orbo)) * 2.0
-    wvo-= reduce(cp.dot, (xJ, orbo.T, veffyI2, orbo)) * 2.0
-    wvo-= reduce(cp.dot, (yI, orbo.T, veffxJ2, orbo)) * 2.0
-    wvo-= reduce(cp.dot, (xI, orbo.T, veffyJ2, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (xJ, orbo.T, veffxI1, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (yJ, orbo.T, veffyI1, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (xI, orbo.T, veffxJ1, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (yI, orbo.T, veffyJ1, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (yJ, orbo.T, veffxI2, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (xJ, orbo.T, veffyI2, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (yI, orbo.T, veffxJ2, orbo)) * 2.0
+    # wvo-= reduce(cp.dot, (xI, orbo.T, veffyJ2, orbo)) * 2.0
+    wvo -= xJ@veffxI1_mo[:nocc, :nocc]
+    wvo -= yJ@veffyI1_mo[:nocc, :nocc]
+    wvo -= xI@veffxJ1_mo[:nocc, :nocc]
+    wvo -= yI@veffyJ1_mo[:nocc, :nocc]
+    wvo -= yJ@veffxI2_mo[:nocc, :nocc]
+    wvo -= xJ@veffyI2_mo[:nocc, :nocc]
+    wvo -= yI@veffxJ2_mo[:nocc, :nocc]
+    wvo -= xI@veffyJ2_mo[:nocc, :nocc]
     # forth term of L
     wvo+= reduce(cp.dot, (orbv.T, veffDIJ, orbo))
     # wvo *= 2.0
@@ -191,9 +215,10 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     des5 = contract("xij,ij->xi", s1, Ds5)*0.5
     
     delec = de1 - des1 - des2 - des3 + des5
+    # delec = des5
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = (delec + de1_r)/(EJ - EI)
+    de = (delec)/(EJ - EI)
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -209,15 +234,17 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
 
     eri1 = mol.intor('int2e_ip1', aosym='s1', comp=3)
     eri1 = cp.asarray(eri1)
-    eri1 = eri1.reshape(3,nao,nao,nao,nao)
+    eri1 =-eri1.reshape(3,nao,nao,nao,nao)
     
     for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
         SA = s1int.copy()
         SA[:, :p0] = 0
         SA[:, p1:] = 0
-        SA -= 0.5*s1
+        Sq = SA+SA.transpose(0,2,1)
+        SA = 0.5*Sq
         de[k] -= cp.einsum("xij,ji->x", SA[:, p0:p1], DS6[:, p0:p1])
+        de[k] -= cp.einsum("xji,ji->x", SA[:, :, p0:p1], DS6[:, p0:p1])
 
         eri1a = eri1.copy()
         eri1a[:,:p0] = 0
