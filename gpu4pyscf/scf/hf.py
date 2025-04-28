@@ -108,12 +108,12 @@ def get_hcore(mol):
         # may exist if mol is converted from cell object.
         from pyscf.gto import pp_int
         h += pp_int.get_gth_pp(mol)
-        h = cupy.asarray(h)
+        h = asarray(h)
     else:
         assert not mol.nucmod
         #:h+= mol.intor_symmetric('int1e_nuc')
         from gpu4pyscf.gto.int3c1e import int1e_grids
-        h = cupy.asarray(h)
+        h = asarray(h)
         h += int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
     if len(mol._ecpbas) > 0:
         h += get_ecp(mol)
@@ -337,6 +337,10 @@ def init_guess_by_minao(mol):
     '''Generate initial guess density matrix based on ANO basis, then project
     the density matrix to the basis set defined by ``mol``
 
+    Note: this function is inconsistent with the latest PySCF (v2.9) and eariler versions.
+    This function returns block diagonal density matrix associated with each atom.
+    While the function in PySCF projects the density matrix into the full space of atomic basis
+
     Returns:
         Density matrix, 2D ndarray
     '''
@@ -445,7 +449,7 @@ def init_guess_by_minao(mol):
     for ia in range(mol.natm):
         symb = mol.atom_symbol(ia)
         if gto.is_ghost_atom(symb):
-            i0, i1 = aoslice[ia,:2]
+            i0, i1 = aoslice[ia,2:]
             n = i1 - i0
             dm.append(cupy.zeros((n, n)))
             mo_coeff.append(cupy.zeros((n, 0)))

@@ -85,6 +85,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmzoob = reduce(cp.dot, (orbob, doob, orbob.T))
     dmzooa += reduce(cp.dot, (orbva, dvva, orbva.T))
     dmzoob += reduce(cp.dot, (orbvb, dvvb, orbvb.T))
+    td_grad.dmxpy = (dmxpya + dmxpyb)*0.5
 
     vj0, vk0 = mf.get_jk(mol, cp.stack((dmzooa, dmzoob)), hermi=0)
     vj1, vk1 = mf.get_jk(mol, cp.stack((dmxpya + dmxpya.T, dmxpyb + dmxpyb.T)), hermi=0)
@@ -107,9 +108,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     vk = vk.reshape(2, 3, nao, nao)
 
     veff0doo = vj[0, 0] + vj[1, 0] - vk[:, 0]
+    veff0doo += td_grad.solvent_response((dmzooa + dmzoob)*0.5)
     wvoa = reduce(cp.dot, (orbva.T, veff0doo[0], orboa)) * 2
     wvob = reduce(cp.dot, (orbvb.T, veff0doo[1], orbob)) * 2
     veff = vj[0, 1] + vj[1, 1] - vk[:, 1]
+    veff += td_grad.solvent_response((td_grad.dmxpy + td_grad.dmxpy.T))
     veff0mopa = reduce(cp.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
     veff0mopb = reduce(cp.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
     wvoa -= contract("ki,ai->ak", veff0mopa[:nocca, :nocca], xpya) * 2
@@ -124,7 +127,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     wvoa += contract("ac,ai->ci", veff0moma[nocca:, nocca:], xmya) * 2
     wvob += contract("ac,ai->ci", veff0momb[noccb:, noccb:], xmyb) * 2
 
-    vresp = mf.gen_response(hermi=1)
+    vresp = td_grad.base.gen_response(hermi=1)
 
     def fvind(x):
         dm1 = cp.empty((2, nao, nao))
@@ -192,6 +195,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     dmz1dooa = z1ao[0] + dmzooa
     dmz1doob = z1ao[1] + dmzoob
+    td_grad.dmz1doo = (dmz1dooa + dmz1doob)*0.5
     oo0a = reduce(cp.dot, (orboa, orboa.T))
     oo0b = reduce(cp.dot, (orbob, orbob.T))
 

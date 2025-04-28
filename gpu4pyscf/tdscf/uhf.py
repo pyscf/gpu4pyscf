@@ -23,6 +23,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.tdscf._uhf_resp_sf import gen_uhf_response_sf
+from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.tdscf import rhf as tdhf_gpu
 from gpu4pyscf.dft import KohnShamDFT
 from pyscf import __config__
@@ -31,7 +32,7 @@ __all__ = [
     'TDA', 'CIS', 'TDHF', 'TDUHF', 'TDBase'
 ]
 
-def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
+def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     r'''A and B matrices for TDDFT response function.
 
     A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
@@ -42,7 +43,6 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     B has three items: (B_aaaa, B_aabb, B_bbbb).
     B_bbaa = B_aabb.transpose(2,3,0,1).
     '''
-
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:
@@ -82,6 +82,72 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     b_bb = cp.zeros_like(a_bb)
     a = (a_aa, a_ab, a_bb)
     b = (b_aa, b_ab, b_bb)
+
+    def add_solvent_(a, b, pcmobj):
+        charge_exp  = pcmobj.surface['charge_exp']
+        grid_coords = pcmobj.surface['grid_coords']
+
+        vmat = -int1e_grids(pcmobj.mol, grid_coords, charge_exponents = charge_exp**2, intopt = pcmobj.intopt)
+        K_LU = pcmobj._intermediates['K_LU']
+        K_LU_pivot = pcmobj._intermediates['K_LU_pivot']
+        if not isinstance(K_LU, cp.ndarray):
+            K_LU = cp.asarray(K_LU)
+        if not isinstance(K_LU_pivot, cp.ndarray):
+            K_LU_pivot = cp.asarray(K_LU_pivot)
+        ngrid_surface = K_LU.shape[0]
+        L = cp.tril(K_LU, k=-1) + cp.eye(ngrid_surface)  
+        U = cp.triu(K_LU)                
+
+        P = cp.eye(ngrid_surface)
+        for i in range(ngrid_surface):
+            pivot = int(K_LU_pivot[i].get())
+            if K_LU_pivot[i] != i:
+                P[[i, pivot]] = P[[pivot, i]]
+        K = P.T @ L @ U
+        Kinv = cp.linalg.inv(K)
+        f_epsilon = pcmobj._intermediates['f_epsilon']
+        if pcmobj.if_method_in_CPCM_category:
+            R = -f_epsilon * cp.eye(K.shape[0])
+        else:
+            A = pcmobj._intermediates['A']
+            D = pcmobj._intermediates['D']
+            DA = D*A
+            R = -f_epsilon * (cp.eye(K.shape[0]) - 1.0/(2.0*np.pi)*DA)
+        Q = Kinv @ R
+        Qs = 0.5*(Q+Q.T)
+        
+        q_sym = cp.einsum('gh,hkl->gkl', Qs, vmat)
+        kEao = contract('gij,gkl->ijkl', vmat, q_sym)
+
+        kEmo_aa = contract('pjkl,pi->ijkl', kEao, orbo_a.conj())
+        kEmo_aa = contract('ipkl,pj->ijkl', kEmo_aa, mo_a)
+        kEmo_aa = contract('ijpl,pk->ijkl', kEmo_aa, mo_a.conj())
+        kEmo_aa = contract('ijkp,pl->ijkl', kEmo_aa, mo_a)
+
+        kEmo_ab = contract('pjkl,pi->ijkl', kEao, orbo_a.conj())
+        kEmo_ab = contract('ipkl,pj->ijkl', kEmo_ab, mo_a)
+        kEmo_ab = contract('ijpl,pk->ijkl', kEmo_ab, mo_b.conj())
+        kEmo_ab = contract('ijkp,pl->ijkl', kEmo_ab, mo_b)
+
+        kEmo_bb = contract('pjkl,pi->ijkl', kEao, orbo_b.conj())
+        kEmo_bb = contract('ipkl,pj->ijkl', kEmo_bb, mo_b)
+        kEmo_bb = contract('ijpl,pk->ijkl', kEmo_bb, mo_b.conj())
+        kEmo_bb = contract('ijkp,pl->ijkl', kEmo_bb, mo_b)
+
+        kEmo_aa = kEmo_aa.reshape(nocc_a,nmo_a,nmo_a,nmo_a)
+        kEmo_ab = kEmo_ab.reshape(nocc_a,nmo_a,nmo_b,nmo_b)
+        kEmo_bb = kEmo_bb.reshape(nocc_b,nmo_b,nmo_b,nmo_b)
+        a_aa, a_ab, a_bb = a
+        b_aa, b_ab, b_bb = b
+
+        a_aa += cp.einsum('iabj->iajb', kEmo_aa[:nocc_a,nocc_a:,nocc_a:,:nocc_a])
+        b_aa += cp.einsum('iajb->iajb', kEmo_aa[:nocc_a,nocc_a:,:nocc_a,nocc_a:])
+
+        a_bb += cp.einsum('iabj->iajb', kEmo_bb[:nocc_b,nocc_b:,nocc_b:,:nocc_b])
+        b_bb += cp.einsum('iajb->iajb', kEmo_bb[:nocc_b,nocc_b:,:nocc_b,nocc_b:])
+
+        a_ab += cp.einsum('iabj->iajb', kEmo_ab[:nocc_a,nocc_a:,nocc_b:,:nocc_b])
+        b_ab += cp.einsum('iajb->iajb', kEmo_ab[:nocc_a,nocc_a:,:nocc_b,nocc_b:])
 
     def add_hf_(a, b, hyb=1):
         if getattr(mf, 'with_df', None):
@@ -133,6 +199,10 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
 
         a_ab += cp.einsum('iabj->iajb', eri_ab[:nocc_a,nocc_a:,nocc_b:,:nocc_b])
         b_ab += cp.einsum('iajb->iajb', eri_ab[:nocc_a,nocc_a:,:nocc_b,nocc_b:])
+
+    if getattr(td, 'with_solvent', None):
+        pcmobj = td.with_solvent
+        add_solvent_(a, b, pcmobj)
 
     if isinstance(mf, scf.hf.KohnShamDFT):
         ni = mf._numint
@@ -330,7 +400,7 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
 
 REAL_EIG_THRESHOLD = tdhf_cpu.REAL_EIG_THRESHOLD
 
-def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
+def gen_tda_operation(td, mf, fock_ao=None, wfnsym=None):
     '''A x
     '''
     assert fock_ao is None
@@ -363,7 +433,7 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
     nocca, nvira = e_ia_a.shape
     noccb, nvirb = e_ia_b.shape
 
-    vresp = mf.gen_response(hermi=0)
+    vresp = td.gen_response(hermi=0)
 
     def vind(zs):
         nz = len(zs)
@@ -391,9 +461,13 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
 
 class TDBase(tdhf_gpu.TDBase):
 
+    def gen_response(self, mo_coeff=None, mo_occ=None, hermi=0):
+        '''Generate function to compute A x'''
+        return self._scf.gen_response(mo_coeff=None, mo_occ=None, hermi=hermi)
+
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
-        return get_ab(mf)
+        return get_ab(self, mf)
 
     def nuc_grad_method(self):
         if getattr(self._scf, 'with_df', None):
@@ -442,7 +516,7 @@ class TDA(TDBase):
         '''Generate function to compute Ax'''
         if mf is None:
             mf = self._scf
-        return gen_tda_operation(mf)
+        return gen_tda_operation(self, mf)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         if mf is None: mf = self._scf
@@ -701,7 +775,7 @@ class SpinFlipTDA(TDBase):
         return self.e, self.xy
 
 
-def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute
 
     [ A   B ][X]
@@ -735,7 +809,7 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     nocca, nvira = e_ia_a.shape
     noccb, nvirb = e_ia_b.shape
 
-    vresp = mf.gen_response(hermi=0)
+    vresp = td.gen_response(hermi=0)
 
     def vind(zs):
         nz = len(zs)
@@ -784,7 +858,7 @@ class TDHF(TDBase):
     def gen_vind(self, mf=None):
         if mf is None:
             mf = self._scf
-        return gen_tdhf_operation(mf, singlet=self.singlet)
+        return gen_tdhf_operation(self, mf, singlet=self.singlet)
 
     get_precond = tdhf_gpu.TDHF.get_precond
 

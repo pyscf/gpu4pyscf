@@ -384,9 +384,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_hf(self):
         mf = self.mf
-        a, b = rhf.get_ab(mf)
-        ftda = rhf.gen_tda_operation(mf, singlet=True)[0]
-        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        td = rhf.TDHF(mf)
+        a, b = td.get_ab()
+        ftda = rhf.gen_tda_operation(td, mf, singlet=True)[0]
+        ftdhf = rhf.gen_tdhf_operation(td, mf, singlet=True)[0]
         nocc = int(np.count_nonzero(mf.mo_occ == 2))
         nvir = int(np.count_nonzero(mf.mo_occ == 0))
         np.random.seed(2)
@@ -403,9 +404,10 @@ class KnownValues(unittest.TestCase):
         
     def test_ab_lda(self):
         mf = self.mf_lda_nodf
-        a, b = rhf.get_ab(mf)
-        ftda = rhf.gen_tda_operation(mf, singlet=True)[0]
-        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        td = rks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = rhf.gen_tda_operation(td, mf, singlet=True)[0]
+        ftdhf = rhf.gen_tdhf_operation(td, mf, singlet=True)[0]
         nocc = int(np.count_nonzero(mf.mo_occ == 2))
         nvir = int(np.count_nonzero(mf.mo_occ == 0))
         np.random.seed(2)
@@ -422,9 +424,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_lda_df(self):
         mf = self.mf_lda
-        a, b = rhf.get_ab(mf)
-        ftda = rhf.gen_tda_operation(mf, singlet=True)[0]
-        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        td = rks.TDDFT(mf)
+        a, b = td.get_ab(mf)
+        ftda = rhf.gen_tda_operation(td, mf, singlet=True)[0]
+        ftdhf = rhf.gen_tdhf_operation(td, mf, singlet=True)[0]
         nocc = int(np.count_nonzero(mf.mo_occ == 2))
         nvir = int(np.count_nonzero(mf.mo_occ == 0))
         np.random.seed(2)
@@ -441,9 +444,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_b3lyp(self):
         mf = self.mf_b3lyp_nodf
-        a, b = rks.TDDFT(mf).get_ab()
-        ftda = rhf.gen_tda_operation(mf, singlet=None)[0]
-        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        td = rks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = rhf.gen_tda_operation(td, mf, singlet=None)[0]
+        ftdhf = rhf.gen_tdhf_operation(td, mf, singlet=True)[0]
         nocc = int(np.count_nonzero(mf.mo_occ == 2))
         nvir = int(np.count_nonzero(mf.mo_occ == 0))
         np.random.seed(2)
@@ -460,9 +464,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_b3lyp_df(self):
         mf = self.mf_b3lyp
-        a, b = rks.TDDFT(mf).get_ab()
-        ftda = rhf.gen_tda_operation(mf, singlet=None)[0]
-        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        td = rks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = rhf.gen_tda_operation(td, mf, singlet=None)[0]
+        ftdhf = rhf.gen_tdhf_operation(td, mf, singlet=True)[0]
         nocc = int(np.count_nonzero(mf.mo_occ == 2))
         nvir = int(np.count_nonzero(mf.mo_occ == 0))
         np.random.seed(2)
@@ -479,9 +484,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_mgga(self):
         mf = self.mf_m06l_nodf
-        a, b = rks.TDDFT(mf).get_ab()
-        ftda = rhf.gen_tda_operation(mf, singlet=None)[0]
-        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        td = rks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = rhf.gen_tda_operation(td, mf, singlet=None)[0]
+        ftdhf = rhf.gen_tdhf_operation(td, mf, singlet=True)[0]
         nocc = int(np.count_nonzero(mf.mo_occ == 2))
         nvir = int(np.count_nonzero(mf.mo_occ == 0))
         np.random.seed(2)
@@ -498,9 +504,10 @@ class KnownValues(unittest.TestCase):
 
     def test_ab_mgga_df(self):
         mf = self.mf_m06l
-        a, b = rks.TDDFT(mf).get_ab()
-        ftda = rhf.gen_tda_operation(mf, singlet=None)[0]
-        ftdhf = rhf.gen_tdhf_operation(mf, singlet=True)[0]
+        td = rks.TDDFT(mf)
+        a, b = td.get_ab()
+        ftda = rhf.gen_tda_operation(td, mf, singlet=None)[0]
+        ftdhf = rhf.gen_tdhf_operation(td, mf, singlet=True)[0]
         nocc = int(np.count_nonzero(mf.mo_occ == 2))
         nvir = int(np.count_nonzero(mf.mo_occ == 0))
         np.random.seed(2)

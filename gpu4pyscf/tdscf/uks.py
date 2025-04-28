@@ -87,7 +87,7 @@ class CasidaTDDFT(TDDFT):
         ed_ia = e_ia * d_ia
         hdiag = e_ia ** 2
         hdiag = hdiag
-        vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)
+        vresp = self.gen_response(mo_coeff, mo_occ, hermi=1)
         nocca, nvira = e_ia_a.shape
         noccb, nvirb = e_ia_b.shape
 

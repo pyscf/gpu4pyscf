@@ -100,7 +100,7 @@ def _jk_task(mol, dms, mo_coeff, mo_occ, vhfopt, task_list, hermi=0,
             kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
                         l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
             tile_kl_mapping = tile_mappings[k,l]
-            scheme = quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            scheme = quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]], with_j, with_k)
             err = kern(
                 vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(n_dm), ctypes.c_int(nao),
