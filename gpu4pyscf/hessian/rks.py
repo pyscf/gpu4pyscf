@@ -671,12 +671,12 @@ def get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices):
         dmudr_dot_dm = None
     return d2rho_dAdr
 
-def get_drhodA_dgammadA(mol, grids_coords, ni, dm0, opt = None):
+def get_drhodA_dgammadA(mol, grids_coords, dm0):
     nao = mol.nao
     natm = mol.natm
     ngrids = grids_coords.shape[0]
 
-    ao = ni.eval_ao(mol, grids_coords, deriv = 2, gdftopt = opt, transpose = False)
+    ao = numint.eval_ao(mol, grids_coords, deriv = 2, gdftopt = None, transpose = False)
     rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "GGA", hermi = 1, with_lapl = False)
     drho = rho_drho[1:4, :]
     mu = ao[0, :, :]
@@ -718,7 +718,7 @@ def get_drhodA_dgammadA(mol, grids_coords, ni, dm0, opt = None):
 
     return drho_dA, dgamma_dA
 
-def get_d2rhodAdB_d2gammadAdB(mol, grids_coords, ni, dm0, opt = None):
+def get_d2rhodAdB_d2gammadAdB(mol, grids_coords, dm0):
     """
         This function should never be used in practice. It requires crazy amount of memory,
         and it's left for debug purpose only. Use the contract function instead.
@@ -727,7 +727,7 @@ def get_d2rhodAdB_d2gammadAdB(mol, grids_coords, ni, dm0, opt = None):
     natm = mol.natm
     ngrids = grids_coords.shape[0]
 
-    ao = ni.eval_ao(mol, grids_coords, deriv = 3, gdftopt = opt, transpose = False)
+    ao = numint.eval_ao(mol, grids_coords, deriv = 3, gdftopt = None, transpose = False)
     rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "GGA", hermi = 1, with_lapl = False)
     drho = rho_drho[1:4, :]
     mu = ao[0, :, :]
@@ -766,12 +766,12 @@ def get_d2rhodAdB_d2gammadAdB(mol, grids_coords, ni, dm0, opt = None):
     d2gamma_dAdB *= 2
     return d2rho_dAdB, d2gamma_dAdB
 
-def contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, ni, dm0, fw_rho, fw_gamma, opt = None):
+def contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, dm0, fw_rho, fw_gamma):
     nao = mol.nao
     natm = mol.natm
     ngrids = grids_coords.shape[0]
 
-    ao = ni.eval_ao(mol, grids_coords, deriv = 3, gdftopt = opt, transpose = False)
+    ao = numint.eval_ao(mol, grids_coords, deriv = 3, gdftopt = None, transpose = False)
     rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "GGA", hermi = 1, with_lapl = False)
     drho = rho_drho[1:4, :]
     mu = ao[0, :, :]
@@ -846,17 +846,11 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     grids = mf.nlcgrids
     ngrids = grids.coords.shape[0]
 
-    ni = mf._numint
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-
-    if ni.libxc.is_nlc(mf.xc):
+    if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
     else:
         xc_code = mf.nlc
-    nlc_coefs = ni.nlc_coeff(xc_code)
+    nlc_coefs = mf._numint.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
         raise NotImplementedError('Additive NLC')
     nlc_pars, fac = nlc_coefs[0]
@@ -865,117 +859,112 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     C_in_omega = nlc_pars[1]
     beta = 0.03125 * (3.0 / nlc_pars[0]**2)**0.75
 
-    with opt.gdft_envs_cache():
-        ao = ni.eval_ao(mol, grids.coords, deriv = 1, gdftopt = opt, transpose = False)
-        rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+    ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
+    rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
 
-        rho_i = rho_drho[0,:]
+    rho_i = rho_drho[0,:]
 
-        rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
+    rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
 
-        rho_i = rho_i[rho_nonzero_mask]
-        nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
-        grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
-        grids_weights = grids.weights[rho_nonzero_mask]
-        ngrids = grids_coords.shape[0]
+    rho_i = rho_i[rho_nonzero_mask]
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
+    grids_weights = grids.weights[rho_nonzero_mask]
+    ngrids = grids_coords.shape[0]
 
-        ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
+    ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
 
-        gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
-        omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
-        kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+    gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
+    omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
+    kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
-        U_i = cupy.empty(ngrids)
-        W_i = cupy.empty(ngrids)
-        A_i = cupy.empty(ngrids)
-        B_i = cupy.empty(ngrids)
-        C_i = cupy.empty(ngrids)
-        E_i = cupy.empty(ngrids)
+    U_i = cupy.empty(ngrids)
+    W_i = cupy.empty(ngrids)
+    A_i = cupy.empty(ngrids)
+    B_i = cupy.empty(ngrids)
+    C_i = cupy.empty(ngrids)
+    E_i = cupy.empty(ngrids)
 
-        stream = cupy.cuda.get_current_stream()
-        libgdft.VXC_vv10nlc_hess_eval_UWABCE(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids)
-        )
+    stream = cupy.cuda.get_current_stream()
+    libgdft.VXC_vv10nlc_hess_eval_UWABCE(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids)
+    )
 
-        domega_drho_i         = cupy.empty(ngrids)
-        domega_dgamma_i       = cupy.empty(ngrids)
-        d2omega_drho2_i       = cupy.empty(ngrids)
-        d2omega_dgamma2_i     = cupy.empty(ngrids)
-        d2omega_drho_dgamma_i = cupy.empty(ngrids)
-        libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.c_double(C_in_omega),
-            ctypes.c_int(ngrids)
-        )
-        dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
-        d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
+    domega_drho_i         = cupy.empty(ngrids)
+    domega_dgamma_i       = cupy.empty(ngrids)
+    d2omega_drho2_i       = cupy.empty(ngrids)
+    d2omega_dgamma2_i     = cupy.empty(ngrids)
+    d2omega_drho_dgamma_i = cupy.empty(ngrids)
+    libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(C_in_omega),
+        ctypes.c_int(ngrids)
+    )
+    dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
+    d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
 
-        f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
-        f_gamma_i = rho_i * domega_dgamma_i * W_i
+    f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
+    f_gamma_i = rho_i * domega_dgamma_i * W_i
 
-        drho_dA, dgamma_dA = get_drhodA_dgammadA(mol, grids_coords, ni, dm0, opt)
-        d2e = contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, ni, dm0,
-                                             f_rho_i * grids_weights, f_gamma_i * grids_weights, opt)
+    drho_dA, dgamma_dA = get_drhodA_dgammadA(mol, grids_coords, dm0)
+    d2e = contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, dm0,
+                                         f_rho_i * grids_weights, f_gamma_i * grids_weights)
 
-        drho_dA   = cupy.ascontiguousarray(drho_dA)
-        dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
-        f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
-        f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    drho_dA   = cupy.ascontiguousarray(drho_dA)
+    dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
+    f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
 
-        libgdft.VXC_vv10nlc_hess_eval_f_t(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(drho_dA.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids),
-            ctypes.c_int(3 * mol.natm),
-        )
+    libgdft.VXC_vv10nlc_hess_eval_f_t(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(drho_dA.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(3 * mol.natm),
+    )
 
-        d2e += contract("Adg,BDg->ABdD",   drho_dA,   f_rho_A_i * grids_weights)
-        d2e += contract("Adg,BDg->ABdD", dgamma_dA, f_gamma_A_i * grids_weights)
+    d2e += contract("Adg,BDg->ABdD",   drho_dA,   f_rho_A_i * grids_weights)
+    d2e += contract("Adg,BDg->ABdD", dgamma_dA, f_gamma_A_i * grids_weights)
 
-    d2e_numerical = _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory)
-
-    print(cupy.max(cupy.abs(d2e - d2e_numerical)))
-
-    return d2e_numerical
+    return d2e
 
 def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id=0):
     mol = hessobj.mol
@@ -1202,17 +1191,11 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     grids = mf.nlcgrids
     ngrids = grids.coords.shape[0]
 
-    ni = mf._numint
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-
-    if ni.libxc.is_nlc(mf.xc):
+    if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
     else:
         xc_code = mf.nlc
-    nlc_coefs = ni.nlc_coeff(xc_code)
+    nlc_coefs = mf._numint.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
         raise NotImplementedError('Additive NLC')
     nlc_pars, fac = nlc_coefs[0]
@@ -1221,184 +1204,183 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     C_in_omega = nlc_pars[1]
     beta = 0.03125 * (3.0 / nlc_pars[0]**2)**0.75
 
-    with opt.gdft_envs_cache():
-        ao = ni.eval_ao(mol, grids.coords, deriv = 2, gdftopt = opt, transpose = False)
-        rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+    ao = numint.eval_ao(mol, grids.coords, deriv = 2, gdftopt = None, transpose = False)
+    rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "NLC", hermi = 1, with_lapl = False)
 
-        rho_i = rho_drho[0,:]
+    rho_i = rho_drho[0,:]
 
-        rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
+    rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
 
-        rho_i = rho_i[rho_nonzero_mask]
-        nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
-        grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
-        grids_weights = grids.weights[rho_nonzero_mask]
-        ngrids = grids_coords.shape[0]
+    rho_i = rho_i[rho_nonzero_mask]
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
+    grids_weights = grids.weights[rho_nonzero_mask]
+    ngrids = grids_coords.shape[0]
 
-        ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
+    ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
 
-        gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
-        omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
-        kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+    gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
+    omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
+    kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
-        U_i = cupy.empty(ngrids)
-        W_i = cupy.empty(ngrids)
-        A_i = cupy.empty(ngrids)
-        B_i = cupy.empty(ngrids)
-        C_i = cupy.empty(ngrids)
-        E_i = cupy.empty(ngrids)
+    U_i = cupy.empty(ngrids)
+    W_i = cupy.empty(ngrids)
+    A_i = cupy.empty(ngrids)
+    B_i = cupy.empty(ngrids)
+    C_i = cupy.empty(ngrids)
+    E_i = cupy.empty(ngrids)
 
-        stream = cupy.cuda.get_current_stream()
-        libgdft.VXC_vv10nlc_hess_eval_UWABCE(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids)
-        )
+    stream = cupy.cuda.get_current_stream()
+    libgdft.VXC_vv10nlc_hess_eval_UWABCE(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids)
+    )
 
-        domega_drho_i         = cupy.empty(ngrids)
-        domega_dgamma_i       = cupy.empty(ngrids)
-        d2omega_drho2_i       = cupy.empty(ngrids)
-        d2omega_dgamma2_i     = cupy.empty(ngrids)
-        d2omega_drho_dgamma_i = cupy.empty(ngrids)
-        libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.c_double(C_in_omega),
-            ctypes.c_int(ngrids)
-        )
-        dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
-        d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
+    domega_drho_i         = cupy.empty(ngrids)
+    domega_dgamma_i       = cupy.empty(ngrids)
+    d2omega_drho2_i       = cupy.empty(ngrids)
+    d2omega_dgamma2_i     = cupy.empty(ngrids)
+    d2omega_drho_dgamma_i = cupy.empty(ngrids)
+    libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(C_in_omega),
+        ctypes.c_int(ngrids)
+    )
+    dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
+    d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
 
-        f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
-        f_gamma_i = rho_i * domega_dgamma_i * W_i
+    f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
+    f_gamma_i = rho_i * domega_dgamma_i * W_i
 
-        drho_dA, dgamma_dA = get_drhodA_dgammadA(mol, grids_coords, ni, dm0, opt)
+    drho_dA, dgamma_dA = get_drhodA_dgammadA(mol, grids_coords, dm0)
 
-        drho_dA   = cupy.ascontiguousarray(drho_dA)
-        dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
-        f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
-        f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    drho_dA   = cupy.ascontiguousarray(drho_dA)
+    dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
+    f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
 
-        libgdft.VXC_vv10nlc_hess_eval_f_t(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(drho_dA.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids),
-            ctypes.c_int(3 * mol.natm),
-        )
+    libgdft.VXC_vv10nlc_hess_eval_f_t(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(f_rho_A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(f_gamma_A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(drho_dA.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(3 * mol.natm),
+    )
 
-        mu = ao_nonzero_rho[0, :, :]
-        dmu_dr = ao_nonzero_rho[1:4, :, :]
-        d2mu_dr2 = get_d2mu_dr2(ao_nonzero_rho)
+    mu = ao_nonzero_rho[0, :, :]
+    dmu_dr = ao_nonzero_rho[1:4, :, :]
+    d2mu_dr2 = get_d2mu_dr2(ao_nonzero_rho)
 
-        aoslices = mol.aoslice_by_atom()
+    aoslices = mol.aoslice_by_atom()
 
-        vmat_mo = cupy.empty([mol.natm, 3, mo_coeff.shape[1], mocc.shape[1]])
+    vmat_mo = cupy.empty([mol.natm, 3, mo_coeff.shape[1], mocc.shape[1]])
 
-        d2rho_dAdr = get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
-        drhodr_dot_dmudr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * grids_weights)
-        for i_atom in range(natm):
-            # # w_i 2 f_i^\gamma \nabla_A \nabla\rho \cdot \nabla(\phi_\mu \phi_nu)_i
-            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dDg,Dig,jg,g->dij', d2rho_dAdr[i_atom, :, :, :], dmu_dr, mu, f_gamma_i * grids_weights)
-            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dDg,Dig,jg,g->dji', d2rho_dAdr[i_atom, :, :, :], dmu_dr, mu, f_gamma_i * grids_weights)
-            d2rhodAdr_dot_dmudr = contract('dDg,Dig->dig', d2rho_dAdr[i_atom, :, :, :], dmu_dr)
-            dF  = contract('dig,jg->dij', d2rhodAdr_dot_dmudr, mu * f_gamma_i * grids_weights)
-            d2rhodAdr_dot_dmudr = None
+    d2rho_dAdr = get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
+    drhodr_dot_dmudr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * grids_weights)
+    for i_atom in range(natm):
+        # # w_i 2 f_i^\gamma \nabla_A \nabla\rho \cdot \nabla(\phi_\mu \phi_nu)_i
+        # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dDg,Dig,jg,g->dij', d2rho_dAdr[i_atom, :, :, :], dmu_dr, mu, f_gamma_i * grids_weights)
+        # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dDg,Dig,jg,g->dji', d2rho_dAdr[i_atom, :, :, :], dmu_dr, mu, f_gamma_i * grids_weights)
+        d2rhodAdr_dot_dmudr = contract('dDg,Dig->dig', d2rho_dAdr[i_atom, :, :, :], dmu_dr)
+        dF  = contract('dig,jg->dij', d2rhodAdr_dot_dmudr, mu * f_gamma_i * grids_weights)
+        d2rhodAdr_dot_dmudr = None
 
-            # # w_i 2 (\nabla\rho)_i \cdot (\nabla(\phi_\mu \phi_nu))_i f_i^{\gamma, A}
-            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dg,Dig,jg,Dg->dij', f_gamma_A_i[i_atom, :, :], dmu_dr, mu, nabla_rho_i * grids_weights)
-            # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dg,Dig,jg,Dg->dji', f_gamma_A_i[i_atom, :, :], dmu_dr, mu, nabla_rho_i * grids_weights)
-            f_gamma_A_i_mu = contract('dg,ig->dig', f_gamma_A_i[i_atom, :, :], mu)
-            dF += contract('dig,jg->dij', f_gamma_A_i_mu, drhodr_dot_dmudr)
-            f_gamma_A_i_mu = None
+        # # w_i 2 (\nabla\rho)_i \cdot (\nabla(\phi_\mu \phi_nu))_i f_i^{\gamma, A}
+        # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dg,Dig,jg,Dg->dij', f_gamma_A_i[i_atom, :, :], dmu_dr, mu, nabla_rho_i * grids_weights)
+        # vmat[i_atom, :, :, :] += 2 * cupy.einsum('dg,Dig,jg,Dg->dji', f_gamma_A_i[i_atom, :, :], dmu_dr, mu, nabla_rho_i * grids_weights)
+        f_gamma_A_i_mu = contract('dg,ig->dig', f_gamma_A_i[i_atom, :, :], mu)
+        dF += contract('dig,jg->dij', f_gamma_A_i_mu, drhodr_dot_dmudr)
+        f_gamma_A_i_mu = None
 
-            dF += dF.transpose(0,2,1)
-            dF *= 2
+        dF += dF.transpose(0,2,1)
+        dF *= 2
 
-            # # w_i \phi_{\mu i} \phi_{\nu i} f_i^{\rho, A}
-            # vmat[i_atom, :, :, :] += cupy.einsum('dg,ig,jg,g->dij', f_rho_A_i[i_atom, :, :], mu, mu, grids_weights)
-            f_rho_A_i_mu = contract('dg,ig->dig', f_rho_A_i[i_atom, :, :], mu)
-            dF += contract('dig,jg->dij', f_rho_A_i_mu, mu * grids_weights)
-            f_rho_A_i_mu = None
+        # # w_i \phi_{\mu i} \phi_{\nu i} f_i^{\rho, A}
+        # vmat[i_atom, :, :, :] += cupy.einsum('dg,ig,jg,g->dij', f_rho_A_i[i_atom, :, :], mu, mu, grids_weights)
+        f_rho_A_i_mu = contract('dg,ig->dig', f_rho_A_i[i_atom, :, :], mu)
+        dF += contract('dig,jg->dij', f_rho_A_i_mu, mu * grids_weights)
+        f_rho_A_i_mu = None
 
-            vmat_mo[i_atom, :, :, :] = jk._ao2mo(dF, mocc, mo_coeff)
-            dF = None
-        d2rho_dAdr = None
-        drhodr_dot_dmudr_dot_weight = None
+        vmat_mo[i_atom, :, :, :] = jk._ao2mo(dF, mocc, mo_coeff)
+        dF = None
+    d2rho_dAdr = None
+    drhodr_dot_dmudr_dot_weight = None
 
-        mu_dot_drhodr = contract('ig,dg->dig', mu, nabla_rho_i * f_gamma_i * grids_weights)
-        dmudr_dot_drhodr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
-        for i_atom in range(natm):
-            p0, p1 = aoslices[i_atom][2:]
-            # # w_i f_i^\rho \nabla_A (\phi_\mu \phi_nu)_i
-            # vmat[i_atom, :, p0:p1, :] += cupy.einsum('dig,jg->dij', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
-            # vmat[i_atom, :, :, p0:p1] += cupy.einsum('dig,jg->dji', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
-            f_rho_dmudA_nu = contract('dig,jg->dij', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
+    mu_dot_drhodr = contract('ig,dg->dig', mu, nabla_rho_i * f_gamma_i * grids_weights)
+    dmudr_dot_drhodr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
+    for i_atom in range(natm):
+        p0, p1 = aoslices[i_atom][2:]
+        # # w_i f_i^\rho \nabla_A (\phi_\mu \phi_nu)_i
+        # vmat[i_atom, :, p0:p1, :] += cupy.einsum('dig,jg->dij', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
+        # vmat[i_atom, :, :, p0:p1] += cupy.einsum('dig,jg->dji', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
+        f_rho_dmudA_nu = contract('dig,jg->dij', -dmu_dr[:, p0:p1, :], mu * f_rho_i * grids_weights)
 
-            # # w_i 2 f_i^\gamma \nabla\rho \cdot \nabla_A \nabla(\phi_\mu \phi_nu)_i
-            # vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dDig,jg,Dg->dij', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
-            # vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dDig,jg,Dg->dji', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
-            # vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dig,Djg,Dg->dij', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
-            # vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dig,Djg,Dg->dji', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
-            f_gamma_d2mudr2_nu = contract('dDig,Djg->dij', -d2mu_dr2[:, :, p0:p1, :], mu_dot_drhodr)
-            f_gamma_dmudr_dnudr = contract('dig,jg->dij', -dmu_dr[:, p0:p1, :], dmudr_dot_drhodr)
+        # # w_i 2 f_i^\gamma \nabla\rho \cdot \nabla_A \nabla(\phi_\mu \phi_nu)_i
+        # vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dDig,jg,Dg->dij', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
+        # vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dDig,jg,Dg->dji', -d2mu_dr2[:, :, p0:p1, :], mu, nabla_rho_i * f_gamma_i * grids_weights)
+        # vmat[i_atom, :, p0:p1, :] += 2 * cupy.einsum('dig,Djg,Dg->dij', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
+        # vmat[i_atom, :, :, p0:p1] += 2 * cupy.einsum('dig,Djg,Dg->dji', -dmu_dr[:, p0:p1, :], dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
+        f_gamma_d2mudr2_nu = contract('dDig,Djg->dij', -d2mu_dr2[:, :, p0:p1, :], mu_dot_drhodr)
+        f_gamma_dmudr_dnudr = contract('dig,jg->dij', -dmu_dr[:, p0:p1, :], dmudr_dot_drhodr)
 
-            dF_ao = f_rho_dmudA_nu + 2 * (f_gamma_d2mudr2_nu + f_gamma_dmudr_dnudr)
-            f_rho_dmudA_nu = None
-            f_gamma_d2mudr2_nu = None
-            f_gamma_dmudr_dnudr = None
+        dF_ao = f_rho_dmudA_nu + 2 * (f_gamma_d2mudr2_nu + f_gamma_dmudr_dnudr)
+        f_rho_dmudA_nu = None
+        f_gamma_d2mudr2_nu = None
+        f_gamma_dmudr_dnudr = None
 
-            dF_mo = dF_ao @ mocc
-            dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[p0:p1, :])
-            vmat_mo[i_atom, :, :, :] += dF_mo
-            dF_mo = dF_ao.transpose(0,2,1) @ mocc[p0:p1, :]
-            dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff)
-            vmat_mo[i_atom, :, :, :] += dF_mo
-            dF_ao = None
-            dF_mo = None
-        mu_dot_drhodr = None
-        dmudr_dot_drhodr = None
+        dF_mo = dF_ao @ mocc
+        dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[p0:p1, :])
+        vmat_mo[i_atom, :, :, :] += dF_mo
+        dF_mo = dF_ao.transpose(0,2,1) @ mocc[p0:p1, :]
+        dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff)
+        vmat_mo[i_atom, :, :, :] += dF_mo
+        dF_ao = None
+        dF_mo = None
+    mu_dot_drhodr = None
+    dmudr_dot_drhodr = None
 
-    vmat_numerical = _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory)
-
-    print(cupy.max(cupy.abs(vmat_mo - vmat_numerical)))
-
-    return vmat_numerical
+    # Note (Henry Wang 20250428):
+    # We observed that in a H2O2 system, the analytical and numerical Fock matrix derivative,
+    # although only diff by else than 1e-7 (norm 1), can cause a 1e-3 error in hessian,
+    # likely because the CPHF converged to a different solution.
+    return vmat_mo
 
 def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
                         verbose=None, hermi=1, device_id=0):
@@ -1534,17 +1516,11 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
 
     n_dm1 = dm1s.shape[0]
 
-    ni = mf._numint
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-
-    if ni.libxc.is_nlc(mf.xc):
+    if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
     else:
         xc_code = mf.nlc
-    nlc_coefs = ni.nlc_coeff(xc_code)
+    nlc_coefs = mf._numint.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
         raise NotImplementedError('Additive NLC')
     nlc_pars, fac = nlc_coefs[0]
@@ -1552,135 +1528,134 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
     kappa_prefactor = nlc_pars[0] * 1.5 * numpy.pi * (9 * numpy.pi)**(-1.0/6.0)
     C_in_omega = nlc_pars[1]
 
-    with opt.gdft_envs_cache():
-        ao = ni.eval_ao(mol, grids.coords, deriv = 1, gdftopt = opt, transpose = False)
-        rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+    ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
+    rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
 
-        rho_i = rho_drho[0,:]
+    rho_i = rho_drho[0,:]
 
-        rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
+    rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
 
-        rho_i = rho_i[rho_nonzero_mask]
-        nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
-        grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
-        grids_weights = grids.weights[rho_nonzero_mask]
-        ngrids = grids_coords.shape[0]
+    rho_i = rho_i[rho_nonzero_mask]
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
+    grids_weights = grids.weights[rho_nonzero_mask]
+    ngrids = grids_coords.shape[0]
 
-        ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
+    ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
 
-        gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
-        omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
-        kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+    gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
+    omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
+    kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
-        U_i = cupy.empty(ngrids)
-        W_i = cupy.empty(ngrids)
-        A_i = cupy.empty(ngrids)
-        B_i = cupy.empty(ngrids)
-        C_i = cupy.empty(ngrids)
-        E_i = cupy.empty(ngrids) # Not used
+    U_i = cupy.empty(ngrids)
+    W_i = cupy.empty(ngrids)
+    A_i = cupy.empty(ngrids)
+    B_i = cupy.empty(ngrids)
+    C_i = cupy.empty(ngrids)
+    E_i = cupy.empty(ngrids) # Not used
 
-        stream = cupy.cuda.get_current_stream()
-        libgdft.VXC_vv10nlc_hess_eval_UWABCE(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids)
-        )
-        E_i = None
+    stream = cupy.cuda.get_current_stream()
+    libgdft.VXC_vv10nlc_hess_eval_UWABCE(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids)
+    )
+    E_i = None
 
-        domega_drho_i         = cupy.empty(ngrids)
-        domega_dgamma_i       = cupy.empty(ngrids)
-        d2omega_drho2_i       = cupy.empty(ngrids)
-        d2omega_dgamma2_i     = cupy.empty(ngrids)
-        d2omega_drho_dgamma_i = cupy.empty(ngrids)
-        libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.c_double(C_in_omega),
-            ctypes.c_int(ngrids)
-        )
-        dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
-        d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
+    domega_drho_i         = cupy.empty(ngrids)
+    domega_dgamma_i       = cupy.empty(ngrids)
+    d2omega_drho2_i       = cupy.empty(ngrids)
+    d2omega_dgamma2_i     = cupy.empty(ngrids)
+    d2omega_drho_dgamma_i = cupy.empty(ngrids)
+    libgdft.VXC_vv10nlc_hess_eval_omega_derivative(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(C_in_omega),
+        ctypes.c_int(ngrids)
+    )
+    dkappa_drho_i   = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
+    d2kappa_drho2_i = kappa_prefactor * (-5.0/36.0) * rho_i**(-11.0/6.0)
 
-        f_gamma_i = rho_i * domega_dgamma_i * W_i
+    f_gamma_i = rho_i * domega_dgamma_i * W_i
 
-        rho_drho_t = cupy.empty([n_dm1, 4, ngrids])
-        for i_dm in range(n_dm1):
-            dm1 = dm1s[i_dm, :, :]
-            rho_drho_1 = numint.eval_rho(mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
-            rho_drho_t[i_dm, :, :] = rho_drho_1[:, rho_nonzero_mask]
+    rho_drho_t = cupy.empty([n_dm1, 4, ngrids])
+    for i_dm in range(n_dm1):
+        dm1 = dm1s[i_dm, :, :]
+        rho_drho_1 = numint.eval_rho(mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
+        rho_drho_t[i_dm, :, :] = rho_drho_1[:, rho_nonzero_mask]
 
-        rho_t_i = rho_drho_t[:, 0, :]
-        nabla_rho_t_i = rho_drho_t[:, 1:4, :]
-        gamma_t_i = nabla_rho_i[0, :] * nabla_rho_t_i[:, 0, :] \
-                    + nabla_rho_i[1, :] * nabla_rho_t_i[:, 1, :] \
-                    + nabla_rho_i[2, :] * nabla_rho_t_i[:, 2, :]
-        gamma_t_i *= 2 # Account for the factor of 2 before gamma_j^t term in equation (22)
+    rho_t_i = rho_drho_t[:, 0, :]
+    nabla_rho_t_i = rho_drho_t[:, 1:4, :]
+    gamma_t_i = nabla_rho_i[0, :] * nabla_rho_t_i[:, 0, :] \
+                + nabla_rho_i[1, :] * nabla_rho_t_i[:, 1, :] \
+                + nabla_rho_i[2, :] * nabla_rho_t_i[:, 2, :]
+    gamma_t_i *= 2 # Account for the factor of 2 before gamma_j^t term in equation (22)
 
-        rho_t_i   = cupy.ascontiguousarray(rho_t_i)
-        gamma_t_i = cupy.ascontiguousarray(gamma_t_i)
-        f_rho_t_i   = cupy.empty([n_dm1, ngrids], order = "C")
-        f_gamma_t_i = cupy.empty([n_dm1, ngrids], order = "C")
+    rho_t_i   = cupy.ascontiguousarray(rho_t_i)
+    gamma_t_i = cupy.ascontiguousarray(gamma_t_i)
+    f_rho_t_i   = cupy.empty([n_dm1, ngrids], order = "C")
+    f_gamma_t_i = cupy.empty([n_dm1, ngrids], order = "C")
 
-        libgdft.VXC_vv10nlc_hess_eval_f_t(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(f_rho_t_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(f_gamma_t_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_t_i.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gamma_t_i.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids),
-            ctypes.c_int(n_dm1),
-        )
+    libgdft.VXC_vv10nlc_hess_eval_f_t(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(f_rho_t_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(f_gamma_t_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_t_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gamma_t_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(n_dm1),
+    )
 
-        fxc_rho = f_rho_t_i * grids_weights
-        fxc_gamma = 2 * (contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i) +
-                         nabla_rho_t_i * f_gamma_i) * grids_weights
+    fxc_rho = f_rho_t_i * grids_weights
+    fxc_gamma = 2 * (contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i) +
+                     nabla_rho_t_i * f_gamma_i) * grids_weights
 
-        vmat_mo = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
-        for i_dm in range(n_dm1):
-            # \mu \nu
-            fxc_dot_ao = ao_nonzero_rho[0] * fxc_rho[i_dm, :]
-            V_munu = contract("ig,jg->ij", ao_nonzero_rho[0], fxc_dot_ao)
+    vmat_mo = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
+    for i_dm in range(n_dm1):
+        # \mu \nu
+        fxc_dot_ao = ao_nonzero_rho[0] * fxc_rho[i_dm, :]
+        V_munu = contract("ig,jg->ij", ao_nonzero_rho[0], fxc_dot_ao)
 
-            # \mu \nabla\nu + \nabla\mu \nu
-            nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", fxc_gamma[i_dm, :, :], ao_nonzero_rho[1:4])
-            V_munu_gamma = contract("ig,jg->ij", ao_nonzero_rho[0], nabla_fxc_dot_nabla_ao)
-            V_munu += V_munu_gamma
-            V_munu += V_munu_gamma.T
+        # \mu \nabla\nu + \nabla\mu \nu
+        nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", fxc_gamma[i_dm, :, :], ao_nonzero_rho[1:4])
+        V_munu_gamma = contract("ig,jg->ij", ao_nonzero_rho[0], nabla_fxc_dot_nabla_ao)
+        V_munu += V_munu_gamma
+        V_munu += V_munu_gamma.T
 
-            vmat_mo[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
+        vmat_mo[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
 
     return vmat_mo
 
