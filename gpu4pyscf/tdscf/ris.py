@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import cupyx.scipy.linalg as cpx_linalg
 
 from pyscf import gto, lib
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
-from gpu4pyscf.lib.cupy_helper import cart2sph, contract
+from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
@@ -28,20 +28,20 @@ from gpu4pyscf.lib import logger
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
 
-    1.  Zhou, Zehao, Fabio Della Sala, and Shane M. Parker. 
-        Minimal auxiliary basis set approach for the electronic excitation spectra 
-        of organic molecules. The Journal of Physical Chemistry Letters 
+    1.  Zhou, Zehao, Fabio Della Sala, and Shane M. Parker.
+        Minimal auxiliary basis set approach for the electronic excitation spectra
+        of organic molecules. The Journal of Physical Chemistry Letters
         14, no. 7 (2023): 1968-1976.
         (must cite)
 
-    2.  Zhou, Zehao, and Shane M. Parker. 
-        Converging Time-Dependent Density Functional Theory Calculations in Five Iterations 
-        with Minimal Auxiliary Preconditioning. Journal of Chemical Theory and Computation 
-        20, no. 15 (2024): 6738-6746. 
+    2.  Zhou, Zehao, and Shane M. Parker.
+        Converging Time-Dependent Density Functional Theory Calculations in Five Iterations
+        with Minimal Auxiliary Preconditioning. Journal of Chemical Theory and Computation
+        20, no. 15 (2024): 6738-6746.
         (for efficient orbital truncation technique)
 
-    2.  Giannone, Giulia, and Fabio Della Sala. 
-        Minimal auxiliary basis set for time-dependent density functional theory and 
+    2.  Giannone, Giulia, and Fabio Della Sala.
+        Minimal auxiliary basis set for time-dependent density functional theory and
         comparison with tight-binding approximations: Application to silver nanoparticles.
         The Journal of Chemical Physics 153, no. 8 (2020).
         (TDDFT-ris is for hybrid functionals, originates from TDDFT-as with pure functional)
@@ -58,10 +58,6 @@ def get_memory_info(words):
     memory_info = f"{words} memory usage: {used_mem / 1024**3:.2f} GB / {total_mem / 1024**3:.2f} GB"
     return memory_info
 
-def get_available_gpu_memory():
-    '''Returns the available GPU memory in bytes using Cupy.'''
-    device = cp.cuda.Device(0)  # Assuming the first GPU
-    return device.mem_info[0]  # Returns the free memory in bytes
 
 def release_memory():
     '''Releases the GPU memory using Cupy.'''
@@ -73,7 +69,7 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis):
     Args:
         auxmol_basis_keys: (['C1', 'H2', 'O3', 'H4', 'H5', 'H6'])
         theta: float 0.2
-        fitting_basis: str ('s','sp','spd') 
+        fitting_basis: str ('s','sp','spd')
 
     return:
         aux_basis:
@@ -89,7 +85,7 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis):
     for atom_index in auxmol_basis_keys:
         atom = ''.join([char for char in atom_index if char.isalpha()])
         '''
-        exponent_alpha = theta/R^2 
+        exponent_alpha = theta/R^2
         '''
         exp_alpha = parameter.ris_exp[atom] * theta
 
@@ -118,21 +114,21 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
 
 
     '''
-    parse_arg = False 
+    parse_arg = False
     turns off PySCF built-in parsing function
     '''
-    auxmol = gto.M(atom=mol.atom, 
+    auxmol = gto.M(atom=mol.atom,
                     basis=mol.basis,
-                    parse_arg=False, 
-                    spin=mol.spin, 
+                    parse_arg=False,
+                    spin=mol.spin,
                     charge=mol.charge,
                     cart=mol.cart)
-    
+
     auxmol_basis_keys = mol._basis.keys()
     auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
     auxmol.build(dump_input=False)
     return auxmol
-   
+
 
 '''
             n_occ          n_vir
@@ -160,10 +156,10 @@ def get_Ppq_to_Tpq(Ppq: cp.ndarray, lower_inv_eri2c: cp.ndarray):
     T_pq = cp.dot(lower_inv_eri2c.T, Ppq)
     T_pq = T_pq.reshape(nauxao, n_p, n_q)
 
-    return T_pq 
+    return T_pq
 
 def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray):
-    # # '''    
+    # # '''
     # # eri3c : (P|pq) , P = auxnao or 3
     # # C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
 
@@ -187,8 +183,8 @@ def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray):
     # eri3c = eri3c.reshape(nauxao*nao, nao)
     # eri3c_C_p = cp.dot(eri3c, C_p)
 
-    # # ''' eri3c_C_p (nauxao*nao, n_p) 
-    # #     -> (nauxao, nao, n_p) 
+    # # ''' eri3c_C_p (nauxao*nao, n_p)
+    # #     -> (nauxao, nao, n_p)
     # #     -> (nauxao, n_p, nao) '''
     # eri3c_C_p = eri3c_C_p.reshape(nauxao, nao, n_p)
     # eri3c_C_p = eri3c_C_p.transpose(0,2,1)
@@ -237,7 +233,7 @@ def get_int3c2e(mol, auxmol, aosym=True, omega=None):
             int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
 
         i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]            
+        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
         int3c[:, j0:j1, i0:i1] = int3c_slice
     if aosym:
         row, col = np.tril_indices(nao)
@@ -245,8 +241,8 @@ def get_int3c2e(mol, auxmol, aosym=True, omega=None):
     int3c = intopt.unsort_orbitals(int3c, aux_axis=[0], axis=[1,2])
     return int3c
 
-def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c, 
-                                calc='JK', aosym=True, omega=None, alpha=None, beta=None, 
+def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
+                                calc='JK', aosym=True, omega=None, alpha=None, beta=None,
                                 group_size=BLKSIZE, group_size_aux=AUXBLKSIZE):
     """
     (3c2e_{Puv}, C_{up}, C_{vq} -> Ppq)。
@@ -260,7 +256,7 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
     Returns:
         Tpq: cupy.ndarray (naux, nao, nao)
     """
-    
+
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(aosym=aosym, group_size=group_size, group_size_aux=group_size_aux)
 
@@ -281,13 +277,13 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
         k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
 
         int3c_slice = cp.empty((k1 - k0, nao, nao), dtype=cp.float32, order='C')
-  
+
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
             li = intopt.angular[cpi]
             lj = intopt.angular[cpj]
-         
+
             int3c_slice_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=0)
 
             if not mol.cart:
@@ -305,8 +301,8 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
 
             int3c_slice_blk = cp.asarray(int3c_slice_blk, dtype=cp.float32, order='C')
             i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]  
-            
+            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+
             assert int3c_slice[:,j0:j1, i0:i1].shape == int3c_slice_blk.shape
             int3c_slice[:,j0:j1, i0:i1] = int3c_slice_blk
 
@@ -340,7 +336,7 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
     #     tmp = cp.einsum('Puv,up->Ppv', eri_3c2e, C_p)
     #     Ppq = cp.einsum('Ppv,vq->Ppq', tmp, C_q)
 
-        
+
     if calc == 'J':
         Tpq = get_Ppq_to_Tpq(Ppq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
         return Tpq
@@ -369,7 +365,7 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
 
     eri2c = cp.asarray(eri2c, dtype=cp.float64, order='C')
 
-    try: 
+    try:
         ''' eri2c=L L.T
             LX = I
             lower_inv_eri2c = X = L^-1
@@ -383,7 +379,7 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
             LINEAR_EPSILON = 1e-8 to remove the linear dependency, sometimes the aux eri2c is not full rank.
         '''
         lower_inv_eri2c = math_helper.matrix_power(eri2c,-0.5,epsilon=LINEAR_EPSILON)
-    
+
 
     lower_inv_eri2c = cp.asarray(lower_inv_eri2c, dtype=cp.float32, order='C')
     return lower_inv_eri2c
@@ -392,7 +388,7 @@ def get_inter_contract_C(int_tensor, C_occ, C_vir):
 
     P = get_PuvCupCvq_to_Ppq(int_tensor, C_occ, C_vir)
 
-    ''' 3 for xyz three directions. 
+    ''' 3 for xyz three directions.
         reshape is helpful when calculating oscillator strength and polarizability.
     '''
     P = cp.asarray(P.reshape(3,-1))
@@ -405,23 +401,23 @@ def gen_hdiag_MVP(hdiag, n_occ, n_vir):
         hdiag_v = hdiag * V
         hdiag_v = hdiag_v.reshape(m, n_occ, n_vir)
         return hdiag_v
-    
+
     return hdiag_MVP
-    
+
 
 def gen_iajb_MVP(T_left, T_right):
     '''
     (ia|jb) = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
             = Σ_P [ T_left_ia^P Σ_jb(T_right_jb^P V_jb^m) ]
-    if T_left == T_right, then it is either 
-        (1) (ia|jb) in RKS 
-        or 
-        (2)(ia_α|jb_α) or (ia_β|jb_β) in UKS, 
+    if T_left == T_right, then it is either
+        (1) (ia|jb) in RKS
+        or
+        (2)(ia_α|jb_α) or (ia_β|jb_β) in UKS,
     elif T_left != T_right
         it is (ia_α|jb_β) or (ia_β|jb_α) in UKS
 
     V in shape (m, n_occ * n_vir)
-    '''    
+    '''
 
     # def iajb_MVP(V):
     #     T_right_jb_V = einsum("Pjb,mjb->Pm", T_right, V)
@@ -432,10 +428,10 @@ def gen_iajb_MVP(T_left, T_right):
         '''
         Optimized calculation of (ia|jb) = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
         by chunking along the auxao dimension to reduce memory usage.
-        
+
         Parameters:
             V (cupy.ndarray): Input tensor of shape (m, n_occ * n_vir).
-            
+
         Returns:
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
@@ -449,9 +445,9 @@ def gen_iajb_MVP(T_left, T_right):
 
         # Estimate the memory size for one chunk
         estimated_chunk_size_bytes = n_occ_r * n_vir_r * T_right.itemsize * 4  # 4 for each element (complex or float64)
-        
+
         # Get available GPU memory in bytes
-        available_gpu_memory = get_available_gpu_memory()
+        available_gpu_memory = get_avail_mem()
 
         # Estimate the optimal chunk size based on available GPU memory
         aux_chunk_size = int(available_gpu_memory * 0.8 // estimated_chunk_size_bytes)
@@ -465,7 +461,7 @@ def gen_iajb_MVP(T_left, T_right):
 
             T_left_chunk = T_left[aux_start:aux_end, :, :]  # Shape: (aux_range, n_occ, n_vir)
             T_right_chunk = T_right[aux_start:aux_end, :, :]   # Shape: (aux_range, n_occ * n_vir)
-            
+
 
             T_right_jb_V_chunk = contract("Pjb,mjb->Pm", T_right_chunk, V)
 
@@ -488,7 +484,7 @@ def gen_ijab_MVP(T_ij, T_ab):
     (ij|ab) = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
             = Σ_P [T_ij^P Σ_jb(T_ab^P V_jb^m)]
     V in shape (m, n_occ * n_vir)
-    '''   
+    '''
 
     # def ijab_MVP(V):
     #     T_ab_V = einsum("Pab,mjb->Pamj", T_ab, V)
@@ -502,7 +498,7 @@ def gen_ijab_MVP(T_ij, T_ab):
 
         Parameters:
             V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
-            
+
         Returns:
             ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
         '''
@@ -513,7 +509,7 @@ def gen_ijab_MVP(T_ij, T_ab):
         ijab_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ab.dtype)
 
         # Get free memory and dynamically calculate chunk size
-        available_gpu_memory = get_available_gpu_memory()
+        available_gpu_memory = get_avail_mem()
         bytes_per_vir = nauxao * n_occ * n_state * 4  # Assuming float32 (4 bytes per element)
         vir_chunk_size = max(1, int(available_gpu_memory * 0.2 // bytes_per_vir))  # Ensure at least 1
 
@@ -540,14 +536,14 @@ def gen_ijab_MVP(T_ij, T_ab):
 
         return ijab_V
 
-    
+
     return ijab_MVP
 
-def get_ibja_MVP(T_ia):    
+def get_ibja_MVP(T_ia):
     '''
     the exchange (ib|ja) in B matrix
     (ib|ja) = Σ_Pjb (T_ib^P T_ja^P V_jb^m)
-            = Σ_P [T_ja^P Σ_jb(T_ib^P V_jb^m)]           
+            = Σ_P [T_ja^P Σ_jb(T_ib^P V_jb^m)]
     '''
     # def ibja_MVP(V):
     #     T_ib_V = einsum("Pib,mjb->Pimj", T_ia, V)
@@ -599,8 +595,8 @@ def get_ibja_MVP(T_ia):
     return ibja_MVP
 
 class RisBase(lib.StreamObject):
-    def __init__(self, 
-                mf, 
+    def __init__(self,
+                mf,
                 theta: float = 0.2,
                 J_fit: str = 'sp',
                 K_fit: str = 's',
@@ -621,7 +617,7 @@ class RisBase(lib.StreamObject):
                 group_size_aux: int = 256):
 
         self.single = single
-        
+
         if single:
             mf = mf.copy()
             mf.mo_coeff = cp.asarray(mf.mo_coeff, dtype=cp.float32)
@@ -647,9 +643,9 @@ class RisBase(lib.StreamObject):
         self.group_size = group_size
         self.group_size_aux = group_size_aux
 
-        self.verbose = mf.verbose  
+        self.verbose = mf.verbose
         self.device = mf.device
-        
+
         logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
 
@@ -661,7 +657,7 @@ class RisBase(lib.StreamObject):
         log.info(f'Ktrunc: {self.Ktrunc}')
 
         if self.a_x or self.omega or self.alpha or self.beta:
-            ''' user wants to define some XC parameters ''' 
+            ''' user wants to define some XC parameters '''
             if self.a_x:
                 if self.a_x == 0:
                     log.info('use pure XC functional')
@@ -671,26 +667,26 @@ class RisBase(lib.StreamObject):
                     log.info('use HF')
                 else:
                     log.info('a_x > 1, weird')
-            
+
             elif self.omega and self.alpha and self.beta:
                 log.info('use range-separated hybrid XC functional')
             else:
                 raise ValueError('Please dounble check the XC functional parameters')
-        else: 
-            ''' use default XC parameters 
+        else:
+            ''' use default XC parameters
                 note: the definition of a_x, α and β is kind of weird in pyscf/libxc
             '''
 
             omega, alpha_libxc, hyb_libxc = self.mf._numint.rsh_and_hybrid_coeff(self.mf.xc, spin=self.mf.mol.spin)
             log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
 
-            if omega > 0: 
+            if omega > 0:
                 log.info('use range-separated hybrid XC functional')
                 self.a_x = 1
                 self.omega = omega
-                self.alpha = hyb_libxc 
+                self.alpha = hyb_libxc
                 self.beta = alpha_libxc - hyb_libxc
-            
+
             elif omega == 0:
                 self.a_x = alpha_libxc
                 if self.a_x == 0:
@@ -710,9 +706,9 @@ class RisBase(lib.StreamObject):
         log.info(f'single: {self.single}')
         log.info(f'group_size: {self.group_size}')
 
-        if self.J_fit == self.K_fit: 
+        if self.J_fit == self.K_fit:
             log.info(f'use same J and K fitting basis: {self.J_fit}')
-        else: 
+        else:
             log.info(f'use different J and K fitting basis: J with {self.J_fit} and K with {self.K_fit}')
 
         if self.mol.cart:
@@ -738,7 +734,7 @@ class RisBase(lib.StreamObject):
             delta_hdiag = cp.repeat(vir_ene, n_occ, axis=0) - cp.repeat(occ_ene, n_vir, axis=1)
             if self.single:
                 delta_hdiag = cp.asarray(delta_hdiag, dtype=cp.float32)
-        
+
             self.delta_hdiag = delta_hdiag
 
             log.info(f'n_occ = {n_occ}')
@@ -747,25 +743,25 @@ class RisBase(lib.StreamObject):
             if self.Ktrunc > 0:
                 log.info(f' MO truncation in K with threshold {self.Ktrunc} eV above HOMO and below LUMO')
 
-                trunc_tol_au = self.Ktrunc/HARTREE2EV     
+                trunc_tol_au = self.Ktrunc/HARTREE2EV
 
                 homo_vir_delta_ene = delta_hdiag[-1,:]
                 occ_lumo_delta_ene = delta_hdiag[:,0]
-                
+
                 rest_occ = cp.sum(occ_lumo_delta_ene <= trunc_tol_au)
                 rest_vir = cp.sum(homo_vir_delta_ene <= trunc_tol_au)
-                
-            elif self.Ktrunc == 0: 
+
+            elif self.Ktrunc == 0:
                 log.info('no MO truncation in K')
                 rest_occ = n_occ
-                rest_vir = n_vir 
-                
+                rest_vir = n_vir
+
             log.info(f'rest_occ = {rest_occ}')
             log.info(f'rest_vir = {rest_vir}')
 
             self.C_occ_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ-rest_occ:n_occ])
             self.C_vir_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:n_occ+rest_vir])
-             
+
             self.rest_occ = rest_occ
             self.rest_vir = rest_vir
 
@@ -780,10 +776,10 @@ class RisBase(lib.StreamObject):
             log.info('n_occ for alpha spin = {self.n_occ_a}')
             log.info('n_vir for alpha spin = {self.n_vir_a}')
             log.info('n_occ for beta spin = {self.n_occ_b}')
-            log.info('n_vir for beta spin = {self.n_vir_b}')    
+            log.info('n_vir for beta spin = {self.n_vir_b}')
 
         self.log = log
-    
+
     def get_P(self):
         '''
         transition dipole u
@@ -825,13 +821,13 @@ class TDA(RisBase):
     ''' ===========  RKS hybrid =========== '''
     def get_RKS_TDA_hybrid_MVP(self):
         ''' TDA RKS hybrid '''
-        log = self.log  
+        log = self.log
 
         a_x = self.a_x
         n_occ = self.n_occ
         n_vir = self.n_vir
 
-        single = self.single 
+        single = self.single
 
         C_occ_notrunc = self.C_occ_notrunc
         C_vir_notrunc = self.C_vir_notrunc
@@ -845,7 +841,7 @@ class TDA(RisBase):
         hdiag = cp.asarray(self.delta_hdiag.reshape(-1))
 
         mol = self.mol
-        theta = self.theta 
+        theta = self.theta
 
         J_fit = self.J_fit
         K_fit = self.K_fit
@@ -853,7 +849,7 @@ class TDA(RisBase):
         omega = self.omega
         alpha = self.alpha
         beta = self.beta
-        
+
         group_size = self.group_size
         group_size_aux = self.group_size_aux
 
@@ -864,17 +860,17 @@ class TDA(RisBase):
         log.info(f'n_bf in auxmol_J = {auxmol_J.nao_nr()}')
         unit = 4 if single else 8
         log.info(f'T_ia_J will take { auxmol_J.nao_nr() * n_occ * n_vir * unit / (1024 ** 2):.0f} MB memory')
-        
-        
+
+
         lower_inv_eri2c_J = get_eri2c_inv_lower(auxmol_J, omega=0)
 
-        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J, 
-                                            C_p=C_occ_notrunc, 
-                                            C_q=C_vir_notrunc, 
+        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J,
+                                            C_p=C_occ_notrunc,
+                                            C_q=C_vir_notrunc,
                                             lower_inv_eri2c=lower_inv_eri2c_J,
-                                            calc="J", 
+                                            calc="J",
                                             omega=0,
-                                            group_size=group_size, 
+                                            group_size=group_size,
                                             group_size_aux=group_size_aux)
 
         log.timer('T_ia_J', *cpu0)
@@ -882,7 +878,7 @@ class TDA(RisBase):
 
         log.info('==================== RIK ====================')
         cpu1 = log.init_timer()
-       
+
         if K_fit == J_fit and (omega == 0 or omega is None):
             log.info('K uese exactly same basis as J, and they share same set of Tensors')
             auxmol_K = auxmol_J
@@ -890,21 +886,21 @@ class TDA(RisBase):
 
         else:
             log.info('K uese different basis as J')
-            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit) 
+            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
             lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=omega, alpha=alpha, beta=beta)
 
         log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
         unit = 4 if single else 8
         log.info(f'T_ij_K will take {auxmol_K.nao_nr() * rest_occ * rest_occ * unit / (1024 ** 2):.0f} MB memory')
         log.info(f'T_ab_K will take {auxmol_K.nao_nr() * rest_vir * rest_vir * unit / (1024 ** 2):.0f} MB memory')
-        
-        T_ij_K, T_ab_K = compute_Tpq_on_gpu_general(mol, auxmol_K, 
-                                                    C_p=C_occ_Ktrunc, 
-                                                    C_q=C_vir_Ktrunc, 
-                                                    lower_inv_eri2c=lower_inv_eri2c_K, 
-                                                    calc='K', 
+
+        T_ij_K, T_ab_K = compute_Tpq_on_gpu_general(mol, auxmol_K,
+                                                    C_p=C_occ_Ktrunc,
+                                                    C_q=C_vir_Ktrunc,
+                                                    lower_inv_eri2c=lower_inv_eri2c_K,
+                                                    calc='K',
                                                     omega=omega,
-                                                    alpha=alpha, 
+                                                    alpha=alpha,
                                                     beta=beta,
                                                     group_size = group_size,
                                                     group_size_aux = group_size_aux)
@@ -927,8 +923,8 @@ class TDA(RisBase):
             '''
             nstates = X.shape[0]
             X = X.reshape(nstates, n_occ, n_vir)
-            AX = hdiag_MVP(X) 
-            AX += 2 * iajb_MVP(X) 
+            AX = hdiag_MVP(X)
+            AX += 2 * iajb_MVP(X)
 
             AX[:,n_occ-rest_occ:,:rest_vir] -= a_x * ijab_MVP(X[:,n_occ-rest_occ:,:rest_vir])
             AX = AX.reshape(nstates, n_occ*n_vir)
@@ -936,16 +932,16 @@ class TDA(RisBase):
             return AX
 
         return RKS_TDA_hybrid_MVP, hdiag
-            
+
 
     ''' ===========  RKS pure =========== '''
     def get_RKS_TDA_pure_MVP(self):
         '''hybrid RKS TDA'''
-        log = self.log  
+        log = self.log
         n_occ = self.n_occ
         n_vir = self.n_vir
 
-        single = self.single 
+        single = self.single
 
         C_occ_notrunc = self.C_occ_notrunc
         C_vir_notrunc = self.C_vir_notrunc
@@ -954,7 +950,7 @@ class TDA(RisBase):
         hdiag = self.delta_hdiag.reshape(-1)
 
         mol = self.mol
-        theta = self.theta 
+        theta = self.theta
 
         J_fit = self.J_fit
 
@@ -968,36 +964,36 @@ class TDA(RisBase):
 
         unit = 4 if single else 8
         log.info(f'T_ia_J will take { auxmol_J.nao_nr() * n_occ * n_vir * unit / (1024 ** 2):.0f} MB memory')
-        
+
         lower_inv_eri2c_J = get_eri2c_inv_lower(auxmol_J, omega=0)
 
-        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J, 
-                                            C_p=C_occ_notrunc, 
-                                            C_q=C_vir_notrunc, 
+        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J,
+                                            C_p=C_occ_notrunc,
+                                            C_q=C_vir_notrunc,
                                             lower_inv_eri2c=lower_inv_eri2c_J,
-                                            calc="J", 
+                                            calc="J",
                                             omega=0,
                                             group_size = group_size,
                                             group_size_aux = group_size_aux,)
         log.info(f'T_ia_J time {time.time() - tt:.1f} seconds')
 
- 
+
         hdiag_MVP = gen_hdiag_MVP(hdiag=hdiag, n_occ=n_occ, n_vir=n_vir)
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
         def RKS_TDA_pure_MVP(X):
             ''' pure functional, a_x = 0
                 return AX
-                AV = hdiag_MVP(V) + 2*iajb_MVP(V) 
+                AV = hdiag_MVP(V) + 2*iajb_MVP(V)
             '''
             nstates = X.shape[0]
             X = X.reshape(nstates, n_occ, n_vir)
-            AX = hdiag_MVP(X) 
-            AX += 2 * iajb_MVP(X) 
+            AX = hdiag_MVP(X)
+            AX += 2 * iajb_MVP(X)
             AX = AX.reshape(nstates, n_occ*n_vir)
             return AX
 
         return RKS_TDA_pure_MVP, hdiag
-       
+
     #  TODO ===========  UKS ===========
     def get_UKS_TDA_MVP(self):
         a_x = self.a_x
@@ -1005,7 +1001,7 @@ class TDA(RisBase):
         n_occ_a = self.n_occ_a
         n_vir_a = self.n_vir_a
         n_occ_b = self.n_occ_b
-        n_vir_b = self.n_vir_b      
+        n_vir_b = self.n_vir_b
 
         A_aa_size = n_occ_a * n_vir_a
         A_bb_size = n_occ_b * n_vir_b
@@ -1026,16 +1022,16 @@ class TDA(RisBase):
             ''' UKS TDA hybrid '''
             T_ia_J_alpha, _, T_ij_K_alpha, T_ab_K_alpha = self.get_T_J_T_K(mol=mol,
                                                                                 auxmol=auxmol,
-                                                                                uvP_withL=uvP_withL, 
-                                                                                eri3c=eri3c, 
+                                                                                uvP_withL=uvP_withL,
+                                                                                eri3c=eri3c,
                                                                                 eri2c=eri2c,
-                                                                                n_occ=n_occ_a, 
+                                                                                n_occ=n_occ_a,
                                                                                 mo_coeff=mo_coeff[0])
-            
+
             T_ia_J_beta, _, T_ij_K_beta, T_ab_K_beta  = self.get_T_J_T_K(mol=mol,
                                                                               auxmol=auxmol,
                                                                               uvP_withL=uvP_withL,
-                                                                              eri3c=eri3c, 
+                                                                              eri3c=eri3c,
                                                                               eri2c=eri2c,
                                                                               n_occ=n_occ_b,
                                                                               mo_coeff=mo_coeff[1])
@@ -1047,21 +1043,21 @@ class TDA(RisBase):
 
             ijab_aa_MVP = self.gen_ijab_MVP(T_ij=T_ij_K_alpha, T_ab=T_ab_K_alpha)
             ijab_bb_MVP = self.gen_ijab_MVP(T_ij=T_ij_K_beta,  T_ab=T_ab_K_beta)
-            
+
             def UKS_TDA_hybrid_MVP(X):
                 '''
                 UKS
                 return AX
                 A have 4 blocks, αα, αβ, βα, ββ
-                A = [ Aαα Aαβ ]  
-                    [ Aβα Aββ ]       
+                A = [ Aαα Aαβ ]
+                    [ Aβα Aββ ]
 
-                X = [ Xα ]   
-                    [ Xβ ]     
+                X = [ Xα ]
+                    [ Xβ ]
                 AX = [ Aαα Xα + Aαβ Xβ ]
                      [ Aβα Xα + Aββ Xβ ]
 
-                Aαα Xα = hdiag_MVP(Xα) + iajb_aa_MVP(Xα) - a_x * ijab_aa_MVP(Xα) 
+                Aαα Xα = hdiag_MVP(Xα) + iajb_aa_MVP(Xα) - a_x * ijab_aa_MVP(Xα)
                 Aββ Xβ = hdiag_MVP(Xβ) + iajb_bb_MVP(Xβ) - a_x * ijab_bb_MVP(Xβ)
                 Aαβ Xβ = iajb_ab_MVP(Xβ)
                 Aβα Xα = iajb_ba_MVP(Xα)
@@ -1069,12 +1065,12 @@ class TDA(RisBase):
                 X_a = X[:A_aa_size,:].reshape(n_occ_a, n_vir_a, -1)
                 X_b = X[A_aa_size:,:].reshape(n_occ_b, n_vir_b, -1)
 
-                Aaa_Xa = hdiag_a_MVP(X_a) + iajb_aa_MVP(X_a) - a_x * ijab_aa_MVP(X_a) 
+                Aaa_Xa = hdiag_a_MVP(X_a) + iajb_aa_MVP(X_a) - a_x * ijab_aa_MVP(X_a)
                 Aab_Xb = iajb_ab_MVP(X_b)
 
                 Aba_Xa = iajb_ba_MVP(X_a)
                 Abb_Xb = hdiag_b_MVP(X_b) + iajb_bb_MVP(X_b) - a_x * ijab_bb_MVP(X_b)
-                
+
                 U_a = (Aaa_Xa + Aab_Xb).reshape(A_aa_size,-1)
                 U_b = (Aba_Xa + Abb_Xb).reshape(A_bb_size,-1)
 
@@ -1085,14 +1081,14 @@ class TDA(RisBase):
         elif a_x == 0:
             ''' UKS TDA pure '''
             T_ia_alpha = self.get_T(uvP_withL=uvP_withL,
-                                    n_occ=n_occ_a, 
+                                    n_occ=n_occ_a,
                                     mo_coeff=mo_coeff[0],
                                     calc='coulomb_only')
             T_ia_beta = self.get_T(uvP_withL=uvP_withL,
-                                    n_occ=n_occ_b, 
+                                    n_occ=n_occ_b,
                                     mo_coeff=mo_coeff[1],
                                     calc='coulomb_only')
-            
+
             iajb_aa_MVP = self.gen_iajb_MVP(T_left=T_ia_alpha, T_right=T_ia_alpha)
             iajb_ab_MVP = self.gen_iajb_MVP(T_left=T_ia_alpha, T_right=T_ia_beta)
             iajb_ba_MVP = self.gen_iajb_MVP(T_left=T_ia_beta,  T_right=T_ia_alpha)
@@ -1100,8 +1096,8 @@ class TDA(RisBase):
 
             def UKS_TDA_pure_MVP(X):
                 '''
-                Aαα Xα = hdiag_MVP(Xα) + iajb_aa_MVP(Xα)  
-                Aββ Xβ = hdiag_MVP(Xβ) + iajb_bb_MVP(Xβ) 
+                Aαα Xα = hdiag_MVP(Xα) + iajb_aa_MVP(Xα)
+                Aββ Xβ = hdiag_MVP(Xβ) + iajb_bb_MVP(Xβ)
                 Aαβ Xβ = iajb_ab_MVP(Xβ)
                 Aβα Xα = iajb_ba_MVP(Xα)
                 '''
@@ -1112,8 +1108,8 @@ class TDA(RisBase):
                 Aab_Xb = iajb_ab_MVP(X_b)
 
                 Aba_Xa = iajb_ba_MVP(X_a)
-                Abb_Xb = hdiag_b_MVP(X_b) + iajb_bb_MVP(X_b) 
-                
+                Abb_Xb = hdiag_b_MVP(X_b) + iajb_bb_MVP(X_b)
+
                 U_a = (Aaa_Xa + Aab_Xb).reshape(A_aa_size,-1)
                 U_b = (Aba_Xa + Abb_Xb).reshape(A_bb_size,-1)
 
@@ -1122,7 +1118,7 @@ class TDA(RisBase):
             return UKS_TDA_pure_MVP, hdiag
 
     def kernel(self):
- 
+
         '''for TDA, pure and hybrid share the same form of
                      AX = Xw
             always use the Davidson solver
@@ -1141,7 +1137,7 @@ class TDA(RisBase):
 
         elif self.UKS:
             TDA_MVP, hdiag = self.get_UKS_TDA_MVP()
-            
+
 
         energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP,
                                             hdiag=hdiag,
@@ -1151,18 +1147,18 @@ class TDA(RisBase):
                                             GS=self.GS,
                                             single=self.single,
                                             verbose=log)
-        
+
         log.debug(f'check orthonormal of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
         P = self.get_P()
         mdpol = self.get_mdpol()
 
-        oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, 
+        oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies,
                                                        X=X/(2**0.5),
                                                        Y=None,
-                                                       P=P, 
+                                                       P=P,
                                                        mdpol=mdpol,
-                                                       name=self.out_name+'_TDA_ris', 
+                                                       name=self.out_name+'_TDA_ris',
                                                        RKS=self.RKS,
                                                        spectra=self.spectra,
                                                        print_threshold = self.print_threshold,
@@ -1189,14 +1185,14 @@ class TDDFT(RisBase):
         log.info('TDDFT-ris is initialized')
 
     ''' ===========  RKS hybrid =========== '''
-    def gen_RKS_TDDFT_hybrid_MVP(self):  
+    def gen_RKS_TDDFT_hybrid_MVP(self):
         '''hybrid RKS TDDFT'''
-        log = self.log   
+        log = self.log
         a_x = self.a_x
         n_occ = self.n_occ
         n_vir = self.n_vir
 
-        single = self.single 
+        single = self.single
 
         C_occ_notrunc = self.C_occ_notrunc
         C_vir_notrunc = self.C_vir_notrunc
@@ -1210,7 +1206,7 @@ class TDDFT(RisBase):
         hdiag = cp.asarray(self.delta_hdiag.reshape(-1))
 
         mol = self.mol
-        theta = self.theta 
+        theta = self.theta
 
         J_fit = self.J_fit
         K_fit = self.K_fit
@@ -1218,7 +1214,7 @@ class TDDFT(RisBase):
         omega = self.omega
         alpha = self.alpha
         beta = self.beta
-        
+
         group_size = self.group_size
         group_size_aux = self.group_size_aux
 
@@ -1231,15 +1227,15 @@ class TDDFT(RisBase):
 
         unit = 4 if single else 8
         log.info(f'T_ia_J will take { auxmol_J.nao_nr() * n_occ * n_vir * unit / (1024 ** 2):.0f} MB memory')
-        
-        
+
+
         lower_inv_eri2c_J = get_eri2c_inv_lower(auxmol_J, omega=0)
 
-        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J, 
-                                            C_p=C_occ_notrunc, 
-                                            C_q=C_vir_notrunc, 
+        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J,
+                                            C_p=C_occ_notrunc,
+                                            C_q=C_vir_notrunc,
                                             lower_inv_eri2c=lower_inv_eri2c_J,
-                                            calc="J", 
+                                            calc="J",
                                             omega=0,
                                             group_size = group_size,
                                             group_size_aux = group_size_aux)
@@ -1256,21 +1252,21 @@ class TDDFT(RisBase):
 
         else:
             log.info('K uese different basis as J')
-            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit) 
+            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
             lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=omega, alpha=alpha, beta=beta)
 
         unit = 4 if single else 8
         log.info(f'T_ia_K will take {auxmol_K.nao_nr() * rest_occ * rest_vir * unit / (1024 ** 2):.0f} MB memory')
         log.info(f'T_ij_K will take {auxmol_K.nao_nr() * rest_occ * rest_occ * unit / (1024 ** 2):.0f} MB memory')
         log.info(f'T_ab_K will take {auxmol_K.nao_nr() * rest_vir * rest_vir * unit / (1024 ** 2):.0f} MB memory')
-        
-        T_ia_K, T_ij_K, T_ab_K = compute_Tpq_on_gpu_general(mol, auxmol_K, 
-                                                            C_p=C_occ_Ktrunc, 
-                                                            C_q=C_vir_Ktrunc, 
-                                                            lower_inv_eri2c=lower_inv_eri2c_K, 
-                                                            calc='JK', 
+
+        T_ia_K, T_ij_K, T_ab_K = compute_Tpq_on_gpu_general(mol, auxmol_K,
+                                                            C_p=C_occ_Ktrunc,
+                                                            C_q=C_vir_Ktrunc,
+                                                            lower_inv_eri2c=lower_inv_eri2c_K,
+                                                            calc='JK',
                                                             omega=omega,
-                                                            alpha=alpha, 
+                                                            alpha=alpha,
                                                             beta=beta,
                                                             group_size = group_size,
                                                             group_size_aux = group_size_aux)
@@ -1289,7 +1285,7 @@ class TDDFT(RisBase):
             [A B][X] = [AX+BY] = [U1]
             [B A][Y]   [AY+BX]   [U2]
             we want AX+BY and AY+BX
-            instead of directly computing AX+BY and AY+BX 
+            instead of directly computing AX+BY and AY+BX
             we compute (A+B)(X+Y) and (A-B)(X-Y)
             it can save one (ia|jb)V tensor contraction compared to directly computing AX+BY and AY+BX
 
@@ -1305,16 +1301,16 @@ class TDDFT(RisBase):
 
             XpY = X + Y
             XmY = X - Y
-            ApB_XpY = hdiag_MVP(XpY) 
+            ApB_XpY = hdiag_MVP(XpY)
 
-            ApB_XpY += 4*iajb_MVP(XpY) 
+            ApB_XpY += 4*iajb_MVP(XpY)
 
-            ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir]) 
+            ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
 
             ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
 
-            AmB_XmY = hdiag_MVP(XmY) 
-            AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir]) 
+            AmB_XmY = hdiag_MVP(XmY)
+            AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
 
             AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
 
@@ -1333,12 +1329,12 @@ class TDDFT(RisBase):
         return RKS_TDDFT_hybrid_MVP, hdiag
 
     ''' ===========  RKS pure =========== '''
-    def gen_RKS_TDDFT_pure_MVP(self):  
-        log = self.log   
+    def gen_RKS_TDDFT_pure_MVP(self):
+        log = self.log
         n_occ = self.n_occ
         n_vir = self.n_vir
 
-        single = self.single 
+        single = self.single
 
         C_occ_notrunc = self.C_occ_notrunc
         C_vir_notrunc = self.C_vir_notrunc
@@ -1346,7 +1342,7 @@ class TDDFT(RisBase):
         hdiag = self.delta_hdiag.reshape(-1)
 
         mol = self.mol
-        theta = self.theta 
+        theta = self.theta
 
         J_fit = self.J_fit
 
@@ -1360,19 +1356,19 @@ class TDDFT(RisBase):
 
         unit = 4 if single else 8
         log.info(f'T_ia_J will take { auxmol_J.nao_nr() * n_occ * n_vir * unit / (1024 ** 2):.0f} MB memory')
-        
+
         lower_inv_eri2c_J = get_eri2c_inv_lower(auxmol_J, omega=0)
 
-        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J, 
-                                            C_p=C_occ_notrunc, 
-                                            C_q=C_vir_notrunc, 
+        T_ia_J = compute_Tpq_on_gpu_general(mol, auxmol_J,
+                                            C_p=C_occ_notrunc,
+                                            C_q=C_vir_notrunc,
                                             lower_inv_eri2c=lower_inv_eri2c_J,
-                                            calc="J", 
+                                            calc="J",
                                             omega=0,
                                             group_size = group_size,
                                             group_size_aux = group_size_aux)
         log.timer('T_ia_J', *cpu0)
- 
+
         hdiag_sqrt_MVP = gen_hdiag_MVP(hdiag=hdiag**0.5, n_occ=n_occ, n_vir=n_vir)
         hdiag_MVP = gen_hdiag_MVP(hdiag=hdiag, n_occ=n_occ, n_vir=n_vir)
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
@@ -1393,18 +1389,18 @@ class TDDFT(RisBase):
             MZ = hdiag_sqrt_MVP(ApB_AmB_sqrt_V)
             MZ = MZ.reshape(nstates, n_occ*n_vir)
             return MZ
-        
+
         return RKS_TDDFT_pure_MVP, hdiag_sq
-        
+
     #  TODO ===========  UKS ===========
     def get_UKS_TDDFT_MVP(self):
-        
+
         a_x = self.a_x
 
         n_occ_a = self.n_occ_a
         n_vir_a = self.n_vir_a
         n_occ_b = self.n_occ_b
-        n_vir_b = self.n_vir_b      
+        n_vir_b = self.n_vir_b
 
         A_aa_size = n_occ_a * n_vir_a
         A_bb_size = n_occ_b * n_vir_b
@@ -1417,7 +1413,7 @@ class TDDFT(RisBase):
         (ij|ab) = (ij|1-(alpha + beta*erf(omega))/r|ab)  + (ij|alpha + beta*erf(omega)/r|ab)
         short-range part (ij|1-(alpha + beta*erf(omega))/r|ab) is treated by the DFT XC functional, thus not considered here
         long-range part  (ij|alpha + beta*erf(omega)/r|ab) = alpha (ij|r|ab) + beta*(ij|erf(omega)/r|ab)
-        ''' 
+        '''
         mol = self.mol
         auxmol = self.get_auxmol(theta=self.theta, add_p=self.add_p)
         eri2c, eri3c = self.get_eri2c_eri3c(mol=self.mol, auxmol=auxmol, omega=0)
@@ -1436,16 +1432,16 @@ class TDDFT(RisBase):
         if a_x != 0:
             T_ia_J_alpha, T_ia_K_alpha, T_ij_K_alpha, T_ab_K_alpha = self.get_T_J_T_K(mol=mol,
                                                                                             auxmol=auxmol,
-                                                                                            uvP_withL=uvP_withL, 
-                                                                                            eri3c=eri3c, 
+                                                                                            uvP_withL=uvP_withL,
+                                                                                            eri3c=eri3c,
                                                                                             eri2c=eri2c,
-                                                                                            n_occ=n_occ_a, 
+                                                                                            n_occ=n_occ_a,
                                                                                             mo_coeff=mo_coeff[0])
-            
+
             T_ia_J_beta,  T_ia_K_beta,  T_ij_K_beta,  T_ab_K_beta  = self.get_T_J_T_K(mol=mol,
                                                                                             auxmol=auxmol,
                                                                                             uvP_withL=uvP_withL,
-                                                                                            eri3c=eri3c, 
+                                                                                            eri3c=eri3c,
                                                                                             eri2c=eri2c,
                                                                                             n_occ=n_occ_b,
                                                                                             mo_coeff=mo_coeff[1])
@@ -1457,7 +1453,7 @@ class TDDFT(RisBase):
 
             ijab_aa_MVP = self.gen_ijab_MVP(T_ij=T_ij_K_alpha, T_ab=T_ab_K_alpha)
             ijab_bb_MVP = self.gen_ijab_MVP(T_ij=T_ij_K_beta,  T_ab=T_ab_K_beta)
-            
+
             ibja_aa_MVP = self.get_ibja_MVP(T_ia=T_ia_K_alpha)
             ibja_bb_MVP = self.get_ibja_MVP(T_ia=T_ia_K_beta)
 
@@ -1475,33 +1471,33 @@ class TDDFT(RisBase):
 
                 (A+B)αα, (A+B)αβ is shown below
 
-                βα, ββ can be obtained by change α to β 
+                βα, ββ can be obtained by change α to β
                 we compute (A+B)(X+Y) and (A-B)(X-Y)
 
                 V:= X+Y
                 (A+B)αα Vα = hdiag_MVP(Vα) + 2*iaαjbα_MVP(Vα) - a_x*[ijαabα_MVP(Vα) + ibαjaα_MVP(Vα)]
-                (A+B)αβ Vβ = 2*iaαjbβ_MVP(Vβ) 
+                (A+B)αβ Vβ = 2*iaαjbβ_MVP(Vβ)
 
                 V:= X-Y
                 (A-B)αα Vα = hdiag_MVP(Vα) - a_x*[ijαabα_MVP(Vα) - ibαjaα_MVP(Vα)]
                 (A-B)αβ Vβ = 0
 
-                A+B = [ Cαα Cαβ ]   x+y = [ Vα ]  
+                A+B = [ Cαα Cαβ ]   x+y = [ Vα ]
                       [ Cβα Cββ ]         [ Vβ ]
                 (A+B)(x+y) =   [ Cαα Vα + Cαβ Vβ ]  = ApB_XpY
                                [ Cβα Vα + Cββ Vβ ]
 
-                A-B = [ Cαα  0  ]   x-y = [ Vα ]   
-                      [  0  Cββ ]         [ Vβ ]                          
+                A-B = [ Cαα  0  ]   x-y = [ Vα ]
+                      [  0  Cββ ]         [ Vβ ]
                 (A-B)(x-y) =   [ Cαα Vα ]    = AmB_XmY
                                [ Cββ Vβ ]
                 '''
-                
+
                 X_a = X[:A_aa_size,:].reshape(n_occ_a, n_vir_a, -1)
                 X_b = X[A_aa_size:,:].reshape(n_occ_b, n_vir_b, -1)
                 Y_a = Y[:A_aa_size,:].reshape(n_occ_a, n_vir_a, -1)
                 Y_b = Y[A_aa_size:,:].reshape(n_occ_b, n_vir_b, -1)
-                
+
                 XpY_a = X_a + Y_a
                 XpY_b = X_b + Y_b
 
@@ -1512,7 +1508,7 @@ class TDDFT(RisBase):
                 '''(A+B)aa(X+Y)a'''
                 ApB_XpY_aa = hdiag_a_MVP(XpY_a) + 2*iajb_aa_MVP(XpY_a) - a_x*(ijab_aa_MVP(XpY_a) + ibja_aa_MVP(XpY_a))
                 '''(A+B)bb(X+Y)b'''
-                ApB_XpY_bb = hdiag_b_MVP(XpY_b) + 2*iajb_bb_MVP(XpY_b) - a_x*(ijab_bb_MVP(XpY_b) + ibja_bb_MVP(XpY_b))           
+                ApB_XpY_bb = hdiag_b_MVP(XpY_b) + 2*iajb_bb_MVP(XpY_b) - a_x*(ijab_bb_MVP(XpY_b) + ibja_bb_MVP(XpY_b))
                 '''(A+B)ab(X+Y)b'''
                 ApB_XpY_ab = 2*iajb_ab_MVP(XpY_b)
                 '''(A+B)ba(X+Y)a'''
@@ -1522,7 +1518,7 @@ class TDDFT(RisBase):
                 '''(A-B)aa(X-Y)a'''
                 AmB_XmY_aa = hdiag_a_MVP(XmY_a) - a_x*(ijab_aa_MVP(XmY_a) - ibja_aa_MVP(XmY_a))
                 '''(A-B)bb(X-Y)b'''
-                AmB_XmY_bb = hdiag_b_MVP(XmY_b) - a_x*(ijab_bb_MVP(XmY_b) - ibja_bb_MVP(XmY_b))  
+                AmB_XmY_bb = hdiag_b_MVP(XmY_b) - a_x*(ijab_bb_MVP(XmY_b) - ibja_bb_MVP(XmY_b))
 
                 ''' (A-B)ab(X-Y)b
                     AmB_XmY_ab = 0
@@ -1542,7 +1538,7 @@ class TDDFT(RisBase):
                 AmB_XmY_alpha = AmB_XmY_aa.reshape(A_aa_size,-1)
                 AmB_XmY_beta  = AmB_XmY_bb.reshape(A_bb_size,-1)
                 AmB_XmY = cp.vstack((AmB_XmY_alpha, AmB_XmY_beta))
-                
+
                 U1 = (ApB_XpY + AmB_XmY)/2
                 U2 = (ApB_XpY - AmB_XmY)/2
 
@@ -1553,26 +1549,26 @@ class TDDFT(RisBase):
         elif a_x == 0:
             ''' UKS TDDFT pure '''
 
-            hdiag_a_sqrt_MVP, hdiag_a_sq = self.get_hdiag_MVP(mo_energy=mo_energy[0], 
-                                                          n_occ=n_occ_a, 
+            hdiag_a_sqrt_MVP, hdiag_a_sq = self.get_hdiag_MVP(mo_energy=mo_energy[0],
+                                                          n_occ=n_occ_a,
                                                           n_vir=n_vir_a,
                                                           sqrt=True)
-            hdiag_b_sqrt_MVP, hdiag_b_sq = self.get_hdiag_MVP(mo_energy=mo_energy[1], 
-                                                          n_occ=n_occ_b, 
+            hdiag_b_sqrt_MVP, hdiag_b_sq = self.get_hdiag_MVP(mo_energy=mo_energy[1],
+                                                          n_occ=n_occ_b,
                                                           n_vir=n_vir_b,
                                                           sqrt=True)
             '''hdiag_sq: preconditioner'''
             hdiag_sq = cp.vstack((hdiag_a_sq.reshape(-1,1), hdiag_b_sq.reshape(-1,1))).reshape(-1)
 
             T_ia_alpha = self.get_T(uvP_withL=uvP_withL,
-                                    n_occ=n_occ_a, 
+                                    n_occ=n_occ_a,
                                     mo_coeff=mo_coeff[0],
                                     calc='coulomb_only')
             T_ia_beta = self.get_T(uvP_withL=uvP_withL,
-                                    n_occ=n_occ_b, 
+                                    n_occ=n_occ_b,
                                     mo_coeff=mo_coeff[1],
                                     calc='coulomb_only')
-                       
+
             iajb_aa_MVP = self.gen_iajb_MVP(T_left=T_ia_alpha, T_right=T_ia_alpha)
             iajb_ab_MVP = self.gen_iajb_MVP(T_left=T_ia_alpha, T_right=T_ia_beta)
             iajb_ba_MVP = self.gen_iajb_MVP(T_left=T_ia_beta,  T_right=T_ia_alpha)
@@ -1588,7 +1584,7 @@ class TDDFT(RisBase):
                     (A-B)^1/2 = hdiag_sqrt_MVP(V)
 
 
-                    M =  [ (A-B)^1/2αα    0   ] [ (A+B)αα (A+B)αβ ] [ (A-B)^1/2αα    0   ]            Z = [ Zα ]  
+                    M =  [ (A-B)^1/2αα    0   ] [ (A+B)αα (A+B)αβ ] [ (A-B)^1/2αα    0   ]            Z = [ Zα ]
                          [    0   (A-B)^1/2ββ ] [ (A+B)βα (A+B)ββ ] [    0   (A-B)^1/2ββ ]                [ Zβ ]
                 '''
                 Z_a = Z[:A_aa_size,:].reshape(n_occ_a, n_vir_a, -1)
@@ -1606,9 +1602,9 @@ class TDDFT(RisBase):
                 MZ_b = hdiag_b_sqrt_MVP(ApB_ba_sqrt_V + ApB_bb_sqrt_V).reshape(A_bb_size, -1)
 
                 MZ = cp.vstack((MZ_a, MZ_b))
-               
+
                 return MZ
-        
+
             return UKS_TDDFT_pure_MVP, hdiag_sq
 
         # def TDDFT_spolar_MVP(X):
@@ -1623,7 +1619,7 @@ class TDDFT(RisBase):
 
         #     return ABX
 
-    def kernel(self):     
+    def kernel(self):
         self.build()
         log = self.log
         if self.a_x != 0:
@@ -1634,7 +1630,7 @@ class TDDFT(RisBase):
             elif self.UKS:
                 TDDFT_hybrid_MVP, hdiag = self.get_UKS_TDDFT_MVP()
 
-            energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP, 
+            energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP,
                                                             hdiag=hdiag,
                                                             N_states=self.nstates,
                                                             conv_tol=self.conv_tol,
@@ -1650,7 +1646,7 @@ class TDDFT(RisBase):
 
             elif self.UKS:
                 TDDFT_pure_MVP, hdiag_sq = self.get_UKS_TDDFT_pure_MVP()
-            energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP, 
+            energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP,
                                                 hdiag=hdiag_sq,
                                                 N_states=self.nstates,
                                                 conv_tol=self.conv_tol,
@@ -1658,7 +1654,7 @@ class TDDFT(RisBase):
                                                 GS=self.GS,
                                                 single=self.single,
                                                 verbose=self.verbose)
-            
+
             energies = energies_sq**0.5
             Z = (energies**0.5).reshape(-1,1) * Z
 
@@ -1669,12 +1665,12 @@ class TDDFT(RisBase):
         P = self.get_P()
         mdpol = self.get_mdpol()
 
-        oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, 
+        oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies,
                                                     X=X/(2**0.5),
                                                     Y=Y/(2**0.5),
-                                                    P=P, 
+                                                    P=P,
                                                     mdpol=mdpol,
-                                                    name=self.out_name+'_TDDFT_ris', 
+                                                    name=self.out_name+'_TDDFT_ris',
                                                     spectra=self.spectra,
                                                     RKS=self.RKS,
                                                     print_threshold = self.print_threshold,
@@ -1686,7 +1682,7 @@ class TDDFT(RisBase):
         log.info(CITATION_INFO)
         self.energies = energies
         self.X = X
-        self.Y = Y 
+        self.Y = Y
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
 

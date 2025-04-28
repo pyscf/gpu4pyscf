@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -89,7 +89,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
 
     if isinstance(x0, np.ndarray) and x0.ndim == 1:
         x0 = x0[None,:]
-    
+
     x0 = cp.asarray(x0)
 
     x0_size = x0.shape[1]
@@ -1071,9 +1071,9 @@ def _time_add(log, t_total, t_start):
         t_total[i] += val
 
 def _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_fill_holder, t_total):
-    ''' 
+    '''
     Timing breakdown:
-                            CPU(sec)  wall(sec)    GPU(ms) | Percentage 
+                            CPU(sec)  wall(sec)    GPU(ms) | Percentage
     AX product                 0.14       0.04      43.28    33.7   31.9   32.0
     proj to subspace           0.00       0.00       2.25     0.5    1.6    1.7
     solve subspace             0.22       0.06      63.04    53.8   46.5   46.5
@@ -1085,10 +1085,9 @@ def _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_fill_holder
     labels = time_labels[:len(t_total)]
 
     log.info("Timing breakdown:")
-    header_time = " ".join(f"{label:>10}" for label in labels)  
+    header_time = " ".join(f"{label:>10}" for label in labels)
     log.info(f"{'':<20}  {header_time} | Percentage ")
 
-    # 计算并打印各计时器
     timers = {
         'mat vec product':t_mvp,
         'proj subspace':  t_subgen,
@@ -1100,10 +1099,10 @@ def _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_fill_holder
     for entry, cost in timers.items():
         time_str = " ".join(f"{x:>10.2f}" for x in cost)
         percent_str = " ".join(f"{x/y*100:>6.1f}" for x, y in zip(cost, t_total))
-        log.info(f"{entry:<20} {time_str}  {percent_str}") 
+        log.info(f"{entry:<20} {time_str}  {percent_str}")
 
 
-# TODO: merge with eigh, write a Class of krylov method, 
+# TODO: merge with eigh, write a Class of krylov method,
 # to allow ris initial guess/preconditioner, single precision, non-orthogonalized Krylov subspace (nKs) method
 def Davidson(matrix_vector_product,
                     hdiag,
@@ -1114,15 +1113,15 @@ def Davidson(matrix_vector_product,
                     single=False,
                     verbose=logger.INFO):
     '''
-    same as eigh, but support 
-        1) single precision 
+    same as eigh, but support
+        1) single precision
         2) non-orthogonalized Krylov subspace (nKs) method
         3) c-contiguous memory
 
     Solve symmetric eigenvalues:
     AX = XΩ
 
-    Args: 
+    Args:
         matrix_vector_product: function(X) -> AX
              return AX
         hdiag: 1D array
@@ -1162,7 +1161,7 @@ def Davidson(matrix_vector_product,
     logger.TIMER_LEVEL = 4
     logger.DEBUG1      = 4
 
-    ''' cpu0 = (cpu time, wall time, gpu time) ''' 
+    ''' cpu0 = (cpu time, wall time, gpu time) '''
     cpu0 = log.init_timer()
 
     A_size = hdiag.shape[0]
@@ -1176,7 +1175,7 @@ def Davidson(matrix_vector_product,
 
     unit = 4 if single else 8
     log.info(f'  V and W holder are going to take { 2 * max_N_mv * A_size * unit / (1024 ** 2):.2f} MB memory')
-    
+
 
     V_holder = cp.zeros((max_N_mv, A_size),dtype=cp.float32 if single else cp.float64)
     W_holder = cp.empty_like(V_holder)
@@ -1193,8 +1192,8 @@ def Davidson(matrix_vector_product,
     else:
         log.info('Using non-orthogonalized Krylov subspace (nKs) method.')
 
-        citation = ''' 
-        Furche, Filipp, Brandon T. Krull, Brian D. Nguyen, and Jake Kwon. 
+        citation = '''
+        Furche, Filipp, Brandon T. Krull, Brian D. Nguyen, and Jake Kwon.
         Accelerating molecular property calculations with nonorthonormal Krylov space methods.
         The Journal of Chemical Physics 144, no. 17 (2016).
         '''
@@ -1203,7 +1202,7 @@ def Davidson(matrix_vector_product,
         s_holder = cp.empty_like(sub_A_holder)
 
     ''' detailed timing for each sub module'''
-    
+
     t_mvp         = [0] * len(cpu0)
     t_subgen      = [0] * len(cpu0)
     t_solve_sub   = [0] * len(cpu0)
@@ -1212,12 +1211,12 @@ def Davidson(matrix_vector_product,
     t_total       = [0] * len(cpu0)
 
     for ii in range(max_iter):
-    
+
         '''matrix vector product'''
         t0 = log.init_timer()
 
         W_holder[size_old:size_new, :] = matrix_vector_product(V_holder[size_old:size_new, :])
-    
+
         _time_add(log, t_mvp, t0)
 
 
@@ -1240,7 +1239,7 @@ def Davidson(matrix_vector_product,
         t0 = log.init_timer()
         if GS:
             omega, x = cp.linalg.eigh(sub_A)
-        else: 
+        else:
             s_holder = math_helper.gen_VW(s_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
             overlap_s = s_holder[:size_new,:size_new]
             omega, x = scipy.linalg.eigh(sub_A.get(), overlap_s.get())
@@ -1257,7 +1256,7 @@ def Davidson(matrix_vector_product,
         t0 = log.init_timer()
         full_X = cp.dot(x.T, V_holder[:size_new, :])
         _time_add(log, t_sub2full, t0)
-        
+
 
 
         ''' compute resdidual and generate new guess'''
@@ -1282,15 +1281,15 @@ def Davidson(matrix_vector_product,
 
         _time_add(log, t_fill_holder, t0)
 
-    
+
     if ii == max_iter-1 and max_norm >= conv_tol:
         log.warn(f'=== Warning: Davidson not converged below {conv_tol:.2e} Due to Iteration Limit ===')
         log.warn(f'current residual norms: {r_norms}')
-        
-    log.info(f'Finished in {ii+1:d} steps')
-    
 
-    
+    log.info(f'Finished in {ii+1:d} steps')
+
+
+
     log.info(f'Maximum residual norm = {max_norm:.2e}')
     log.info(f'Final subspace size = {sub_A.shape[0]:d}')
 
@@ -1318,12 +1317,12 @@ def Davidson_Casida(matrix_vector_product,
     [ A B ] X - [1   0] Y Ω = 0
     [ B A ] Y   [0  -1] X   = 0
 
-    same as real_eig, but support 
-    1) single precision 
+    same as real_eig, but support
+    1) single precision
     2) non-orthogonalized Krylov subspace (nKs) method
     3) c-contiguous memory
 
-    Args: 
+    Args:
         matrix_vector_product: function
             matrix vector product
         hdiag: array
@@ -1340,9 +1339,9 @@ def Davidson_Casida(matrix_vector_product,
             use Gram-Schmidt orthogonalization
         single: bool
             use single precision
-        verbose: logger.Logger 
+        verbose: logger.Logger
             logger object
-    
+
     Returns:
         omega: 1D array
              eigenvalues
@@ -1366,7 +1365,7 @@ def Davidson_Casida(matrix_vector_product,
 
     log.info('======= TDDFT Eigen Solver Statrs =======')
 
-    ''' cpu0 = (cpu time, wall time, gpu time) ''' 
+    ''' cpu0 = (cpu time, wall time, gpu time) '''
     cpu0 = log.init_timer()
 
     A_size = hdiag.shape[0]
@@ -1377,7 +1376,7 @@ def Davidson_Casida(matrix_vector_product,
     size_new = min([N_states+8, 2*N_states, A_size])
 
     max_N_mv = (max_iter+1)*N_states
-    
+
     '''
     [U1] = [A B][V]
     [U2]   [B A][W]
@@ -1391,7 +1390,7 @@ def Davidson_Casida(matrix_vector_product,
 
     unit = 4 if single else 8
     log.info(f'V W U1 U2 holder are going to take { 4 * max_N_mv * A_size * unit / (1024 ** 3):.2f} GB memory')
-    
+
 
     V_holder = cp.zeros((max_N_mv, A_size),dtype=cp.float32 if single else cp.float64)
     W_holder = cp.zeros_like(V_holder)
@@ -1422,8 +1421,8 @@ def Davidson_Casida(matrix_vector_product,
     else:
         log.info('Using non-orthogonalized Krylov subspace (nKs) method.')
 
-        citation = ''' 
-        Furche, Filipp, Brandon T. Krull, Brian D. Nguyen, and Jake Kwon. 
+        citation = '''
+        Furche, Filipp, Brandon T. Krull, Brian D. Nguyen, and Jake Kwon.
         Accelerating molecular property calculations with nonorthonormal Krylov space methods.
         The Journal of Chemical Physics 144, no. 17 (2016).
         '''
@@ -1431,7 +1430,7 @@ def Davidson_Casida(matrix_vector_product,
         fill_holder = math_helper.VW_nKs_fill_holder
 
     ''' detailed timing for each sub module'''
-    
+
     t_mvp         = [0] * len(cpu0)
     t_subgen      = [0] * len(cpu0)
     t_solve_sub   = [0] * len(cpu0)
@@ -1439,10 +1438,10 @@ def Davidson_Casida(matrix_vector_product,
     t_fill_holder = [0] * len(cpu0)
     t_total       = [0] * len(cpu0)
 
-    omega_backup, X_backup, Y_backup = None, None, None 
+    omega_backup, X_backup, Y_backup = None, None, None
     for ii in range(max_iter):
 
-        
+
         t0 = log.init_timer()
         U1_holder[size_old:size_new, :], U2_holder[size_old:size_new, :] = matrix_vector_product(
                                                                             X=V_holder[size_old:size_new, :],
@@ -1479,7 +1478,7 @@ def Davidson_Casida(matrix_vector_product,
         Y_full = Wx + Vy
         '''
         t0 = log.init_timer()
- 
+
         V = V_holder[:size_new,:]
         W = W_holder[:size_new,:]
         U1 = U1_holder[:size_new, :]
@@ -1515,8 +1514,8 @@ def Davidson_Casida(matrix_vector_product,
         X_new, Y_new = math_helper.TDDFT_diag_preconditioner(R_x=R_x[index_bool,:],
                                                             R_y=R_y[index_bool,:],
                                                             omega=omega[index_bool],
-                                                            hdiag=hdiag)     
-                                                   
+                                                            hdiag=hdiag)
+
         '''
         GS and symmetric orthonormalization
         '''
@@ -1532,10 +1531,10 @@ def Davidson_Casida(matrix_vector_product,
 
         if size_new == size_old:
             log.warn('All new guesses kicked out!!!!!!!')
-            omega, X_full, Y_full = omega_backup, X_backup, Y_backup 
+            omega, X_full, Y_full = omega_backup, X_backup, Y_backup
             break
         omega_backup, X_backup, Y_backup = omega, X_full, Y_full
-    
+
     if ii == (max_iter -1) and max_norm >= conv_tol:
         log.warn(f'===  Warning: TDDFT eigen solver not converged below {conv_tol:.2e} due to max iteration limit ===')
         log.warn('max residual norms', cp.max(r_norms))

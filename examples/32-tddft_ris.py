@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,16 +29,16 @@ H         -5.23998        4.31540        0.27138
 H         -3.22959        2.35981       -0.24953
 '''
 
-mol = pyscf.M(atom=atom, basis='def2-svp',verbose=4)
+mol = pyscf.M(atom=atom, basis='def2-svp', verbose=4)
 mf = rks.RKS(mol, xc='wb97x').density_fit()
 
-e_dft = mf.kernel()  
+e_dft = mf.kernel()
 print(f"total energy = {e_dft}")
 
 
 
 ''' TDDFT-ris'''
-td = ris.TDDFT(mf=mf.to_gpu(), nstates=10, spectra=True) 
+td = ris.TDDFT(mf=mf.to_gpu(), nstates=10, spectra=True)
 td.kernel()
 # energies, X, Y, oscillator_strength, rotatory_strength = td.kernel()
 
@@ -52,7 +52,7 @@ print("TDDFT-ris ex energies", energies)
 print("TDDFT-ris oscillator_strength", oscillator_strength)
 
 ''' TDA-ris'''
-td = ris.TDA(mf=mf.to_gpu(), nstates=10) 
+td = ris.TDA(mf=mf.to_gpu(), nstates=10)
 td.kernel()
 # energies, X, oscillator_strength, rotatory_strength = td.kernel()
 

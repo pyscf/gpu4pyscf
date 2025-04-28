@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import time
 def TDA_diag_initial_guess(V_holder, N_states, hdiag):
     '''
     N_states is the amount of initial guesses
-    sort out the smallest value of hdiag, the corresponding position in the 
+    sort out the smallest value of hdiag, the corresponding position in the
     initial guess set as 1.0, everywhere else set as 0.0
     '''
     hdiag = hdiag.reshape(-1,)
@@ -74,7 +74,7 @@ def level_shit_index(eigenvalue):
         if eigenvalue[i] > 1e-3:
             return i
 
-            
+
 
 def commutator(A,B):
     commu = cp.dot(A,B) - cp.dot(B,A)
@@ -96,9 +96,9 @@ def matrix_power(S,a, epsilon=None):
             pass
         s = s[valid_indices]
         ket = ket[:, valid_indices]
-    
+
     s = s**a
-    
+
     X = cp.dot(ket*s,ket.T)
 
     return X
@@ -169,12 +169,12 @@ def gen_VW(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
     [ V_old ] [W_old.T, W_new.T] = [VW_old,        V_old W_new.T] = [VW_old,   V_old W_new.T  ]
     [ V_new ]                      [V_new W_old.T, V_new W_new.T]   [  V_new  W_current.T     ]
 
-    symmetry: whether sub_A is symmatric 
+    symmetry: whether sub_A is symmatric
 
                         V_holder (W_holder is same set up)
 
             |------------------------------------------------|
-            |      V_old                                     |     
+            |      V_old                                     |
 size_old    |------------------------------------------------|  [ V_current ]
             |      V_new                                     |
 size_new    |------------------------------------------------|
@@ -266,7 +266,7 @@ def gen_sub_ab(V_holder, W_holder, U1_holder, U2_holder,
     sigma = V V.T - W W.T
     pi = V W.T - V W.T.T
 
-    
+
     '''
 
     VU1_holder = gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
@@ -439,7 +439,7 @@ def VW_nKs_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
         else:
             pass
 
-    new_m = m   
+    new_m = m
     return V_holder, W_holder, new_m
 
 
@@ -492,7 +492,7 @@ def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, k):
     ''' M = G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G '''
     dapbd = d_mh.reshape(-1,1)*(a+b)*d_mh.reshape(1,-1)
     M = cp.dot(G.T, L_inv) # G^T L^−1
-    M = cp.dot(M, dapbd)  # d^−1/2 (a+b) d^−1/2 
+    M = cp.dot(M, dapbd)  # d^−1/2 (a+b) d^−1/2
     M = cp.dot(M, L_inv.T) #  L^−T
     M = cp.dot(M, G)      # G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G
 
@@ -519,7 +519,7 @@ def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, k):
     return omega, x, y
 
 def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
-    ''' [ a b ] x - [ σ   π] x  Ω = 0 
+    ''' [ a b ] x - [ σ   π] x  Ω = 0
         [ b a ] y   [-π  -σ] y    = 0
         AT=BTΩ
         B^-1/2 A B^-1/2 B^1/2 T = B^1/2 T Ω
@@ -532,12 +532,12 @@ def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
     A[:half_size,:half_size] = a[:,:]
     A[:half_size,half_size:] = b[:,:]
     A[half_size:,:half_size] = b[:,:]
-    A[half_size:,half_size:] = a[:,:]  
+    A[half_size:,half_size:] = a[:,:]
 
     B = cp.empty_like(A)
     B[:half_size,:half_size] = sigma[:,:]
     B[:half_size,half_size:] = pi[:,:]
-    B[half_size:,:half_size] = -pi[:,:]  
+    B[half_size:,:half_size] = -pi[:,:]
     B[half_size:,half_size:] = -sigma[:,:]
     #B^-1/2
     B_neg_tmp = matrix_power(B, -0.5)
@@ -555,13 +555,13 @@ def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
     return omega, x, y
 
 def TDDFT_subspace_eigen_solver(a, b, sigma, pi, k):
-    ''' [ a b ] x - [ σ   π] x  Ω = 0 
+    ''' [ a b ] x - [ σ   π] x  Ω = 0
         [ b a ] y   [-π  -σ] y    = 0
         AT=BTΩ
         A^1/2 T = A^-1/2 B A^-1/2 A^1/2 T Ω
         MZ = Z 1/Ω
         M = A^-1/2 B A^-1/2 A^1/2
-        Z = A^1/2 T 
+        Z = A^1/2 T
         Z is always returned as normlized vectors, which are not what we wanted
         because Z^T Z = [x]^T A^1/2 A^1/2 [x] = [x]^T [ a b ] [x] =  [x]^T [ σ   π] x Ω = Ω
                         [y]               [y]   [y]   [ b a ] [y]    [y]   [-π  -σ] y
@@ -573,12 +573,12 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, k):
     A[:half_size,:half_size] = a[:,:]
     A[:half_size,half_size:] = b[:,:]
     A[half_size:,:half_size] = b[:,:]
-    A[half_size:,half_size:] = a[:,:]  
+    A[half_size:,half_size:] = a[:,:]
     B = cp.empty_like(A)
     B[:half_size,:half_size] = sigma[:,:]
     B[:half_size,half_size:] = pi[:,:]
     B[half_size:,:half_size] = -pi[:,:]
-    B[half_size:,half_size:] = -sigma[:,:]  
+    B[half_size:,half_size:] = -sigma[:,:]
     #A^-1/2
     A_neg_tmp = matrix_power(A, -0.5)
     M = cp.dot(A_neg_tmp, B)
@@ -600,7 +600,7 @@ def XmY_2_XY(Z, AmB_sq, omega):
        return X, Y
 
         X-Y = (A-B)^-1/2 Z
-        X+Y = (A-B)^1/2 Z omega^-1 
+        X+Y = (A-B)^1/2 Z omega^-1
     '''
     AmB_sq = AmB_sq.reshape(1,-1)
 

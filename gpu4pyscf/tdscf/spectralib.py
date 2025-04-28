@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,32 +18,32 @@ import cupy as cp
 from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
 
 
-''' 
-    This file prints spectral data in Multiwfn format 
+'''
+    This file prints spectral data in Multiwfn format
     also prints transition coefficient in Gaussian16 format
 
     standard TDDFT can also use this module.
 
-    actually, pyscf already has a similar function to print transition coefficient 
-    pyscf/pyscf/tdscf/rhf.py 
-        def analyze(tdobj, verbose=None): 
+    actually, pyscf already has a similar function to print transition coefficient
+    pyscf/pyscf/tdscf/rhf.py
+        def analyze(tdobj, verbose=None):
 
     ECD rotatory strength is in length representation
-    unit cgs (10**-40 erg-esu-cm/Gauss) 
+    unit cgs (10**-40 erg-esu-cm/Gauss)
     ECD_SCALING_FACTOR is to match Gaussian16 results
 '''
 ECD_SCALING_FACTOR = 500
 
 def print_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
 
-    abs_coeff = cp.abs(coeff_vec[state, :, :])  
-    mask = abs_coeff >= print_threshold         
+    abs_coeff = cp.abs(coeff_vec[state, :, :])
+    mask = abs_coeff >= print_threshold
 
     occ_indices, vir_indices = cp.where(mask)
 
     if len(occ_indices) == 0:
         return []
-        
+
     coeff_values = coeff_vec[state, occ_indices, vir_indices]
 
     occ_indices += 1  # Convert to 1-based index
@@ -72,7 +72,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
                                              [Qβ]   [Yβ]
     P = Q
 
-    TDA: 
+    TDA:
         u =  [Pα]^T [Xα]
              [Pβ]   [Xβ]
 
@@ -84,12 +84,12 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
         UKS: u = Pα^T Xα + Pβ^TXβ + Qα^TYα + Qβ^T Yβ =  P^T(X+Y)  (P = [Pα]  X = [Xα] )
                                                                        [Pβ]      [Xβ]
                                                                        [Qα]      [Yα]
-                                                                       [Qβ]      [Yβ] 
+                                                                       [Qβ]      [Yβ]
 
-    for TDA,   f = 2/3 E 2*|<P|X>|**2                   
-    for TDDFT, f = 2/3 E 2*|<P|X+Y>|**2     
-    P is transition dipole 
-    TDA:   transition_vector is X*2**0.5 
+    for TDA,   f = 2/3 E 2*|<P|X>|**2
+    for TDDFT, f = 2/3 E 2*|<P|X+Y>|**2
+    P is transition dipole
+    TDA:   transition_vector is X*2**0.5
     TDDFT: transition_vector is (X*2**0.5 + Y*2**0.5)
 
     energies are in Hartree
@@ -104,7 +104,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
 
     if isinstance(Y, cp.ndarray):
         trans_dipole_moment = -cp.dot(X*2**0.5 + Y*2**0.5, P.T)
-    else: 
+    else:
         trans_dipole_moment = -cp.dot(X*2**0.5, P.T)
 
     if RKS:
@@ -117,7 +117,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
     if isinstance(Y, cp.ndarray):
         trans_magnetic_moment = -cp.dot((X*2**0.5 - Y*2**0.5), mdpol.T )
     else:
-        trans_magnetic_moment = -cp.dot(X*2**0.5, mdpol.T) 
+        trans_magnetic_moment = -cp.dot(X*2**0.5, mdpol.T)
 
     rotatory_strength = ECD_SCALING_FACTOR * cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
 
@@ -131,7 +131,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
         for row in range(data.shape[0]):
             print(f'{data[row,0]:<8.3f} {data[row,1]:<8.0f} {data[row,2]:<8.0f} {data[row,3]:<15.8f} {data[row,4]:8.8f}')
 
-    
+
         filename = name + '_eV_os_Multiwfn.txt'
         with open(filename, 'w') as f:
             cp.savetxt(f, data[:,(0,3)], fmt='%.5f', header=f'{len(energies)} 1', comments='')
@@ -156,7 +156,7 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
             filename = name + '_coeff_Multiwfn.txt'
 
             with open(filename, 'w') as f:
-                
+
                 for state in range(n_state):
                     print(f" Excited State{state+1:4d}:      Singlet-A      {eV[state]:>.4f} eV  {nm[state]:>.2f} nm  f={fosc[state]:>.4f}   <S**2>=0.000")
                     f.write(f" Excited State{state+1:4d}   1    {eV[state]:>.4f} \n")
