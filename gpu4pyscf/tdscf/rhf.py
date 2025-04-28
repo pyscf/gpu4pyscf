@@ -15,7 +15,7 @@
 
 import numpy as np
 import cupy as cp
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
@@ -315,6 +315,35 @@ def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     return vind, hdiag
 
 
+def as_scanner(td):
+    if isinstance(td, lib.SinglePointScanner):
+        return td
+
+    logger.info(td, 'Set %s as a scanner', td.__class__)
+    name = td.__class__.__name__ + TD_Scanner.__name_mixin__
+    return lib.set_class(TD_Scanner(td), (TD_Scanner, td.__class__), name)
+
+
+class TD_Scanner(lib.SinglePointScanner):
+    def __init__(self, td):
+        self.__dict__.update(td.__dict__)
+        self._scf = td._scf.as_scanner()
+
+    def __call__(self, mol_or_geom, **kwargs):
+        if isinstance(mol_or_geom, gto.MoleBase):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+
+        mf_scanner = self._scf
+        mf_e = mf_scanner(mol)
+        self.kernel(**kwargs)
+        assert self.device == 'gpu'
+        return mf_e + self.e
+
+
 class TDBase(lib.StreamObject):
     to_gpu = utils.to_gpu
     device = utils.device
@@ -372,7 +401,7 @@ class TDBase(lib.StreamObject):
             from gpu4pyscf.grad import tdrhf
             return tdrhf.Gradients(self)
 
-    as_scanner = tdhf_cpu.as_scanner
+    as_scanner = as_scanner
 
     oscillator_strength = tdhf_cpu.oscillator_strength
     transition_dipole              = tdhf_cpu.transition_dipole
