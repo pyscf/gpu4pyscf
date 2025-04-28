@@ -14,7 +14,7 @@
 # limitations under the License.
 
 '''
-IR intensity
+TDDFT excited state geometry optimization
 '''
 
 import pyscf
@@ -31,7 +31,6 @@ mol = pyscf.M(atom=atom, basis='631g')
 mf = rks.RKS(mol, xc='b3lyp')
 mf.kernel() 
 
-print('------------------- TDA -----------------------------')
 td = mf.TDA().set(nstates=5)
 assert td.device == 'gpu'
 e_tda = td.kernel()[0]
