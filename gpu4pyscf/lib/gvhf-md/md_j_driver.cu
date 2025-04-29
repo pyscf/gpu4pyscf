@@ -38,7 +38,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
                 int *pair_ij_mapping, int *pair_kl_mapping,
                 int *pair_ij_loc, int *pair_kl_loc,
                 float **qd_ij_max, float **qd_kl_max,
-                float *q_cond, float q_cutoff, float qd_cutoff,
+                float *q_cond, float cutoff,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -55,7 +55,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
     MDBoundsInfo bounds = {li, lj, lk, ll,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         pair_ij_loc, pair_kl_loc, tile16_qd_ij_max, tile16_qd_kl_max,
-        q_cond, q_cutoff, qd_cutoff};
+        q_cond, cutoff};
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 
@@ -92,15 +92,15 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
         int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
         dim3 blocks(blocks_ij, blocks_kl);
-        if (0 and li == lk && lj == ll) {
-            int buflen = (order+1) * nsq_per_block
-                + threads_ij * 4 + bsizey * 4
-                + nf3ij * threads_ij + nf3kl * threads_kl
-                + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
-            buflen += max(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
-            md_j_s4_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
-                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
-        } else {
+//        if (li == lk && lj == ll) {
+//            int buflen = (order+1) * nsq_per_block
+//                + threads_ij * 4 + bsizey * 4
+//                + nf3ij * threads_ij + nf3kl * threads_kl
+//                + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
+//            buflen += max(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
+//            md_j_s4_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
+//                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
+//        } else {
             int buflen = (order+1) * nsq_per_block
                 + threads_ij * 4 + bsizey * 4
                 + nf3ij * threads_ij * 2 + nf3kl * threads_kl * 2
@@ -109,7 +109,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
             md_j_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
         }
-    }
+//    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in MD_build_j: %s\n", cudaGetErrorString(err));

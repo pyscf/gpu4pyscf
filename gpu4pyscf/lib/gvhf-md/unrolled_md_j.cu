@@ -21,7 +21,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -147,8 +147,8 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*25] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*25] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*25] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*25] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -250,7 +250,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -369,8 +369,8 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*22] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*22] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -516,7 +516,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -642,8 +642,8 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*9] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*9] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -850,7 +850,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -969,8 +969,8 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*17] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*17] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1215,7 +1215,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -1334,8 +1334,8 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*7] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*7] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1683,7 +1683,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -1809,8 +1809,8 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*11] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*11] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -2364,7 +2364,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -2483,8 +2483,8 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -2898,7 +2898,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -3017,8 +3017,8 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*4] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*4] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -3606,7 +3606,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -3725,8 +3725,8 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*9] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -4661,7 +4661,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -4780,8 +4780,8 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*32] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*32] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -5450,7 +5450,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -5569,8 +5569,8 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*16] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -6528,7 +6528,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
-    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.q_cutoff) {
+    if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
     int tx = threadIdx.x;
@@ -6647,8 +6647,8 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.qd_cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*26] + q_cond[pair_ij0] < bounds.qd_cutoff) {
+            if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
+                qd_kl_max[batch_kl+blockIdx.y*26] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 

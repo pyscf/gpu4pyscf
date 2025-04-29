@@ -168,7 +168,7 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
                         (ctypes.c_void_p*6)(*qd_ij_addrs),
                         (ctypes.c_void_p*6)(*qd_kl_addrs),
                         ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(q_cutoff), ctypes.c_float(log_cutoff),
+                        ctypes.c_float(log_cutoff),
                         prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
                         prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas), _env.ctypes)
                     if err != 0:
