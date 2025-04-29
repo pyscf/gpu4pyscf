@@ -58,7 +58,7 @@ class KnownValues(unittest.TestCase):
     def test_opt_rks_tda(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
-        td = mf.TDDFT().set(nstates=3)
+        td = mf.TDA().set(nstates=3)
         td.kernel()
         td_cpu = td.to_cpu()
         mol_gpu = optimize(td)
