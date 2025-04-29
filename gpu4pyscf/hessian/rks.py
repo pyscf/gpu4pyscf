@@ -645,7 +645,7 @@ def get_d3mu_dr3(ao):
 
     return d3mu_dr3
 
-def get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices):
+def get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices):
     assert mu.ndim == 2
     nao = mu.shape[0]
     ngrids = mu.shape[1]
@@ -671,8 +671,26 @@ def get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices):
         dmudr_dot_dm = None
     return d2rho_dAdr
 
-def get_drhodA_dgammadA(mol, grids_coords, dm0):
-    nao = mol.nao
+def get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_map):
+    assert mu.ndim == 2
+    nao = mu.shape[0]
+    ngrids = mu.shape[1]
+    natm = len(atom_to_grid_index_map)
+    assert d2mu_dr2.shape == (3, 3, nao, ngrids)
+    assert dmu_dr.shape == (3, nao, ngrids)
+    assert dm0.shape == (nao, nao)
+
+    d2rho_dAdr_grid_response = cupy.zeros([natm, 3, 3, ngrids])
+    for i_atom in range(natm):
+        associated_grid_index = atom_to_grid_index_map[i_atom]
+        d2rho_dAdr_response  = cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], dm0)
+        d2rho_dAdr_response += cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], dm0.T)
+        d2rho_dAdr_response += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], dm0)
+        d2rho_dAdr_response += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], dm0.T)
+        d2rho_dAdr_grid_response[i_atom, :, :, associated_grid_index] = d2rho_dAdr_response.transpose(2,0,1)
+    return d2rho_dAdr_grid_response
+
+def get_drhodA_dgammadA_orbital_response(mol, grids_coords, dm0):
     natm = mol.natm
     ngrids = grids_coords.shape[0]
 
@@ -717,6 +735,33 @@ def get_drhodA_dgammadA(mol, grids_coords, dm0):
     dgamma_dA *= 2
 
     return drho_dA, dgamma_dA
+
+def get_drhodA_dgammadA_grid_response(mol, grids_coords, dm0, atom_to_grid_index_map):
+    natm = mol.natm
+    ngrids = grids_coords.shape[0]
+
+    ao = numint.eval_ao(mol, grids_coords, deriv = 2, gdftopt = None, transpose = False)
+    rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "GGA", hermi = 1, with_lapl = False)
+    drho = rho_drho[1:4, :]
+    mu = ao[0, :, :]
+    dmu_dr = ao[1:4, :, :]
+    d2mu_dr2 = get_d2mu_dr2(ao)
+
+    drho_dA_grid_response   = cupy.zeros([natm, 3, ngrids])
+    dgamma_dA_grid_response = cupy.zeros([natm, 3, ngrids])
+    for i_atom in range(natm):
+        associated_grid_index = atom_to_grid_index_map[i_atom]
+        rho_response  = cupy.einsum('dig,jg,ij->dg', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index], dm0)
+        rho_response += cupy.einsum('dig,jg,ij->dg', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index], dm0.T)
+        drho_dA_grid_response[i_atom, :, associated_grid_index] = rho_response.T
+        gamma_response  = cupy.einsum('dDig,jg,Dg,ij->dg', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], drho[:, associated_grid_index], dm0)
+        gamma_response += cupy.einsum('dDig,jg,Dg,ij->dg', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], drho[:, associated_grid_index], dm0.T)
+        gamma_response += cupy.einsum('dig,Djg,Dg,ij->dg', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], drho[:, associated_grid_index], dm0)
+        gamma_response += cupy.einsum('dig,Djg,Dg,ij->dg', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], drho[:, associated_grid_index], dm0.T)
+        dgamma_dA_grid_response[i_atom, :, associated_grid_index] = gamma_response.T
+    dgamma_dA_grid_response *= 2
+
+    return drho_dA_grid_response, dgamma_dA_grid_response
 
 def get_d2rhodAdB_d2gammadAdB(mol, grids_coords, dm0):
     """
@@ -829,12 +874,19 @@ def contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, dm0, fw_rho, fw_gamma):
             d2e_gamma_dAdB[j_atom, i_atom, :, :] += d2gamma_dAdB.T
             d2gamma_dAdB = None
 
-    d2rho_dAdr = get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
+    d2rho_dAdr = get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
     d2e_gamma_dAdB += contract('AdPg,BDPg->ABdD', d2rho_dAdr, d2rho_dAdr * fw_gamma)
 
     return d2e_rho_dAdB + 2 * d2e_gamma_dAdB
 
 def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Equation notation follows:
+        Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
+        VV10-containing density functionals: Theory, efficient implementation, and
+        benchmark assessments. J Chem Phys. 2023 May 28;158(20):204109. doi: 10.1063/5.0152838.
+    """
+
     mol = hessobj.mol
     mf = hessobj.base
     nao = mol.nao
@@ -925,7 +977,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
     f_gamma_i = rho_i * domega_dgamma_i * W_i
 
-    drho_dA, dgamma_dA = get_drhodA_dgammadA(mol, grids_coords, dm0)
+    drho_dA, dgamma_dA = get_drhodA_dgammadA_orbital_response(mol, grids_coords, dm0)
     d2e = contract_d2rhodAdB_d2gammadAdB(mol, grids_coords, dm0,
                                          f_rho_i * grids_weights, f_gamma_i * grids_weights)
 
@@ -1179,7 +1231,34 @@ def _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     vmat = contract('Adiq,ip->Adpq', vmat, mo_coeff)
     return vmat
 
+def get_dweight_dA(grids):
+    from gpu4pyscf.grad.rks import grids_response_cc
+    grids_weights_1 = []
+    natm = 0
+    for (coords, weight, weight1) in grids_response_cc(grids):
+        grids_weights_1.append(weight1)
+        natm += 1
+    grids_weights_1.append(cupy.zeros([natm, 3, grids.padding]))
+    grids_weights_1 = cupy.concatenate(grids_weights_1, axis = 2)
+
+    grids_weights_1 = grids_weights_1[:, :, grids.grid_sorting_index]
+    return grids_weights_1
+
 def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Equation notation follows:
+        Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
+        VV10-containing density functionals: Theory, efficient implementation, and
+        benchmark assessments. J Chem Phys. 2023 May 28;158(20):204109. doi: 10.1063/5.0152838.
+    """
+
+    # Note (Henry Wang 20250428):
+    # We observed that in several very simple systems, for example H2O2, H2CO, C2H4,
+    # if we do not include the grid response term, the analytical and numerical Fock matrix
+    # derivative, although only diff by else than 1e-7 (norm 1), can cause a 1e-3 error in hessian,
+    # likely because the CPHF converged to a different solution.
+    grid_response = True
+
     mol = hessobj.mol
     mf = hessobj.base
     nao = mol.nao
@@ -1270,12 +1349,22 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
     f_gamma_i = rho_i * domega_dgamma_i * W_i
 
-    drho_dA, dgamma_dA = get_drhodA_dgammadA(mol, grids_coords, dm0)
+    drho_dA, dgamma_dA = get_drhodA_dgammadA_orbital_response(mol, grids_coords, dm0)
+
+    if grid_response:
+        grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
+        atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
+
+        drho_dA_grid_response, dgamma_dA_grid_response = get_drhodA_dgammadA_grid_response(mol, grids_coords, dm0, atom_to_grid_index_map)
+        drho_dA   += drho_dA_grid_response
+        dgamma_dA += dgamma_dA_grid_response
+        drho_dA_grid_response = None
+        dgamma_dA_grid_response = None
 
     drho_dA   = cupy.ascontiguousarray(drho_dA)
     dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
-    f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
-    f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    f_rho_A_i   = cupy.empty([natm, 3, ngrids], order = "C")
+    f_gamma_A_i = cupy.empty([natm, 3, ngrids], order = "C")
 
     libgdft.VXC_vv10nlc_hess_eval_f_t(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -1301,7 +1390,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ctypes.cast(drho_dA.data.ptr, ctypes.c_void_p),
         ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
-        ctypes.c_int(3 * mol.natm),
+        ctypes.c_int(3 * natm),
     )
 
     mu = ao_nonzero_rho[0, :, :]
@@ -1310,9 +1399,14 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     aoslices = mol.aoslice_by_atom()
 
-    vmat_mo = cupy.empty([mol.natm, 3, mo_coeff.shape[1], mocc.shape[1]])
+    vmat_mo = cupy.empty([natm, 3, mo_coeff.shape[1], mocc.shape[1]])
 
-    d2rho_dAdr = get_d2rho_dAdr(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
+    d2rho_dAdr = get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
+    if grid_response:
+        d2rho_dAdr_grid_response = get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_map)
+        d2rho_dAdr += d2rho_dAdr_grid_response
+        d2rho_dAdr_grid_response = None
+
     drhodr_dot_dmudr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * grids_weights)
     for i_atom in range(natm):
         # # w_i 2 f_i^\gamma \nabla_A \nabla\rho \cdot \nabla(\phi_\mu \phi_nu)_i
@@ -1341,7 +1435,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         vmat_mo[i_atom, :, :, :] = jk._ao2mo(dF, mocc, mo_coeff)
         dF = None
     d2rho_dAdr = None
-    drhodr_dot_dmudr_dot_weight = None
+    drhodr_dot_dmudr = None
 
     mu_dot_drhodr = contract('ig,dg->dig', mu, nabla_rho_i * f_gamma_i * grids_weights)
     dmudr_dot_drhodr = contract('dig,dg->ig', dmu_dr, nabla_rho_i * f_gamma_i * grids_weights)
@@ -1376,10 +1470,99 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     mu_dot_drhodr = None
     dmudr_dot_drhodr = None
 
-    # Note (Henry Wang 20250428):
-    # We observed that in a H2O2 system, the analytical and numerical Fock matrix derivative,
-    # although only diff by else than 1e-7 (norm 1), can cause a 1e-3 error in hessian,
-    # likely because the CPHF converged to a different solution.
+    if grid_response:
+        E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
+        U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
+        W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
+        libgdft.VXC_vv10nlc_hess_eval_EUW_grid_response(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(W_Bgr_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(natm),
+        )
+
+        grids_weights_1 = get_dweight_dA(grids)
+        grids_weights_1 = grids_weights_1[:, :, rho_nonzero_mask]
+
+        E_Bw_i = cupy.empty([natm, 3, ngrids])
+        U_Bw_i = cupy.empty([natm, 3, ngrids])
+        W_Bw_i = cupy.empty([natm, 3, ngrids])
+        U_fake = cupy.empty(ngrids)
+        W_fake = cupy.empty(ngrids)
+        A_fake = cupy.empty(ngrids)
+        B_fake = cupy.empty(ngrids)
+        C_fake = cupy.empty(ngrids)
+        E_fake = cupy.empty(ngrids)
+        for i_atom in range(natm):
+            for i_xyz in range(3):
+                grids_weights_fake = cupy.ascontiguousarray(grids_weights_1[i_atom, i_xyz, :])
+
+                stream = cupy.cuda.get_current_stream()
+                libgdft.VXC_vv10nlc_hess_eval_UWABCE(
+                    ctypes.cast(stream.ptr, ctypes.c_void_p),
+                    ctypes.cast(U_fake.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(W_fake.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(A_fake.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(B_fake.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(C_fake.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(E_fake.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(grids_weights_fake.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(ngrids)
+                )
+
+                E_Bw_i[i_atom, i_xyz, :] = E_fake
+                U_Bw_i[i_atom, i_xyz, :] = U_fake
+                W_Bw_i[i_atom, i_xyz, :] = W_fake
+        U_fake = None
+        W_fake = None
+        A_fake = None
+        B_fake = None
+        C_fake = None
+        E_fake = None
+
+        f_rho_grid_response_i = (E_Bw_i + E_Bgr_i) + ((U_Bw_i + U_Bgr_i) * dkappa_drho_i + (W_Bw_i + W_Bgr_i) * domega_drho_i) * rho_i
+        f_gamma_grid_response_i = (W_Bw_i + W_Bgr_i) * domega_dgamma_i * rho_i
+
+        vmat = cupy.zeros([natm, 3, nao, nao])
+
+        vmat += cupy.einsum('Adg,ig,jg,g->Adij', grids_weights_1, mu, mu, f_rho_i)
+        vmat += 2 * cupy.einsum('Adg,Dig,jg,Dg,g->Adij', grids_weights_1, dmu_dr, mu, nabla_rho_i, f_gamma_i)
+        vmat += 2 * cupy.einsum('Adg,Dig,jg,Dg,g->Adji', grids_weights_1, dmu_dr, mu, nabla_rho_i, f_gamma_i)
+
+        vmat += cupy.einsum('Adg,ig,jg,g->Adij', f_rho_grid_response_i, mu, mu, grids_weights)
+        vmat += 2 * cupy.einsum('Adg,Dig,jg,Dg,g->Adij', f_gamma_grid_response_i, dmu_dr, mu, nabla_rho_i, grids_weights)
+        vmat += 2 * cupy.einsum('Adg,Dig,jg,Dg,g->Adji', f_gamma_grid_response_i, dmu_dr, mu, nabla_rho_i, grids_weights)
+
+        for i_atom in range(natm):
+            associated_grid_index = atom_to_grid_index_map[i_atom]
+            # w_i f_i^\rho \nabla_A (\phi_\mu \phi_nu)_i
+            munu_response  = cupy.einsum('dig,jg->dij', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index] * f_rho_i[associated_grid_index] * grids_weights[associated_grid_index])
+            munu_response += cupy.einsum('dig,jg->dji', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index] * f_rho_i[associated_grid_index] * grids_weights[associated_grid_index])
+            vmat[i_atom, :, :, :] += munu_response
+
+            # w_i 2 f_i^\gamma \nabla\rho \cdot \nabla_A \nabla(\phi_\mu \phi_nu)_i
+            nabla_munu_response  = cupy.einsum('dDig,jg,Dg->dij', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], nabla_rho_i[:, associated_grid_index] * f_gamma_i[associated_grid_index] * grids_weights[associated_grid_index])
+            nabla_munu_response += cupy.einsum('dDig,jg,Dg->dji', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], nabla_rho_i[:, associated_grid_index] * f_gamma_i[associated_grid_index] * grids_weights[associated_grid_index])
+            nabla_munu_response += cupy.einsum('dig,Djg,Dg->dij', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], nabla_rho_i[:, associated_grid_index] * f_gamma_i[associated_grid_index] * grids_weights[associated_grid_index])
+            nabla_munu_response += cupy.einsum('dig,Djg,Dg->dji', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], nabla_rho_i[:, associated_grid_index] * f_gamma_i[associated_grid_index] * grids_weights[associated_grid_index])
+            vmat[i_atom, :, :, :] += 2 * nabla_munu_response
+
+        vmat = contract('Adij,jq->Adiq', vmat, mocc)
+        vmat = contract('Adiq,ip->Adpq', vmat, mo_coeff)
+        vmat_mo += vmat
+
     return vmat_mo
 
 def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
