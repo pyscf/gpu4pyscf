@@ -247,7 +247,6 @@ void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+0, vj_ij_cache[sq_id]);
         }
@@ -531,7 +530,6 @@ void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+1, vj_ij_cache[sq_id]);
         }
@@ -543,7 +541,6 @@ void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -555,7 +552,6 @@ void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -886,7 +882,6 @@ void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+1, vj_ij_cache[sq_id]);
         }
@@ -898,7 +893,6 @@ void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -910,7 +904,6 @@ void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -1328,7 +1321,6 @@ void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+1, vj_ij_cache[sq_id]);
         }
@@ -1340,7 +1332,6 @@ void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -1352,7 +1343,6 @@ void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -1660,7 +1650,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+1, vj_ij_cache[sq_id]);
         }
@@ -1672,7 +1661,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -1684,7 +1672,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -1696,7 +1683,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+4, vj_ij_cache[sq_id]);
         }
@@ -1708,7 +1694,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -1720,7 +1705,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -1732,7 +1716,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -1744,7 +1727,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -1756,7 +1738,6 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -2120,7 +2101,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+1, vj_ij_cache[sq_id]);
         }
@@ -2132,7 +2112,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -2144,7 +2123,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -2156,7 +2134,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+4, vj_ij_cache[sq_id]);
         }
@@ -2168,7 +2145,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -2180,7 +2156,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -2192,7 +2167,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -2204,7 +2178,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -2216,7 +2189,6 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -2686,7 +2658,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+1, vj_ij_cache[sq_id]);
         }
@@ -2698,7 +2669,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -2710,7 +2680,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -2722,7 +2691,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+4, vj_ij_cache[sq_id]);
         }
@@ -2734,7 +2702,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -2746,7 +2713,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -2758,7 +2724,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -2770,7 +2735,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -2782,7 +2746,6 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -3374,7 +3337,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+1, vj_ij_cache[sq_id]);
         }
@@ -3386,7 +3348,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -3398,7 +3359,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -3410,7 +3370,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+4, vj_ij_cache[sq_id]);
         }
@@ -3422,7 +3381,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -3434,7 +3392,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -3446,7 +3403,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -3458,7 +3414,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -3470,7 +3425,6 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -3801,7 +3755,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -3813,7 +3766,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -3825,7 +3777,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -3837,7 +3788,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -3849,7 +3799,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -3861,7 +3810,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -3873,7 +3821,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -3885,7 +3832,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+11, vj_ij_cache[sq_id]);
         }
@@ -3897,7 +3843,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+12, vj_ij_cache[sq_id]);
         }
@@ -3909,7 +3854,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+13, vj_ij_cache[sq_id]);
         }
@@ -3921,7 +3865,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+14, vj_ij_cache[sq_id]);
         }
@@ -3933,7 +3876,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+15, vj_ij_cache[sq_id]);
         }
@@ -3945,7 +3887,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+16, vj_ij_cache[sq_id]);
         }
@@ -3957,7 +3898,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+17, vj_ij_cache[sq_id]);
         }
@@ -3969,7 +3909,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+18, vj_ij_cache[sq_id]);
         }
@@ -3981,7 +3920,6 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+19, vj_ij_cache[sq_id]);
         }
@@ -4387,7 +4325,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -4399,7 +4336,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -4411,7 +4347,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -4423,7 +4358,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -4435,7 +4369,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -4447,7 +4380,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -4459,7 +4391,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -4471,7 +4402,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+11, vj_ij_cache[sq_id]);
         }
@@ -4483,7 +4413,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+12, vj_ij_cache[sq_id]);
         }
@@ -4495,7 +4424,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+13, vj_ij_cache[sq_id]);
         }
@@ -4507,7 +4435,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+14, vj_ij_cache[sq_id]);
         }
@@ -4519,7 +4446,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+15, vj_ij_cache[sq_id]);
         }
@@ -4531,7 +4457,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+16, vj_ij_cache[sq_id]);
         }
@@ -4543,7 +4468,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+17, vj_ij_cache[sq_id]);
         }
@@ -4555,7 +4479,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+18, vj_ij_cache[sq_id]);
         }
@@ -4567,7 +4490,6 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+19, vj_ij_cache[sq_id]);
         }
@@ -5096,7 +5018,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -5108,7 +5029,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -5120,7 +5040,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -5132,7 +5051,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -5144,7 +5062,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -5156,7 +5073,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -5168,7 +5084,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -5180,7 +5095,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+11, vj_ij_cache[sq_id]);
         }
@@ -5192,7 +5106,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+12, vj_ij_cache[sq_id]);
         }
@@ -5204,7 +5117,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+13, vj_ij_cache[sq_id]);
         }
@@ -5216,7 +5128,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+14, vj_ij_cache[sq_id]);
         }
@@ -5228,7 +5139,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+15, vj_ij_cache[sq_id]);
         }
@@ -5240,7 +5150,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+16, vj_ij_cache[sq_id]);
         }
@@ -5252,7 +5161,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+17, vj_ij_cache[sq_id]);
         }
@@ -5264,7 +5172,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+18, vj_ij_cache[sq_id]);
         }
@@ -5276,7 +5183,6 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+19, vj_ij_cache[sq_id]);
         }
@@ -5946,7 +5852,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -5958,7 +5863,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -5970,7 +5874,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+5, vj_ij_cache[sq_id]);
         }
@@ -5982,7 +5885,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -5994,7 +5896,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -6006,7 +5907,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -6018,7 +5918,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -6030,7 +5929,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+11, vj_ij_cache[sq_id]);
         }
@@ -6042,7 +5940,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+12, vj_ij_cache[sq_id]);
         }
@@ -6054,7 +5951,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+13, vj_ij_cache[sq_id]);
         }
@@ -6066,7 +5962,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+14, vj_ij_cache[sq_id]);
         }
@@ -6078,7 +5973,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+15, vj_ij_cache[sq_id]);
         }
@@ -6090,7 +5984,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+16, vj_ij_cache[sq_id]);
         }
@@ -6102,7 +5995,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+17, vj_ij_cache[sq_id]);
         }
@@ -6114,7 +6006,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+18, vj_ij_cache[sq_id]);
         }
@@ -6126,7 +6017,6 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+19, vj_ij_cache[sq_id]);
         }
@@ -6502,7 +6392,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -6514,7 +6403,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -6526,7 +6414,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+4, vj_ij_cache[sq_id]);
         }
@@ -6538,7 +6425,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -6550,7 +6436,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -6562,7 +6447,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -6574,7 +6458,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -6586,7 +6469,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+10, vj_ij_cache[sq_id]);
         }
@@ -6598,7 +6480,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+11, vj_ij_cache[sq_id]);
         }
@@ -6610,7 +6491,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+12, vj_ij_cache[sq_id]);
         }
@@ -6622,7 +6502,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+13, vj_ij_cache[sq_id]);
         }
@@ -6634,7 +6513,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+14, vj_ij_cache[sq_id]);
         }
@@ -6646,7 +6524,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+16, vj_ij_cache[sq_id]);
         }
@@ -6658,7 +6535,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+17, vj_ij_cache[sq_id]);
         }
@@ -6670,7 +6546,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+18, vj_ij_cache[sq_id]);
         }
@@ -6682,7 +6557,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+19, vj_ij_cache[sq_id]);
         }
@@ -6694,7 +6568,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+20, vj_ij_cache[sq_id]);
         }
@@ -6706,7 +6579,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+21, vj_ij_cache[sq_id]);
         }
@@ -6718,7 +6590,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+22, vj_ij_cache[sq_id]);
         }
@@ -6730,7 +6601,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+23, vj_ij_cache[sq_id]);
         }
@@ -6742,7 +6612,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+24, vj_ij_cache[sq_id]);
         }
@@ -6754,7 +6623,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+25, vj_ij_cache[sq_id]);
         }
@@ -6766,7 +6634,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+26, vj_ij_cache[sq_id]);
         }
@@ -6778,7 +6645,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+27, vj_ij_cache[sq_id]);
         }
@@ -6790,7 +6656,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+28, vj_ij_cache[sq_id]);
         }
@@ -6802,7 +6667,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+29, vj_ij_cache[sq_id]);
         }
@@ -6814,7 +6678,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+30, vj_ij_cache[sq_id]);
         }
@@ -6826,7 +6689,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+31, vj_ij_cache[sq_id]);
         }
@@ -6838,7 +6700,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+32, vj_ij_cache[sq_id]);
         }
@@ -6850,7 +6711,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+33, vj_ij_cache[sq_id]);
         }
@@ -6862,7 +6722,6 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+34, vj_ij_cache[sq_id]);
         }
@@ -7330,7 +7189,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -7342,7 +7200,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -7354,7 +7211,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+4, vj_ij_cache[sq_id]);
         }
@@ -7366,7 +7222,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -7378,7 +7233,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -7390,7 +7244,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -7402,7 +7255,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -7414,7 +7266,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+10, vj_ij_cache[sq_id]);
         }
@@ -7426,7 +7277,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+11, vj_ij_cache[sq_id]);
         }
@@ -7438,7 +7288,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+12, vj_ij_cache[sq_id]);
         }
@@ -7450,7 +7299,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+13, vj_ij_cache[sq_id]);
         }
@@ -7462,7 +7310,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+14, vj_ij_cache[sq_id]);
         }
@@ -7474,7 +7321,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+16, vj_ij_cache[sq_id]);
         }
@@ -7486,7 +7332,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+17, vj_ij_cache[sq_id]);
         }
@@ -7498,7 +7343,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+18, vj_ij_cache[sq_id]);
         }
@@ -7510,7 +7354,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+19, vj_ij_cache[sq_id]);
         }
@@ -7522,7 +7365,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+20, vj_ij_cache[sq_id]);
         }
@@ -7534,7 +7376,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+21, vj_ij_cache[sq_id]);
         }
@@ -7546,7 +7387,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+22, vj_ij_cache[sq_id]);
         }
@@ -7558,7 +7398,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+23, vj_ij_cache[sq_id]);
         }
@@ -7570,7 +7409,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+24, vj_ij_cache[sq_id]);
         }
@@ -7582,7 +7420,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+25, vj_ij_cache[sq_id]);
         }
@@ -7594,7 +7431,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+26, vj_ij_cache[sq_id]);
         }
@@ -7606,7 +7442,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+27, vj_ij_cache[sq_id]);
         }
@@ -7618,7 +7453,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+28, vj_ij_cache[sq_id]);
         }
@@ -7630,7 +7464,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+29, vj_ij_cache[sq_id]);
         }
@@ -7642,7 +7475,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+30, vj_ij_cache[sq_id]);
         }
@@ -7654,7 +7486,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+31, vj_ij_cache[sq_id]);
         }
@@ -7666,7 +7497,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+32, vj_ij_cache[sq_id]);
         }
@@ -7678,7 +7508,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+33, vj_ij_cache[sq_id]);
         }
@@ -7690,7 +7519,6 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+34, vj_ij_cache[sq_id]);
         }
@@ -8300,7 +8128,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+2, vj_ij_cache[sq_id]);
         }
@@ -8312,7 +8139,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+3, vj_ij_cache[sq_id]);
         }
@@ -8324,7 +8150,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+4, vj_ij_cache[sq_id]);
         }
@@ -8336,7 +8161,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+6, vj_ij_cache[sq_id]);
         }
@@ -8348,7 +8172,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+7, vj_ij_cache[sq_id]);
         }
@@ -8360,7 +8183,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+8, vj_ij_cache[sq_id]);
         }
@@ -8372,7 +8194,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+9, vj_ij_cache[sq_id]);
         }
@@ -8384,7 +8205,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+10, vj_ij_cache[sq_id]);
         }
@@ -8396,7 +8216,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+11, vj_ij_cache[sq_id]);
         }
@@ -8408,7 +8227,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+12, vj_ij_cache[sq_id]);
         }
@@ -8420,7 +8238,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+13, vj_ij_cache[sq_id]);
         }
@@ -8432,7 +8249,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+14, vj_ij_cache[sq_id]);
         }
@@ -8444,7 +8260,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+16, vj_ij_cache[sq_id]);
         }
@@ -8456,7 +8271,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+17, vj_ij_cache[sq_id]);
         }
@@ -8468,7 +8282,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+18, vj_ij_cache[sq_id]);
         }
@@ -8480,7 +8293,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+19, vj_ij_cache[sq_id]);
         }
@@ -8492,7 +8304,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+20, vj_ij_cache[sq_id]);
         }
@@ -8504,7 +8315,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+21, vj_ij_cache[sq_id]);
         }
@@ -8516,7 +8326,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+22, vj_ij_cache[sq_id]);
         }
@@ -8528,7 +8337,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+23, vj_ij_cache[sq_id]);
         }
@@ -8540,7 +8348,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+24, vj_ij_cache[sq_id]);
         }
@@ -8552,7 +8359,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+25, vj_ij_cache[sq_id]);
         }
@@ -8564,7 +8370,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+26, vj_ij_cache[sq_id]);
         }
@@ -8576,7 +8381,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+27, vj_ij_cache[sq_id]);
         }
@@ -8588,7 +8392,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+28, vj_ij_cache[sq_id]);
         }
@@ -8600,7 +8403,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+29, vj_ij_cache[sq_id]);
         }
@@ -8612,7 +8414,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+30, vj_ij_cache[sq_id]);
         }
@@ -8624,7 +8425,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+31, vj_ij_cache[sq_id]);
         }
@@ -8636,7 +8436,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+32, vj_ij_cache[sq_id]);
         }
@@ -8648,7 +8447,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+33, vj_ij_cache[sq_id]);
         }
@@ -8660,7 +8458,6 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds)
                 vj_ij_cache[sq_id] += vj_ij_cache[sq_id + stride*16];
             }
         }
-        __syncthreads();
         if (ty == 0 && task_ij0+tx < npairs_ij) {
             atomicAdd(vj+ij_loc0+34, vj_ij_cache[sq_id]);
         }

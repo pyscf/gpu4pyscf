@@ -329,7 +329,7 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
 
     tilex = 32
     tiley = min(32, 128 // (lkl+1))
-    s4 = False
+    s4 = False # s4 seems not faster
     if li == lk and lj == ll:
         if s4:
             cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl

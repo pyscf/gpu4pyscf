@@ -209,7 +209,6 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -433,7 +432,6 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -447,7 +445,6 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -461,7 +458,6 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -475,7 +471,6 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -758,7 +753,6 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -775,7 +769,6 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -792,7 +785,6 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -809,7 +801,6 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -1048,7 +1039,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -1062,7 +1052,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -1076,7 +1065,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -1090,7 +1078,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -1104,7 +1091,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -1118,7 +1104,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -1132,7 +1117,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -1146,7 +1130,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -1160,7 +1143,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -1174,7 +1156,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -1489,7 +1470,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -1506,7 +1486,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -1523,7 +1502,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -1540,7 +1518,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -1557,7 +1534,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -1574,7 +1550,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -1591,7 +1566,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -1608,7 +1582,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -1625,7 +1598,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -1642,7 +1614,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -2116,7 +2087,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -2139,7 +2109,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -2162,7 +2131,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -2185,7 +2153,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -2208,7 +2175,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -2231,7 +2197,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -2254,7 +2219,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -2277,7 +2241,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -2300,7 +2263,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -2323,7 +2285,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -2591,7 +2552,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -2605,7 +2565,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -2619,7 +2578,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -2633,7 +2591,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -2647,7 +2604,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -2661,7 +2617,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -2675,7 +2630,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -2689,7 +2643,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -2703,7 +2656,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -2717,7 +2669,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -2731,7 +2682,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+160] += vj_cache[sq_id];
             }
@@ -2745,7 +2695,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+176] += vj_cache[sq_id];
             }
@@ -2759,7 +2708,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+192] += vj_cache[sq_id];
             }
@@ -2773,7 +2721,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+208] += vj_cache[sq_id];
             }
@@ -2787,7 +2734,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+224] += vj_cache[sq_id];
             }
@@ -2801,7 +2747,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+240] += vj_cache[sq_id];
             }
@@ -2815,7 +2760,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+256] += vj_cache[sq_id];
             }
@@ -2829,7 +2773,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+272] += vj_cache[sq_id];
             }
@@ -2843,7 +2786,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+288] += vj_cache[sq_id];
             }
@@ -2857,7 +2799,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+304] += vj_cache[sq_id];
             }
@@ -3246,7 +3187,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -3263,7 +3203,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -3280,7 +3219,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -3297,7 +3235,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -3314,7 +3251,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -3331,7 +3267,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -3348,7 +3283,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -3365,7 +3299,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -3382,7 +3315,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -3399,7 +3331,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -3416,7 +3347,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+160] += vj_cache[sq_id];
             }
@@ -3433,7 +3363,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+176] += vj_cache[sq_id];
             }
@@ -3450,7 +3379,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+192] += vj_cache[sq_id];
             }
@@ -3467,7 +3395,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+208] += vj_cache[sq_id];
             }
@@ -3484,7 +3411,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+224] += vj_cache[sq_id];
             }
@@ -3501,7 +3427,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+240] += vj_cache[sq_id];
             }
@@ -3518,7 +3443,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+256] += vj_cache[sq_id];
             }
@@ -3535,7 +3459,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+272] += vj_cache[sq_id];
             }
@@ -3552,7 +3475,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+288] += vj_cache[sq_id];
             }
@@ -3569,7 +3491,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+304] += vj_cache[sq_id];
             }
@@ -4183,7 +4104,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -4206,7 +4126,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -4229,7 +4148,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -4252,7 +4170,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -4275,7 +4192,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -4298,7 +4214,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -4321,7 +4236,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -4344,7 +4258,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -4367,7 +4280,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -4390,7 +4302,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -4413,7 +4324,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+160] += vj_cache[sq_id];
             }
@@ -4436,7 +4346,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+176] += vj_cache[sq_id];
             }
@@ -4459,7 +4368,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+192] += vj_cache[sq_id];
             }
@@ -4482,7 +4390,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+208] += vj_cache[sq_id];
             }
@@ -4505,7 +4412,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+224] += vj_cache[sq_id];
             }
@@ -4528,7 +4434,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+240] += vj_cache[sq_id];
             }
@@ -4551,7 +4456,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+256] += vj_cache[sq_id];
             }
@@ -4574,7 +4478,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+272] += vj_cache[sq_id];
             }
@@ -4597,7 +4500,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+288] += vj_cache[sq_id];
             }
@@ -4620,7 +4522,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+304] += vj_cache[sq_id];
             }
@@ -4937,7 +4838,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -4951,7 +4851,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -4965,7 +4864,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -4979,7 +4877,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -4993,7 +4890,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -5007,7 +4903,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -5021,7 +4916,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -5035,7 +4929,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -5049,7 +4942,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -5063,7 +4955,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -5077,7 +4968,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+160] += vj_cache[sq_id];
             }
@@ -5091,7 +4981,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+176] += vj_cache[sq_id];
             }
@@ -5105,7 +4994,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+192] += vj_cache[sq_id];
             }
@@ -5119,7 +5007,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+208] += vj_cache[sq_id];
             }
@@ -5133,7 +5020,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+224] += vj_cache[sq_id];
             }
@@ -5147,7 +5033,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+240] += vj_cache[sq_id];
             }
@@ -5161,7 +5046,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+256] += vj_cache[sq_id];
             }
@@ -5175,7 +5059,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+272] += vj_cache[sq_id];
             }
@@ -5189,7 +5072,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+288] += vj_cache[sq_id];
             }
@@ -5203,7 +5085,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+304] += vj_cache[sq_id];
             }
@@ -5217,7 +5098,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+320] += vj_cache[sq_id];
             }
@@ -5231,7 +5111,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+336] += vj_cache[sq_id];
             }
@@ -5245,7 +5124,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+352] += vj_cache[sq_id];
             }
@@ -5259,7 +5137,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+368] += vj_cache[sq_id];
             }
@@ -5273,7 +5150,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+384] += vj_cache[sq_id];
             }
@@ -5287,7 +5163,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+400] += vj_cache[sq_id];
             }
@@ -5301,7 +5176,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+416] += vj_cache[sq_id];
             }
@@ -5315,7 +5189,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+432] += vj_cache[sq_id];
             }
@@ -5329,7 +5202,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+448] += vj_cache[sq_id];
             }
@@ -5343,7 +5215,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+464] += vj_cache[sq_id];
             }
@@ -5357,7 +5228,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+480] += vj_cache[sq_id];
             }
@@ -5371,7 +5241,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+496] += vj_cache[sq_id];
             }
@@ -5385,7 +5254,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+512] += vj_cache[sq_id];
             }
@@ -5399,7 +5267,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+528] += vj_cache[sq_id];
             }
@@ -5413,7 +5280,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+544] += vj_cache[sq_id];
             }
@@ -5913,7 +5779,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -5930,7 +5795,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -5947,7 +5811,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -5964,7 +5827,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -5981,7 +5843,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -5998,7 +5859,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -6015,7 +5875,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -6032,7 +5891,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -6049,7 +5907,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -6066,7 +5923,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -6083,7 +5939,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+160] += vj_cache[sq_id];
             }
@@ -6100,7 +5955,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+176] += vj_cache[sq_id];
             }
@@ -6117,7 +5971,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+192] += vj_cache[sq_id];
             }
@@ -6134,7 +5987,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+208] += vj_cache[sq_id];
             }
@@ -6151,7 +6003,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+224] += vj_cache[sq_id];
             }
@@ -6168,7 +6019,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+240] += vj_cache[sq_id];
             }
@@ -6185,7 +6035,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+256] += vj_cache[sq_id];
             }
@@ -6202,7 +6051,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+272] += vj_cache[sq_id];
             }
@@ -6219,7 +6067,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+288] += vj_cache[sq_id];
             }
@@ -6236,7 +6083,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+304] += vj_cache[sq_id];
             }
@@ -6253,7 +6099,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+320] += vj_cache[sq_id];
             }
@@ -6270,7 +6115,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+336] += vj_cache[sq_id];
             }
@@ -6287,7 +6131,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+352] += vj_cache[sq_id];
             }
@@ -6304,7 +6147,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+368] += vj_cache[sq_id];
             }
@@ -6321,7 +6163,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+384] += vj_cache[sq_id];
             }
@@ -6338,7 +6179,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+400] += vj_cache[sq_id];
             }
@@ -6355,7 +6195,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+416] += vj_cache[sq_id];
             }
@@ -6372,7 +6211,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+432] += vj_cache[sq_id];
             }
@@ -6389,7 +6227,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+448] += vj_cache[sq_id];
             }
@@ -6406,7 +6243,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+464] += vj_cache[sq_id];
             }
@@ -6423,7 +6259,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+480] += vj_cache[sq_id];
             }
@@ -6440,7 +6275,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+496] += vj_cache[sq_id];
             }
@@ -6457,7 +6291,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+512] += vj_cache[sq_id];
             }
@@ -6474,7 +6307,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+528] += vj_cache[sq_id];
             }
@@ -6491,7 +6323,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+544] += vj_cache[sq_id];
             }
@@ -6880,7 +6711,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+0] += vj_cache[sq_id];
             }
@@ -6894,7 +6724,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+16] += vj_cache[sq_id];
             }
@@ -6908,7 +6737,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+32] += vj_cache[sq_id];
             }
@@ -6922,7 +6750,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+48] += vj_cache[sq_id];
             }
@@ -6936,7 +6763,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+64] += vj_cache[sq_id];
             }
@@ -6950,7 +6776,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+80] += vj_cache[sq_id];
             }
@@ -6964,7 +6789,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+96] += vj_cache[sq_id];
             }
@@ -6978,7 +6802,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+112] += vj_cache[sq_id];
             }
@@ -6992,7 +6815,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+128] += vj_cache[sq_id];
             }
@@ -7006,7 +6828,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+144] += vj_cache[sq_id];
             }
@@ -7020,7 +6841,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+160] += vj_cache[sq_id];
             }
@@ -7034,7 +6854,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+176] += vj_cache[sq_id];
             }
@@ -7048,7 +6867,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+192] += vj_cache[sq_id];
             }
@@ -7062,7 +6880,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+208] += vj_cache[sq_id];
             }
@@ -7076,7 +6893,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+224] += vj_cache[sq_id];
             }
@@ -7090,7 +6906,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+240] += vj_cache[sq_id];
             }
@@ -7104,7 +6919,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+256] += vj_cache[sq_id];
             }
@@ -7118,7 +6932,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+272] += vj_cache[sq_id];
             }
@@ -7132,7 +6945,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+288] += vj_cache[sq_id];
             }
@@ -7146,7 +6958,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+304] += vj_cache[sq_id];
             }
@@ -7160,7 +6971,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+320] += vj_cache[sq_id];
             }
@@ -7174,7 +6984,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+336] += vj_cache[sq_id];
             }
@@ -7188,7 +6997,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+352] += vj_cache[sq_id];
             }
@@ -7202,7 +7010,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+368] += vj_cache[sq_id];
             }
@@ -7216,7 +7023,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+384] += vj_cache[sq_id];
             }
@@ -7230,7 +7036,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+400] += vj_cache[sq_id];
             }
@@ -7244,7 +7049,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+416] += vj_cache[sq_id];
             }
@@ -7258,7 +7062,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+432] += vj_cache[sq_id];
             }
@@ -7272,7 +7075,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+448] += vj_cache[sq_id];
             }
@@ -7286,7 +7088,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+464] += vj_cache[sq_id];
             }
@@ -7300,7 +7101,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+480] += vj_cache[sq_id];
             }
@@ -7314,7 +7114,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+496] += vj_cache[sq_id];
             }
@@ -7328,7 +7127,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+512] += vj_cache[sq_id];
             }
@@ -7342,7 +7140,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+528] += vj_cache[sq_id];
             }
@@ -7356,7 +7153,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+544] += vj_cache[sq_id];
             }
@@ -7370,7 +7166,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+560] += vj_cache[sq_id];
             }
@@ -7384,7 +7179,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+576] += vj_cache[sq_id];
             }
@@ -7398,7 +7192,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+592] += vj_cache[sq_id];
             }
@@ -7412,7 +7205,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+608] += vj_cache[sq_id];
             }
@@ -7426,7 +7218,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+624] += vj_cache[sq_id];
             }
@@ -7440,7 +7231,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+640] += vj_cache[sq_id];
             }
@@ -7454,7 +7244,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+656] += vj_cache[sq_id];
             }
@@ -7468,7 +7257,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+672] += vj_cache[sq_id];
             }
@@ -7482,7 +7270,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+688] += vj_cache[sq_id];
             }
@@ -7496,7 +7283,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+704] += vj_cache[sq_id];
             }
@@ -7510,7 +7296,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+720] += vj_cache[sq_id];
             }
@@ -7524,7 +7309,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+736] += vj_cache[sq_id];
             }
@@ -7538,7 +7322,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+752] += vj_cache[sq_id];
             }
@@ -7552,7 +7335,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+768] += vj_cache[sq_id];
             }
@@ -7566,7 +7348,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+784] += vj_cache[sq_id];
             }
@@ -7580,7 +7361,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+800] += vj_cache[sq_id];
             }
@@ -7594,7 +7374,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+816] += vj_cache[sq_id];
             }
@@ -7608,7 +7387,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+832] += vj_cache[sq_id];
             }
@@ -7622,7 +7400,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+848] += vj_cache[sq_id];
             }
@@ -7636,7 +7413,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+864] += vj_cache[sq_id];
             }
@@ -7650,7 +7426,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                     vj_cache[sq_id] += vj_cache[sq_id + stride*16];
                 }
             }
-            __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
                 vj_ij_cache[tx+880] += vj_cache[sq_id];
             }
