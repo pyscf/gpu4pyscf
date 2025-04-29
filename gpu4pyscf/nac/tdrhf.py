@@ -60,15 +60,15 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     xI, yI = x_yI
     xJ, yJ = x_yJ
     xI = cp.asarray(xI).reshape(nocc, nvir).T
-    if yI == 0:
+    if not isinstance(yI, np.ndarray):
         yI = xI * 0.0
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     xJ = cp.asarray(xJ).reshape(nocc, nvir).T
-    if yJ == 0:
+    if not isinstance(yI, np.ndarray):
         yJ = xJ * 0.0
     yJ = cp.asarray(yJ).reshape(nocc, nvir).T
-    LI = reduce(cp.dot, (orbv, xI-yI, orbo.T)) * 2.0
-    dmxpyI = reduce(cp.dot, (orbv, xIyI, orbo.T))
+    LI = xI-yI
+    dmxpyI = reduce(cp.dot, (orbv, xI + yI, orbo.T))
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -94,18 +94,17 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     z1aoS = z1ao + z1ao.T
     GZS = contract_G(z1aoS)
-    GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS[0], mo_coeff))
+    GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
-    W[nocc:, nocc:] = 0.5*yI
     zeta = mo_energy[nocc:, cp.newaxis]
-    zeta*=z1
-    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*xI.T + zeta
+    zeta = z1 * zeta
+    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*xI.T + zeta.T
     zeta = mo_energy[cp.newaxis, :nocc]
-    zeta*=z1
+    zeta = z1 * zeta
     W[nocc:, :nocc] = 0.5*yI + zeta
 
-    mf_grad = mf._scf.nuc_grad_method()
+    mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
 
     dmz1doo = z1ao  # P
@@ -119,7 +118,7 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     dh_ground = contract("xij,ij->xi", h1, oo0 * 2)
     dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
     ds = contract("xij,ij->xi", s1, (W + W.T) * 0.5)
-    ds2 = contract("xij,ji->xj", s1, )
+    ds2 = contract("xij,ji->xj", s1, dmxpyI)
 
     dh1e_ground = int3c2e.get_dh1e(mol, oo0 * 2)  # 1/r like terms
     if mol.has_ecp():
@@ -141,7 +140,7 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
 
-    delec = 2.0 * (dh_ground + dh_td - ds)
+    delec = 2.0 * (dh_ground + dh_td - ds - ds2)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec
@@ -211,13 +210,14 @@ class NAC(rhf_grad.GradientsBase):
             else:
                 self.state = state
 
-            if state == 0:
-                raise ValueError("State ID cannot be 0.")
-
+            if state[1] == 0:
+                x_yJ = self.base.xy[state[1]]
+                E_J = self.base.e[state[1]]
+            else:
+                x_yJ = self.base.xy[state[1] - 1]
+                E_J = self.base.e[state[1] - 1]
             x_yI = self.base.xy[state[0] - 1]
-            x_yJ = self.base.xy[state[1] - 1]
             E_I = self.base.e[state[0] - 1]
-            E_J = self.base.e[state[1] - 1]
 
         if singlet is None:
             singlet = self.base.singlet
@@ -234,6 +234,28 @@ class NAC(rhf_grad.GradientsBase):
         self.de = self.get_nacv(x_yI, x_yJ, E_I, E_J, singlet, atmlst, verbose=self.verbose)
         self._finalize()
         return self.de
+    
+    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+        """
+        Computes the first-order derivatives of the energy contributions from
+        Veff per atom.
+
+        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
+        """
+        if mol is None:
+            mol = self.mol
+        if dm is None:
+            dm = self.base.make_rdm1()
+        if omega == 0.0:
+            vhfopt = self.base._scf._opt_gpu.get(None, None)
+            return rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
+        else:
+            vhfopt = self.base._scf._opt_gpu.get(omega, None)
+            with mol.with_range_coulomb(omega):
+                return rhf_grad._jk_energy_per_atom(
+                    mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
+
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:
