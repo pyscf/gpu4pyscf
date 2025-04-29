@@ -91,8 +91,8 @@ typedef struct {
     uint8_t lprim;
     union {int ntile_ij_pairs; int npairs_ij;};
     union {int ntile_kl_pairs; int npairs_kl;};
-    int *tile_ij_mapping;
-    int *tile_kl_mapping;
+    union {int *tile_ij_mapping; int *pair_ij_mapping;};
+    union {int *tile_kl_mapping; int *pair_kl_mapping;};
     float *q_cond;
     float *tile_q_cond;
     float *s_estimator;
