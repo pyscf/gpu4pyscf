@@ -94,9 +94,9 @@ typedef struct {
     union {int *tile_ij_mapping; int *pair_ij_mapping;};
     union {int *tile_kl_mapping; int *pair_kl_mapping;};
     float *q_cond;
-    union {float *tile_q_cond; float *qd_ij_max;};
+    union float *tile_q_cond;
     float *s_estimator;
-    union {float *dm_cond; float *qd_kl_max;};
+    union float *dm_cond;
     float cutoff;
 } BoundsInfo;
 
