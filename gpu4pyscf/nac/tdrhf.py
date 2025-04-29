@@ -92,17 +92,27 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         tol=td_nac.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir, nocc)
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    z1aoS = z1ao + z1ao.T
-    GZS = contract_G(z1aoS)
+    # z1aoS = z1ao + z1ao.T
+    # GZS = contract_G(z1aoS)
+    GZS = vresp(z1ao + z1ao.T)
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
-    zeta = mo_energy[nocc:, cp.newaxis]
-    zeta = z1 * zeta
-    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*xI.T + zeta.T
-    zeta = mo_energy[cp.newaxis, :nocc]
-    zeta = z1 * zeta
-    W[nocc:, :nocc] = 0.5*yI + zeta
+    # zeta = mo_energy[nocc:, cp.newaxis]
+    # zeta = z1 * zeta
+    # W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 1.0*xI.T + 0.5*zeta.T
+    # zeta = mo_energy[cp.newaxis, :nocc]
+    # zeta = z1 * zeta
+    # W[nocc:, :nocc] = 1.0*yI + 0.5*zeta
+    # W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T))
+    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + xI.T
+    W[nocc:, :nocc] = yI 
+    zeta = (mo_energy[:,cp.newaxis] + mo_energy)*0.5
+    zeta[nocc:, :nocc] = mo_energy[:nocc]
+    zeta[:nocc, nocc:] = mo_energy[nocc:]
+    dm1 = cp.zeros((nmo, nmo))
+    dm1[nocc:, :nocc] = z1
+    W = reduce(cp.dot, (mo_coeff, W + zeta * dm1, mo_coeff.T))
 
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
@@ -115,14 +125,10 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_ground = contract("xij,ij->xi", h1, oo0 * 2)
     dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
     ds = contract("xij,ij->xi", s1, (W + W.T) * 0.5)
-    ds2 = contract("xij,ji->xj", s1, dmxpyI)
+    ds2 = contract("xij,ij->xj", s1, (dmxpyI+dmxpyI.T)*1.0)
 
-    dh1e_ground = int3c2e.get_dh1e(mol, oo0 * 2)  # 1/r like terms
-    if mol.has_ecp():
-        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0 * 2)  # 1/r like terms
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
@@ -139,13 +145,17 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
+    dvhf = td_nac.get_veff(mol, oo0 * 2)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
 
-    delec = 2.0 * (dh_ground + dh_td - ds - ds2)
+    delec = 2.0 * (dh_td - ds + ds2)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec
+    de = 2.0 * dvhf_all + dh1e_td + delec
 
-    return de.get()
+    return de.get()*0.5
 
 
 class NAC(rhf_grad.GradientsBase):
