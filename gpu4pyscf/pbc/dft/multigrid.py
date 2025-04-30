@@ -498,7 +498,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    assert nset == 1
 
     xctype = ni._xc_type(xc_code)
     if xctype == 'LDA':
@@ -510,55 +510,49 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     vol = cell.vol
     mesh = ni.mesh
-    rhoG = _eval_rhoG(ni, dms, hermi, kpts)
-    if xctype == 'LDA':
-        rhoG = rhoG[:,None]
-    else:
-        Gv = cp.asarray(cell.get_Gv(mesh))
-        rhoG = cp.repeat(rhoG[:,None], nvar, axis=1)
-        rhoG[:,1:4] *= 1j
-        rhoG[:,1:4] *= Gv.T
-        if xctype == 'MGGA':
-            rhoG[:,4] = _eval_tauG(ni, dms, hermi, kpts)
-
     ngrids = np.prod(mesh)
+    rhoG = _eval_rhoG(ni, dms, hermi, kpts)
+    rhoG = rhoG.reshape(1,ngrids)
+    if xctype != 'LDA':
+        Gv = cp.asarray(cell.get_Gv(mesh))
+        rhoG = cp.repeat(rhoG, nvar, axis=0)
+        rhoG[1:4] *= 1j
+        rhoG[1:4] *= Gv.T
+        if xctype == 'MGGA':
+            rhoG[4] = _eval_tauG(ni, dms, hermi, kpts)
+
     coulG = tools.get_coulG(cell, mesh=mesh)
-    vG = rhoG[:,0] * coulG
-    ecoul = .5 * float(rhoG[0,0].conj().dot(vG[0]).real) / vol
+    vG = rhoG[0] * coulG
+    ecoul = .5 * float(rhoG[0].conj().dot(vG).real) / vol
     log.debug('Multigrid Coulomb energy %s', ecoul)
 
     weight = vol / ngrids
     # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
-    rhoR = cp.asarray(rhoR.reshape(nset,nvar,ngrids), order='C')
-    nelec = float(rhoR[0,0].sum()) * weight
+    rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
+    nelec = float(rhoR[0].sum()) * weight
 
-    wv_freq = cp.empty((nset,nvar,ngrids), dtype=np.complex128)
     excsum = 0
-    for i in range(nset):
-        if xctype == 'LDA':
-            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i,0], deriv=1, xctype=xctype)[:2]
-        else:
-            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i], deriv=1, xctype=xctype)[:2]
-        if i == 0:
-            excsum += float(rhoR[0,0].dot(exc[:,0])) * weight
-        wv = weight * vxc
-        wv_freq[i] = tools.fft(wv, mesh)
-    rhoR = rhoG = None
+    if xctype == 'LDA':
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
+    else:
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
+    excsum += float(rhoR[0].dot(exc[:,0])) * weight
+    wv = weight * vxc
+    wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
+    rhoR = rhoG = exc = vxc = wv = None
     log.debug('Multigrid exc %s  nelec %s', excsum, nelec)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    if with_j:
+        wv_freq[0] += vG
     if xctype == 'LDA':
-        if with_j:
-            wv_freq[:,0] += vG
-            veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
+        veff = _get_j_pass2(ni, wv_freq[None,0], hermi, kpts_band, verbose=log)
     else:
-        if with_j:
-            wv_freq[:,0] += vG
-        veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
+        veff = _get_gga_pass2(ni, wv_freq[None,:4], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
-            veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
+            veff += _get_tau_pass2(ni, wv_freq[None,4], hermi, kpts_band, verbose=log)
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
 
     shape = list(dm_kpts.shape)
@@ -603,7 +597,6 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     nset //= 2
     # Disable GKS
     assert nset == 1
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
 
     xctype = ni._xc_type(xc_code)
     if xctype == 'LDA':
@@ -617,17 +610,17 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     mesh = ni.mesh
     ngrids = np.prod(mesh)
     rhoG = _eval_rhoG(ni, dms, hermi, kpts)
-    rhoG = rhoG.reshape(nset,2,1,ngrids)
+    rhoG = rhoG.reshape(2,1,ngrids)
     if xctype != 'LDA':
         Gv = cp.asarray(cell.get_Gv(mesh))
-        rhoG = cp.repeat(rhoG, nvar, axis=2)
-        rhoG[:,:,1:4] *= 1j
-        rhoG[:,:,1:4] *= Gv.T
+        rhoG = cp.repeat(rhoG, nvar, axis=1)
+        rhoG[:,1:4] *= 1j
+        rhoG[:,1:4] *= Gv.T
         if xctype == 'MGGA':
-            rhoG[:,:,4] = _eval_tauG(ni, dms, hermi, kpts)
+            rhoG[:,4] = _eval_tauG(ni, dms, hermi, kpts)
 
     coulG = tools.get_coulG(cell, mesh=mesh)
-    rho_tot = rhoG[0,0,0] + rhoG[0,1,0]
+    rho_tot = rhoG[0,0] + rhoG[1,0]
     vG = rho_tot * coulG
     ecoul = .5 * float(rho_tot.conj().dot(vG).real) / vol
     log.debug('Multigrid Coulomb energy %s', ecoul)
@@ -636,40 +629,35 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
-    rhoR = cp.asarray(rhoR.reshape(nset,2,nvar,ngrids), order='C')
-    nelec = rhoR[0,:,0].sum(axis=-1).get() * weight
+    rhoR = cp.asarray(rhoR.reshape(2,nvar,ngrids), order='C')
+    nelec = rhoR[:,0].sum(axis=-1).get() * weight
 
-    wv_freq = cp.empty((nset,2,nvar,ngrids), dtype=np.complex128)
     excsum = 0
-    for i in range(nset):
-        if xctype == 'LDA':
-            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i,:,0], deriv=1, xctype=xctype)[:2]
-        else:
-            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i], deriv=1, xctype=xctype)[:2]
-        if i == 0:
-            rhoa, rhob = rhoR[0,:,0]
-            excsum += float(rhoa.dot(exc[:,0]) + rhob.dot(exc[:,1])) * weight
-        wv = weight * vxc
-        wv_freq[i] = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
-    rhoR = rhoG = None
+    if xctype == 'LDA':
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
+    else:
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
+    den = rhoR[:,0].sum(axis=0)
+    excsum += float(den.dot(exc[:,0])) * weight
+    wv = (weight * vxc).reshape(2*nvar,ngrids)
+    wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
+    rhoR = rhoG = den = exc = vxc = wv = None
     log.debug('Multigrid exc %s  nelec %s', excsum, nelec)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    if with_j:
+        wv_freq[:,0] += vG
     if xctype == 'LDA':
-        if with_j:
-            wv_freq[:,0] += vG
-            veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
+        veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
     else:
-        if with_j:
-            wv_freq[:,0] += vG
         veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
             veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
 
-    shape = list(dm_kpts.shape)
-    if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
-        shape[0] = kpts_band.shape[0]
+    shape = list(dm_kpts.shape) # [spin,nkpts,nao,nao]
+    if len(shape) == 4 and shape[1] != kpts_band.shape[1]:
+        shape[1] = kpts_band.shape[1]
     veff = veff.reshape(shape)
     veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
     return nelec, excsum, veff
