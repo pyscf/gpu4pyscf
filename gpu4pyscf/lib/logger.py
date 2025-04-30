@@ -106,6 +106,20 @@ def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):
         return t0,
 >>>>>>> origin/master
 
+def timer_silent(rec, cpu0=None, wall0=None, gpu0=None):
+    if gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
+        e0.synchronize()
+        return t0-cpu0, w0-wall0, cupy.cuda.get_elapsed_time(gpu0,e0)
+    elif wall0:
+        t0, w0 = process_clock(), perf_counter()
+        return t0-cpu0, w0-wall0
+    else:
+        t0 = process_clock()
+        return t0-cpu0,
+
+
 def _timer_debug1(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
     if rec.verbose >= DEBUG1:
         return timer(rec, msg, cpu0, wall0, gpu0)
@@ -150,6 +164,7 @@ class Logger(lib.logger.Logger):
     timer_debug2 = _timer_debug2
     timer = timer
     init_timer = init_timer
+    timer_silent = timer_silent
 
 def new_logger(rec=None, verbose=None):
     '''Create and return a :class:`Logger` object

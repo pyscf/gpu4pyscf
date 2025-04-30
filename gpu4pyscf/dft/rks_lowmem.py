@@ -127,6 +127,7 @@ class RKS(rks.RKS):
         vj = vhfopt.get_j(dm, log)
         assert vj.ndim == 3
         vj = vhfopt.apply_coeff_CT_mat_C(vj)
+        cput2 = log.timer_debug1('vj', *cput1)
         vj = pack_tril(vj[0])
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
@@ -155,8 +156,9 @@ class RKS(rks.RKS):
                 vklr = self._get_k_sorted_mol(dm, hermi, omega, log)
                 vklr *= (alpha - hyb)
                 vk += vklr
-            vk_last = getattr(vhf_last, 'vk', None)
             vk = vhfopt.apply_coeff_CT_mat_C(vk)
+            log.timer_debug1('vk', *cput2)
+            vk_last = getattr(vhf_last, 'vk', None)
             vk = pack_tril(vk[0])
             vk *= .5
             if vk_last is not None:

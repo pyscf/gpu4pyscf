@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,8 +22,10 @@ import sys
 import numpy as np
 import scipy.linalg
 import cupyx.scipy.linalg
+from gpu4pyscf.tdscf import math_helper
+import time
 from pyscf.lib.parameters import MAX_MEMORY
-from pyscf.lib import logger
+from gpu4pyscf.lib import logger
 from pyscf.lib.linalg_helper import _sort_elast, _outprod_to_subspace
 try:
     from pyscf.lib.exceptions import LinearDependencyError
@@ -87,7 +89,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
 
     if isinstance(x0, np.ndarray) and x0.ndim == 1:
         x0 = x0[None,:]
-    
+
     x0 = cp.asarray(x0)
 
     x0_size = x0.shape[1]
@@ -1057,3 +1059,496 @@ def _sort_elast_gpu(elast, conv_last, vlast, v, log):
     conv[~found] = False
     e[~found] = 0.
     return e, conv
+
+def _time_add(log, t_total, t_start):
+    ''' t_total: list
+        t_start: tuple
+
+        In-place revise t_total, add the time elapsed since t_start
+    '''
+    current_t = log.timer_silent(*t_start)
+    for i, val in enumerate(current_t):
+        t_total[i] += val
+
+def _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_fill_holder, t_total):
+    '''
+    Timing breakdown:
+                            CPU(sec)  wall(sec)    GPU(ms) | Percentage
+    AX product                 0.14       0.04      43.28    33.7   31.9   32.0
+    proj to subspace           0.00       0.00       2.25     0.5    1.6    1.7
+    solve subspace             0.22       0.06      63.04    53.8   46.5   46.5
+    proj to full space         0.00       0.00       0.64     0.2    0.4    0.5
+    fill holder                0.02       0.01       6.74     4.1    5.0    5.0
+    Total                      0.41       0.14     135.44   100.0  100.0  100.0
+    '''
+    time_labels = ["CPU(sec)", "wall(sec)", "GPU(ms)"]
+    labels = time_labels[:len(t_total)]
+
+    log.info("Timing breakdown:")
+    header_time = " ".join(f"{label:>10}" for label in labels)
+    log.info(f"{'':<20}  {header_time} | Percentage ")
+
+    timers = {
+        'mat vec product':t_mvp,
+        'proj subspace':  t_subgen,
+        'solve subspace': t_solve_sub,
+        'proj fullspace': t_sub2full,
+        'fill holder':    t_fill_holder,
+        'Total':          t_total
+    }
+    for entry, cost in timers.items():
+        time_str = " ".join(f"{x:>10.2f}" for x in cost)
+        percent_str = " ".join(f"{x/y*100:>6.1f}" for x, y in zip(cost, t_total))
+        log.info(f"{entry:<20} {time_str}  {percent_str}")
+
+
+# TODO: merge with eigh, write a Class of krylov method,
+# to allow ris initial guess/preconditioner, single precision, non-orthogonalized Krylov subspace (nKs) method
+def Davidson(matrix_vector_product,
+                    hdiag,
+                    N_states=20,
+                    conv_tol=1e-5,
+                    max_iter=25,
+                    GS=True,
+                    single=False,
+                    verbose=logger.INFO):
+    '''
+    same as eigh, but support
+        1) single precision
+        2) non-orthogonalized Krylov subspace (nKs) method
+        3) c-contiguous memory
+
+    Solve symmetric eigenvalues:
+    AX = XΩ
+
+    Args:
+        matrix_vector_product: function(X) -> AX
+             return AX
+        hdiag: 1D array
+             diagonal of the Hamiltonian matrix
+
+    Kwargs:
+        N_states: int
+             number of eigenvalues to solve
+        conv_tol: float
+             convergence tolerance
+        max_iter: int
+             maximum iterations
+        GS: bool
+             use Gram-Schmidt orthogonalization
+        single: bool
+             use single precision
+
+    Returns:
+        omega: 1D array
+             eigenvalues
+        X: 2D array  (in c-order, each row is a eigenvector)
+             eigenvectors
+    '''
+    if isinstance(verbose, logger.Logger):
+        log = verbose
+    else:
+        log = logger.Logger(sys.stdout, verbose)
+
+    if single:
+        log.info('Using single precision')
+        assert hdiag.dtype == cp.float32
+    else:
+        log.info('Using double precision')
+        assert hdiag.dtype == cp.float64
+
+    log.info('====== Davidson Diagonalization Starts ======')
+    logger.TIMER_LEVEL = 4
+    logger.DEBUG1      = 4
+
+    ''' cpu0 = (cpu time, wall time, gpu time) '''
+    cpu0 = log.init_timer()
+
+    A_size = hdiag.shape[0]
+    log.info(f'size of A matrix = {A_size}')
+    size_old = 0
+    size_new = min([N_states+8, 2*N_states, A_size])
+
+
+
+    max_N_mv = max_iter*N_states + size_new
+
+    unit = 4 if single else 8
+    log.info(f'  V and W holder are going to take { 2 * max_N_mv * A_size * unit / (1024 ** 2):.2f} MB memory')
+
+
+    V_holder = cp.zeros((max_N_mv, A_size),dtype=cp.float32 if single else cp.float64)
+    W_holder = cp.empty_like(V_holder)
+    sub_A_holder = cp.empty((max_N_mv,max_N_mv),dtype=cp.float32 if single else cp.float64)
+
+    '''
+    generate the initial guesss and put into the basis holder V_holder
+    '''
+    V_holder = math_helper.TDA_diag_initial_guess(V_holder=V_holder, N_states=size_new, hdiag=hdiag)
+
+    if GS:
+        log.info('Using Gram-Schmidt orthogonalization')
+        fill_holder = math_helper.Gram_Schmidt_fill_holder
+    else:
+        log.info('Using non-orthogonalized Krylov subspace (nKs) method.')
+
+        citation = '''
+        Furche, Filipp, Brandon T. Krull, Brian D. Nguyen, and Jake Kwon.
+        Accelerating molecular property calculations with nonorthonormal Krylov space methods.
+        The Journal of Chemical Physics 144, no. 17 (2016).
+        '''
+        log.info(citation)
+        fill_holder = math_helper.nKs_fill_holder
+        s_holder = cp.empty_like(sub_A_holder)
+
+    ''' detailed timing for each sub module'''
+
+    t_mvp         = [0] * len(cpu0)
+    t_subgen      = [0] * len(cpu0)
+    t_solve_sub   = [0] * len(cpu0)
+    t_sub2full    = [0] * len(cpu0)
+    t_fill_holder = [0] * len(cpu0)
+    t_total       = [0] * len(cpu0)
+
+    for ii in range(max_iter):
+
+        '''matrix vector product'''
+        t0 = log.init_timer()
+
+        W_holder[size_old:size_new, :] = matrix_vector_product(V_holder[size_old:size_new, :])
+
+        _time_add(log, t_mvp, t0)
+
+
+        ''' project into krylov space (subspace)'''
+        t0 = log.init_timer()
+
+        sub_A_holder = math_helper.gen_VW(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetry=True)
+        sub_A = sub_A_holder[:size_new,:size_new]
+
+        _time_add(log, t_subgen, t0)
+
+        # #for debug
+        # sub_A = math_helper.utriangle_symmetrize(sub_A)
+        # sub_A = math_helper.symmetrize(sub_A)
+
+        '''
+        Diagonalize the subspace Hamiltonian, and sorted.
+        omega[:N_states] are smallest N_states eigenvalues
+        '''
+        t0 = log.init_timer()
+        if GS:
+            omega, x = cp.linalg.eigh(sub_A)
+        else:
+            s_holder = math_helper.gen_VW(s_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
+            overlap_s = s_holder[:size_new,:size_new]
+            omega, x = scipy.linalg.eigh(sub_A.get(), overlap_s.get())
+            omega = cp.asarray(omega)
+            x = cp.asarray(x)
+
+        omega = omega[:N_states]
+        x = x[:,:N_states]
+
+        _time_add(log, t_solve_sub, t0)
+
+
+        ''' project back to full space '''
+        t0 = log.init_timer()
+        full_X = cp.dot(x.T, V_holder[:size_new, :])
+        _time_add(log, t_sub2full, t0)
+
+
+
+        ''' compute resdidual and generate new guess'''
+        AV = cp.dot(x.T, W_holder[:size_new, :])
+        residual = AV - omega.reshape(-1, 1) * full_X
+
+        r_norms = cp.linalg.norm(residual, axis=1)
+        max_norm = cp.max(r_norms)
+        log.info(f'iter: {ii+1:<3d}   max|R|: {max_norm:<12.2e}  subspace: {sub_A.shape[0]:<8d}')
+        if max_norm < conv_tol or ii == (max_iter-1):
+            break
+
+        index_bool = r_norms > conv_tol
+
+        new_guess = math_helper.TDA_diag_preconditioner(residual=residual[index_bool,:],
+                                                        omega=omega[index_bool],
+                                                        hdiag=hdiag)
+
+        t0 = log.init_timer()
+        size_old = size_new
+        V_holder, size_new = fill_holder(V_holder, size_old, new_guess)
+
+        _time_add(log, t_fill_holder, t0)
+
+
+    if ii == max_iter-1 and max_norm >= conv_tol:
+        log.warn(f'=== Warning: Davidson not converged below {conv_tol:.2e} Due to Iteration Limit ===')
+        log.warn(f'current residual norms: {r_norms}')
+
+    log.info(f'Finished in {ii+1:d} steps')
+
+
+
+    log.info(f'Maximum residual norm = {max_norm:.2e}')
+    log.info(f'Final subspace size = {sub_A.shape[0]:d}')
+
+
+    _time_add(log, t_total, cpu0)
+
+    log.timer('Davidson total cost', *cpu0)
+    if log.verbose >= logger.INFO:
+        _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_fill_holder, t_total)
+
+
+    log.info('========== Davidson Diagonalization Done ==========')
+    return omega, full_X
+
+# TODO: merge with real_eig, write a Class of krylov method for Casida problem, allowing ris initial guess/preconditioner
+def Davidson_Casida(matrix_vector_product,
+                        hdiag,
+                        N_states=20,
+                        conv_tol=1e-5,
+                        max_iter=25,
+                        GS=True,
+                        single=False,
+                        verbose=logger.NOTE):
+    '''
+    [ A B ] X - [1   0] Y Ω = 0
+    [ B A ] Y   [0  -1] X   = 0
+
+    same as real_eig, but support
+    1) single precision
+    2) non-orthogonalized Krylov subspace (nKs) method
+    3) c-contiguous memory
+
+    Args:
+        matrix_vector_product: function
+            matrix vector product
+        hdiag: array
+            diagonal of the Hamiltonian matrix
+
+    Kwargs:
+        N_states: int
+            number of states to be solved
+        conv_tol: float
+            convergence tolerance
+        max_iter: int
+            maximum number of iterations
+        GS: bool
+            use Gram-Schmidt orthogonalization
+        single: bool
+            use single precision
+        verbose: logger.Logger
+            logger object
+
+    Returns:
+        omega: 1D array
+             eigenvalues
+        X_full: 2D array (in c-order, each row is a eigenvector)
+             eigenvectors
+        Y_full: 2D array (in c-order, each row is a eigenvector)
+             eigenvectors
+    '''
+    if isinstance(verbose, logger.Logger):
+        log = verbose
+    else:
+        log = logger.Logger(sys.stdout, verbose)
+
+    if single:
+        log.info('Using single precision')
+        assert hdiag.dtype == cp.float32
+    else:
+        log.info('Using double precision')
+        assert hdiag.dtype == cp.float64
+
+
+    log.info('======= TDDFT Eigen Solver Statrs =======')
+
+    ''' cpu0 = (cpu time, wall time, gpu time) '''
+    cpu0 = log.init_timer()
+
+    A_size = hdiag.shape[0]
+    log.info(f'size of A matrix = {A_size}')
+
+
+    size_old = 0
+    size_new = min([N_states+8, 2*N_states, A_size])
+
+    max_N_mv = (max_iter+1)*N_states
+
+    '''
+    [U1] = [A B][V]
+    [U2]   [B A][W]
+
+    U1 = AV + BW
+    U2 = AW + BV
+
+    a = [V.T W.T][A B][V] = [V.T W.T][U1] = VU1 + WU2
+                 [B A][W]            [U2]
+    '''
+
+    unit = 4 if single else 8
+    log.info(f'V W U1 U2 holder are going to take { 4 * max_N_mv * A_size * unit / (1024 ** 3):.2f} GB memory')
+
+
+    V_holder = cp.zeros((max_N_mv, A_size),dtype=cp.float32 if single else cp.float64)
+    W_holder = cp.zeros_like(V_holder)
+
+    U1_holder = cp.empty_like(V_holder)
+    U2_holder = cp.empty_like(V_holder)
+
+    VU1_holder = cp.empty((max_N_mv,max_N_mv),dtype=cp.float32 if single else cp.float64)
+    VU2_holder = cp.empty_like(VU1_holder)
+    WU1_holder = cp.empty_like(VU1_holder)
+    WU2_holder = cp.empty_like(VU1_holder)
+
+    VV_holder = cp.empty_like(VU1_holder)
+    VW_holder = cp.empty_like(VU1_holder)
+    WW_holder = cp.empty_like(VU1_holder)
+
+    '''
+    set up initial guess, V= TDA initial guess, W=0
+    '''
+
+    V_holder = math_helper.TDA_diag_initial_guess(V_holder=V_holder,
+                                                N_states=size_new,
+                                                hdiag=hdiag)
+
+    if GS:
+        log.info('Using Gram-Schmidt orthogonalization')
+        fill_holder = math_helper.VW_Gram_Schmidt_fill_holder
+    else:
+        log.info('Using non-orthogonalized Krylov subspace (nKs) method.')
+
+        citation = '''
+        Furche, Filipp, Brandon T. Krull, Brian D. Nguyen, and Jake Kwon.
+        Accelerating molecular property calculations with nonorthonormal Krylov space methods.
+        The Journal of Chemical Physics 144, no. 17 (2016).
+        '''
+        log.info(citation)
+        fill_holder = math_helper.VW_nKs_fill_holder
+
+    ''' detailed timing for each sub module'''
+
+    t_mvp         = [0] * len(cpu0)
+    t_subgen      = [0] * len(cpu0)
+    t_solve_sub   = [0] * len(cpu0)
+    t_sub2full    = [0] * len(cpu0)
+    t_fill_holder = [0] * len(cpu0)
+    t_total       = [0] * len(cpu0)
+
+    omega_backup, X_backup, Y_backup = None, None, None
+    for ii in range(max_iter):
+
+
+        t0 = log.init_timer()
+        U1_holder[size_old:size_new, :], U2_holder[size_old:size_new, :] = matrix_vector_product(
+                                                                            X=V_holder[size_old:size_new, :],
+                                                                            Y=W_holder[size_old:size_new, :])
+        _time_add(log, t_mvp, t0)
+
+        '''
+        generate the subspace matrices
+        '''
+        t0 = log.init_timer()
+        (sub_A, sub_B, sigma, pi,
+        VU1_holder, WU2_holder, VU2_holder, WU1_holder,
+        VV_holder, WW_holder, VW_holder) = math_helper.gen_sub_ab(
+                                                    V_holder, W_holder, U1_holder, U2_holder,
+                                                    VU1_holder, WU2_holder, VU2_holder, WU1_holder,
+                                                    VV_holder, WW_holder, VW_holder,
+                                                    size_old, size_new)
+
+        _time_add(log, t_subgen, t0)
+
+        '''
+        solve the eigenvalue omega in the subspace
+        '''
+        t0 = log.init_timer()
+        omega, x, y = math_helper.TDDFT_subspace_eigen_solver(sub_A, sub_B, sigma, pi, N_states)
+
+        _time_add(log, t_solve_sub, t0)
+
+        '''
+        compute the residual
+        R_x = U1x + U2y - X_full*omega
+        R_y = U2x + U1y + Y_full*omega
+        X_full = Vx + Wy
+        Y_full = Wx + Vy
+        '''
+        t0 = log.init_timer()
+
+        V = V_holder[:size_new,:]
+        W = W_holder[:size_new,:]
+        U1 = U1_holder[:size_new, :]
+        U2 = U2_holder[:size_new, :]
+
+        X_full = cp.dot(x.T, V) + cp.dot(y.T, W)
+        Y_full = cp.dot(x.T, W) + cp.dot(y.T, V)
+
+
+        R_x = cp.dot(x.T, U1) + cp.dot(y.T, U2) - omega.reshape(-1, 1) * X_full
+        R_y = cp.dot(x.T, U2) + cp.dot(y.T, U1) + omega.reshape(-1, 1) * Y_full
+
+        _time_add(log, t_sub2full, t0)
+
+        ''' compute the residual '''
+        residual = cp.hstack((R_x, R_y))
+
+        r_norms = cp.linalg.norm(residual, axis=1)
+
+        max_norm = cp.max(r_norms)
+
+        log.info(f'iter: {ii+1:<3d}, max|R|: {max_norm:<10.2e} subspace_size = {sub_A.shape[0]}')
+
+        if max_norm < conv_tol or ii == (max_iter -1):
+            # math_helper.show_memory_info('After last Davidson iteration')
+            break
+
+        index_bool = r_norms > conv_tol
+
+        '''
+        preconditioning step
+        '''
+        X_new, Y_new = math_helper.TDDFT_diag_preconditioner(R_x=R_x[index_bool,:],
+                                                            R_y=R_y[index_bool,:],
+                                                            omega=omega[index_bool],
+                                                            hdiag=hdiag)
+
+        '''
+        GS and symmetric orthonormalization
+        '''
+        t0 = log.init_timer()
+        size_old = size_new
+        V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
+                                                    W_holder=W_holder,
+                                                    X_new=X_new,
+                                                    Y_new=Y_new,
+                                                    m=size_old,
+                                                    double=False)
+        _time_add(log, t_fill_holder, t0)
+
+        if size_new == size_old:
+            log.warn('All new guesses kicked out!!!!!!!')
+            omega, X_full, Y_full = omega_backup, X_backup, Y_backup
+            break
+        omega_backup, X_backup, Y_backup = omega, X_full, Y_full
+
+    if ii == (max_iter -1) and max_norm >= conv_tol:
+        log.warn(f'===  Warning: TDDFT eigen solver not converged below {conv_tol:.2e} due to max iteration limit ===')
+        log.warn('max residual norms', cp.max(r_norms))
+
+    log.info(f'Finished in {ii+1:d} steps')
+    log.info(f'final subspace = {sub_A.shape[0]}' )
+    log.info(f'max_norm = {max_norm:.2e}')
+
+    log.timer('Davidson total cost', *cpu0)
+    if log.verbose >= logger.INFO:
+        _time_add(log, t_total, cpu0)
+        _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_fill_holder, t_total)
+
+    log.info('======= TDDFT Eigen Solver Done =======' )
+
+    return omega, X_full, Y_full
+
