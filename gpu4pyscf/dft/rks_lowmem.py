@@ -195,7 +195,7 @@ class RKS(rks.RKS):
         self.scf_summary['coul'] = ecoul
         self.scf_summary['exc'] = exc
         logger.debug(self, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
-        return e_tot, e2
+        return e_tot, e_tot-e1
 
     def to_cpu(self):
         raise NotImplementedError
