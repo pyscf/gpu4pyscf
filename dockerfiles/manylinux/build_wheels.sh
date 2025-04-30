@@ -14,6 +14,10 @@ export CUTENSOR_DIR=/usr/local/cuda
 export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
+sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
+sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
+sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
+
 # blas is required by DFTD3 and DFTD4
 yum install -y openblas-devel
 
@@ -23,7 +27,7 @@ for PYBIN in /opt/python/cp311-cp311/bin; do
     rm -rf /gpu4pyscf/build
     rm -rf /gpu4pyscf/gpu4pyscf/lib/deps
     rm -rf /gpu4pyscf/tmp/*
-    rm -rf /gpu4pyscf/put4pyscf/lib/*.so
+    rm -rf /gpu4pyscf/gpu4pyscf/lib/*.so
     "${PYBIN}/python3" -m pip install --upgrade pip
     "${PYBIN}/pip" wheel /gpu4pyscf/ --no-deps -w /gpu4pyscf/tmp/
     repair_wheel /gpu4pyscf/tmp/*.whl
