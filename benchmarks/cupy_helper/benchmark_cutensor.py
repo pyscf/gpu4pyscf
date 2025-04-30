@@ -31,8 +31,6 @@ b0 = b[:,64:480]
 perf = profiler.benchmark(contract, ('ijk,lk->ijl', a0, b0), n_repeat=20, n_warmup=3)
 flops = 2*np.prod(a0.shape) * b0.shape[0]
 print(flops/perf.gpu_times.mean()/1024**3, 'GFLOPS')
-<<<<<<< HEAD
-=======
 
 print('benchmarking tensor contraction with stride')
 a0 = a[64:480,:,:128]
@@ -83,4 +81,3 @@ print(cupy.matmul(b0.T,a0).shape)
 #handle = cublas.create()
 perf = profiler.benchmark(cupy.matmul, (b0.T,a0), n_repeat=20, n_warmup=3)
 print(flops/perf.gpu_times.mean(), 'GFLOPS')
->>>>>>> origin/master
