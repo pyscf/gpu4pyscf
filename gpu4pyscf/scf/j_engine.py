@@ -58,12 +58,10 @@ def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     dm = cp.asarray(dm, order='C')
     dms = dm.reshape(-1,nao_orig,nao_orig)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
-    n_dm = dms.shape[0]
-    assert n_dm == 1
     if hermi != 1:
         dms = transpose_sum(dms)
-    else:
-        dms *= 2.
+        dms *= .5
+
     vj = vhfopt.get_j(dms, log)
     #:vj = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, cp.asarray(vj), vhfopt.coeff)
     vj = vhfopt.apply_coeff_CT_mat_C(vj)
@@ -121,8 +119,9 @@ class _VHFOpt(jk._VHFOpt):
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
+        assert group_size is None
         sorted_mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = \
-                group_basis(mol, self.tile, group_size, sparse_coeff=True)
+                group_basis(mol, 1, group_size, sparse_coeff=True)
         self.sorted_mol = sorted_mol
         self.ao_idx = ao_idx
         self.l_ctr_pad_counts = l_ctr_pad_counts
@@ -155,8 +154,7 @@ class _VHFOpt(jk._VHFOpt):
         q_cond = np.log(q_cond + 1e-300).astype(np.float32)
         self.q_cond_cpu = q_cond
 
-        tile = self.tile
-        assert tile == 1
+        assert self.tile == 1
         self._tile_q_cond_cpu = q_cond
 
         if mol.omega < 0:
@@ -165,6 +163,9 @@ class _VHFOpt(jk._VHFOpt):
         return self
 
     def get_j(self, dms, verbose):
+        if callable(dms):
+            dms = dms()
+        assert dms.ndim == 3
         log = logger.new_logger(self.mol, verbose)
         sorted_mol = self.sorted_mol
         prim_mol = self.prim_mol
@@ -172,6 +173,7 @@ class _VHFOpt(jk._VHFOpt):
         ao_loc = sorted_mol.ao_loc
         n_dm, nao = dms.shape[:2]
         assert nao == ao_loc[-1]
+        assert n_dm == 1
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
@@ -333,6 +335,7 @@ class _VHFOpt(jk._VHFOpt):
             ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
             prim_mol._bas.ctypes, _env.ctypes)
         vj = transpose_sum(asarray(vj))
+        vj *= 2.
 
         h_shls = self.h_shls
         if h_shls:

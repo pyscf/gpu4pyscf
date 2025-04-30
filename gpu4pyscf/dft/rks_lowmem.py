@@ -21,7 +21,7 @@ import cupy as cp
 from pyscf import lib as pyscf_lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
-from gpu4pyscf.scf import hf_lowmem, jk
+from gpu4pyscf.scf import hf_lowmem, jk, j_engine
 from gpu4pyscf.lib.cupy_helper import (
     tag_array, pack_tril, get_avail_mem, asarray)
 from pyscf import __config__
@@ -106,19 +106,22 @@ class RKS(rks.RKS):
         cput1 = log.timer_debug1('vxc tot', *cput0)
 
         omega = mol.omega
-        vhfopt = self._opt_gpu.get(omega)
-        if vhfopt is None:
-            vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
-        dm = self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
+        if omega in self._opt_gpu:
+            vhfopt, jopt = self._opt_gpu[omega]
+        else:
+            vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
+            self._opt_gpu[omega] = (vhfopt, jopt)
 
         cp.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()
         log.debug1('available GPU memory for get_jk in rks.get_veff: %.3f GB',
                    mem_avail/1e9)
 
-        vj = vhfopt.get_j(dm, log)
+        dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, jopt)
+        vj = jopt.get_j(dm, log)
         assert vj.ndim == 3
-        vj = vhfopt.apply_coeff_CT_mat_C(vj)
+        vj = jopt.apply_coeff_CT_mat_C(vj)
         cput2 = log.timer_debug1('vj', *cput1)
         vj = pack_tril(vj[0])
         vj_last = getattr(vhf_last, 'vj', None)
@@ -133,6 +136,7 @@ class RKS(rks.RKS):
         vk = None
         if ni.libxc.is_hybrid_xc(self.xc):
             omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+            dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
             if omega == 0:
                 vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
                 vk *= hyb
