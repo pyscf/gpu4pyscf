@@ -44,6 +44,7 @@ libmgrid.MG_eval_rho_orth.restype = ctypes.c_int
 libmgrid.MG_eval_mat_lda_orth.restype = ctypes.c_int
 libmgrid.MG_eval_mat_gga_orth.restype = ctypes.c_int
 libmgrid.MG_init_constant.restype = ctypes.c_int
+libmgrid.overlap_estimation.restype = ctypes.c_int
 
 PRIMBAS_ANG = 0
 PRIMBAS_EXP = 1
@@ -87,7 +88,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     vj_kpts = _get_j_pass2(ni, vG, hermi, kpts_band)
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None):
+def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -123,7 +124,7 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks(xctype)
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     nf3 = nf2*(lmax*2+3)//3
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
@@ -200,7 +201,7 @@ def _eval_tauG(ni, dm_kpts, hermi=1, kpts=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('MGGA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     nf3 = nf2*(lmax*2+3)
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
@@ -263,7 +264,7 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('LDA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+1)) * WARP_SIZE
@@ -338,7 +339,7 @@ def _get_gga_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('GGA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+2)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+2)) * WARP_SIZE
@@ -413,7 +414,7 @@ def _get_tau_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('MGGA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+3)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+3)) * WARP_SIZE
@@ -511,7 +512,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     vol = cell.vol
     mesh = ni.mesh
     ngrids = np.prod(mesh)
-    rhoG = _eval_rhoG(ni, dms, hermi, kpts)
+    rhoG = _eval_rhoG(ni, dms, hermi, kpts, xctype)
     rhoG = rhoG.reshape(1,ngrids)
     if xctype != 'LDA':
         Gv = cp.asarray(cell.get_Gv(mesh))
@@ -609,7 +610,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     vol = cell.vol
     mesh = ni.mesh
     ngrids = np.prod(mesh)
-    rhoG = _eval_rhoG(ni, dms, hermi, kpts)
+    rhoG = _eval_rhoG(ni, dms, hermi, kpts, xctype)
     rhoG = rhoG.reshape(2,1,ngrids)
     if xctype != 'LDA':
         Gv = cp.asarray(cell.get_Gv(mesh))
@@ -931,51 +932,72 @@ class Task:
     l: int
     shl_pair_idx: np.ndarray
 
-def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
-    log = logger.new_logger(cell)
-    t0 = log.init_timer()
-    a = cell.lattice_vectors()
-    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+DEBUG = False
 
-    vol = cell.vol
-    weight_penalty = vol
-    precision = cell.precision / max(weight_penalty, 1)
-
-    cell0_nprims = len(prim_bas)
-    ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG])
-    es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]])
-    cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]))
-    #TODO: create different task plans for LDA, GGA and MGGA
-    cs *= es*2
+def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
+                          ao_loc_in_cell0, precision, xctype, hermi=1):
+    ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG], dtype=np.int32)
+    es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]], dtype=np.float32)
+    cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]), dtype=np.float32)
+    if xctype == 'MGGA' or xctype == 'GGA':
+        cs *= es*2
     ptr_coords = supmol_bas[:,PRIMBAS_COORD]
     bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
-    log.debug1('%d primitive shells in cell0, %d shells in supmol',
-               cell0_nprims, len(supmol_bas))
 
-    # Estimate <cell0|supmol> overlap
-    li = ls[:cell0_nprims,None]
-    lj = ls[None,:]
-    lij = li + lj
-    aij = es[:cell0_nprims,None] + es
-    fi = es[:cell0_nprims,None] / aij
-    fj = es[None,:] / aij
-    theta = es[:cell0_nprims,None] * fj
-    #:rirj = bas_coords[:cell0_nprims,None,:] - bas_coords
-    #:dr = cp.linalg.norm(rirj, axis=2)
-    dr = dist_matrix(bas_coords[:cell0_nprims], bas_coords)
-    dri = fj * dr
-    drj = fi * dr
-    fac_dri = (li * .5/aij + dri**2) ** (li*.5)
-    fac_drj = (lj * .5/aij + drj**2) ** (lj*.5)
-    rad = cell.vol**(-1./3) * dr + 1
-    surface = 4*np.pi * rad**2
-    fl = cp.where(surface > 1, surface, 1)
-    fac_norm = cs[:cell0_nprims,None]*cs * (np.pi/aij)**1.5
-    ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
-    # The hermitian symmetry in Coulomb matrix.
-    # FIXME: hermitian symmetry might not be available in methods like TDDFT
-    ovlp[ao_loc_in_cell0[:cell0_nprims,None] < ao_loc_in_cell0] = 0.
-    ovlp[ovlp > 1.] = 1.
+    if DEBUG:
+        # Estimate <cell0|supmol> overlap
+        li = ls[:cell0_nprims,None]
+        lj = ls[None,:]
+        lij = li + lj
+        aij = es[:cell0_nprims,None] + es
+        fi = es[:cell0_nprims,None] / aij
+        fj = es[None,:] / aij
+        theta = es[:cell0_nprims,None] * fj
+        #:rirj = bas_coords[:cell0_nprims,None,:] - bas_coords
+        #:dr = cp.linalg.norm(rirj, axis=2)
+        dr = dist_matrix(bas_coords[:cell0_nprims], bas_coords)
+        dri = fj * dr
+        drj = fi * dr
+        fac_dri = (li*.5) * cp.log(li * .5/aij + dri**2 + 1e-9)
+        fac_drj = (lj*.5) * cp.log(lj * .5/aij + drj**2 + 1e-9)
+        fac_norm = cp.log(cs[:cell0_nprims,None]*cs) + 1.5*cp.log(np.pi/aij)
+        log_ovlp = fac_norm - theta*dr**2 + fac_dri + fac_drj
+
+        rad = cell.vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        log_ovlp += np.log(surface)
+
+        # The hermitian symmetry in Coulomb matrix.
+        if hermi == 1:
+            # hermitian symmetry might not be available in methods like TDDFT
+            log_ovlp[ao_loc_in_cell0[:cell0_nprims,None] < ao_loc_in_cell0] = -1000
+        log_ovlp[log_ovlp > 0] = 0
+    else:
+        bas_coords = cp.asarray(bas_coords.T, dtype=np.float32, order='C')
+        ao_loc_in_cell0 = cp.asarray(ao_loc_in_cell0, dtype=np.int32)
+        log_cs = cp.asarray(cp.log(cs), dtype=np.float32)
+        supmol_nbas = len(supmol_bas)
+        log_ovlp = cp.empty((cell0_nprims, supmol_nbas), dtype=np.float32)
+        err = libmgrid.overlap_estimation(
+            ctypes.cast(log_ovlp.data.ptr, ctypes.c_void_p),
+            ctypes.cast(es.data.ptr, ctypes.c_void_p),
+            ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ao_loc_in_cell0.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ls.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(cell0_nprims),
+            ctypes.c_int(supmol_nbas),
+            ctypes.c_int(hermi))
+        if err != 0:
+            raise RuntimeError('overlap_estimation kernel failed')
+
+        rad = cell.vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        log_ovlp += np.log(surface)
+        li = ls[:cell0_nprims,None]
+        lj = ls[None,:]
+        lij = li + lj
+        aij = es[:cell0_nprims,None] + es
 
     # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
     # Factors for Ecut estimation should be
@@ -987,19 +1009,55 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
     #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
     # Here, this fac is approximately derived from the overlap integral
     #fac = fac_norm * fac_dri * fac_drj * fl / precision
-    fac = ovlp / precision
-    Ecut = cp.log(fac + 1.) * 2*aij
+    #fac = ovlp / precision
+    #Ecut = cp.log(fac + 1.) * 2*aij
+    log_fac = log_ovlp - np.log(precision)
+    Ecut = log_fac * (2*aij)
 
     # Estimate radius:
     # rho[r-Rp] = fl*cs[:cell0_nprims,None]*cs * exp(-theta*dr**2)
     #             * r**lij * exp(-aij*r**2)
     radius = 2.
-    #TODO: create different task plans for LDA, GGA and MGGA
-    # lij+2 may be required for MGGA as it raises anuglar momentum on both bra and ket
-    radius = (cp.log(ovlp/precision * radius**(lij+1) + 1.) / aij)**.5
-    radius = (cp.log(ovlp/precision * radius**(lij+1) + 1.) / aij)**.5
+    if xctype == 'MGGA':
+        # lij+2 for MGGA as it raises anuglar momentum on both bra and ket
+        l_inc = 2
+    elif xctype == 'GGA':
+        l_inc = 1
+    else:
+        l_inc = 0
+    #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
+    #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
+    radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
+    radius[radius < 0] = 1e-300
+    radius = cp.sqrt(radius)
+    radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
+    radius[radius < 0] = 1e-300
+    radius = cp.sqrt(radius)
+    ovlp_mask = log_fac >= 0
+    return ovlp_mask, Ecut, radius
+
+def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
+                 xctype='LDA', hermi=1):
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
+    a = cell.lattice_vectors()
+    assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
+
+    cell0_nprims = len(prim_bas)
+    vol = cell.vol
+    weight_penalty = vol
+    precision = cell.precision / max(weight_penalty, 1)
+    log.debug1('%d primitive shells in cell0, %d shells in supmol',
+               cell0_nprims, len(supmol_bas))
+    ovlp_mask, Ecut, radius = _ovlp_mask_estimation(
+        cell, cell0_nprims, supmol_bas, supmol_env, ao_loc_in_cell0, precision,
+        xctype, hermi)
     log.timer_debug1('Ecut and radius estimation in create_tasks', *t0)
 
+    ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG], dtype=np.int32)
+    li = ls[:cell0_nprims,None]
+    lj = ls[None,:]
+    lij = li + lj
     lmax = cell._bas[:,ANG_OF].max()
     assert lmax <= LMAX
     cell_len = a.diagonal()
@@ -1019,7 +1077,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
                               mesh, n_radius, rcut_threshold, l, n_pairs)
         return sub_tasks
 
-    remaining_mask = ovlp >= precision
+    remaining_mask, ovlp_mask = ovlp_mask, None
     Gbase = 2*np.pi / cell_len
     ngrid_min = 512
     mesh = np.asarray(cell.mesh)
@@ -1159,17 +1217,24 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         self.ao_loc_in_cell0 = ao_loc_in_cell0
         # Number of primitive shells
         self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
-        # A list of integral meshgrids for each task
-        #self.tasks = multigrid_tasks(cell)
-        prim_bas = supmol_bas[:self.primitive_nbas]
-        self.tasks = create_tasks(cell, prim_bas, supmol_bas, supmol_env,
-                                  ao_loc_in_cell0)
-        logger.debug(cell, 'Multigrid ntasks %s', len(self.tasks))
+        self._tasks = {}
+
+    def create_tasks(self, xctype, hermi=1):
+        xctype = xctype.upper()
+        if (xctype, hermi) in self._tasks:
+            tasks = self._tasks[xctype, hermi]
+        else:
+            prim_bas = self.supmol_bas[:self.primitive_nbas]
+            self._tasks[xctype, hermi] = tasks = create_tasks(
+                self.cell, prim_bas, self.supmol_bas, self.supmol_env,
+                self.ao_loc_in_cell0, xctype, hermi)
+            logger.debug(self.cell, 'Multigrid ntasks for %s: %s', xctype, len(tasks))
+        return tasks
 
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
-        self.tasks = None
+        self._tasks = {}
         return self
 
     def sort_orbitals(self, mat):
