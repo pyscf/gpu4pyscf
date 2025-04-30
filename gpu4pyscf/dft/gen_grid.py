@@ -481,7 +481,9 @@ class Grids(lib.StreamObject):
                     [self.coords, cupy.full((padding, 3), 1e-4)])
                 self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
                 self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
-        self.padding = padding
+            self.padding = padding
+        else:
+            self.padding = 0
 
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
@@ -491,6 +493,8 @@ class Grids(lib.StreamObject):
             self.atm_idx = self.atm_idx[idx]
             t0 = log.timer_debug1('sorting grids', *t0)
             self.grid_sorting_index = idx
+        else:
+            self.grid_sorting_index = cupy.arange(self.coords.shape[0])
 
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
