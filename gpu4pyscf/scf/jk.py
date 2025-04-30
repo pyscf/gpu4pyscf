@@ -508,6 +508,8 @@ class _VHFOpt:
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 tile_ij_mapping = tile_mappings[i,j]
                 tile_kl_mapping = tile_mappings[k,l]
+                if len(tile_ij_mapping) == 0 or len(tile_kl_mapping) == 0:
+                    continue
                 scheme = schemes[task]
                 err = kern(
                     vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),

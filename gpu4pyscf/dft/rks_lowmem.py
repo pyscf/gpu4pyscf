@@ -185,15 +185,17 @@ class RKS(rks.RKS):
         dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
         ecoul = float(vhf.vj.dot(dm_tril))
-        exc = vhf.exc
+        exc = float(vhf.exc)
         if vhf.vk is not None:
             exc -= float(vhf.vk.dot(dm_tril))
-        e2 = ecoul + exc
+        vtmp = h1e * 2
+        vtmp += vhf.vj
+        e_tot = float(vtmp.dot(dm_tril)) + exc
         self.scf_summary['e1'] = e1
         self.scf_summary['coul'] = ecoul
         self.scf_summary['exc'] = exc
         logger.debug(self, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
-        return e1+e2, e2
+        return e_tot, e2
 
     def to_cpu(self):
         raise NotImplementedError

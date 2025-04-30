@@ -325,10 +325,13 @@ class RHF(hf.RHF):
         dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
         e_coul = float(vhf.dot(dm_tril))
+        vtmp = h1e * 2
+        vtmp += vhf
+        e_tot = float(vtmp.dot(dm_tril))
         self.scf_summary['e1'] = e1
         self.scf_summary['e2'] = e_coul
         logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-        return e1+e_coul, e_coul
+        return e_tot, e_coul
 
     def to_cpu(self):
         raise NotImplementedError
