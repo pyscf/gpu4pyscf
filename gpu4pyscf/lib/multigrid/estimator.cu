@@ -92,4 +92,55 @@ int overlap_estimation(float *log_ovlp, float *exps, float *log_coeff,
     }
     return 0;
 }
+
+void filter_supmol_bas(int8_t *mask, double *Ls, int nimgs,
+                       int *es_sorted, int *bas, int nbas, double *env,
+                       float log_cutoff)
+{
+    for (int jsh = nbas; jsh < nbas*nimgs; ++jsh) {
+        int img = jsh / nbas;
+        int cell0_jsh = jsh % nbas;
+        int lj = bas[PRIMBAS_ANG+cell0_jsh*PRIMBAS_SLOTS];
+        float aj = env[bas[PRIMBAS_EXP+cell0_jsh*PRIMBAS_SLOTS]];
+        float cj = env[bas[PRIMBAS_COEFF+cell0_jsh*PRIMBAS_SLOTS]];
+        double *rj = env + bas[PRIMBAS_COORD+cell0_jsh*PRIMBAS_SLOTS];
+        float xj = rj[0] + Ls[img*3+0];
+        float yj = rj[1] + Ls[img*3+1];
+        float zj = rj[2] + Ls[img*3+2];
+        mask[jsh] = 0;
+        for (int n = 0; n < nbas; ++n) {
+            int ish = es_sorted[n];
+            int li = bas[PRIMBAS_ANG+ish*PRIMBAS_SLOTS];;
+            float ai = env[bas[PRIMBAS_EXP+ish*PRIMBAS_SLOTS]];;
+            float aij = ai + aj;
+            float fi = ai / aij;
+            float fj = aj / aij;
+            float theta = ai * fj;
+            double *ri = env + bas[PRIMBAS_COORD+ish*PRIMBAS_SLOTS];
+            float xi = ri[0];
+            float yi = ri[1];
+            float zi = ri[2];
+            float xjxi = xj - xi;
+            float yjyi = yj - yi;
+            float zjzi = zj - zi;
+            float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
+            float theta_rr = theta * rr_ij;
+            if (theta*rr_ij > REMOTE_THRESHOLD) {
+                continue;
+            }
+            float ci = env[bas[PRIMBAS_COEFF+ish*PRIMBAS_SLOTS]];
+            float dr = sqrtf(rr_ij);
+            float dri = fj * dr;
+            float drj = fi * dr;
+            float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
+            float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
+            float fac_norm = logf(fabsf(ci * cj)) + 1.717f - 1.5f * logf(aij);
+            float s = fac_norm - theta_rr + dri_fac + drj_fac;
+            if (s > log_cutoff) {
+                mask[jsh] = 1;
+                break;
+            }
+        }
+    }
+}
 }

@@ -527,7 +527,7 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
             ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
         if err != 0:
-            raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+            raise RuntimeError(f'{ll_pattern} overlap_img_idx failed')
         img_counts = counts_sorting = None
 
         # bas_ij stores the non-negligible primitive-pair indices.

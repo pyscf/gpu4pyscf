@@ -88,7 +88,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                 vk += vklr
             vxc -= vk * .5
             exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
-        t0 = log.timer('veff', *t0)
+        log.timer_debug1('veff', *t0)
         return vxc
 
     ground_state = (isinstance(dm, cp.ndarray) and dm.ndim == 2
@@ -111,7 +111,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             exc += enlc
             vxc += vnlc
             log.debug('nelec with nlc grids = %s', n)
-        log.timer('vxc', *t0)
+        log.timer_debug1('vxc', *t0)
 
     if not hybrid:
         vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
@@ -146,7 +146,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     else:
         ecoul = None
 
-    log.timer('veff', *t0)
+    log.timer_debug1('veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
     return vxc
 

@@ -30,7 +30,6 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-#from gpu4pyscf.pbc.df.int3c2e import libpbc
 from gpu4pyscf.pbc.df.fft import get_SI, _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
@@ -54,6 +53,8 @@ LMAX = 4
 SHM_SIZE = shm_size - 1024
 del shm_size
 WARP_SIZE = 32
+
+DEBUG = False
 
 def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -875,49 +876,83 @@ def to_primitive_bas(cell):
     prim_bas = np.asarray(np.vstack(prim_bas), dtype=np.int32)
     ao_loc_in_cell0 = np.asarray(np.hstack(ao_loc_in_cell0), dtype=np.int32)
 
-    # Transform to super-mole
-    Ls = cell.get_lattice_Ls()
-    Ls = Ls[np.linalg.norm(Ls+0.5, axis=1).argsort()]
-    nimgs = len(Ls)
-    ptr_coords = prim_bas[:,PRIMBAS_COORD]
-    bas_coords = cell._env[ptr_coords[:,None] + np.arange(3)]
+    if DEBUG:
+        # Transform to super-mole
+        Ls = cell.get_lattice_Ls()
+        Ls = Ls[np.linalg.norm(Ls-0.5, axis=1).argsort()]
+        nimgs = len(Ls)
+        ptr_coords = prim_bas[:,PRIMBAS_COORD]
+        bas_coords = cell._env[ptr_coords[:,None] + np.arange(3)]
 
-    es = prim_env[prim_bas[:,PRIMBAS_EXP]]
-    es_min = es.min()
-    theta = es * es_min / (es + es_min)
-    # rcut for each basis
-    raw_rcut = (np.log(1e6/cell.precision) / theta)**.5
-    raw_rcut[raw_rcut > cell.rcut] = cell.rcut
+        es = prim_env[prim_bas[:,PRIMBAS_EXP]]
+        es_min = es.min()
+        theta = es * es_min / (es + es_min)
+        # rcut for each basis
+        raw_rcut = (np.log(1e6/cell.precision) / theta)**.5
+        raw_rcut[raw_rcut > cell.rcut] = cell.rcut
 
-    # Keep the unit cell at the beginning
-    basLr = bas_coords + Ls[1:,None]
+        # Keep the unit cell at the beginning
+        basLr = bas_coords + Ls[1:,None]
 
-    # Filter very remote basis
-    #:atom_coords = cell.atom_coords()
-    #:dr = np.linalg.norm(atom_coords[:,None,None,:] - basLr, axis=3)
-    #:mask = (dr.min(axis=0) < raw_rcut).ravel()
-    # This code is slow, approximate dr.min() below by shifting the basis one
-    # image in the left and right.
-    # TODO: optimize this slow basis filtering code
-    atom_coords = cell.atom_coords()
-    shift = bas_coords[:,None] - atom_coords
-    shift_left = shift.min(axis=1)
-    shift_zero = abs(bas_coords[:,None] - atom_coords).min(axis=1)
-    shift_right = shift.max(axis=1)
+        # Filter very remote basis
+        #:atom_coords = cell.atom_coords()
+        #:dr = np.linalg.norm(atom_coords[:,None,None,:] - basLr, axis=3)
+        #:mask = (dr.min(axis=0) < raw_rcut).ravel()
+        # This code is slow, approximate dr.min() below by shifting the basis one
+        # image in the left and right.
+        atom_coords = cell.atom_coords()
+        shift = bas_coords[:,None] - atom_coords
+        shift_left = shift.min(axis=1)
+        shift_zero = abs(bas_coords[:,None] - atom_coords).min(axis=1)
+        shift_right = shift.max(axis=1)
 
-    r2 = np.min([(shift_left + Ls[1:,None])**2,
-                 (shift_zero + Ls[1:,None])**2,
-                 (shift_right + Ls[1:,None])**2], axis=0).sum(axis=2)
-    mask = (r2 < raw_rcut**2).ravel()
-    basLr = basLr.reshape(-1, 3)[mask]
-    _env = np.hstack([prim_env, basLr.ravel()])
-    extended_bas = _repeat(prim_bas, nimgs-1)[mask]
-    extended_bas[:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr)) * 3
-    supmol_bas = np.vstack([prim_bas, extended_bas])
+        r2 = np.min([(shift_left + Ls[1:,None])**2,
+                     (shift_zero + Ls[1:,None])**2,
+                     (shift_right + Ls[1:,None])**2], axis=0).sum(axis=2)
+        mask = (r2 < raw_rcut**2).ravel()
+        basLr = basLr.reshape(-1, 3)[mask]
+        _env = np.hstack([prim_env, basLr.ravel()])
+        extended_bas = _repeat(prim_bas, nimgs-1)[mask]
+        extended_bas[:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr)) * 3
+        supmol_bas = np.vstack([prim_bas, extended_bas])
 
-    ao_loc_in_cell0 = np.append(
-        ao_loc_in_cell0, _repeat(ao_loc_in_cell0, nimgs-1)[mask])
-    ao_loc_in_cell0 = np.asarray(ao_loc_in_cell0, dtype=np.int32)
+        ao_loc_in_cell0 = np.append(
+            ao_loc_in_cell0, _repeat(ao_loc_in_cell0, nimgs-1)[mask])
+        ao_loc_in_cell0 = np.asarray(ao_loc_in_cell0, dtype=np.int32)
+
+    else:
+        Ls = cell.get_lattice_Ls()
+        Ls = Ls[np.linalg.norm(Ls-.5, axis=1).argsort()]
+        nimgs = len(Ls)
+        nbas = len(prim_bas)
+        mask = np.empty(nbas*nimgs, dtype=np.int8)
+        mask[:nbas] = 1 # keep all basis in cell0
+        es = prim_env[prim_bas[:,PRIMBAS_EXP]]
+        es_sorted = np.asarray(np.argsort(es), dtype=np.int32)
+        vol = cell.vol
+        rad = vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        es_min = es.min()
+        lattice_sum_factor = 2*np.pi*cell.rcut/(vol*2*es_min) + surface
+        log_cutoff = np.log(cell.precision / lattice_sum_factor)
+        libmgrid.filter_supmol_bas(
+            mask.ctypes, Ls.ctypes, ctypes.c_int(nimgs),
+            es_sorted.ctypes,
+            prim_bas.ctypes, ctypes.c_int(nbas),
+            prim_env.ctypes, ctypes.c_float(log_cutoff))
+
+        mask = np.asarray(mask, dtype=bool)
+        prim_bas_idx = np.where(mask)[0] % nbas
+        supmol_bas = prim_bas[prim_bas_idx]
+        # Exclude the unit cell, as it is always placed at the beginning
+        ptr_coords = prim_bas[:,PRIMBAS_COORD]
+        bas_coords = prim_env[ptr_coords[:,None] + np.arange(3)]
+        basLr = bas_coords + Ls[1:,None]
+        basLr = basLr.reshape(-1, 3)[mask[nbas:]]
+        _env = np.hstack([prim_env, basLr.ravel()])
+        supmol_bas[nbas:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr))*3
+        ao_loc_in_cell0 = ao_loc_in_cell0[prim_bas_idx]
+
     return supmol_bas, _env, ao_loc_in_cell0
 
 def _repeat(a, repeats):
@@ -931,8 +966,6 @@ class Task:
     n_radius: int
     l: int
     shl_pair_idx: np.ndarray
-
-DEBUG = False
 
 def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
                           ao_loc_in_cell0, precision, xctype, hermi=1):
