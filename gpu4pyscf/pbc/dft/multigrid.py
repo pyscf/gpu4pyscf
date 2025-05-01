@@ -43,7 +43,8 @@ libmgrid.MG_eval_rho_orth.restype = ctypes.c_int
 libmgrid.MG_eval_mat_lda_orth.restype = ctypes.c_int
 libmgrid.MG_eval_mat_gga_orth.restype = ctypes.c_int
 libmgrid.MG_init_constant.restype = ctypes.c_int
-libmgrid.overlap_estimation.restype = ctypes.c_int
+libmgrid.ovlp_mask_estimation.restype = ctypes.c_int
+libmgrid.filter_supmol_bas.restype = ctypes.c_int
 
 PRIMBAS_ANG = 0
 PRIMBAS_EXP = 1
@@ -921,35 +922,53 @@ def to_primitive_bas(cell):
         ao_loc_in_cell0 = np.asarray(ao_loc_in_cell0, dtype=np.int32)
 
     else:
-        Ls = cell.get_lattice_Ls()
-        Ls = Ls[np.linalg.norm(Ls-.5, axis=1).argsort()]
+        Ls = cp.asarray(cell.get_lattice_Ls())
+        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
         nbas = len(prim_bas)
-        mask = np.empty(nbas*nimgs, dtype=np.int8)
-        mask[:nbas] = 1 # keep all basis in cell0
+
+        # A quick estimation of diffuseness for each primitive GTO
         es = prim_env[prim_bas[:,PRIMBAS_EXP]]
-        es_sorted = np.asarray(np.argsort(es), dtype=np.int32)
+        cs = prim_env[prim_bas[:,PRIMBAS_COEFF]]
+        ls = prim_env[prim_bas[:,ANG_OF]]
+        diffuseness = np.log(cs**2/cell.precision*10**ls + 1e-200) / es
+        # Find the diffused functions on each atom
+        diffuseness_order = np.argsort(-diffuseness)
+        _, uniq_atm_idx = np.unique(prim_bas[diffuseness_order,PRIMBAS_COORD], return_index=True)
+        uniq_Dbasis_idx = cp.asarray(diffuseness_order[uniq_atm_idx], dtype=np.int32)
+
         vol = cell.vol
         rad = vol**(-1./3) * cell.rcut + 1
         surface = 4*np.pi * rad**2
         es_min = es.min()
         lattice_sum_factor = 2*np.pi*cell.rcut/(vol*2*es_min) + surface
         log_cutoff = np.log(cell.precision / lattice_sum_factor)
-        libmgrid.filter_supmol_bas(
-            mask.ctypes, Ls.ctypes, ctypes.c_int(nimgs),
-            es_sorted.ctypes,
-            prim_bas.ctypes, ctypes.c_int(nbas),
-            prim_env.ctypes, ctypes.c_float(log_cutoff))
+        prim_bas_gpu = cp.asarray(prim_bas)
+        prim_env_gpu = cp.asarray(prim_env)
+        mask = cp.empty(nbas*nimgs, dtype=np.int8)
+        mask[:nbas] = 1 # keep all basis in cell0
+        err = libmgrid.filter_supmol_bas(
+            ctypes.cast(mask.data.ptr, ctypes.c_void_p),
+            ctypes.cast(Ls.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nimgs),
+            ctypes.cast(uniq_Dbasis_idx.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(uniq_Dbasis_idx)),
+            ctypes.cast(prim_bas_gpu.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nbas),
+            ctypes.cast(prim_env_gpu.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('filter_supmol_bas kernel failed')
 
-        mask = np.asarray(mask, dtype=bool)
-        prim_bas_idx = np.where(mask)[0] % nbas
+        mask = mask.astype(dtype=bool, copy=False)
+        prim_bas_idx = (cp.where(mask)[0] % nbas).get()
         supmol_bas = prim_bas[prim_bas_idx]
         # Exclude the unit cell, as it is always placed at the beginning
-        ptr_coords = prim_bas[:,PRIMBAS_COORD]
-        bas_coords = prim_env[ptr_coords[:,None] + np.arange(3)]
+        ptr_coords = prim_bas_gpu[:,PRIMBAS_COORD]
+        bas_coords = prim_env_gpu[ptr_coords[:,None] + cp.arange(3)]
         basLr = bas_coords + Ls[1:,None]
         basLr = basLr.reshape(-1, 3)[mask[nbas:]]
-        _env = np.hstack([prim_env, basLr.ravel()])
+        _env = cp.hstack([prim_env_gpu, basLr.ravel()]).get()
         supmol_bas[nbas:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr))*3
         ao_loc_in_cell0 = ao_loc_in_cell0[prim_bas_idx]
 
@@ -1005,14 +1024,64 @@ def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
             # hermitian symmetry might not be available in methods like TDDFT
             log_ovlp[ao_loc_in_cell0[:cell0_nprims,None] < ao_loc_in_cell0] = -1000
         log_ovlp[log_ovlp > 0] = 0
+
+        # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
+        # Factors for Ecut estimation should be
+        #     fac = cs[:,None]*cs * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
+        # where
+        #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
+        #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
+        #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
+        #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
+        # Here, this fac is approximately derived from the overlap integral
+        #fac = fac_norm * fac_dri * fac_drj * fl / precision
+        #fac = ovlp / precision
+        #Ecut = cp.log(fac + 1.) * 2*aij
+        log_fac = log_ovlp - np.log(precision)
+        Ecut = log_fac * (2*aij)
+
+        # Estimate radius:
+        # rho[r-Rp] = fl*cs[:cell0_nprims,None]*cs * exp(-theta*dr**2)
+        #             * r**lij * exp(-aij*r**2)
+        radius = 2.
+        if xctype == 'MGGA':
+            # lij+2 for MGGA as it raises anuglar momentum on both bra and ket
+            l_inc = 2
+        elif xctype == 'GGA':
+            l_inc = 1
+        else:
+            l_inc = 0
+        #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
+        #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
+        radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
+        radius[radius < 0] = 1e-300
+        radius = cp.sqrt(radius)
+        radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
+        radius[radius < 0] = 1e-300
+        radius = cp.sqrt(radius)
+        ovlp_mask = log_fac >= 0
     else:
         bas_coords = cp.asarray(bas_coords.T, dtype=np.float32, order='C')
         ao_loc_in_cell0 = cp.asarray(ao_loc_in_cell0, dtype=np.int32)
         log_cs = cp.asarray(cp.log(cs), dtype=np.float32)
         supmol_nbas = len(supmol_bas)
-        log_ovlp = cp.empty((cell0_nprims, supmol_nbas), dtype=np.float32)
-        err = libmgrid.overlap_estimation(
-            ctypes.cast(log_ovlp.data.ptr, ctypes.c_void_p),
+        Ecut = cp.empty((cell0_nprims, supmol_nbas), dtype=np.float32)
+        radius = cp.empty_like(Ecut)
+        ovlp_mask = cp.empty(Ecut.shape, dtype=np.int8)
+        # Estimate radius:
+        # rho[r-Rp] = fl*cs[:cell0_nprims,None]*cs * exp(-theta*dr**2)
+        #             * r**lij * exp(-aij*r**2)
+        if xctype == 'MGGA':
+            # lij+2 for MGGA as it raises anuglar momentum on both bra and ket
+            l_inc = 2
+        elif xctype == 'GGA':
+            l_inc = 1
+        else:
+            l_inc = 0
+        err = libmgrid.ovlp_mask_estimation(
+            ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
+            ctypes.cast(Ecut.data.ptr, ctypes.c_void_p),
+            ctypes.cast(radius.data.ptr, ctypes.c_void_p),
             ctypes.cast(es.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_coords.data.ptr, ctypes.c_void_p),
@@ -1020,53 +1089,11 @@ def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
             ctypes.cast(ls.data.ptr, ctypes.c_void_p),
             ctypes.c_int(cell0_nprims),
             ctypes.c_int(supmol_nbas),
-            ctypes.c_int(hermi))
+            ctypes.c_int(l_inc), ctypes.c_int(hermi),
+            ctypes.c_float(np.log(precision)))
         if err != 0:
-            raise RuntimeError('overlap_estimation kernel failed')
-
-        rad = cell.vol**(-1./3) * cell.rcut + 1
-        surface = 4*np.pi * rad**2
-        log_ovlp += np.log(surface)
-        li = ls[:cell0_nprims,None]
-        lj = ls[None,:]
-        lij = li + lj
-        aij = es[:cell0_nprims,None] + es
-
-    # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
-    # Factors for Ecut estimation should be
-    #     fac = cs[:,None]*cs * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
-    # where
-    #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
-    #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
-    #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
-    #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
-    # Here, this fac is approximately derived from the overlap integral
-    #fac = fac_norm * fac_dri * fac_drj * fl / precision
-    #fac = ovlp / precision
-    #Ecut = cp.log(fac + 1.) * 2*aij
-    log_fac = log_ovlp - np.log(precision)
-    Ecut = log_fac * (2*aij)
-
-    # Estimate radius:
-    # rho[r-Rp] = fl*cs[:cell0_nprims,None]*cs * exp(-theta*dr**2)
-    #             * r**lij * exp(-aij*r**2)
-    radius = 2.
-    if xctype == 'MGGA':
-        # lij+2 for MGGA as it raises anuglar momentum on both bra and ket
-        l_inc = 2
-    elif xctype == 'GGA':
-        l_inc = 1
-    else:
-        l_inc = 0
-    #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
-    #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
-    radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
-    radius[radius < 0] = 1e-300
-    radius = cp.sqrt(radius)
-    radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
-    radius[radius < 0] = 1e-300
-    radius = cp.sqrt(radius)
-    ovlp_mask = log_fac >= 0
+            raise RuntimeError('ovlp_mask_estimation kernel failed')
+        ovlp_mask = ovlp_mask.astype(dtype=bool, copy=False)
     return ovlp_mask, Ecut, radius
 
 def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
