@@ -62,7 +62,6 @@ def numerical_denlc(mf, dm, denlc_only = True):
 
     dx = 1e-5
     mol_copy = mol.copy()
-    mf_copy = mf.copy()
     numerical_gradient = np.zeros([mol.natm, 3])
     for i_atom in range(mol.natm):
         for i_xyz in range(3):
@@ -70,29 +69,31 @@ def numerical_denlc(mf, dm, denlc_only = True):
             xyz_p[i_atom, i_xyz] += dx
             mol_copy.set_geom_(xyz_p, unit='Bohr')
             mol_copy.build()
-            mf_copy.reset(mol_copy)
-            mf_copy.nlcgrids.build()
+            mf.reset(mol_copy)
+            mf.nlcgrids.build()
 
             if denlc_only:
-                get_veff_energy(mf_copy, mol = mol_copy, dm = dm)
-                energy_p = mf_copy.enlc
+                get_veff_energy(mf, mol = mol_copy, dm = dm)
+                energy_p = mf.enlc
             else:
-                energy_p = mf_copy.kernel()
+                energy_p = mf.kernel()
 
             xyz_m = mol.atom_coords()
             xyz_m[i_atom, i_xyz] -= dx
             mol_copy.set_geom_(xyz_m, unit='Bohr')
             mol_copy.build()
-            mf_copy.reset(mol_copy)
-            mf_copy.nlcgrids.build()
+            mf.reset(mol_copy)
+            mf.nlcgrids.build()
 
             if denlc_only:
-                get_veff_energy(mf_copy, mol = mol_copy, dm = dm)
-                energy_m = mf_copy.enlc
+                get_veff_energy(mf, mol = mol_copy, dm = dm)
+                energy_m = mf.enlc
             else:
-                energy_m = mf_copy.kernel()
+                energy_m = mf.kernel()
 
             numerical_gradient[i_atom, i_xyz] = (energy_p - energy_m) / (2 * dx)
+    mf.reset(mol)
+    mf.kernel()
 
     np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
     print(numerical_gradient)
