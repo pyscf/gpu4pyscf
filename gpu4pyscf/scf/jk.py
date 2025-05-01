@@ -431,7 +431,6 @@ class _VHFOpt:
         '''
         if callable(dms):
             dms = dms()
-        assert dms.ndim == 3
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
@@ -441,8 +440,7 @@ class _VHFOpt:
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
-        n_dm, nao = dms.shape[:2]
-        assert nao == ao_loc[-1]
+        assert dms.ndim == 3 and dms.shape[-1] == ao_loc[-1]
         dm_cond = condense('absmax', dms, ao_loc)
         if hermi == 0:
             # Wrap the triu contribution to tril
@@ -469,6 +467,7 @@ class _VHFOpt:
             if hermi == 0:
                 # Contract the tril and triu parts separately
                 dms = cp.vstack([dms, dms.transpose(0,2,1)])
+            n_dm, nao = dms.shape[:2]
             tile_q_cond = self.tile_q_cond
             tile_q_ptr = ctypes.cast(tile_q_cond.data.ptr, ctypes.c_void_p)
             q_ptr = ctypes.cast(self.q_cond.data.ptr, ctypes.c_void_p)
@@ -612,12 +611,11 @@ class _VHFOpt:
     def get_j(self, dms, verbose):
         if callable(dms):
             dms = dms()
-        assert dms.ndim == 3
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
         n_dm, nao = dms.shape[:2]
-        assert nao == ao_loc[-1]
+        assert dms.ndim == 3 and nao == ao_loc[-1]
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)

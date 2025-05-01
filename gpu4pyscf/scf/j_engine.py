@@ -165,14 +165,13 @@ class _VHFOpt(jk._VHFOpt):
     def get_j(self, dms, verbose):
         if callable(dms):
             dms = dms()
-        assert dms.ndim == 3
         log = logger.new_logger(self.mol, verbose)
         sorted_mol = self.sorted_mol
         prim_mol = self.prim_mol
         p2c_mapping = self.prim_to_ctr_mapping
         ao_loc = sorted_mol.ao_loc
         n_dm, nao = dms.shape[:2]
-        assert nao == ao_loc[-1]
+        assert dms.ndim == 3 and nao == ao_loc[-1]
         assert n_dm == 1
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
@@ -406,8 +405,7 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = 32
-    tiley = min(32, 128 // (lkl+1))
+    tilex = tiley = min(64, 128 // (lkl+1))
     s4 = False # s4 seems not faster
     if li == lk and lj == ll:
         if s4:
@@ -433,7 +431,7 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
 
     # Adjust tiley, to effectively utilize the 28 registers per thread as cache
     _KL_REGISTERS = 28 # see md_contract_j.cu
-    tiley = min(32, tiley, int(ij * gout_stride * _KL_REGISTERS / nf3kl))
+    tiley = min(64, tiley, int(ij * gout_stride * _KL_REGISTERS / nf3kl))
     if li == lk and lj == ll:
         tilex = tiley
     return ij, kl, gout_stride, tilex, tiley
