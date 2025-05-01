@@ -28,6 +28,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df import aft as aft_cpu
+from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from pyscf.pbc.df import df as df_cpu
 from pyscf.pbc.df.gdf_builder import libpbc
 from pyscf.pbc.lib.kpts_helper import is_zero
@@ -228,7 +229,7 @@ class GDF(lib.StreamObject):
             #   sample density in vacuum.
             if cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum':
                 mydf = AFTDF(cell, self.kpts)
-                ke_cutoff = aft_cpu.estimate_ke_cutoff_for_omega(cell, omega)
+                ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
                 mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
             else:
                 mydf = self
