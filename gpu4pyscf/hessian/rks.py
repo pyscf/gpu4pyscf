@@ -1757,7 +1757,7 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     t0 = log.timer_debug1('nr_rks_fxc', *t0)
     return cupy.asarray(vmat)
 
-def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
+def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     """
         Equation notation follows:
         Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
@@ -1905,7 +1905,10 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
     fxc_gamma = 2 * (contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i) +
                      nabla_rho_t_i * f_gamma_i) * grids_weights
 
-    vmat_mo = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
+    if return_in_mo:
+        vmat = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
+    else:
+        vmat = cupy.empty([n_dm1, mol.nao, mol.nao])
     for i_dm in range(n_dm1):
         # \mu \nu
         fxc_dot_ao = ao_nonzero_rho[0] * fxc_rho[i_dm, :]
@@ -1917,9 +1920,12 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
         V_munu += V_munu_gamma
         V_munu += V_munu_gamma.T
 
-        vmat_mo[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
+        if return_in_mo:
+            vmat[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
+        else:
+            vmat[i_dm, :, :] = V_munu
 
-    return vmat_mo
+    return vmat
 
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     mol = hessobj.mol

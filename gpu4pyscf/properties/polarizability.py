@@ -75,12 +75,12 @@ def eval_polarizability(mf, max_cycle=20, tol=1e-10):
     with mf.mol.with_common_orig((0, 0, 0)):
         h1 = mf.mol.intor('int1e_r')
         h1 = cupy.array(h1)
+    h1ai = -contract('ap,dpj->daj', mvir.T.conj(), h1 @ mocc)
+    mo1 = cphf.solve(fx, mo_energy, mo_occ, h1ai, max_cycle=max_cycle, tol=tol)[0]
     for idirect in range(3):
-        h1ai = -mvir.T.conj()@h1[idirect]@mocc
-        mo1 = cphf.solve(fx, mo_energy, mo_occ, h1ai, max_cycle=max_cycle, tol=tol)[0]
         for jdirect in range(idirect, 3):
-            p10 = np.trace(mo1.conj().T@mvir.conj().T@h1[jdirect]@mocc)*2
-            p01 = np.trace(mocc.conj().T@h1[jdirect]@mvir@mo1)*2
+            p10 = np.trace(mo1[idirect].conj().T @ mvir.conj().T @ h1[jdirect] @ mocc) * 2
+            p01 = np.trace(mocc.conj().T @ h1[jdirect] @ mvir @ mo1[idirect]) * 2
             polarizability[idirect, jdirect] = p10+p01
     polarizability[1, 0] = polarizability[0, 1]
     polarizability[2, 0] = polarizability[0, 2]
