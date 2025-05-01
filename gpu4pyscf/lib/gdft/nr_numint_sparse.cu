@@ -38,7 +38,7 @@ static void _dot_ao_dm(double *out, double *ao, double *dm, int jsh0, int jsh1,
                        uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    auto item = syclex::this_work_item::get_nd_item<3>();
     sycl::group thread_block = item.get_group();
     int tx = item.get_local_id(2);
     int ty = item.get_local_id(1);
@@ -125,7 +125,7 @@ static void _dot_ao_dmT(double *out, double *ao, double *dm, int jsh0, int jsh1,
                         uint8_t *screen_index, uint8_t *pair_mask, int *ao_loc)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    auto item = syclex::this_work_item::get_nd_item<3>();
     sycl::group thread_block = item.get_group();
     int tx = item.get_local_id(2);
     int ty = item.get_local_id(1);
@@ -212,7 +212,7 @@ static void _dot_aow_ao(double *out, double *bra, double *ket, double *wv,
                         int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    auto item = syclex::this_work_item::get_nd_item<3>();
     sycl::group thread_block = item.get_group();
     const int tx = item.get_local_id(2);
     const int ty = item.get_local_id(1);
@@ -328,7 +328,7 @@ static void _dot_ao_ao(double *out, double *bra, double *ket,
                        int *bas_pair2bra, int *bas_pair2ket, int *ao_loc)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<3>();
+    auto item = syclex::this_work_item::get_nd_item<3>();
     sycl::group thread_block = item.get_group();
     const int tx = item.get_local_id(2);
     const int ty = item.get_local_id(1);

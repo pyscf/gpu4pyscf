@@ -18,6 +18,7 @@ import cupy as cp
 import pyscf
 import pytest
 from pyscf import gto
+from gpu4pyscf.solvent import pcm
 from gpu4pyscf import scf, dft
 from packaging import version
 from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_nuc, analytical_hess_solver, analytical_hess_qv
@@ -91,8 +92,6 @@ def _check_hessian(mf, h, ix=0, iy=0):
     print(f'Norm of H({ix},{iy}) diff, {np.linalg.norm(h[ix,:,iy,:] - h_fd)}')
     assert(np.linalg.norm(h[ix,:,iy,:] - h_fd) < tol)
 
-<<<<<<< HEAD
-=======
 def _fd_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None):
     '''
     dv_solv / da
@@ -163,7 +162,6 @@ def _fd_hess_contribution(pcmobj, dm, gradient_function):
     return de
 
 @unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
->>>>>>> origin/master
 class KnownValues(unittest.TestCase):
     def test_df_hess_cpcm(self):
         print('testing C-PCM Hessian with DF-RKS')

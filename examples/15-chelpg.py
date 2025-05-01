@@ -39,10 +39,6 @@ mf = rks.RKS(mol, xc=xc)
 mf.grids.level = 5
 mf.kernel()
 q = chelpg.eval_chelpg_layer_gpu(mf)
-<<<<<<< HEAD
-print('partial charge with CHELPG')
-print(q) # [ 0.04402311  0.11333945 -0.25767919  0.10031663]
-=======
 print('Partial charge with CHELPG, using modified Bondi radii')
 print(q) # [ 0.04402311  0.11333945 -0.25767919  0.10031663]
 
@@ -51,4 +47,3 @@ from pyscf.data import radii
 q = chelpg.eval_chelpg_layer_gpu(mf, Rvdw=radii.UFF)
 print('Partial charge with CHELPG, using UFF radii')
 print(q)
->>>>>>> origin/master

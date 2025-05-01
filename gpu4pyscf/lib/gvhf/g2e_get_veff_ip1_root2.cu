@@ -22,7 +22,7 @@ static void GINTint2e_get_veff_ip1_kernel0010(GINTEnvVars envs,
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<2>();
   const int task_ij = item.get_global_id(1);
   const int task_kl = item.get_global_id(0);
   #else
@@ -313,7 +313,7 @@ static void GINTint2e_get_veff_ip1_kernel0011(GINTEnvVars envs,
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<2>();
   const int task_ij = item.get_global_id(1);
   const int task_kl = item.get_global_id(0);
   #else
@@ -859,7 +859,7 @@ static void GINTint2e_get_veff_ip1_kernel0020(GINTEnvVars envs,
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<2>();
   const int task_ij = item.get_global_id(1);
   const int task_kl = item.get_global_id(0);
   #else
@@ -1276,7 +1276,7 @@ static void GINTint2e_get_veff_ip1_kernel1000(GINTEnvVars envs,
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<2>();
   const int task_ij = item.get_global_id(1);
   const int task_kl = item.get_global_id(0);
   #else
@@ -1559,7 +1559,7 @@ static void GINTint2e_get_veff_ip1_kernel1010(GINTEnvVars envs,
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<2>();
   const int task_ij = item.get_global_id(1);
   const int task_kl = item.get_global_id(0);
   #else
@@ -2088,7 +2088,7 @@ static void GINTint2e_get_veff_ip1_kernel1100(GINTEnvVars envs,
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<2>();
   const int task_ij = item.get_global_id(1);
   const int task_kl = item.get_global_id(0);
   #else
@@ -2609,7 +2609,7 @@ static void GINTint2e_get_veff_ip1_kernel2000(GINTEnvVars envs,
   int ntasks_ij = offsets.ntasks_ij;
   int ntasks_kl = offsets.ntasks_kl;
   #ifdef USE_SYCL
-  auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+  auto item = syclex::this_work_item::get_nd_item<2>();
   const int task_ij = item.get_global_id(1);
   const int task_kl = item.get_global_id(0);
   #else

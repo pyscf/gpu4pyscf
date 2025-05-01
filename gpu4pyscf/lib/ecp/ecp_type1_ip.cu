@@ -24,7 +24,7 @@ void type1_cart_unrolled_kernel(double *gctr,
     constexpr int LIJ3 = LIJ1*LIJ1*LIJ1;
 
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
 
@@ -148,7 +148,7 @@ void type1_cart_kernel(double *smem, double *gctr,
                 const int *atm, const int *bas, const double *env)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
 #else // USE_SYCL
@@ -273,7 +273,7 @@ void type1_cart_ip1(double *gctr,
     constexpr int nfi1 = (LI+2)*(LI+3)/2;
 
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int task_id = item.get_group(0);
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);

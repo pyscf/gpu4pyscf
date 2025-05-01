@@ -25,7 +25,7 @@ void init_orth_data(double *pool, int *grid_start,
                     double ai, double aj, int l)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;
@@ -125,7 +125,7 @@ int load_xs(double *xs_cache, double *xs_exp, int ix0, int ngridx,
             int l, int batch_size, int xs_stride, int warp_id)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
 #endif
     int nx = MIN(ngridx - ix0, batch_size);
     double *_xs_exp = xs_exp + ix0 * WARP_SIZE;
@@ -142,7 +142,7 @@ __device__ static
 double reduce_warps(double val, int ngridx, int thread_id, int sp_id, int warp_id)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     double (&cache)[THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
 #else
     __shared__ double cache[THREADS];
@@ -169,7 +169,7 @@ void fill_dm_xyz(double* cache, double *dm_xyz, double *gx_dmyz, double *xs_exp,
                  int ngridx, int ngrid_span)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;

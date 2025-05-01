@@ -129,7 +129,7 @@ __device__
 static void GINTrys_root(int nroots, double x, double *rw)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
 #else
     const int threadIdx_x = threadIdx.x;

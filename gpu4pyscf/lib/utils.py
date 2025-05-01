@@ -12,26 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import sys
+import time
+import platform
+import h5py
 import functools
+import cupy
 import numpy
+import scipy
+import pyscf
 from pyscf import lib
 from pyscf.lib import parameters as param
-
-
-from importlib.util import find_spec
-
-
-has_dpctl = find_spec("dpctl")
-
-if not has_dpctl:
-    import cupy as np
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract, take_last2d
-    from gpu4pyscf.lib.cupy_helper import load_library
-else:
-    import dpnp as np
-    from gpu4pyscf.lib.dpnp_helper import tag_array, contract, take_last2d
-    from gpu4pyscf.lib.dpnp_helper import load_library
+import gpu4pyscf
 
 def patch_cpu_kernel(cpu_kernel):
     '''Generate a decorator to patch cpu function to gpu function'''
@@ -90,7 +83,7 @@ def to_cpu(method, out=None):
     keys = set(method.__dict__).intersection(out_keys)
     for key in keys:
         val = getattr(method, key)
-        if isinstance(val, np.ndarray):
+        if isinstance(val, cupy.ndarray):
             val = val.get()
         elif hasattr(val, 'to_cpu'):
             val = val.to_cpu()
@@ -107,8 +100,6 @@ def device(obj):
         return 'gpu'
     else:
         return 'cpu'
-<<<<<<< HEAD
-=======
 
 #@patch_cpu_kernel(lib.misc.format_sys_info)
 def format_sys_info():
@@ -151,4 +142,3 @@ def format_sys_info():
     if 'git' in pyscf_info:
         result.append(pyscf_info['git'])
     return result
->>>>>>> origin/master

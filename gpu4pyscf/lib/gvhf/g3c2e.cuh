@@ -18,13 +18,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef USE_SYCL
-#include <cmath>
-#include <cassert>
-#else //USE_SYCL
 #include <math.h>
 #include <assert.h>
-#endif //USE_SYCL
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 #include "gvhf.h"

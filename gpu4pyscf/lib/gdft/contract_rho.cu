@@ -32,7 +32,7 @@ __global__
 void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int grid_id = item.get_global_id(1);
     sycl::group thread_block = item.get_group();
     using tile_t = double[BLKSIZEX*(BLKSIZEY+1)];
@@ -283,7 +283,7 @@ void GDFTscale_ao_kernel(double *out, double *ket, double *wv,
                          int ngrids, int nao, int nvar)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int grid_id = item.get_global_id(1);
     int ao_id = item.get_global_id(0);
 #else

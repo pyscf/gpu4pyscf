@@ -26,7 +26,7 @@ void _eval_mat_lda_kernel(double* cache, double *out, double *rho, MGridEnvVars 
                           MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;

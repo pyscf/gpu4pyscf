@@ -19,16 +19,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include "gint/gint.h"
-#include "nr_eval_gto.cuh"
-#include "contract_rho.cuh"
-
 #ifdef USE_SYCL
 #include "gint/sycl_alloc.hpp"
 #else // USE_SYCL
 #include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
 #endif // USE_SYCL
+#include "gint/gint.h"
+#include "nr_eval_gto.cuh"
+#include "contract_rho.cuh"
 
 #define NG_PER_BLOCK      128
 #define NG_PER_THREADS    1
@@ -42,7 +41,7 @@ static void vv10_kernel(double *Fvec, double *Uvec, double *Wvec,
 {
     // grid id
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     sycl::group thread_block = item.get_group();
     int grid_id = item.get_global_id(0);
     const int blockDim_x = item.get_group_range(0);
@@ -151,7 +150,7 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
     int vvngrids, int ngrids)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     sycl::group thread_block = item.get_group();
     const int outer_grid_id = item.get_group(0) * NG_PER_BLOCK + item.get_local_id(0);
     const int threadIdx_x = item.get_local_id(0);
@@ -226,7 +225,7 @@ static void vv10_hess_eval_UWABCE_kernel(double* __restrict__ U, double* __restr
                                          const int ngrids)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int i = item.get_global_id(0);
     #else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -289,7 +288,7 @@ static void vv10_hess_eval_omega_derivative_kernel(double* __restrict__ domega_d
                                                    const int ngrids)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int i = item.get_group(0) * NG_PER_BLOCK + item.get_local_id(0);
     #else
     const int i = blockIdx.x * NG_PER_BLOCK + threadIdx.x;
@@ -335,7 +334,7 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
                                       const int ngrids, const int ntrial)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i = item.get_global_id(1);
     const int i_trial_start = (item.get_global_id(0)) * n_trial_per_thread;
     #else
@@ -442,8 +441,15 @@ static void vv10_hess_eval_EUW_grid_response_kernel(double* __restrict__ Egr, do
                                                     const int* __restrict__ grid_associated_atom,
                                                     const int ngrids, const int natoms)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i = item.get_global_id(1);
+    const int B_atom = item.get_global_id(0);
+    #else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int B_atom = blockIdx.y * blockDim.y + threadIdx.y;
+    #endif
+
     if (i >= ngrids || B_atom >= natoms)
         return;
     const int i_associated_atom = grid_associated_atom[i];
@@ -605,8 +611,8 @@ int VXC_vv10nlc_hess_eval_UWABCE(const cudaStream_t stream,
     const sycl::range<1> threads(NG_PER_BLOCK);
     const sycl::range<1> blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-      vv10_hess_eval_UWABC_kernel(U, W, A, B, C,
-                                  grid_coord, grid_weight, rho, omega, kappa, ngrids); });
+      vv10_hess_eval_UWABCE_kernel(U, W, A, B, C, E,
+                                   grid_coord, grid_weight, rho, omega, kappa, ngrids); });
 #else //USE_SYCL
     const dim3 threads(NG_PER_BLOCK);
     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
@@ -705,6 +711,16 @@ int VXC_vv10nlc_hess_eval_EUW_grid_response(const cudaStream_t stream,
 {
     constexpr int n_grids_per_block = 32;
     constexpr int n_atoms_per_block = 4;
+#ifdef USE_SYCL
+    const sycl::range<2> threads(n_atoms_per_block, n_grids_per_block);
+    const sycl::range<2> blocks((  natm + n_atoms_per_block - 1) / n_atoms_per_block,
+                                (ngrids + n_grids_per_block - 1) / n_grids_per_block);
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      vv10_hess_eval_EUW_grid_response_kernel(Egr, Ugr, Wgr,
+                                              grid_coord, grid_weight, rho, omega, kappa,
+                                              grid_associated_atom, ngrids, natm);
+    });
+#else // USE_SYCL
     const dim3 threads(n_grids_per_block, n_atoms_per_block);
     const dim3 blocks((ngrids + n_grids_per_block - 1) / n_grids_per_block,
                       (  natm + n_atoms_per_block - 1) / n_atoms_per_block);
@@ -716,6 +732,7 @@ int VXC_vv10nlc_hess_eval_EUW_grid_response(const cudaStream_t stream,
         fprintf(stderr, "CUDA Error of vv10 hess eval_EUW_grid_response: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 }

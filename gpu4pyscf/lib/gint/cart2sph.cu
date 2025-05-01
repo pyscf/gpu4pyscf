@@ -487,7 +487,7 @@ static void left_cart2sph_inplace(double* cartesian_matrix, const int n_ao_carte
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_ao = item.get_global_id(1);
     const int i_bas = item.get_global_id(0);
     #else
@@ -513,7 +513,7 @@ static void left_sph2cart_inplace(double* cartesian_matrix, const int n_ao_carte
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_ao = item.get_global_id(1);
     const int i_bas = item.get_global_id(0);
     #else
@@ -541,7 +541,7 @@ static void left_sph2cart(double* cartesian_matrix, const double* spherical_matr
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_ao = item.get_global_id(1);
     const int i_bas = item.get_global_id(0);
     #else
@@ -567,7 +567,7 @@ static void right_cart2sph_inplace(double* cartesian_matrix, const int n_ao_cart
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_ao = item.get_global_id(1);
     const int i_bas = item.get_global_id(0);
     #else
@@ -593,7 +593,7 @@ static void right_sph2cart_inplace(double* cartesian_matrix, const int n_ao_cart
     constexpr int n_spherical_of_l = 2 * L + 1;
 
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_ao = item.get_global_id(1);
     const int i_bas = item.get_global_id(0);
     #else
@@ -619,7 +619,7 @@ static void copy_spherical_cart2sph(const double* cartesian_matrix, double* sphe
                                     const int* d_ao_idx)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_bas = item.get_global_id(1);
     const int j_bas = item.get_global_id(0);
     #else
@@ -653,7 +653,7 @@ static void copy_spherical_sph2cart(double* cartesian_matrix, const double* sphe
                                     const int* d_ao_idx)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_bas = item.get_global_id(1);
     const int j_bas = item.get_global_id(0);
     #else
@@ -687,7 +687,7 @@ static void copy_cartesian_pad_to_unpad(const double* cartesian_matrix, double* 
                                         const int* d_ao_idx)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_bas = item.get_global_id(1);
     const int j_bas = item.get_global_id(0);
     #else
@@ -719,7 +719,7 @@ static void copy_cartesian_unpad_to_pad(double* cartesian_matrix, const double* 
                                         const int* d_ao_idx)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_bas = item.get_global_id(1);
     const int j_bas = item.get_global_id(0);
     #else
@@ -749,7 +749,7 @@ static void left_cart2cart(double* destination_matrix, const double* source_matr
                            const int* d_ao_idx)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int i_right = item.get_global_id(1);
     const int i_left = item.get_global_id(0);
     #else

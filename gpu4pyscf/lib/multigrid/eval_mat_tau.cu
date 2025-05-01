@@ -26,7 +26,7 @@ void fill_dm_xyz_ipip(double *cache, double *dm_xyz, double *gx_dmyz, double *xs
                      int ngridx, int ngrid_span)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;
@@ -177,7 +177,7 @@ void _dm_xyz_to_dm_derivx(double *cache, double *dm, double *dm_yzx, int nao, in
                           double cicj, int npairs_per_block)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
     auto c_i_in_fold2idx = s_i_in_fold2idx.get();
 #else
@@ -271,7 +271,7 @@ void _dm_xyz_to_dm_derivy(double *cache, double *dm, double *dm_xzy, int nao, in
                           double cicj, int npairs_per_block)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
     auto c_i_in_fold2idx = s_i_in_fold2idx.get();
 #else
@@ -365,7 +365,7 @@ void _dm_xyz_to_dm_derivz(double *cache, double *dm, double *dm_xyz, int nao, in
                           double cicj, int npairs_per_block)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
     auto c_i_in_fold2idx = s_i_in_fold2idx.get();
 #else
@@ -458,7 +458,7 @@ void _eval_mat_tau_kernel(double *cache, double *out, double *vR, MGridEnvVars e
                           MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;

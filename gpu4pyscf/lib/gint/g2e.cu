@@ -16,14 +16,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef USE_SYCL
-#include <cmath>
-#include <cassert>
-#else //USE_SYCL
 #include <math.h>
 #include <assert.h>
-#endif //USE_SYCL
-
 #include "g2e.h"
 #include "cint2e.cuh"
 
@@ -440,7 +434,7 @@ static void GINTg0_int3c2e_shared(GINTEnvVars envs, double* __restrict__ g0,
     const int prim_ij, const int prim_kl)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
     const int blockDim_x = item.get_local_range(1);
     auto c_bpcache = s_bpcache.get();

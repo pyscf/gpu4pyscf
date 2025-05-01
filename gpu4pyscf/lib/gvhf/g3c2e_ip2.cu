@@ -214,7 +214,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
 __device__
 static void write_int3c2e_ip2_jk(JKMatrix jk, double *j3, double* k3, int ksh){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int tx = item.get_local_id(1);
     const int ty = item.get_local_id(0);
     using tile_t = double[THREADSX][THREADSY];
@@ -260,7 +260,7 @@ void GINTint3c2e_ip2_jk_kernel(GINTEnvVars envs, JKMatrix jk, BasisProdOffsets o
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int task_ij = item.get_global_id(1);
     int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -315,7 +315,7 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
         const int ish, const int jsh, const int ksh)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
     const int blockDim_x = item.get_group_range(1);
     auto c_bpcache = s_bpcache.get();
@@ -563,7 +563,7 @@ static void GINTint3c2e_ip2_jk_kernel001(GINTEnvVars envs, JKMatrix jk, BasisPro
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int task_ij = item.get_global_id(1);
     int task_kl = item.get_global_id(0);
     const int tx = item.get_local_id(1);

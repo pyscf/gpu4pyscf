@@ -99,7 +99,7 @@ static void rys_roots_rs(int nroots, double theta, double rr, double omega,
                          double *rw, int block_size, int rt_id, int stride)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     #endif
     double theta_rr = theta * rr;
     if (omega == 0) {

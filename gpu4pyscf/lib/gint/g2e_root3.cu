@@ -24,7 +24,7 @@ static void GINTfill_int2e_kernel0022(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -304,7 +304,7 @@ static void GINTfill_int2e_kernel0031(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -557,7 +557,7 @@ static void GINTfill_int2e_kernel0032(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -942,7 +942,7 @@ static void GINTfill_int2e_kernel1021(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -1310,7 +1310,7 @@ static void GINTfill_int2e_kernel1022(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -1912,7 +1912,7 @@ static void GINTfill_int2e_kernel1030(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -2169,7 +2169,7 @@ static void GINTfill_int2e_kernel1031(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -2693,7 +2693,7 @@ static void GINTfill_int2e_kernel1111(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -3185,7 +3185,7 @@ static void GINTfill_int2e_kernel1120(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -3554,7 +3554,7 @@ static void GINTfill_int2e_kernel1121(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -4394,7 +4394,7 @@ static void GINTfill_int2e_kernel1130(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -4919,7 +4919,7 @@ static void GINTfill_int2e_kernel2011(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -5288,7 +5288,7 @@ static void GINTfill_int2e_kernel2020(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -5573,7 +5573,7 @@ static void GINTfill_int2e_kernel2021(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -6176,7 +6176,7 @@ static void GINTfill_int2e_kernel2030(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -6566,7 +6566,7 @@ static void GINTfill_int2e_kernel2110(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -6934,7 +6934,7 @@ static void GINTfill_int2e_kernel2111(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -7774,7 +7774,7 @@ static void GINTfill_int2e_kernel2120(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -8377,7 +8377,7 @@ static void GINTfill_int2e_kernel2200(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -8657,7 +8657,7 @@ static void GINTfill_int2e_kernel2210(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -9259,7 +9259,7 @@ static void GINTfill_int2e_kernel3010(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -9516,7 +9516,7 @@ static void GINTfill_int2e_kernel3011(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -10041,7 +10041,7 @@ static void GINTfill_int2e_kernel3020(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -10431,7 +10431,7 @@ static void GINTfill_int2e_kernel3100(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -10684,7 +10684,7 @@ static void GINTfill_int2e_kernel3110(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -11208,7 +11208,7 @@ static void GINTfill_int2e_kernel3200(GINTEnvVars envs, ERITensor eri, BasisProd
     int ntasks_ij = offsets.ntasks_ij;
     int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();

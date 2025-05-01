@@ -38,9 +38,4 @@ mf.with_solvent.solvent = 'water' # Has to be a string, lookup the solvent name 
 e_smd = mf.kernel()
 print('total energy in water:', e_smd)
 
-<<<<<<< HEAD
-hessobj = mf.Hessian()
-h = hessobj.kernel()
-=======
 print('Solvation free energy:', e_smd - e_gas)
->>>>>>> origin/master

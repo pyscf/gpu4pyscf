@@ -26,7 +26,7 @@ void fill_gx_dmyz(double* cache, double *gx_dmyz, double *dm_xyz, double *xs_exp
                   int ngridx, int ngrid_span, int npairs_this_block)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;
@@ -192,7 +192,7 @@ void _dm_to_dm_xyz_derivx(double *cache, double *dm_xyz, double *dm, int nao, in
                           double cicj, int npairs_per_block)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;
@@ -314,7 +314,7 @@ void _dm_to_dm_xyz_derivy(double *cache, double *dm_xyz, double *dm, int nao, in
                           double cicj, int npairs_per_block)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;
@@ -436,7 +436,7 @@ void _dm_to_dm_xyz_derivz(double *cache, double *dm_xyz, double *dm, int nao, in
                           double cicj, int npairs_per_block)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;
@@ -557,7 +557,7 @@ void _eval_tau_orth_kernel(double *cache, double *rho, double *dm, MGridEnvVars 
                            MGridBounds bounds, double *pool, uint32_t pair_idx0)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     int thread_id = item.get_local_id(0);
 #else
     int thread_id = threadIdx.x;

@@ -33,7 +33,7 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
                             int *atm_idx, int ngrids, int natm)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     sycl::group thread_block = item.get_group();
     int tx = item.get_local_id(1);
     int ty = item.get_local_id(0);
@@ -188,7 +188,7 @@ __global__
 void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const double* coords, int natm, int ngrids)
 {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int grid_id = item.get_global_id(0);
     const int tx = item.get_local_id(0);
     sycl::group thread_block = item.get_group();

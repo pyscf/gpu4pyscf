@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include <cmath>
-#else //USE_SYCL
 #include <math.h>
-#endif //USE_SYCL
 #include "cint2e.cuh"
 
 // This function assumes i_l >= j_l

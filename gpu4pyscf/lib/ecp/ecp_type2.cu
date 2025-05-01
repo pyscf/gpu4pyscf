@@ -18,7 +18,7 @@ template <int order> __device__
 void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
                     const double *ci, const double *ai){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     #else
     const int threadIdx_x = threadIdx.x;
@@ -60,7 +60,7 @@ void type2_facs_rad(double* facs, const int LIC, const int np, const double rca,
 __device__
 void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, double *r){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -131,7 +131,7 @@ void type2_facs_omega(double* __restrict__ omega, const int LI, const int LC, do
 template <int LI, int LC> __device__
 void type2_facs_omega(double* __restrict__ omega, double *r){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -201,7 +201,7 @@ void type2_facs_omega(double* __restrict__ omega, double *r){
 
 void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *rca, double *omega){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -260,7 +260,7 @@ void type2_ang(double * __restrict__ facs, const int LI, const int LC, double *r
 template <int LI, int LC> __device__
 void type2_ang(double * __restrict__ facs, double *rca, double *omega){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -334,7 +334,7 @@ void type2_cart(double * __restrict__ gctr,
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
 

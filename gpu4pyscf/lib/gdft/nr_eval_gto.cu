@@ -326,7 +326,7 @@ static void _cart_kernel_deriv0(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -433,7 +433,7 @@ static void _cart_kernel_deriv1(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -691,7 +691,7 @@ static void _cart_kernel_deriv2(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -776,7 +776,7 @@ static void _cart_kernel_deriv3(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();    
@@ -883,7 +883,7 @@ static void _cart_kernel_deriv4(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -1020,7 +1020,7 @@ static void _sph_kernel_deriv0(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -1165,7 +1165,7 @@ static void _sph_kernel_deriv1(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -1494,7 +1494,7 @@ static void _sph_kernel_deriv2(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -1574,7 +1574,7 @@ static void _sph_kernel_deriv3(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     const int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();
@@ -1676,7 +1676,7 @@ static void _sph_kernel_deriv4(BasOffsets offsets)
 {
     int ngrids = offsets.ngrids;
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int grid_id = item.get_global_id(1);
     int bas_id = item.get_group(0);
     auto c_envs = s_envs.get();

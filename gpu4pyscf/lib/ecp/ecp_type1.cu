@@ -18,7 +18,7 @@ __device__
 void type1_rad_part(double* __restrict__ rad_all, const int LIJ, double k, double aij, double ur)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -102,7 +102,7 @@ __device__
 void type1_rad_ang(double *rad_ang, const int LIJ, double *r, double *rad_all, const double fac)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -167,7 +167,7 @@ template <int LIJ> __device__
 void type1_rad_ang(double *rad_ang, double *r, double *rad_all, const double fac)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -241,7 +241,7 @@ void type1_cart(double *gctr,
     constexpr int LIJ1 = LI+LJ+1;
 
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     auto thread_block = item.get_group();
     const int task_id = thread_block.get_group_id(0); //item.get_group(0);
     const int threadIdx_x = item.get_local_id(0);

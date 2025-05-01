@@ -28,7 +28,7 @@ void int3c2e_bdiv_000(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -157,7 +157,7 @@ void int3c2e_bdiv_100(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -301,7 +301,7 @@ void int3c2e_bdiv_110(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -473,7 +473,7 @@ void int3c2e_bdiv_200(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -630,7 +630,7 @@ void int3c2e_bdiv_210(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -835,7 +835,7 @@ void int3c2e_bdiv_220(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -1109,7 +1109,7 @@ void int3c2e_bdiv_001(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -1253,7 +1253,7 @@ void int3c2e_bdiv_101(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -1426,7 +1426,7 @@ void int3c2e_bdiv_111(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -1672,7 +1672,7 @@ void int3c2e_bdiv_201(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -1879,7 +1879,7 @@ void int3c2e_bdiv_211(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -2217,7 +2217,7 @@ __device__
 void int3c2e_bdiv_221(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -2723,7 +2723,7 @@ void int3c2e_bdiv_002(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -2880,7 +2880,7 @@ void int3c2e_bdiv_102(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -3087,7 +3087,7 @@ void int3c2e_bdiv_112(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -3430,7 +3430,7 @@ void int3c2e_bdiv_202(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3
 {
     // For better load balance, consume blocks in the reversed order
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -3700,7 +3700,7 @@ __device__
 void int3c2e_bdiv_212(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -4194,7 +4194,7 @@ __device__
 int int3c2e_bdiv_unrolled(double *rw_buffer, double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
 {
   #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int ksh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
     int nst_per_block = item.get_local_range(1);
@@ -4217,23 +4217,23 @@ int int3c2e_bdiv_unrolled(double *rw_buffer, double *out, Int3c2eEnvVars envs, B
     int lk = bas[ksh0*BAS_SLOTS+ANG_OF];
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
-    case 0: int3c2e_bdiv_000(out, envs, bounds); break;
-    case 5: int3c2e_bdiv_100(out, envs, bounds); break;
-    case 6: int3c2e_bdiv_110(out, envs, bounds); break;
-    case 10: int3c2e_bdiv_200(out, envs, bounds); break;
-    case 11: int3c2e_bdiv_210(out, envs, bounds); break;
-    case 12: int3c2e_bdiv_220(out, envs, bounds); break;
-    case 25: int3c2e_bdiv_001(out, envs, bounds); break;
-    case 30: int3c2e_bdiv_101(out, envs, bounds); break;
-    case 31: int3c2e_bdiv_111(out, envs, bounds); break;
-    case 35: int3c2e_bdiv_201(out, envs, bounds); break;
-    case 36: int3c2e_bdiv_211(out, envs, bounds); break;
-    case 37: int3c2e_bdiv_221(out, envs, bounds); break;
-    case 50: int3c2e_bdiv_002(out, envs, bounds); break;
-    case 55: int3c2e_bdiv_102(out, envs, bounds); break;
-    case 56: int3c2e_bdiv_112(out, envs, bounds); break;
-    case 60: int3c2e_bdiv_202(out, envs, bounds); break;
-    case 61: int3c2e_bdiv_212(out, envs, bounds); break;
+    case 0: int3c2e_bdiv_000(rw_buffer, out, envs, bounds); break;
+    case 5: int3c2e_bdiv_100(rw_buffer, out, envs, bounds); break;
+    case 6: int3c2e_bdiv_110(rw_buffer, out, envs, bounds); break;
+    case 10: int3c2e_bdiv_200(rw_buffer, out, envs, bounds); break;
+    case 11: int3c2e_bdiv_210(rw_buffer, out, envs, bounds); break;
+    case 12: int3c2e_bdiv_220(rw_buffer, out, envs, bounds); break;
+    case 25: int3c2e_bdiv_001(rw_buffer, out, envs, bounds); break;
+    case 30: int3c2e_bdiv_101(rw_buffer, out, envs, bounds); break;
+    case 31: int3c2e_bdiv_111(rw_buffer, out, envs, bounds); break;
+    case 35: int3c2e_bdiv_201(rw_buffer, out, envs, bounds); break;
+    case 36: int3c2e_bdiv_211(rw_buffer, out, envs, bounds); break;
+    case 37: int3c2e_bdiv_221(rw_buffer, out, envs, bounds); break;
+    case 50: int3c2e_bdiv_002(rw_buffer, out, envs, bounds); break;
+    case 55: int3c2e_bdiv_102(rw_buffer, out, envs, bounds); break;
+    case 56: int3c2e_bdiv_112(rw_buffer, out, envs, bounds); break;
+    case 60: int3c2e_bdiv_202(rw_buffer, out, envs, bounds); break;
+    case 61: int3c2e_bdiv_212(rw_buffer, out, envs, bounds); break;
     default: return 0;
     }
     return 1;

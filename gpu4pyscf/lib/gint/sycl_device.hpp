@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 #include <type_traits>
+//#include <numbers> C++20 feature for value of PI
 
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -23,18 +24,29 @@
 #define __constant__ static constexpr
 
 using cudaStream_t = sycl::queue&;
+namespace syclex = sycl::ext::oneapi;
 
-#define sqrt sycl::sqrt
-#define min sycl::min
-#define max sycl::max
-#define exp sycl::exp
-#define fabs sycl::fabs
-#define erf sycl::erf
-#define pow sycl::pown
 #define rnorm3d(d1,d2,d3) (1 / sycl::length(sycl::double3(d1, d2, d3)))
 #define norm3d(d1,d2,d3) (sycl::length(sycl::double3(d1, d2, d3)))
-
 #define __syncthreads() (item.barrier(sycl::access::fence_space::local_space))
+
+template <typename T> inline auto sqrt(T x) { return sycl::sqrt(x); }
+template <typename T> inline auto min(T x, T y) { return sycl::min(x, y); }
+template <typename T> inline auto max(T x, T y) { return sycl::max(x, y); }
+template <typename T> inline auto exp(T x) { return sycl::exp(x); }
+template <typename T> inline auto fabs(T x) { return sycl::fabs(x); }
+template <typename T> inline auto erf(T x) { return sycl::erf(x); }
+template <typename T> inline auto floor(T x) { return sycl::floor(x); }
+template <typename T> inline auto pow(T x, int n) { return sycl::pown(x, n); }
+#define NAN std::numeric_limits<float>::quiet_NaN()
+
+namespace constants {
+    constexpr double pi = 3.141592653589793238462643383279502884;
+}
+// Only define M_PI if not already defined (to avoid conflict)
+#ifndef M_PI
+#define M_PI constants::pi
+#endif
 
 namespace compat {
   struct double3 {

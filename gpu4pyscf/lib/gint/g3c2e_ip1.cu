@@ -74,7 +74,7 @@ void GINTfill_int3c2e_ip1_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffse
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();
@@ -125,7 +125,7 @@ __device__
 static void GINTwrite_int3c2e_ip1_direct(GINTEnvVars envs, ERITensor eri, double* g, double ai2, const int ish, const int jsh, const int ksh)
 {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
     const int blockDim_x = item.get_local_range(1);
     auto c_bpcache = s_bpcache.get();
@@ -249,7 +249,7 @@ static void GINTfill_int3c2e_ip1_kernel000(GINTEnvVars envs, ERITensor eri, Basi
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
     auto c_bpcache = s_bpcache.get();

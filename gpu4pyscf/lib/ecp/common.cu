@@ -45,7 +45,7 @@ Cartesian<(l+1)*(l+2)/2> ang_nuc_l(double rx, double ry, double rz){
 __device__
 double rad_part(const int ish, const int *ecpbas, const double *env){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     #else
     const int threadIdx_x = threadIdx.x;
@@ -125,7 +125,7 @@ void cache_fac(double *fx, double *ri){
 __device__
 void block_reduce(double val, double *d_out) {
 #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     double (&sdata)[THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
     const unsigned int tid = item.get_local_id(0);    
 #else // USE_SYCL
@@ -167,7 +167,7 @@ void block_reduce(double val, double *d_out) {
 __device__ __forceinline__
 void set_shared_memory(double *smem, const int size) {
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -183,7 +183,7 @@ void set_shared_memory(double *smem, const int size) {
 __device__
 void _li_up(double *out, double *buf, const int li, const int lj){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -213,7 +213,7 @@ void _li_up(double *out, double *buf, const int li, const int lj){
 __device__
 void _li_up_and_write(double *out, double *buf, const int li, const int lj, const int nao){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -258,7 +258,7 @@ void _li_up_and_write(double *out, double *buf, const int li, const int lj, cons
 __device__
 void _li_down(double *out, double *buf, const int li, const int lj){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -285,7 +285,7 @@ void _li_down(double *out, double *buf, const int li, const int lj){
 __device__
 void _li_down_and_write(double *out, double *buf, const int li, const int lj, const int nao){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -329,7 +329,7 @@ void _li_down_and_write(double *out, double *buf, const int li, const int lj, co
 __device__
 void _lj_up_and_write(double *out, double *buf, const int li, const int lj, const int nao){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else
@@ -373,7 +373,7 @@ void _lj_up_and_write(double *out, double *buf, const int li, const int lj, cons
 __device__
 void _lj_down_and_write(double *out, double *buf, const int li, const int lj, const int nao){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
     const int blockDim_x = item.get_local_range(0);
     #else

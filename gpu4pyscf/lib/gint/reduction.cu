@@ -19,7 +19,7 @@
 template <int blockx, int blocky>
 __device__ static void block_reduce_x(double val, double *addr, int tx, int ty){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     double (&sdata)[blockx*blocky] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[blockx*blocky]>(item.get_group());
     #else
     __shared__ double sdata[blockx*blocky];
@@ -44,7 +44,7 @@ __device__ static void block_reduce_y(double val, double *addr, int tx, int ty){
     */
     int stride = blocky + 1;
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     double (&sdata)[blockx*(blocky+1)] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[blockx*(blocky+1)]>(item.get_group());
     #else
     __shared__ double sdata[blockx*(blocky+1)];
@@ -61,7 +61,7 @@ __device__ static void block_reduce_y(double val, double *addr, int tx, int ty){
 template <int BLKSIZE>
 __device__ void block_reduce(double *sum, double a){
     #ifdef USE_SYCL
-    auto item = sycl::ext::oneapi::experimental::this_nd_item<2>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     const int tx = item.get_local_id(1);
     __syncthreads();
     double (&as)[BLKSIZE] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[BLKSIZE]>(item.get_group());
