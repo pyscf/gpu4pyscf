@@ -925,7 +925,7 @@ def to_primitive_bas(cell):
         Ls = cp.asarray(cell.get_lattice_Ls())
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        nbas = len(prim_bas)
+        nbas_p = len(prim_bas)
 
         # A quick estimation of diffuseness for each primitive GTO
         es = prim_env[prim_bas[:,PRIMBAS_EXP]]
@@ -944,8 +944,8 @@ def to_primitive_bas(cell):
         log_cutoff = np.log(cell.precision / lattice_sum_factor)
         prim_bas_gpu = cp.asarray(prim_bas)
         prim_env_gpu = cp.asarray(prim_env)
-        mask = cp.empty(nbas*nimgs, dtype=np.int8)
-        mask[:nbas] = 1 # keep all basis in cell0
+        mask = cp.empty(nbas_p*nimgs, dtype=np.int8)
+        mask[:nbas_p] = 1 # keep all basis in cell0
         err = libmgrid.filter_supmol_bas(
             ctypes.cast(mask.data.ptr, ctypes.c_void_p),
             ctypes.cast(Ls.data.ptr, ctypes.c_void_p),
@@ -953,23 +953,24 @@ def to_primitive_bas(cell):
             ctypes.cast(uniq_Dbasis_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(uniq_Dbasis_idx)),
             ctypes.cast(prim_bas_gpu.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(nbas),
+            ctypes.c_int(nbas_p),
             ctypes.cast(prim_env_gpu.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('filter_supmol_bas kernel failed')
 
         mask = mask.astype(dtype=bool, copy=False)
-        prim_bas_idx = (cp.where(mask)[0] % nbas).get()
+        prim_bas_idx = (cp.where(mask)[0] % nbas_p).get()
         supmol_bas = prim_bas[prim_bas_idx]
         # Exclude the unit cell, as it is always placed at the beginning
         ptr_coords = prim_bas_gpu[:,PRIMBAS_COORD]
         bas_coords = prim_env_gpu[ptr_coords[:,None] + cp.arange(3)]
         basLr = bas_coords + Ls[1:,None]
-        basLr = basLr.reshape(-1, 3)[mask[nbas:]]
+        basLr = basLr.reshape(-1, 3)[mask[nbas_p:]]
         _env = cp.hstack([prim_env_gpu, basLr.ravel()]).get()
-        supmol_bas[nbas:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr))*3
+        supmol_bas[nbas_p:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr))*3
         ao_loc_in_cell0 = ao_loc_in_cell0[prim_bas_idx]
+        assert nbas_p * len(supmol_bas) < 2**31, 'int32 overflow in CUDA kernel'
 
     return supmol_bas, _env, ao_loc_in_cell0
 
