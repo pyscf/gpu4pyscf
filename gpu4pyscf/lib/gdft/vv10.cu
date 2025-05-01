@@ -220,10 +220,10 @@ static void vv10_grad_kernel(double *Fvec, const double *vvcoords, const double 
 }
 
 __global__
-static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restrict__ W, double* __restrict__ A, double* __restrict__ B, double* __restrict__ C,
-                                        const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
-                                        const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
-                                        const int ngrids)
+static void vv10_hess_eval_UWABCE_kernel(double* __restrict__ U, double* __restrict__ W, double* __restrict__ A, double* __restrict__ B, double* __restrict__ C, double* __restrict__ E,
+                                         const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
+                                         const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
+                                         const int ngrids)
 {
     #ifdef USE_SYCL
     auto item = sycl::ext::oneapi::experimental::this_nd_item<1>();
@@ -243,6 +243,7 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
     double A_i = 0;
     double B_i = 0;
     double C_i = 0;
+    double E_i = 0;
 
     for (int j = 0; j < ngrids; j++) {
         const double omega_j = omega[j];
@@ -258,10 +259,10 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
         const double g_sum_1 = 1 / (g_ij + g_ji);
         const double Phi_ij = -1.5 / g_ji * g_ij_1 * g_sum_1;
 
-        const double wj_rhoj_Phiij = weight_j * rho_j * Phi_ij;
-        const double U_ij = wj_rhoj_Phiij * (g_sum_1 + g_ij_1);
+        const double E_ij = weight_j * rho_j * Phi_ij;
+        const double U_ij = E_ij * (g_sum_1 + g_ij_1);
         const double W_ij = U_ij * r_ij2;
-        const double A_ij = wj_rhoj_Phiij * (g_sum_1 * g_sum_1 + g_sum_1 * g_ij_1 + g_ij_1 * g_ij_1);
+        const double A_ij = E_ij * (g_sum_1 * g_sum_1 + g_sum_1 * g_ij_1 + g_ij_1 * g_ij_1);
         const double B_ij = A_ij * r_ij2;
         const double C_ij = B_ij * r_ij2;
 
@@ -270,6 +271,7 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
         A_i += A_ij;
         B_i += B_ij;
         C_i += C_ij;
+        E_i += E_ij;
     }
 
     U[i] = -U_i;
@@ -277,6 +279,7 @@ static void vv10_hess_eval_UWABC_kernel(double* __restrict__ U, double* __restri
     A[i] = 2 * A_i;
     B[i] = 2 * B_i;
     C[i] = 2 * C_i;
+    E[i] = E_i;
 }
 
 __global__
@@ -396,8 +399,8 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
             if (i_trial + i_trial_start >= ntrial) continue;
             const double   rho_t_j =   rho_t[(i_trial + i_trial_start) * ngrids + j];
             const double gamma_t_j = gamma_t[(i_trial + i_trial_start) * ngrids + j];
-            f_rho_t_i  [i_trial] += weight_j * (  f_rho_rho_ij * rho_t_j + 2 *   f_rho_gamma_ij * gamma_t_j);
-            f_gamma_t_i[i_trial] += weight_j * (f_gamma_rho_ij * rho_t_j + 2 * f_gamma_gamma_ij * gamma_t_j);
+            f_rho_t_i  [i_trial] += weight_j * (  f_rho_rho_ij * rho_t_j +   f_rho_gamma_ij * gamma_t_j);
+            f_gamma_t_i[i_trial] += weight_j * (f_gamma_rho_ij * rho_t_j + f_gamma_gamma_ij * gamma_t_j);
         }
     }
 
@@ -424,12 +427,114 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
         if (i_trial + i_trial_start >= ntrial) continue;
         const double rho_t_i   =   rho_t[(i_trial + i_trial_start) * ngrids + i];
         const double gamma_t_i = gamma_t[(i_trial + i_trial_start) * ngrids + i];
-        f_rho_t_i  [i_trial] += (  f_rho_rho_ii * rho_t_i + 2 *   f_rho_gamma_ii * gamma_t_i);
-        f_gamma_t_i[i_trial] += (f_gamma_rho_ii * rho_t_i + 2 * f_gamma_gamma_ii * gamma_t_i);
+        f_rho_t_i  [i_trial] += (  f_rho_rho_ii * rho_t_i +   f_rho_gamma_ii * gamma_t_i);
+        f_gamma_t_i[i_trial] += (f_gamma_rho_ii * rho_t_i + f_gamma_gamma_ii * gamma_t_i);
 
         f_rho_t  [(i_trial + i_trial_start) * ngrids + i] = f_rho_t_i  [i_trial];
         f_gamma_t[(i_trial + i_trial_start) * ngrids + i] = f_gamma_t_i[i_trial];
     }
+}
+
+__global__
+static void vv10_hess_eval_EUW_grid_response_kernel(double* __restrict__ Egr, double* __restrict__ Ugr, double* __restrict__ Wgr,
+                                                    const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
+                                                    const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
+                                                    const int* __restrict__ grid_associated_atom,
+                                                    const int ngrids, const int natoms)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int B_atom = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= ngrids || B_atom >= natoms)
+        return;
+    const int i_associated_atom = grid_associated_atom[i];
+    if (i_associated_atom < 0) {
+        Egr[B_atom * 3 * ngrids + 0 * ngrids + i] = 0;
+        Egr[B_atom * 3 * ngrids + 1 * ngrids + i] = 0;
+        Egr[B_atom * 3 * ngrids + 2 * ngrids + i] = 0;
+        Ugr[B_atom * 3 * ngrids + 0 * ngrids + i] = 0;
+        Ugr[B_atom * 3 * ngrids + 1 * ngrids + i] = 0;
+        Ugr[B_atom * 3 * ngrids + 2 * ngrids + i] = 0;
+        Wgr[B_atom * 3 * ngrids + 0 * ngrids + i] = 0;
+        Wgr[B_atom * 3 * ngrids + 1 * ngrids + i] = 0;
+        Wgr[B_atom * 3 * ngrids + 2 * ngrids + i] = 0;
+        return;
+    }
+    const bool i_in_B = (i_associated_atom == B_atom);
+
+    const double omega_i = omega[i];
+    const double kappa_i = kappa[i];
+    const double3 r_i = { grid_coord[i * 3 + 0], grid_coord[i * 3 + 1], grid_coord[i * 3 + 2] };
+
+    double3 Egr_i = { 0, 0, 0 };
+    double3 Ugr_i = { 0, 0, 0 };
+    double3 Wgr_i = { 0, 0, 0 };
+
+    for (int j = 0; j < ngrids; j++) {
+        const int j_associated_atom = grid_associated_atom[j];
+        if (j_associated_atom < 0)
+            continue;
+        const int j_in_B = (j_associated_atom == B_atom);
+        if (!i_in_B && !j_in_B)
+            continue;
+        if (i_in_B && j_in_B)
+            continue;
+
+        const double omega_j = omega[j];
+        const double kappa_j = kappa[j];
+        const double3 r_j = { grid_coord[j * 3 + 0], grid_coord[j * 3 + 1], grid_coord[j * 3 + 2] };
+        const double weight_j = grid_weight[j];
+        const double rho_j = rho[j];
+
+        const double3 r_ji = { r_j.x - r_i.x, r_j.y - r_i.y, r_j.z - r_i.z };
+        const double r_ij2 = r_ji.x * r_ji.x + r_ji.y * r_ji.y + r_ji.z * r_ji.z;
+        const double g_ij = omega_i * r_ij2 + kappa_i;
+        const double g_ji = omega_j * r_ij2 + kappa_j;
+        const double g_ij_1 = 1 / g_ij;
+        const double g_ji_1 = 1 / g_ji;
+        const double g_sum_1 = 1 / (g_ij + g_ji);
+        const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
+
+        const double E_ij = weight_j * rho_j * Phi_ij;
+        const double dPhi_drj_over_Phi = omega_i * g_ij_1 + omega_j * g_ji_1 + (omega_i + omega_j) * g_sum_1;
+        const double d2Phi_dgij_drj_over_Phi = omega_i * g_ij_1 * g_ij_1 + (omega_i + omega_j) * g_sum_1 * g_sum_1;
+        const double dPhi_dgij_over_Phi = g_sum_1 + g_ij_1;
+
+        const double Egr_ij = E_ij * dPhi_drj_over_Phi;
+        const double Ugr_ij = E_ij * (dPhi_drj_over_Phi * dPhi_dgij_over_Phi + d2Phi_dgij_drj_over_Phi);
+        const double Wgr_ij = E_ij * (r_ij2 * (dPhi_drj_over_Phi * dPhi_dgij_over_Phi + d2Phi_dgij_drj_over_Phi) - dPhi_dgij_over_Phi);
+
+        Egr_i.x += Egr_ij * r_ji.x;
+        Egr_i.y += Egr_ij * r_ji.y;
+        Egr_i.z += Egr_ij * r_ji.z;
+        Ugr_i.x += Ugr_ij * r_ji.x;
+        Ugr_i.y += Ugr_ij * r_ji.y;
+        Ugr_i.z += Ugr_ij * r_ji.z;
+        Wgr_i.x += Wgr_ij * r_ji.x;
+        Wgr_i.y += Wgr_ij * r_ji.y;
+        Wgr_i.z += Wgr_ij * r_ji.z;
+    }
+
+    if (i_in_B) {
+        Egr_i.x *= -1;
+        Egr_i.y *= -1;
+        Egr_i.z *= -1;
+        Ugr_i.x *= -1;
+        Ugr_i.y *= -1;
+        Ugr_i.z *= -1;
+        Wgr_i.x *= -1;
+        Wgr_i.y *= -1;
+        Wgr_i.z *= -1;
+    }
+
+    Egr[B_atom * 3 * ngrids + 0 * ngrids + i] = -2 * Egr_i.x;
+    Egr[B_atom * 3 * ngrids + 1 * ngrids + i] = -2 * Egr_i.y;
+    Egr[B_atom * 3 * ngrids + 2 * ngrids + i] = -2 * Egr_i.z;
+    Ugr[B_atom * 3 * ngrids + 0 * ngrids + i] =  2 * Ugr_i.x;
+    Ugr[B_atom * 3 * ngrids + 1 * ngrids + i] =  2 * Ugr_i.y;
+    Ugr[B_atom * 3 * ngrids + 2 * ngrids + i] =  2 * Ugr_i.z;
+    Wgr[B_atom * 3 * ngrids + 0 * ngrids + i] =  2 * Wgr_i.x;
+    Wgr[B_atom * 3 * ngrids + 1 * ngrids + i] =  2 * Wgr_i.y;
+    Wgr[B_atom * 3 * ngrids + 2 * ngrids + i] =  2 * Wgr_i.z;
 }
 
 extern "C" {
@@ -490,11 +595,11 @@ int VXC_vv10nlc_grad(cudaStream_t stream, double *Fvec,
 }
 
 __host__
-int VXC_vv10nlc_hess_eval_UWABC(const cudaStream_t stream,
-                                double* U, double* W, double* A, double* B, double* C,
-                                const double* grid_coord, const double* grid_weight,
-                                const double* rho, const double* omega, const double* kappa,
-                                const int ngrids)
+int VXC_vv10nlc_hess_eval_UWABCE(const cudaStream_t stream,
+                                 double* U, double* W, double* A, double* B, double* C, double* E,
+                                 const double* grid_coord, const double* grid_weight,
+                                 const double* rho, const double* omega, const double* kappa,
+                                 const int ngrids)
 {
 #ifdef USE_SYCL
     const sycl::range<1> threads(NG_PER_BLOCK);
@@ -505,8 +610,8 @@ int VXC_vv10nlc_hess_eval_UWABC(const cudaStream_t stream,
 #else //USE_SYCL
     const dim3 threads(NG_PER_BLOCK);
     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    vv10_hess_eval_UWABC_kernel<<<blocks, threads, 0, stream>>>(U, W, A, B, C,
-                                                                grid_coord, grid_weight, rho, omega, kappa, ngrids);
+    vv10_hess_eval_UWABCE_kernel<<<blocks, threads, 0, stream>>>(U, W, A, B, C, E,
+                                                                 grid_coord, grid_weight, rho, omega, kappa, ngrids);
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 hess eval_UWABC: %s\n", cudaGetErrorString(err));
@@ -587,6 +692,30 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
         return 1;
     }
 #endif // USE_SYCL
+    return 0;
+}
+
+__host__
+int VXC_vv10nlc_hess_eval_EUW_grid_response(const cudaStream_t stream,
+                                            double* Egr, double* Ugr, double* Wgr,
+                                            const double* grid_coord, const double* grid_weight,
+                                            const double* rho, const double* omega, const double* kappa,
+                                            const int* grid_associated_atom,
+                                            const int ngrids, const int natm)
+{
+    constexpr int n_grids_per_block = 32;
+    constexpr int n_atoms_per_block = 4;
+    const dim3 threads(n_grids_per_block, n_atoms_per_block);
+    const dim3 blocks((ngrids + n_grids_per_block - 1) / n_grids_per_block,
+                      (  natm + n_atoms_per_block - 1) / n_atoms_per_block);
+    vv10_hess_eval_EUW_grid_response_kernel<<<blocks, threads, 0, stream>>>(Egr, Ugr, Wgr,
+                                                                            grid_coord, grid_weight, rho, omega, kappa,
+                                                                            grid_associated_atom, ngrids, natm);
+    const cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of vv10 hess eval_EUW_grid_response: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
     return 0;
 }
 }

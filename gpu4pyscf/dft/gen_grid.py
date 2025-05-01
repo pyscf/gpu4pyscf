@@ -472,6 +472,15 @@ class Grids(lib.StreamObject):
             mol, self.atom_grid, self.radi_method, self.level, self.prune, **kwargs)
         self.coords, self.weights = self.get_partition(
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
+
+        atm_idx = cupy.empty(self.coords.shape[0], dtype=numpy.int32)
+        p0 = p1 = 0
+        for ia in range(mol.natm):
+            r, vol = atom_grids_tab[mol.atom_symbol(ia)]
+            p0, p1 = p1, p1 + vol.size
+            atm_idx[p0:p1] = ia
+        self.atm_idx = atm_idx
+
         t0 = log.timer_debug1('generating atomic grids', *t0)
         if self.alignment > 1:
             padding = _padding_size(self.size, self.alignment)
@@ -481,12 +490,21 @@ class Grids(lib.StreamObject):
                 self.coords = cupy.vstack(
                     [self.coords, cupy.full((padding, 3), 1e-4)])
                 self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
+                self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
+            self.padding = padding
+        else:
+            self.padding = 0
+
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
             idx = atomic_group_grids(mol, self.coords)
             self.coords = self.coords[idx]
             self.weights = self.weights[idx]
+            self.atm_idx = self.atm_idx[idx]
             t0 = log.timer_debug1('sorting grids', *t0)
+            self.grid_sorting_index = idx
+        else:
+            self.grid_sorting_index = cupy.arange(self.coords.shape[0])
 
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
