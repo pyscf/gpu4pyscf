@@ -471,7 +471,6 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= ft_ao.LMAX)
 
-    ls = sorted_cell._bas[:,ANG_OF]
     exps, cs = extract_pgto_params(sorted_cell, 'diffused')
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))

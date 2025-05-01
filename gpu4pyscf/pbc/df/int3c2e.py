@@ -410,7 +410,6 @@ class SRInt3c2eOpt:
         nimgs = int3c2e_envs.nimgs
         p_nbas = pcell.nbas
 
-        ls = pcell._bas[:,ANG_OF]
         exps, cs = extract_pgto_params(pcell, 'diffused')
         exps = cp.asarray(exps, dtype=np.float32)
         log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))

@@ -175,7 +175,6 @@ class FTOpt:
         log_cutoff = math.log(cutoff)
         log.debug1('ft_ao min_exp=%g cutoff=%g', cell_exp, cutoff)
 
-        ls = cell._bas[:,ANG_OF]
         exps, cs = extract_pgto_params(cell, 'diffused')
         exps = cp.asarray(exps, dtype=np.float32)
         log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))

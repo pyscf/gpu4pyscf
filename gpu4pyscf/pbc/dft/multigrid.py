@@ -940,8 +940,7 @@ def to_primitive_bas(cell):
         vol = cell.vol
         rad = vol**(-1./3) * cell.rcut + 1
         surface = 4*np.pi * rad**2
-        es_min = es.min()
-        lattice_sum_factor = 2*np.pi*cell.rcut/(vol*2*es_min) + surface
+        lattice_sum_factor = surface
         log_cutoff = np.log(cell.precision / lattice_sum_factor)
         prim_bas_gpu = cp.asarray(prim_bas)
         prim_env_gpu = cp.asarray(prim_env)
@@ -1078,6 +1077,11 @@ def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
             l_inc = 1
         else:
             l_inc = 0
+        vol = cell.vol
+        rad = vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = surface
+        log_cutoff = np.log(precision / lattice_sum_factor)
         err = libmgrid.ovlp_mask_estimation(
             ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
             ctypes.cast(Ecut.data.ptr, ctypes.c_void_p),
@@ -1090,7 +1094,7 @@ def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
             ctypes.c_int(cell0_nprims),
             ctypes.c_int(supmol_nbas),
             ctypes.c_int(l_inc), ctypes.c_int(hermi),
-            ctypes.c_float(np.log(precision)))
+            ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('ovlp_mask_estimation kernel failed')
         ovlp_mask = ovlp_mask.astype(dtype=bool, copy=False)
