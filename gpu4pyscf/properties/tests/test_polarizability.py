@@ -194,7 +194,6 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-16
         mf.direct_scf_tol = 1e-16
         mf.verbose = 0
-        # mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
         mf.kernel()
         test_polarizability = polarizability.eval_polarizability(mf)
 
@@ -226,6 +225,42 @@ class KnownValues(unittest.TestCase):
         ])
 
         assert np.linalg.norm(test_polarizability - ref_polarizability) < 2e-5
+
+    def test_rks_wb97xv(self):
+        mf = rks.RKS(mol, xc = "wb97x-v")
+        mf.grids.atom_grid = (99,590)
+        mf.conv_tol = 1e-16
+        mf.direct_scf_tol = 1e-16
+        mf.verbose = 0
+        mf.kernel()
+        test_polarizability = polarizability.eval_polarizability(mf)
+
+        # ref_polarizability = numerical_polarizability(mf, 5e-4)
+        ref_polarizability = np.array([
+            [ 8.48051130e+00,  1.26620050e-12, -5.76743098e-08],
+            [ 1.36110971e-07,  5.99968451e+00, -5.26197974e-08],
+            [-7.13398253e-12, -1.05076611e-05,  7.47143620e+00],
+        ])
+
+        assert np.linalg.norm(test_polarizability - ref_polarizability) < 4e-5
+
+    def test_rks_wb97xv_df(self):
+        mf = rks.RKS(mol, xc = "wb97x-v")
+        mf.grids.atom_grid = (99,590)
+        mf.conv_tol = 1e-16
+        mf.verbose = 0
+        mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        test_polarizability = polarizability.eval_polarizability(mf)
+
+        # ref_polarizability = numerical_polarizability(mf, 5e-4)
+        ref_polarizability = np.array([
+            [ 8.48085798e+00, -6.46046743e-13,  3.67918096e-06],
+            [-1.45786335e-06,  6.00033985e+00, -9.99222927e-07],
+            [-3.60933614e-12, -1.04525515e-05,  7.47207291e+00],
+        ])
+
+        assert np.linalg.norm(test_polarizability - ref_polarizability) < 4e-5
 
     @unittest.skipIf(polar is None, "Skipping test if pyscf.properties is not installed")
     def test_cpu_rks(self):
