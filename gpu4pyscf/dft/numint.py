@@ -1001,7 +1001,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     ao_deriv = 0
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
-    #with opt.gdft_envs_cache():
+    
     t1 = t0 = log.init_timer()
     p0 = p1 = 0
     for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
