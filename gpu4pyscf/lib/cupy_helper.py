@@ -672,6 +672,9 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         x1 = x1.reshape(1, x1.size)
     nroots, ndim = x1.shape
     x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+    if len(x1) == 0:
+        return cupy.zeros_like(b)
+    
     x1 *= rmat.diagonal()[:,None]
 
     innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]

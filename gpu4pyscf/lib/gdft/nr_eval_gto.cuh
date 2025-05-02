@@ -45,4 +45,3 @@ typedef struct {
 #define C_BAS_SLOTS     3
 #define NBAS_MAX        6000
 
-__constant__ GTOValEnvVars c_envs;

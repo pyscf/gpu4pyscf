@@ -54,22 +54,34 @@ libgdft.GDFTdot_aow_ao_sparse.restype = ctypes.c_int
 def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=None,
             non0tab=None, out=None, verbose=None, ctr_offsets_slice=None, gdftopt=None,
             transpose=True):
-    ''' evaluate ao values for given coords and shell indices
+    ''' Evaluate ao values with mol and given coords.
+        Calculate all AO values by default if shell indices is not given.
+    
     Kwargs:
-        shls_slice :       offsets of shell slices to be evaluated
-        ao_loc_slice:      offsets of ao slices to be evaluated
-        ctr_offsets_slice: offsets of contraction patterns
+        mol: can be regular mol object or sorted mol. 
+            mol has to be consistent with gdftopt if given.
+        
+        Note: The following arguments are for sorted mol only. 
+        shls_slice :       shell indices to be evaluated.
+        ao_loc_slice:      offset address of AO corresponding to shells.
+                           controls the output of each shell.
+        ctr_offsets_slice: offsets of contraction patterns.
+                           Each contraction pattern is evaluated as a batch.
+    
     Returns:
-        ao: comp x nao_slice x ngrids, ao is in C-contiguous.
+        ao (out): comp x nao_slice x ngrids, ao is in C-contiguous.
             comp x ngrids x nao_slice if tranpose, be compatiable with PySCF.
+            The order of AO values is the AO direction is consistent with mol.
     '''
     if gdftopt is None:
         opt = _GDFTOpt.from_mol(mol)
-        with opt.gdft_envs_cache():
-            return eval_ao(
-                mol, coords, deriv, shls_slice, nao_slice, ao_loc_slice,
-                non0tab, out, verbose, ctr_offsets_slice, opt, transpose)
-
+        return eval_ao(
+            mol, coords, deriv, shls_slice, nao_slice, ao_loc_slice,
+            non0tab, out, verbose, ctr_offsets_slice, opt, transpose)
+    
+    if mol not in [gdftopt.mol, gdftopt._sorted_mol]:
+        raise RuntimeError("mol object is not compatible with gdftopt.")
+    
     opt = gdftopt
     _sorted_mol = opt._sorted_mol
 
@@ -80,6 +92,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ao_loc_slice = cupy.asarray(_sorted_mol.ao_loc_nr())
         nao_slice = _sorted_mol.nao
     else:
+        assert mol is gdftopt._sorted_mol, "slice evaluation of mol is not supported"
         assert ao_loc_slice is not None
         assert nao_slice is not None
         assert ctr_offsets_slice is not None
@@ -104,7 +117,8 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
         ctypes.c_int(nao_slice),
         ctr_offsets.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(nctr),
         ctr_offsets_slice.ctypes.data_as(ctypes.c_void_p),
-        _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p))
+        _sorted_mol._bas.ctypes.data_as(ctypes.c_void_p),
+        ctypes.byref(opt.envs_cache))
 
     if err != 0:
         raise RuntimeError('CUDA Error in evaluating AO')
@@ -990,18 +1004,18 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     ao_deriv = 0
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
-    with opt.gdft_envs_cache():
-        t1 = t0 = log.init_timer()
-        p0 = p1 = 0
-        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
-            p0, p1 = p1, p1 + weight.size
-            if mo_coeff is None:
-                dm_mask = dm[idx[:,None],idx]
-                rho[p0:p1] = eval_rho(_sorted_mol, ao, dm_mask, xctype='LDA', hermi=1)
-            else:
-                mo_coeff_mask = mo_coeff[idx,:]
-                rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'LDA')
-            t1 = log.timer_debug2('eval rho slice', *t1)
+    #with opt.gdft_envs_cache():
+    t1 = t0 = log.init_timer()
+    p0 = p1 = 0
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+        p0, p1 = p1, p1 + weight.size
+        if mo_coeff is None:
+            dm_mask = dm[idx[:,None],idx]
+            rho[p0:p1] = eval_rho(_sorted_mol, ao, dm_mask, xctype='LDA', hermi=1)
+        else:
+            mo_coeff_mask = mo_coeff[idx,:]
+            rho[p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'LDA')
+        t1 = log.timer_debug2('eval rho slice', *t1)
     t0 = log.timer_debug1('eval rho', *t0)
 
     if FREE_CUPY_CACHE:
@@ -1580,10 +1594,14 @@ def _init_xcfuns(xc_code, spin):
             raise NotImplementedError()
     return xcfuns
 
-def _sparse_index(mol, coords, l_ctr_offsets, ao_loc):
+def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
     '''
     determine sparse AO indices
     '''
+    if opt is None:
+        opt = _GDFTOpt.from_mol(mol)
+    assert mol is opt._sorted_mol
+
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
     stream = cupy.cuda.get_current_stream()
@@ -1594,7 +1612,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc):
     nbas = len(ao_loc) - 1
     non0shl_mask = cupy.zeros(nbas, dtype=np.int32)
     coords = cupy.asarray(coords, order='F')
-
+    
     libgdft.GDFTscreen_index(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(non0shl_mask.data.ptr, ctypes.c_void_p),
@@ -1603,7 +1621,8 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc):
         ctypes.c_int(ng),
         l_ctr_offsets.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(nctr),
-        mol._bas.ctypes.data_as(ctypes.c_void_p))
+        mol._bas.ctypes.data_as(ctypes.c_void_p),
+        ctypes.byref(opt.envs_cache))
     non0shl_mask = non0shl_mask.get()
 
     # offset of contraction pattern, used in eval_ao
@@ -1649,9 +1668,14 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc):
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0, grid_range=None):
     '''
-    Define this macro to loop over grids by blocks.
-    Sparsity is not implemented yet
-    sorted_ao: by default ao_value is sorted for GPU
+    Generator loops over grids block-by-block.
+    Kwargs:
+        mol: regular pyscf mol or sorted mol. 
+            It has to be compatiable with ni.gdftopt if built
+        non0tab: dummy argument for compatibility with PySCF
+        blksize: if not given, it will be estimated with avail GPU memory.
+        buf: dummy argument for compatibility with PySCF
+        grid_range: loop [grid_start, grid_end] in grids only.
     '''
     log = logger.new_logger(mol)
     if grids.coords is None:
@@ -1679,7 +1703,10 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
             raise RuntimeError('Not enough GPU memory')
 
     opt = getattr(ni, 'gdftopt', None)
-    if opt is None or mol not in [opt.mol, opt._sorted_mol]:
+    if (opt is not None) and (mol not in [opt.mol, opt._sorted_mol]):
+        raise RuntimeError("mol object is incompatiable with ni.gdftopt")
+    
+    if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
@@ -1690,39 +1717,38 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
 
     mol = None
     lookup_cache_size = 0
-    with opt.gdft_envs_cache():
-        for block_id, (ip0, ip1) in enumerate(lib.prange(grid_start, grid_end, blksize)):
-            coords = coords_device[ip0:ip1]
-            weight = weights_device[ip0:ip1]
-            # cache ao indices
-            lookup_key = (device_id, block_id, blksize, ngrids)
-            if lookup_key not in ni.non0ao_idx:
-                ni.non0ao_idx[lookup_key] = res = _sparse_index(
-                    _sorted_mol, coords, opt.l_ctr_offsets, ao_loc)
-                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
-                lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
+    for block_id, (ip0, ip1) in enumerate(lib.prange(grid_start, grid_end, blksize)):
+        coords = coords_device[ip0:ip1]
+        weight = weights_device[ip0:ip1]
+        # cache ao indices
+        lookup_key = (device_id, block_id, blksize, ngrids)
+        
+        if lookup_key not in ni.non0ao_idx:
+            ni.non0ao_idx[lookup_key] = res = _sparse_index(
+                _sorted_mol, coords, opt.l_ctr_offsets, ao_loc, opt)
+            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
+            lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
+        else:
+            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
+
+        if len(idx) == 0:
+            continue
+
+        ao_mask = eval_ao(
+            _sorted_mol, coords, deriv,
+            nao_slice=len(idx),
+            shls_slice=non0shl_idx,
+            ao_loc_slice=ao_loc_slice,
+            ctr_offsets_slice=ctr_offsets_slice,
+            gdftopt=opt,
+            transpose=False)
+
+        if pad > 0:
+            if deriv == 0:
+                ao_mask[-pad:,:] = 0.0
             else:
-                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
-
-            if len(idx) == 0:
-                continue
-
-            ao_mask = eval_ao(
-                _sorted_mol, coords, deriv,
-                nao_slice=len(idx),
-                shls_slice=non0shl_idx,
-                ao_loc_slice=ao_loc_slice,
-                ctr_offsets_slice=ctr_offsets_slice,
-                gdftopt=opt,
-                transpose=False
-            )
-
-            if pad > 0:
-                if deriv == 0:
-                    ao_mask[-pad:,:] = 0.0
-                else:
-                    ao_mask[:,-pad:,:] = 0.0
-            yield ao_mask, idx, weight, coords
+                ao_mask[:,-pad:,:] = 0.0
+        yield ao_mask, idx, weight, coords
 
     if lookup_cache_size != 0:
         log.debug1('Cached non-zero AO look up table: %.3f GB', lookup_cache_size/1e9)
@@ -1766,53 +1792,53 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     _sorted_mol = opt._sorted_mol
     ao_loc = _sorted_mol.ao_loc_nr()
     lookup_cache_size = 0
-    with opt.gdft_envs_cache():
-        block_id = 0
-        t1 = log.init_timer()
-        for ip0, ip1 in lib.prange(0, ngrids, blksize):
-            coords = grids.coords[ip0:ip1]
-            weight = grids.weights[ip0:ip1]
-            # cache ao indices
-            if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-                ni.non0ao_idx[block_id, blksize, ngrids] = res = _sparse_index(
-                    _sorted_mol, coords, opt.l_ctr_offsets, ao_loc)
-                pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
-                lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
 
-            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
+    block_id = 0
+    t1 = log.init_timer()
+    for ip0, ip1 in lib.prange(0, ngrids, blksize):
+        coords = grids.coords[ip0:ip1]
+        weight = grids.weights[ip0:ip1]
+        # cache ao indices
+        if (block_id, blksize, ngrids) not in ni.non0ao_idx:
+            ni.non0ao_idx[block_id, blksize, ngrids] = res = _sparse_index(
+                _sorted_mol, coords, opt.l_ctr_offsets, ao_loc, opt)
+            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
+            lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
 
-            ao_mask = eval_ao(
-                _sorted_mol, coords, deriv,
-                nao_slice=len(idx),
-                shls_slice=non0shl_idx,
-                ao_loc_slice=ao_loc_slice,
-                ctr_offsets_slice=ctr_offsets_slice,
-                gdftopt=opt,
-                transpose=False
-            )
+        pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
 
-            if pad > 0:
-                if deriv == 0:
-                    ao_mask[-pad:,:] = 0.0
-                else:
-                    ao_mask[:,-pad:,:] = 0.0
-            block_id += 1
-            total_used_bytes += ao_mask.nbytes
-            ao_mask_group.append(ao_mask)
-            idx_group.append(idx)
-            weight_group.append(weight)
-            coords_group.append(coords)
-            if total_used_bytes > 0.2 * mem_limit:
-                t1 = log.timer_debug2('evaluate ao slice', *t1)
-                yield ao_mask_group, idx_group, weight_group, coords_group
-                ao_mask_group = []
-                idx_group = []
-                weight_group = []
-                coords_group = []
-                total_used_bytes = 0
-        if total_used_bytes > 0:
+        ao_mask = eval_ao(
+            _sorted_mol, coords, deriv,
+            nao_slice=len(idx),
+            shls_slice=non0shl_idx,
+            ao_loc_slice=ao_loc_slice,
+            ctr_offsets_slice=ctr_offsets_slice,
+            gdftopt=opt,
+            transpose=False
+        )
+
+        if pad > 0:
+            if deriv == 0:
+                ao_mask[-pad:,:] = 0.0
+            else:
+                ao_mask[:,-pad:,:] = 0.0
+        block_id += 1
+        total_used_bytes += ao_mask.nbytes
+        ao_mask_group.append(ao_mask)
+        idx_group.append(idx)
+        weight_group.append(weight)
+        coords_group.append(coords)
+        if total_used_bytes > 0.2 * mem_limit:
             t1 = log.timer_debug2('evaluate ao slice', *t1)
             yield ao_mask_group, idx_group, weight_group, coords_group
+            ao_mask_group = []
+            idx_group = []
+            weight_group = []
+            coords_group = []
+            total_used_bytes = 0
+    if total_used_bytes > 0:
+        t1 = log.timer_debug2('evaluate ao slice', *t1)
+        yield ao_mask_group, idx_group, weight_group, coords_group
 
     if lookup_cache_size != 0:
         log.debug1('Cached non-zero AO look up table: %.3f GB', lookup_cache_size/1e9)
@@ -1821,6 +1847,8 @@ class LibXCMixin:
     libxc = libxc
     omega = None
     to_cpu = NotImplemented
+    eval_xc      = NotImplemented
+    eval_xc_eff  = NotImplemented
 
     def hybrid_coeff(self, xc_code, spin=0):
         return dft.libxc.hybrid_coeff(xc_code, spin)
@@ -1830,8 +1858,6 @@ class LibXCMixin:
 
     def rsh_coeff(sef, xc_code):
         return dft.libxc.rsh_coeff(xc_code)
-    eval_xc      = NotImplemented
-    eval_xc_eff  = NotImplemented
 
     def _xc_type(self, xc_code):
         return dft.libxc.xc_type(xc_code)
@@ -2104,7 +2130,7 @@ def _tau_dot(bra, ket, wv, buf=None):
 
 class _GDFTOpt:
     def __init__(self, mol):
-        self.envs_cache = {}
+        self._envs_cache = {}
         self._sorted_mol = None       # sorted mol object based on contraction pattern
         self.mol = mol
 
@@ -2190,34 +2216,30 @@ class _GDFTOpt:
     def from_mol(cls, mol):
         return cls(mol).build()
 
-    @contextlib.contextmanager
-    def gdft_envs_cache(self):
-        _sorted_mol = self._sorted_mol
+    @property
+    def envs_cache(self):
         device_id = cupy.cuda.Device().id
-        envs_cache = ctypes.POINTER(_GDFTEnvsCache)()
+        if device_id not in self._envs_cache:
+            _sorted_mol = self._sorted_mol
 
-        bas_atom = cupy.asarray(_sorted_mol._bas[:,[gto.ATOM_OF]], dtype=np.int32)
-        bas_exp = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_EXP]], dtype=np.int32)
-        bas_coeff = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_COEFF]], dtype=np.int32)
-        atom_coords = cupy.asarray(_sorted_mol.atom_coords(), dtype=np.double, order='F')
-        env = cupy.asarray(_sorted_mol._env, dtype=np.double, order='C')
-
-        libgdft.GDFTinit_envs(
-            ctypes.byref(envs_cache),
-            ctypes.cast(bas_atom.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_exp.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_coeff.data.ptr, ctypes.c_void_p),
-            ctypes.cast(atom_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(env.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(_sorted_mol.natm),
-            ctypes.c_int(_sorted_mol.nbas)
-        )
-        self.envs_cache[device_id] = envs_cache
-        try:
-            yield
-        finally:
-            envs_cache = self.envs_cache[device_id]
-            libgdft.GDFTdel_envs(ctypes.byref(envs_cache))
+            bas_atom = cupy.asarray(_sorted_mol._bas[:,[gto.ATOM_OF]], dtype=np.int32)
+            bas_exp = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_EXP]], dtype=np.int32)
+            bas_coeff = cupy.asarray(_sorted_mol._bas[:,[gto.PTR_COEFF]], dtype=np.int32)
+            atom_coords = cupy.asarray(_sorted_mol.atom_coords(), dtype=np.double, order='F')
+            env = cupy.asarray(_sorted_mol._env, dtype=np.double, order='C')
+            data_holder = [bas_atom, bas_exp, bas_coeff, atom_coords, env]
+            
+            envs_cache = GTOValEnvVars(
+                _sorted_mol.natm,
+                _sorted_mol.nbas,
+                bas_atom.data.ptr,
+                bas_exp.data.ptr,
+                bas_coeff.data.ptr,
+                env.data.ptr,
+                atom_coords.data.ptr,)
+            
+            self._envs_cache[device_id] = [envs_cache] + data_holder
+        return self._envs_cache[device_id][0]
 
     def sort_orbitals(self, mat, axis=[]):
         ''' Transform given axis of a matrix into sorted AO
@@ -2254,5 +2276,13 @@ class _GDFTOpt:
         out[tuple(fancy_index)] = sorted_mat
         return out
 
-class _GDFTEnvsCache(ctypes.Structure):
-    pass
+class GTOValEnvVars(ctypes.Structure):
+    _fields_ = [
+        ("natm", ctypes.c_int),
+        ("nbas", ctypes.c_int),
+        ("bas_atom", ctypes.c_void_p),
+        ("bas_exp", ctypes.c_void_p),
+        ("bas_coeff", ctypes.c_void_p),
+        ("env", ctypes.c_void_p),
+        ("atom_coordx", ctypes.c_void_p),
+    ]
