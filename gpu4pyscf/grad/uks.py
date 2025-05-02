@@ -266,88 +266,88 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((2,3,nao,nao))
-    with opt.gdft_envs_cache():
-        if xctype == 'LDA':
-            ao_deriv = 1
-        else:
-            ao_deriv = 2
 
-        mem_avail = get_avail_mem()
-        comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
-        block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
-        block_size = min(block_size, MIN_BLK_SIZE)
-        log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
+    if xctype == 'LDA':
+        ao_deriv = 1
+    else:
+        ao_deriv = 2
 
-        if block_size < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
+    mem_avail = get_avail_mem()
+    comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
+    block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
+    block_size = min(block_size, MIN_BLK_SIZE)
+    log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
 
-        for atm_id, (coords, weight, weight1) in enumerate(rks_grad.grids_response_cc(grids)):
-            ngrids = weight.size
-            for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
-                if xctype == 'LDA':
-                    rho_a = numint.eval_rho(_sorted_mol, ao[0], dms[0],
-                                        xctype=xctype, hermi=1, with_lapl=False)
-                    rho_b = numint.eval_rho(_sorted_mol, ao[0], dms[1],
-                                        xctype=xctype, hermi=1, with_lapl=False)
-                    rho = cupy.array([rho_a,rho_b])
-                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                    exc = exc[:,0]
-                else:
-                    rho_a = numint.eval_rho(_sorted_mol, ao, dms[0],
-                                        xctype=xctype, hermi=1, with_lapl=False)
-                    rho_b = numint.eval_rho(_sorted_mol, ao, dms[1],
-                                        xctype=xctype, hermi=1, with_lapl=False)
-                    rho = cupy.array([rho_a,rho_b])
-                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                    exc = exc[:,0]
+    if block_size < ALIGNED:
+        raise RuntimeError('Not enough GPU memory')
 
-                if xctype == 'LDA':
-                    wv = weight[p0:p1] * vxc[:,0]
-                    aow = numint._scale_ao(ao[0], wv[0])
-                    vtmp = rks_grad._d1_dot_(ao[1:4], aow.T)
-                    rho = rho_a + rho_b
-                    excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[0]) * 2
-                    vmat[0] += vtmp
-                    aow = numint._scale_ao(ao[0], wv[1])
-                    vtmp = rks_grad._d1_dot_(ao[1:4], aow.T)
-                    vmat[1] += vtmp
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
-                    rho = vxc = aow = None
+    for atm_id, (coords, weight, weight1) in enumerate(rks_grad.grids_response_cc(grids)):
+        ngrids = weight.size
+        for p0, p1 in lib.prange(0,ngrids,block_size):
+            ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
+            if xctype == 'LDA':
+                rho_a = numint.eval_rho(_sorted_mol, ao[0], dms[0],
+                                    xctype=xctype, hermi=1, with_lapl=False)
+                rho_b = numint.eval_rho(_sorted_mol, ao[0], dms[1],
+                                    xctype=xctype, hermi=1, with_lapl=False)
+                rho = cupy.array([rho_a,rho_b])
+                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                exc = exc[:,0]
+            else:
+                rho_a = numint.eval_rho(_sorted_mol, ao, dms[0],
+                                    xctype=xctype, hermi=1, with_lapl=False)
+                rho_b = numint.eval_rho(_sorted_mol, ao, dms[1],
+                                    xctype=xctype, hermi=1, with_lapl=False)
+                rho = cupy.array([rho_a,rho_b])
+                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                exc = exc[:,0]
 
-                elif xctype == 'GGA':
-                    wv = weight[p0:p1] * vxc
-                    wv[:,0] *= .5
-                    vtmp = rks_grad._gga_grad_sum_(ao, wv[0])
-                    vmat[0] += vtmp
-                    rho = rho_a[0] + rho_b[0]
-                    excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[0]) * 2
-                    vtmp = rks_grad._gga_grad_sum_(ao, wv[1])
-                    vmat[1] += vtmp
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
-                    rho = vxc = None
-                elif xctype == 'NLC':
-                    raise NotImplementedError('NLC')
+            if xctype == 'LDA':
+                wv = weight[p0:p1] * vxc[:,0]
+                aow = numint._scale_ao(ao[0], wv[0])
+                vtmp = rks_grad._d1_dot_(ao[1:4], aow.T)
+                rho = rho_a + rho_b
+                excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[0]) * 2
+                vmat[0] += vtmp
+                aow = numint._scale_ao(ao[0], wv[1])
+                vtmp = rks_grad._d1_dot_(ao[1:4], aow.T)
+                vmat[1] += vtmp
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
+                rho = vxc = aow = None
 
-                elif xctype == 'MGGA':
-                    wv = weight[p0:p1] * vxc
-                    wv[:,0] *= .5
-                    wv[:,4] *= .5
+            elif xctype == 'GGA':
+                wv = weight[p0:p1] * vxc
+                wv[:,0] *= .5
+                vtmp = rks_grad._gga_grad_sum_(ao, wv[0])
+                vmat[0] += vtmp
+                rho = rho_a[0] + rho_b[0]
+                excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[0]) * 2
+                vtmp = rks_grad._gga_grad_sum_(ao, wv[1])
+                vmat[1] += vtmp
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
+                rho = vxc = None
+            elif xctype == 'NLC':
+                raise NotImplementedError('NLC')
 
-                    vtmp = rks_grad._gga_grad_sum_(ao, wv[0])
-                    vtmp += rks_grad._tau_grad_dot_(ao, wv[0,4])
-                    vmat[0] += vtmp
-                    rho = rho_a[0] + rho_b[0]
-                    excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[0]) * 2
+            elif xctype == 'MGGA':
+                wv = weight[p0:p1] * vxc
+                wv[:,0] *= .5
+                wv[:,4] *= .5
 
-                    vtmp = rks_grad._gga_grad_sum_(ao, wv[1])
-                    vtmp += rks_grad._tau_grad_dot_(ao, wv[1,4])
-                    vmat[1] += vtmp
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
-                    rho = vxc = None
+                vtmp = rks_grad._gga_grad_sum_(ao, wv[0])
+                vtmp += rks_grad._tau_grad_dot_(ao, wv[0,4])
+                vmat[0] += vtmp
+                rho = rho_a[0] + rho_b[0]
+                excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[0]) * 2
+
+                vtmp = rks_grad._gga_grad_sum_(ao, wv[1])
+                vtmp += rks_grad._tau_grad_dot_(ao, wv[1,4])
+                vmat[1] += vtmp
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
+                rho = vxc = None
 
     #vmat = opt.unsort_orbitals(vmat, axis=[2,3])
     exc1 = contract('nij,ij->ni', vmat[0], dms[0])

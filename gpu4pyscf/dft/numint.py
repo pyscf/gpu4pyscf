@@ -74,15 +74,12 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
             The order of AO values is the AO direction is consistent with mol.
     '''
     if gdftopt is None:
-        opt = _GDFTOpt.from_mol(mol)
-        return eval_ao(
-            mol, coords, deriv, shls_slice, nao_slice, ao_loc_slice,
-            non0tab, out, verbose, ctr_offsets_slice, opt, transpose)
-    
-    if mol not in [gdftopt.mol, gdftopt._sorted_mol]:
-        raise RuntimeError("mol object is not compatible with gdftopt.")
+        gdftopt = _GDFTOpt.from_mol(mol)
     
     opt = gdftopt
+    if mol not in [opt.mol, opt._sorted_mol]:
+        raise RuntimeError("mol object is not compatible with gdftopt.")
+    
     _sorted_mol = opt._sorted_mol
 
     if shls_slice is None:
