@@ -185,7 +185,7 @@ class _VHFOpt(jk._VHFOpt):
         l_symb = lib.param.ANGULAR
         q_cond = self.q_cond
         pair_mappings = _make_pair_qd_cond(prim_mol, l_ctr_bas_loc, q_cond, dm_cond, q_cutoff)
-        dm_cond = None
+        dm_cond = q_cond = None
 
         pair_lst = []
         task_offsets = {} # the pair_loc offsets for each ij pair
@@ -202,11 +202,11 @@ class _VHFOpt(jk._VHFOpt):
         ll = ls[:,None] + ls
         ll = ll.ravel()[pair_lst] # drops the pairs that do not contribute to integrals
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
-        pair_loc_on_gpu = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
+        pair_loc = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
         xyz_size = None
 
         pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)
-        pair_loc = pair_loc_on_gpu.get()
+        pair_loc = pair_loc.get()
         dms = dms.get()
         dm_xyz = np.zeros(pair_loc[-1])
         # Must use this modified _env to ensure the consistency with GPU kernel
@@ -255,6 +255,8 @@ class _VHFOpt(jk._VHFOpt):
                     qd = [cp.asarray(x) for x in qd]
                     addrs = [ctypes.cast(x.data.ptr, ctypes.c_void_p) for x in qd]
                     _pair_mappings[task] = (cp.asarray(pair_idx), addrs, qd)
+            pair_loc_on_gpu = asarray(pair_loc)
+            q_cond = cp.asarray(self.q_cond)
             t1 = log.timer_debug1(f'q_cond on Device {device_id}', *t0)
 
             timing_collection = {}

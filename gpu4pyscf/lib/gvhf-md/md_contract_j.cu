@@ -1367,6 +1367,7 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
             }
             for (int n = 1; n <= order; ++n) {
+                __syncthreads();
                 // swap input and output
                 double *tmp = buf;
                 buf = Rt;
@@ -1419,7 +1420,6 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                     }
                     break;
                 default:
-                    __syncthreads();
                     iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
                 }
             }
