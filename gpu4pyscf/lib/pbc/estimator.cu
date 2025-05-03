@@ -195,7 +195,7 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
                            PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
                            float *atom_aux_exps, float log_cutoff)
 {
-    int task = blockIdx.x * blockDim.x + threadIdx.x;
+    int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_id = threadIdx.x;
     int threads = blockDim.x;
     int cell0_natm = envs.cell0_natm;
@@ -210,10 +210,9 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
         xyz_cache[k*3+2] = rk[2];
     }
     __syncthreads();
-    if (task >= npairs) {
+    if (pair_id >= npairs) {
         return;
     }
-    int pair_id = pair_sorting[task];
     int bas_ij = bas_ij_mapping[pair_id];
     int bvk_njsh = envs.bvk_ncells * njsh;
     int ish = bas_ij / bvk_njsh;
@@ -257,10 +256,11 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
 
     if (img_idx != NULL) {
         int *img_offsets = counts_or_offsets;
-        img_idx += img_offsets[task];
+        img_idx += img_offsets[pair_id];
     }
-    int jL0 = ovlp_img_offsets[pair_id];
-    int jL1 = ovlp_img_offsets[pair_id+1];
+    int ovlp_pair_id = pair_sorting[pair_id];
+    int jL0 = ovlp_img_offsets[ovlp_pair_id];
+    int jL1 = ovlp_img_offsets[ovlp_pair_id+1];
     int counts = 0;
     for (int jLp = jL0; jLp < jL1; ++jLp) {
         int jL = ovlp_img_idx[jLp];
@@ -323,7 +323,7 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
     }
     if (img_idx == NULL) {
         int *img_counts = counts_or_offsets;
-        img_counts[task] = counts;
+        img_counts[pair_id] = counts;
     }
 }
 

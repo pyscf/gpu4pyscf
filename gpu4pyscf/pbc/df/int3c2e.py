@@ -486,12 +486,12 @@ class SRInt3c2eOpt:
             ovlp_img_counts = counts_sorting = None
 
             img_counts = cp.zeros(ovlp_npairs, dtype=np.int32)
-            pair_sorting = cp.arange(len(bas_ij), dtype=np.int32)
+            ovlp_pair_sorting = cp.arange(len(bas_ij), dtype=np.int32)
             err = libpbc.sr_int3c2e_img_idx(
                 lib.c_null_ptr(),
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                ctypes.cast(pair_sorting.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_pair_sorting.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ovlp_npairs),
@@ -511,9 +511,10 @@ class SRInt3c2eOpt:
 
             # Sorting the bas_ij pairs by image counts. This groups bas_ij into
             # groups with similar workloads in int3c2e kernel.
-            counts_sorting = cp.arange(len(bas_ij), dtype=np.int32)#(-img_counts.ravel()).argsort()[:n_pairs]
+            counts_sorting = cp.argsort(-img_counts.ravel())[:n_pairs]
             counts_sorting = cp.asarray(counts_sorting, dtype=np.int32)
-            pair_sorting = counts_sorting
+            bas_ij = bas_ij[counts_sorting]
+            ovlp_pair_sorting = counts_sorting
             img_counts = img_counts[counts_sorting]
             offsets = cp.empty(n_pairs+1, dtype=np.int32)
             cp.cumsum(img_counts, out=offsets[1:])
@@ -524,7 +525,7 @@ class SRInt3c2eOpt:
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                ctypes.cast(pair_sorting.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_pair_sorting.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(n_pairs),
