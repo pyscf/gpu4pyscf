@@ -225,6 +225,7 @@ class KnownValues(unittest.TestCase):
                 deriv = 0
             ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
             ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
+            
             rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
             ref = ni_cpu.eval_rho(mol, ao_cpu, dm, xctype=xctype, hermi=0, with_lapl=False)
             self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 10)
