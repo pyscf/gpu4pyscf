@@ -17,7 +17,7 @@ import cupy
 from gpu4pyscf.scf import hf, cphf, _response_functions
 from gpu4pyscf.lib.cupy_helper import contract
 
-def gen_vind(mf, mo_coeff, mo_occ):
+def gen_vind(mf, mo_coeff, mo_occ, with_nlc=True):
     """get the induced potential. This is the same as contract the mo1 with the kernel.
 
     Args:
@@ -33,7 +33,7 @@ def gen_vind(mf, mo_coeff, mo_occ):
     mvir = mo_coeff[:, mo_occ == 0]
     nocc = mocc.shape[1]
     nvir = nmo - nocc
-    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1)
+    vresp = mf.gen_response(mo_coeff, mo_occ, hermi=1, with_nlc=with_nlc)
 
     def fx(mo1):
         mo1 = mo1.reshape(-1, nvir, nocc)  # * the saving pattern
@@ -49,7 +49,7 @@ def gen_vind(mf, mo_coeff, mo_occ):
     return fx
 
 
-def eval_polarizability(mf, max_cycle=20, tol=1e-10):
+def eval_polarizability(mf, max_cycle=20, tol=1e-10, with_nlc=True):
     """main function to calculate the polarizability
 
     Args:
@@ -68,7 +68,7 @@ def eval_polarizability(mf, max_cycle=20, tol=1e-10):
     mo_coeff = cupy.array(mo_coeff)
     mo_occ = cupy.array(mo_occ)
     mo_energy = cupy.array(mo_energy)
-    fx = gen_vind(mf, mo_coeff, mo_occ)
+    fx = gen_vind(mf, mo_coeff, mo_occ, with_nlc=with_nlc)
     mocc = mo_coeff[:, mo_occ > 0]
     mvir = mo_coeff[:, mo_occ == 0]
 
