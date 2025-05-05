@@ -87,4 +87,3 @@ def eval_polarizability(mf, max_cycle=20, tol=1e-10):
     polarizability[2, 1] = polarizability[1, 2]
 
     return polarizability
-

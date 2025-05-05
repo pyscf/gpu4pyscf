@@ -25,18 +25,18 @@ from gpu4pyscf import scf
 
 
 class TDPCM(PCM):
-    def __init__(self, mfpcmobj, eps_optical=1.78, equilium_solvation=False):
+    def __init__(self, mfpcmobj, eps_optical=1.78, equilibrium_solvation=False):
         self.__dict__.update(mfpcmobj.__dict__)
-        self.equilibrium_solvation = equilium_solvation
-        if not equilium_solvation:
+        self.equilibrium_solvation = equilibrium_solvation
+        if not equilibrium_solvation:
             self.eps = eps_optical
         
 
-def make_tdscf_object(tda_method, equilibrium_solvation=False, eps_optical=1.78):
+def make_tdscf_object(tda_method, equilibrium_solvation=False, eps_optical=1.78, linear_response=True):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     name = (tda_method._scf.with_solvent.__class__.__name__
             + tda_method.__class__.__name__)
-    return lib.set_class(WithSolventTDSCF(tda_method, eps_optical, equilibrium_solvation),
+    return lib.set_class(WithSolventTDSCF(tda_method, eps_optical, equilibrium_solvation, linear_response),
                          (WithSolventTDSCF, tda_method.__class__), name)
 
 
@@ -51,12 +51,13 @@ def make_tdscf_gradient_object(tda_grad_method):
 class WithSolventTDSCF:
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'with_solvent'}
+    _keys = {'with_solvent', 'linear_response'}
 
-    def __init__(self, tda_method, eps_optical=1.78, equilibrium_solvation=False):
+    def __init__(self, tda_method, eps_optical=1.78, equilibrium_solvation=False, linear_response=True):
         self.__dict__.update(tda_method.__dict__)
         self.with_solvent = TDPCM(tda_method._scf.with_solvent, eps_optical, equilibrium_solvation)
-        if not self.with_solvent.equilibrium_solvation:
+        self.linear_response = linear_response
+        if not self.with_solvent.equilibrium_solvation and linear_response:
             self.with_solvent.build()
 
     def gen_response(self, *args, **kwargs):
@@ -67,17 +68,19 @@ class WithSolventTDSCF:
         # singlet=None is orbital hessian or CPHF type response function
         singlet = kwargs.get('singlet', True)
         singlet = singlet or singlet is None
+        assert not self._scf.with_solvent.equilibrium_solvation
         def vind_with_solvent(dm1):
             v = vind(dm1)
-            if is_uhf:
-                v_solvent = pcmobj._B_dot_x(dm1[0]+dm1[1])
-                if not self._scf.with_solvent.equilibrium_solvation:
-                    v += v_solvent
-            elif singlet:
-                if not self._scf.with_solvent.equilibrium_solvation:
-                    v += pcmobj._B_dot_x(dm1)
-            else:
-                logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')    
+            if self.linear_response:
+                if is_uhf:
+                    v_solvent = pcmobj._B_dot_x(dm1[0]+dm1[1])
+                    if not self._scf.with_solvent.equilibrium_solvation:
+                        v += v_solvent
+                elif singlet:
+                    if not self._scf.with_solvent.equilibrium_solvation:
+                        v += pcmobj._B_dot_x(dm1)
+                else:
+                    logger.warn(pcmobj, 'Singlet-Triplet excitation has no LR-PCM contribution!')   
             return v     
         return vind_with_solvent
 
@@ -86,6 +89,9 @@ class WithSolventTDSCF:
         name_mixin = self.base.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCF, name_mixin))
         return obj
+
+    def kernel(self, *args, **kwargs):
+        return super().kernel(*args, **kwargs)
     
     def _finalize(self):
         super()._finalize()
