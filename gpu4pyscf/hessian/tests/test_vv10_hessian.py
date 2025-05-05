@@ -64,17 +64,16 @@ def numerical_d2enlc(mf):
 
     dx = 1e-3
     mol_copy = mol.copy()
-    mf_copy = mf.copy()
     for i_atom in range(mol.natm):
         for i_xyz in range(3):
             xyz_p = mol.atom_coords()
             xyz_p[i_atom, i_xyz] += dx
             mol_copy.set_geom_(xyz_p, unit='Bohr')
             mol_copy.build()
-            mf_copy.reset(mol_copy)
-            mf_copy.kernel()
-            assert mf_copy.converged
-            grad_obj = mf_copy.Gradients()
+            mf.reset(mol_copy)
+            mf.kernel()
+            assert mf.converged
+            grad_obj = mf.Gradients()
             grad_obj.grid_response = True
             gradient_p = grad_obj.kernel()
 
@@ -82,14 +81,16 @@ def numerical_d2enlc(mf):
             xyz_m[i_atom, i_xyz] -= dx
             mol_copy.set_geom_(xyz_m, unit='Bohr')
             mol_copy.build()
-            mf_copy.reset(mol_copy)
-            mf_copy.kernel()
-            assert mf_copy.converged
-            grad_obj = mf_copy.Gradients()
+            mf.reset(mol_copy)
+            mf.kernel()
+            assert mf.converged
+            grad_obj = mf.Gradients()
             grad_obj.grid_response = True
             gradient_m = grad_obj.kernel()
 
             numerical_hessian[i_atom, :, i_xyz, :] = (gradient_p - gradient_m) / (2 * dx)
+    mf.reset(mol)
+    mf.kernel()
 
     np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
     print(repr(numerical_hessian))
