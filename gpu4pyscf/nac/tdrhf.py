@@ -92,27 +92,33 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         tol=td_nac.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir, nocc)
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    # z1aoS = z1ao + z1ao.T
-    # GZS = contract_G(z1aoS)
-    GZS = vresp(z1ao + z1ao.T)
+    z1aoS = z1ao + z1ao.T
+    GZS = contract_G(z1aoS)
+    # GZS = vresp(z1ao + z1ao.T)
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
-    # zeta = mo_energy[nocc:, cp.newaxis]
-    # zeta = z1 * zeta
-    # W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 1.0*xI.T + 0.5*zeta.T
-    # zeta = mo_energy[cp.newaxis, :nocc]
-    # zeta = z1 * zeta
-    # W[nocc:, :nocc] = 1.0*yI + 0.5*zeta
-    # W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T))
-    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + xI.T
-    W[nocc:, :nocc] = yI 
-    zeta = (mo_energy[:,cp.newaxis] + mo_energy)*0.5
-    zeta[nocc:, :nocc] = mo_energy[:nocc]
-    zeta[:nocc, nocc:] = mo_energy[nocc:]
-    dm1 = cp.zeros((nmo, nmo))
-    dm1[nocc:, :nocc] = z1
-    W = reduce(cp.dot, (mo_coeff, W + zeta * dm1, mo_coeff.T))
+    zeta0 = mo_energy[nocc:, cp.newaxis]
+    zeta0 = z1 * zeta0
+    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*xI.T + 0.5*zeta0.T
+    zeta1 = mo_energy[cp.newaxis, :nocc]
+    zeta1 = z1 * zeta1
+    W[nocc:, :nocc] = 0.5*yI + 0.5*zeta1
+    W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T))
+    # W1 = cp.zeros((nmo, nmo))
+    # W1[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
+    # W1[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + xI.T * 0.5
+    # W1[nocc:, :nocc] = yI * 0.5
+    # zeta3 = (mo_energy[:,cp.newaxis] + mo_energy)*0.5
+    # zeta3[nocc:, :nocc] = mo_energy[:nocc]
+    # zeta3[:nocc, nocc:] = mo_energy[nocc:]
+    # dm1 = cp.zeros((nmo, nmo))
+    # dm1[nocc:, :nocc] = z1
+    # dm1[:nocc, nocc:] = z1.T
+    # dmf = zeta3 * dm1
+    # W = reduce(cp.dot, (mo_coeff, W1 + dmf*0.5, mo_coeff.T))
+    # import pdb
+    # pdb.set_trace()
 
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
@@ -155,7 +161,7 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     de = 2.0 * dvhf_all + dh1e_td + delec
 
-    return de.get()*0.5
+    return de.get()
 
 
 class NAC(rhf_grad.GradientsBase):
