@@ -262,6 +262,25 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_polarizability - ref_polarizability) < 4e-5
 
+    def test_rks_wb97xv_df_response_without_nlc(self):
+        mf = rks.RKS(mol, xc = "wb97x-v")
+        mf.grids.atom_grid = (99,590)
+        mf.conv_tol = 1e-16
+        mf.verbose = 0
+        mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        test_polarizability = polarizability.eval_polarizability(mf, with_nlc = False)
+        print(test_polarizability)
+
+        # This is a consistency test, the reference value is not validated from independent source
+        ref_polarizability = np.array([
+            [ 8.48485899e+00,  4.40307440e-15, -3.26162370e-14],
+            [ 4.40307440e-15,  6.00459819e+00,  3.39953163e-15],
+            [-3.26162370e-14,  3.39953163e-15,  7.47621491e+00],
+        ])
+
+        assert np.linalg.norm(test_polarizability - ref_polarizability) < 1e-5
+
     @unittest.skipIf(polar is None, "Skipping test if pyscf.properties is not installed")
     def test_cpu_rks(self):
         _vs_cpu_rks('b3lyp')
