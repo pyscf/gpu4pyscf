@@ -346,6 +346,8 @@ def add_sparse(a, b, indices):
     return a
 
 def dist_matrix(x, y, out=None):
+    x = cupy.asarray(x, dtype=np.float64)
+    y = cupy.asarray(y, dtype=np.float64)
     assert x.flags.c_contiguous
     assert y.flags.c_contiguous
 

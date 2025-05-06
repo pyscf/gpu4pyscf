@@ -41,9 +41,8 @@ __all__ = [
 ]
 
 libpbc.fill_int3c2e.restype = ctypes.c_int
-libpbc.bvk_overlap_img_counts.restype = ctypes.c_int
 libpbc.bvk_overlap_img_idx.restype = ctypes.c_int
-libpbc.sr_int3c2e_img_idx_sparse.restype = ctypes.c_int
+libpbc.sr_int3c2e_img_idx.restype = ctypes.c_int
 libpbc.conc_img_idx.restype = ctypes.c_int
 
 LMAX = 4
@@ -407,12 +406,9 @@ class SRInt3c2eOpt:
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
         bvk_ncells = np.prod(self.bvk_kmesh)
-        nimgs = int3c2e_envs.nimgs
         p_nbas = pcell.nbas
 
-        ls = pcell._bas[:,ANG_OF]
         exps, cs = extract_pgto_params(pcell, 'diffused')
-        cs *= ((2*ls+1)/(4*np.pi))**.5
         exps = cp.asarray(exps, dtype=np.float32)
         log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
 
@@ -431,7 +427,6 @@ class SRInt3c2eOpt:
         if cutoff is None:
             cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
-        vol = self.bvkcell.vol
 
         c_shell_counts = self.cell0_ctr_l_counts
         c_shell_offsets = np.append(0, np.cumsum(c_shell_counts))
@@ -485,23 +480,18 @@ class SRInt3c2eOpt:
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff))
             if err != 0:
-                raise RuntimeError('bvk_overlap_img_counts failed')
+                raise RuntimeError('bvk_overlap_img_idx failed')
             log.timer_debug1('ovlp_img_idx', *cput0)
             nimgs_J = int(ovlp_img_counts[0])
             ovlp_img_counts = counts_sorting = None
 
-            nimgs_IJ = nimgs + nimgs_J * 6
-            if vol < 216:
-                # If cell is sufficiently large, nimgs+nimgs_J*6 should be
-                # enough for the double lattice sum.
-                # When cell is small, more images may be required in double lattice sum.
-                nimgs_IJ = nimgs + nimgs_J**2
-            img_idx_sparse = cp.empty((nimgs_IJ,ovlp_npairs), dtype=np.int32)
             img_counts = cp.zeros(ovlp_npairs, dtype=np.int32)
-            err = libpbc.sr_int3c2e_img_idx_sparse(
-                ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
+            ovlp_pair_sorting = cp.arange(len(bas_ij), dtype=np.int32)
+            err = libpbc.sr_int3c2e_img_idx(
+                lib.c_null_ptr(),
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_pair_sorting.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ovlp_npairs),
@@ -512,30 +502,41 @@ class SRInt3c2eOpt:
                 ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff))
             if err != 0:
-                raise RuntimeError('sr_int3c2e_img_idx failed')
+                raise RuntimeError('sr_int3c2e_img_counts failed')
 
             n_pairs = int(cp.count_nonzero(img_counts))
             if n_pairs == 0:
                 img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = np.zeros(0, dtype=np.int32)
                 return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
 
-            counts_sorting = (-img_counts.ravel()).argsort()[:n_pairs]
+            # Sorting the bas_ij pairs by image counts. This groups bas_ij into
+            # groups with similar workloads in int3c2e kernel.
+            counts_sorting = cp.argsort(-img_counts.ravel())[:n_pairs]
             counts_sorting = cp.asarray(counts_sorting, dtype=np.int32)
             bas_ij = bas_ij[counts_sorting]
+            ovlp_pair_sorting = counts_sorting
             img_counts = img_counts[counts_sorting]
             offsets = cp.empty(n_pairs+1, dtype=np.int32)
             cp.cumsum(img_counts, out=offsets[1:])
             offsets[0] = 0
             tot_imgs = int(offsets[n_pairs])
             img_idx = cp.empty(tot_imgs, dtype=np.int32)
-            err = libpbc.conc_img_idx(
+            err = libpbc.sr_int3c2e_img_idx(
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
-                ctypes.cast(img_idx_sparse.data.ptr, ctypes.c_void_p),
-                ctypes.cast(counts_sorting.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n_pairs), ctypes.c_int(ovlp_npairs))
+                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_pair_sorting.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ovlp_img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_pairs),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.byref(int3c2e_envs),
+                ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+                ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff))
             if err != 0:
-                raise RuntimeError('conc_img_idx failed')
+                raise RuntimeError('sr_int3c2e_img_idx failed')
             log.debug1('ovlp nimgs=%d pairs=%d tot_imgs=%d. '
                        'double-lattice-sum: largest=%d, medium=%d',
                        nimgs_J, n_pairs, tot_imgs, img_counts[0], img_counts[n_pairs//2])
@@ -766,7 +767,7 @@ def estimate_rcut(cell, auxcell, omega):
     fac *= fl / precision
 
     r0 = cell.rcut  # initial guess
-    r0 = (np.log(fac * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
-    r0 = (np.log(fac * (sfac*r0)**(l3-1) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * (sfac*r0+1e-200)**(l3-1) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * (sfac*r0+1e-200)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
