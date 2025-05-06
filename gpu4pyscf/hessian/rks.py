@@ -1505,7 +1505,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     # drho_dA, dgamma_dA = get_drhodA_dgammadA_orbital_response(d2mu_dr2, dmu_dr, mu, nabla_rho_i, dm0, aoslices)
     # if grid_response:
-    #     drho_dA_grid_response, dgamma_dA_grid_response = get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, nabla_rho_i, dm0, atom_to_grid_index_map = atom_to_grid_index_map)
+    #     drho_dA_grid_response, dgamma_dA_grid_response = \
+    #         get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, nabla_rho_i, dm0, atom_to_grid_index_map = atom_to_grid_index_map)
     #     drho_dA   += drho_dA_grid_response
     #     dgamma_dA += dgamma_dA_grid_response
     #     drho_dA_grid_response = None
@@ -1559,7 +1560,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 dmu_dr = split_ao[1:4, :, :]
                 d2mu_dr2 = get_d2mu_dr2(split_ao)
                 split_drho_dr = associated_drho_dr[:, g0:g1]
-                split_drho_dA_grid_response, split_dgamma_dA_grid_response = get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, split_drho_dr, dm0, i_atom = i_atom)
+                split_drho_dA_grid_response, split_dgamma_dA_grid_response = \
+                    get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, split_drho_dr, dm0, i_atom = i_atom)
 
                 drho_dA_grid_response  [:, g0:g1] =   split_drho_dA_grid_response
                 dgamma_dA_grid_response[:, g0:g1] = split_dgamma_dA_grid_response
