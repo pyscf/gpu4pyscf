@@ -1757,7 +1757,7 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     t0 = log.timer_debug1('nr_rks_fxc', *t0)
     return cupy.asarray(vmat)
 
-def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
+def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     """
         Equation notation follows:
         Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
@@ -1778,11 +1778,15 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
 
     n_dm1 = dm1s.shape[0]
 
+    ni = mf._numint
+    opt = ni.gdftopt
+    _sorted_mol = opt._sorted_mol
+
     if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
     else:
         xc_code = mf.nlc
-    nlc_coefs = mf._numint.nlc_coeff(xc_code)
+    nlc_coefs = ni.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
         raise NotImplementedError('Additive NLC')
     nlc_pars, fac = nlc_coefs[0]
@@ -1790,8 +1794,18 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
     kappa_prefactor = nlc_pars[0] * 1.5 * numpy.pi * (9 * numpy.pi)**(-1.0/6.0)
     C_in_omega = nlc_pars[1]
 
-    ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
-    rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+    # ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
+    # rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
+    dm0_sorted = opt.sort_orbitals(dm0, axis=[0,1])
+    dm0 = None
+    ngrids_full = grids.coords.shape[0]
+    rho_drho = cupy.empty([4, ngrids_full])
+    g1 = 0
+    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
+        g0, g1 = g1, g1 + split_weights.size
+        dm0_masked = dm0_sorted[ao_mask_index[:,None], ao_mask_index]
+        rho_drho[:, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dm0_masked, xctype = "NLC", hermi = 1)
+    dm0_sorted = None
 
     rho_i = rho_drho[0,:]
 
@@ -1802,8 +1816,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
-
-    ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
 
     gamma_i = nabla_rho_i[0,:]**2 + nabla_rho_i[1,:]**2 + nabla_rho_i[2,:]**2
     omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
@@ -1856,11 +1868,24 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
 
     f_gamma_i = rho_i * domega_dgamma_i * W_i
 
-    rho_drho_t = cupy.empty([n_dm1, 4, ngrids])
-    for i_dm in range(n_dm1):
-        dm1 = dm1s[i_dm, :, :]
-        rho_drho_1 = numint.eval_rho(mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
-        rho_drho_t[i_dm, :, :] = rho_drho_1[:, rho_nonzero_mask]
+    # ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
+    # rho_drho_t = cupy.empty([n_dm1, 4, ngrids])
+    # for i_dm in range(n_dm1):
+    #     dm1 = dm1s[i_dm, :, :]
+    #     rho_drho_1 = numint.eval_rho(mol, ao, dm1, xctype = "NLC", hermi = 0, with_lapl = False)
+    #     rho_drho_t[i_dm, :, :] = rho_drho_1[:, rho_nonzero_mask]
+    dm1s_sorted = opt.sort_orbitals(dm1s, axis=[1,2])
+    dm1s = None
+    rho_drho_t = cupy.empty([n_dm1, 4, ngrids_full])
+    g1 = 0
+    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
+        g0, g1 = g1, g1 + split_weights.size
+        for i_dm in range(n_dm1):
+            dm1_sorted = dm1s_sorted[i_dm, :, :]
+            dm1_masked = dm1_sorted[ao_mask_index[:,None], ao_mask_index]
+            rho_drho_t[i_dm, :, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dm1_masked, xctype = "NLC", hermi = 0)
+    dm1s_sorted = None
+    rho_drho_t = rho_drho_t[:, :, rho_nonzero_mask]
 
     rho_t_i = rho_drho_t[:, 0, :]
     nabla_rho_t_i = rho_drho_t[:, 1:4, :]
@@ -1905,21 +1930,61 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s):
     fxc_gamma = 2 * (contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i) +
                      nabla_rho_t_i * f_gamma_i) * grids_weights
 
-    vmat_mo = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
-    for i_dm in range(n_dm1):
-        # \mu \nu
-        fxc_dot_ao = ao_nonzero_rho[0] * fxc_rho[i_dm, :]
-        V_munu = contract("ig,jg->ij", ao_nonzero_rho[0], fxc_dot_ao)
+    # ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
+    # ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
+    # if return_in_mo:
+    #     vmat = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
+    # else:
+    #     vmat = cupy.empty([n_dm1, mol.nao, mol.nao])
+    # for i_dm in range(n_dm1):
+    #     # \mu \nu
+    #     fxc_dot_ao = ao_nonzero_rho[0] * fxc_rho[i_dm, :]
+    #     V_munu = contract("ig,jg->ij", ao_nonzero_rho[0], fxc_dot_ao)
 
-        # \mu \nabla\nu + \nabla\mu \nu
-        nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", fxc_gamma[i_dm, :, :], ao_nonzero_rho[1:4])
-        V_munu_gamma = contract("ig,jg->ij", ao_nonzero_rho[0], nabla_fxc_dot_nabla_ao)
-        V_munu += V_munu_gamma
-        V_munu += V_munu_gamma.T
+    #     # \mu \nabla\nu + \nabla\mu \nu
+    #     nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", fxc_gamma[i_dm, :, :], ao_nonzero_rho[1:4])
+    #     V_munu_gamma = contract("ig,jg->ij", ao_nonzero_rho[0], nabla_fxc_dot_nabla_ao)
+    #     V_munu += V_munu_gamma
+    #     V_munu += V_munu_gamma.T
 
-        vmat_mo[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
+    #     if return_in_mo:
+    #         vmat[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
+    #     else:
+    #         vmat[i_dm, :, :] = V_munu
 
-    return vmat_mo
+    fxc_rho_full = cupy.zeros([n_dm1, ngrids_full])
+    fxc_rho_full[:, rho_nonzero_mask] = fxc_rho
+    fxc_gamma_full = cupy.zeros([n_dm1, 3, ngrids_full])
+    fxc_gamma_full[:, :, rho_nonzero_mask] = fxc_gamma
+
+    vmat_ao = cupy.zeros([n_dm1, mol.nao, mol.nao])
+
+    g1 = 0
+    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
+        g0, g1 = g1, g1 + split_weights.size
+        split_fxc_rho = fxc_rho_full[:, g0:g1]
+        split_fxc_gamma = fxc_gamma_full[:, :, g0:g1]
+
+        for i_dm in range(n_dm1):
+            # \mu \nu
+            V_munu = contract("ig,jg->ij", split_ao[0], split_ao[0] * split_fxc_rho[i_dm, :])
+
+            # \mu \nabla\nu + \nabla\mu \nu
+            nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", split_fxc_gamma[i_dm, :, :], split_ao[1:4])
+            V_munu_gamma = contract("ig,jg->ij", split_ao[0], nabla_fxc_dot_nabla_ao)
+            V_munu += V_munu_gamma
+            V_munu += V_munu_gamma.T
+
+            add_sparse(vmat_ao[i_dm, :, :], V_munu, ao_mask_index)
+
+    vmat_ao = opt.unsort_orbitals(vmat_ao, axis=[1,2])
+
+    if return_in_mo:
+        vmat = jk._ao2mo(vmat_ao, mocc, mo_coeff)
+    else:
+        vmat = vmat_ao
+
+    return vmat
 
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     mol = hessobj.mol
