@@ -2262,7 +2262,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
             if return_in_mo:
                 vmat[i_dm, :, :] += mo_coeff.T @ vmat_ao @ mocc
             else:
-                vmat[i_dm, :, :] += vmat_ao
+                vmat[i_dm, :, :] += opt.unsort_orbitals(vmat_ao, axis=[0,1])
             vmat_ao = None
 
     return vmat
