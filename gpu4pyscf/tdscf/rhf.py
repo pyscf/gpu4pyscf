@@ -351,7 +351,7 @@ class TDBase(lib.StreamObject):
             logger.warn(self, 'NLC functional found in the DFT object. Its contribution is '
                         'not included in the TDDFT response function.')
         return self._scf.gen_response(singlet=singlet, hermi=hermi,
-                                      with_nlc=self.exclude_nlc)
+                                      with_nlc=not self.exclude_nlc)
 
     def get_ab(self, mf=None):
         if mf is None:
