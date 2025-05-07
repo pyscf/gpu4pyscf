@@ -2158,6 +2158,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                 + nabla_rho_i[1, :] * nabla_rho_t_i[:, 1, :] \
                 + nabla_rho_i[2, :] * nabla_rho_t_i[:, 2, :]
     gamma_t_i *= 2 # Account for the factor of 2 before gamma_j^t term in equation (22)
+    rho_drho_t = None
 
     rho_t_i   = cupy.ascontiguousarray(rho_t_i)
     gamma_t_i = cupy.ascontiguousarray(gamma_t_i)
@@ -2190,10 +2191,16 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         ctypes.c_int(ngrids),
         ctypes.c_int(n_dm1),
     )
+    rho_t_i = None
+    gamma_t_i = None
 
     fxc_rho = f_rho_t_i * grids_weights
     fxc_gamma = 2 * (contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i) +
                      nabla_rho_t_i * f_gamma_i) * grids_weights
+    f_rho_t_i = None
+    f_gamma_t_i = None
+    nabla_rho_t_i = None
+    f_gamma_i = None
 
     # ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
     # ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
@@ -2221,8 +2228,15 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     fxc_rho_full[:, rho_nonzero_mask] = fxc_rho
     fxc_gamma_full = cupy.zeros([n_dm1, 3, ngrids_full])
     fxc_gamma_full[:, :, rho_nonzero_mask] = fxc_gamma
+    fxc_rho = None
+    fxc_gamma = None
 
-    vmat_ao = cupy.zeros([n_dm1, mol.nao, mol.nao])
+    if return_in_mo:
+        vmat = cupy.zeros([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
+        mocc = opt.sort_orbitals(mocc, axis=[0])
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+    else:
+        vmat = cupy.zeros([n_dm1, mol.nao, mol.nao])
 
     g1 = 0
     for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
@@ -2237,17 +2251,19 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
             # \mu \nabla\nu + \nabla\mu \nu
             nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", split_fxc_gamma[i_dm, :, :], split_ao[1:4])
             V_munu_gamma = contract("ig,jg->ij", split_ao[0], nabla_fxc_dot_nabla_ao)
+            nabla_fxc_dot_nabla_ao = None
             V_munu += V_munu_gamma
             V_munu += V_munu_gamma.T
+            V_munu_gamma = None
 
-            add_sparse(vmat_ao[i_dm, :, :], V_munu, ao_mask_index)
+            vmat_ao = cupy.zeros([mol.nao, mol.nao])
+            add_sparse(vmat_ao, V_munu, ao_mask_index)
 
-    vmat_ao = opt.unsort_orbitals(vmat_ao, axis=[1,2])
-
-    if return_in_mo:
-        vmat = jk._ao2mo(vmat_ao, mocc, mo_coeff)
-    else:
-        vmat = vmat_ao
+            if return_in_mo:
+                vmat[i_dm, :, :] += mo_coeff.T @ vmat_ao @ mocc
+            else:
+                vmat[i_dm, :, :] += vmat_ao
+            vmat_ao = None
 
     return vmat
 
