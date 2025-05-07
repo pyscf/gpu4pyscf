@@ -27,21 +27,6 @@ from gpu4pyscf import tdscf
 from pyscf.scf import _vhf
 
 
-def get_jk(mol, dm):
-    '''J = ((-nabla i) j| kl) D_lk
-    K = ((-nabla i) j| kl) D_jk
-    '''
-    if not isinstance(dm, np.ndarray): dm = dm.get()
-    # vhfopt = _VHFOpt(mol, 'int2e_ip1').build()
-    intor = mol._add_suffix('int2e_ip1')
-    vj, vk = _vhf.direct_mapdm(intor,  # (nabla i,j|k,l)
-                               's2kl', # ip1_sph has k>=l,
-                               ('lk->s1ij', 'jk->s1il'),
-                               dm, 3, # xyz, 3 components
-                               mol._atm, mol._bas, mol._env)
-    return -vj, -vk
-
-
 def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
     if singlet is None:
         singlet = True
@@ -68,7 +53,6 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         yJ = xJ * 0.0
     yJ = cp.asarray(yJ).reshape(nocc, nvir).T
     LI = xI-yI
-    dmxpyI = reduce(cp.dot, (orbv, xI + yI, orbo.T))
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -76,12 +60,6 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
         v1ao = vresp(dm + dm.T)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
-
-    def contract_G(Zs):
-        vj, vk = mf.get_jk(mol, Zs, hermi=0)
-        if not isinstance(vj, cp.ndarray): vj = cp.asarray(vj)
-        if not isinstance(vk, cp.ndarray): vk = cp.asarray(vk)
-        return 2*vj - vk
 
     z1 = cphf.solve(
         fvind,
@@ -92,9 +70,8 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         tol=td_nac.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir, nocc)
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    z1aoS = z1ao + z1ao.T
-    GZS = contract_G(z1aoS)
-    # GZS = vresp(z1ao + z1ao.T)
+    z1aoS = (z1ao + z1ao.T)*0.5
+    GZS = vresp(z1aoS)
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
@@ -104,27 +81,13 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     zeta1 = mo_energy[cp.newaxis, :nocc]
     zeta1 = z1 * zeta1
     W[nocc:, :nocc] = 0.5*yI + 0.5*zeta1
-    W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T))
-    # W1 = cp.zeros((nmo, nmo))
-    # W1[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
-    # W1[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + xI.T * 0.5
-    # W1[nocc:, :nocc] = yI * 0.5
-    # zeta3 = (mo_energy[:,cp.newaxis] + mo_energy)*0.5
-    # zeta3[nocc:, :nocc] = mo_energy[:nocc]
-    # zeta3[:nocc, nocc:] = mo_energy[nocc:]
-    # dm1 = cp.zeros((nmo, nmo))
-    # dm1[nocc:, :nocc] = z1
-    # dm1[:nocc, nocc:] = z1.T
-    # dmf = zeta3 * dm1
-    # W = reduce(cp.dot, (mo_coeff, W1 + dmf*0.5, mo_coeff.T))
-    # import pdb
-    # pdb.set_trace()
+    W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
 
-    dmz1doo = z1ao  # P
-    oo0 = reduce(cp.dot, (orbo, orbo.T))  # D
+    dmz1doo = z1ao
+    oo0 = reduce(cp.dot, (orbo, orbo.T))
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -133,7 +96,6 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
     ds = contract("xij,ij->xi", s1, (W + W.T) * 0.5)
-    ds2 = contract("xij,ij->xj", s1, (dmxpyI+dmxpyI.T)*1.0)
 
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
     if mol.has_ecp():
@@ -141,12 +103,10 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     extra_force = cp.zeros((len(atmlst), 3))
 
     dvhf_all = 0
-    # this term contributes the ground state contribution.
     dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2) 
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
-    # this term will remove the unused-part from PP density.
     dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
@@ -156,12 +116,21 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
 
-    delec = 2.0 * (dh_td - ds + ds2)
+    delec = 2.0 * (dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_td + delec
+    de = 2.0 * dvhf_all + dh1e_td + delec + extra_force
 
-    return de.get()
+    offsetdic = mol.offset_nr_by_atom()
+    ds1 = s1.transpose(0,2,1)
+    xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
+    yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
+    for ia in range(mol.natm):
+        shl0, shl1, p0, p1 = offsetdic[ia]
+        de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], xIao[:, p0:p1])
+        de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], yIao[:, p0:p1])
+
+    return -de.get() # derivetive couplings
 
 
 class NAC(rhf_grad.GradientsBase):
@@ -182,6 +151,7 @@ class NAC(rhf_grad.GradientsBase):
         "state",
         "atmlst",
         "de",
+        "numerical",
     }
 
     def __init__(self, td):
@@ -277,7 +247,7 @@ class NAC(rhf_grad.GradientsBase):
         if self.verbose >= logger.NOTE:
             logger.note(
                 self,
-                "--------- %s gradients for state %d and %d----------",
+                "--------- %s nonadiabatic coupling vector for state %d and %d----------",
                 self.base.__class__.__name__,
                 self.state[0],
                 self.state[1],
