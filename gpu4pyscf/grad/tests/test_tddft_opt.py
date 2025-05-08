@@ -28,8 +28,6 @@ H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
-
 bas0 = "631g"
 
 def setUpModule():
@@ -52,7 +50,6 @@ class KnownValues(unittest.TestCase):
         td_cpu = td.to_cpu()
         mol_gpu = optimize(td)
         mol_cpu = optimize(td_cpu)
-        print(mol_gpu.atom_coords(), mol_cpu.atom_coords())
         assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
     def test_opt_rks_tda(self):

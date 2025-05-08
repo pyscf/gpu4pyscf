@@ -330,6 +330,7 @@ class TD_Scanner(lib.SinglePointScanner):
         self._scf = td._scf.as_scanner()
 
     def __call__(self, mol_or_geom, **kwargs):
+        assert self.device == 'gpu'
         if isinstance(mol_or_geom, gto.MoleBase):
             mol = mol_or_geom
         else:
@@ -340,7 +341,6 @@ class TD_Scanner(lib.SinglePointScanner):
         mf_scanner = self._scf
         mf_e = mf_scanner(mol)
         self.kernel(**kwargs)
-        assert self.device == 'gpu'
         return mf_e + self.e
 
 
