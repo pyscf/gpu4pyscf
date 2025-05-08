@@ -27,7 +27,7 @@ from pyscf import lib
 from pyscf.pbc.dft import uks as uks_cpu
 from gpu4pyscf.pbc.scf import uhf as pbcuhf
 from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.dft import uks as mol_uks
 from gpu4pyscf.pbc.dft import rks
 from gpu4pyscf.pbc.dft import multigrid
@@ -42,6 +42,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if kpt is None: kpt = ks.kpt
     log = logger.new_logger(ks)
     t0 = log.init_timer()
+    mem_avail = get_avail_mem()
+    log.debug1('available GPU memory for rks.get_veff: %.3f GB', mem_avail/1e9)
 
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
@@ -156,6 +158,7 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
     get_hcore = rks.RKS.get_hcore
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec
+    density_fit = rks.RKS.density_fit
 
     def get_rho(self, dm=None, grids=None, kpt=None):
         if dm is None: dm = self.make_rdm1()
@@ -163,9 +166,6 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
-
-    to_gpu = utils.to_gpu
-    device = utils.device
 
     def to_cpu(self):
         mf = uks_cpu.UKS(self.cell)

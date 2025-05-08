@@ -118,7 +118,8 @@ void get_E_tensor(double *Et, int li, int lj, double ai, double aj,
 }
 
 void Et_dot_dm(double *Et_dm, double *dm, int *ao_loc, int *pair_loc,
-               int *bas, int nbas, double *env)
+               int *pair_lst, int npairs, int *p2c_mapping,
+               int p_nbas, int c_nbas, int *bas, double *env)
 {
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
@@ -126,42 +127,44 @@ void Et_dot_dm(double *Et_dm, double *dm, int *ao_loc, int *pair_loc,
         double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
 
-        size_t nao = ao_loc[nbas];
-        for (int ish = 0; ish < nbas; ish++) {
+        size_t nao = ao_loc[c_nbas];
+        for (int task_ij = 0; task_ij < npairs; task_ij++) {
+                int pair_ij = pair_lst[task_ij];
+                int ish = pair_ij / p_nbas;
+                int jsh = pair_ij % p_nbas;
+                int ctr_ish = p2c_mapping[ish];
+                int ctr_jsh = p2c_mapping[jsh];
                 int li = bas[ish*BAS_SLOTS+ANG_OF];
-                int i0 = ao_loc[ish];
+                int lj = bas[jsh*BAS_SLOTS+ANG_OF];
                 double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+                double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
                 double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+                double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
                 double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-                for (int jsh = 0; jsh <= ish; jsh++) {
-                        int lj = bas[jsh*BAS_SLOTS+ANG_OF];
-                        int j0 = ao_loc[jsh];
-                        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
-                        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
-                        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-                        double *rho = Et_dm + pair_loc[ish*nbas+jsh];
-                        int lij = li + lj;
-                        int nfi = (li + 1) * (li + 2) / 2;
-                        int nfj = (lj + 1) * (lj + 2) / 2;
-                        int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
-                        get_E_tensor(Et, li, lj, ai, aj, ri, rj, buf);
-                        double cc = ci * cj;
-                        double *pdm = dm + j0*nao + i0;
-                        for (int n = 0, t = 0; t < Et_len; t++) {
-                                double rho_t = 0.;
-                                for (int i = 0; i < nfi; i++) {
-                                for (int j = 0; j < nfj; j++, n++) {
-                                        rho_t += Et[n] * cc * pdm[j*nao+i];
-                                } }
-                                rho[t] = rho_t;
-                        }
+                double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+                double *rho = Et_dm + pair_loc[task_ij];
+                int lij = li + lj;
+                int nfi = (li + 1) * (li + 2) / 2;
+                int nfj = (lj + 1) * (lj + 2) / 2;
+                int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
+                get_E_tensor(Et, li, lj, ai, aj, ri, rj, buf);
+                double cc = ci * cj;
+                double *pdm = dm + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
+                for (int n = 0, t = 0; t < Et_len; t++) {
+                        double rho_t = 0.;
+                        for (int i = 0; i < nfi; i++) {
+                        for (int j = 0; j < nfj; j++, n++) {
+                                rho_t += Et[n] * cc * pdm[i*nao+j];
+                        } }
+                        rho[t] = rho_t;
                 }
         }
         free(Et);
 }
 
 void jengine_dot_Et(double *vj, double *jvec, int *ao_loc, int *pair_loc,
-                    int *bas, int nbas, double *env)
+                    int *pair_lst, int npairs, int *p2c_mapping,
+                    int p_nbas, int c_nbas, int *bas, double *env)
 {
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
@@ -169,34 +172,35 @@ void jengine_dot_Et(double *vj, double *jvec, int *ao_loc, int *pair_loc,
         double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
 
-        size_t nao = ao_loc[nbas];
-        for (int ish = 0; ish < nbas; ish++) {
+        size_t nao = ao_loc[c_nbas];
+        for (int task_ij = 0; task_ij < npairs; task_ij++) {
+                int pair_ij = pair_lst[task_ij];
+                int ish = pair_ij / p_nbas;
+                int jsh = pair_ij % p_nbas;
+                int ctr_ish = p2c_mapping[ish];
+                int ctr_jsh = p2c_mapping[jsh];
                 int li = bas[ish*BAS_SLOTS+ANG_OF];
-                int i0 = ao_loc[ish];
+                int lj = bas[jsh*BAS_SLOTS+ANG_OF];
                 double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+                double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
                 double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+                double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
                 double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-                for (int jsh = 0; jsh <= ish; jsh++) {
-                        int lj = bas[jsh*BAS_SLOTS+ANG_OF];
-                        int j0 = ao_loc[jsh];
-                        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
-                        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
-                        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-                        double *jvec_ij = jvec + pair_loc[ish*nbas+jsh];
-                        int lij = li + lj;
-                        int nfi = (li + 1) * (li + 2) / 2;
-                        int nfj = (lj + 1) * (lj + 2) / 2;
-                        int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
-                        get_E_tensor(Et, li, lj, ai, aj, ri, rj, buf);
-                        double cc = ci * cj;
-                        double *pj = vj + i0*nao+j0;
-                        for (int n = 0, t = 0; t < Et_len; t++) {
-                                double fac = cc * jvec_ij[t];
-                                for (int i = 0; i < nfi; i++) {
-                                for (int j = 0; j < nfj; j++, n++) {
-                                        pj[i*nao+j] += Et[n] * fac;
-                                } }
-                        }
+                double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+                double *jvec_ij = jvec + pair_loc[task_ij];
+                int lij = li + lj;
+                int nfi = (li + 1) * (li + 2) / 2;
+                int nfj = (lj + 1) * (lj + 2) / 2;
+                int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
+                get_E_tensor(Et, li, lj, ai, aj, ri, rj, buf);
+                double cc = ci * cj;
+                double *pj = vj + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
+                for (int n = 0, t = 0; t < Et_len; t++) {
+                        double fac = cc * jvec_ij[t];
+                        for (int i = 0; i < nfi; i++) {
+                        for (int j = 0; j < nfj; j++, n++) {
+                                pj[i*nao+j] += Et[n] * fac;
+                        } }
                 }
         }
         free(Et);

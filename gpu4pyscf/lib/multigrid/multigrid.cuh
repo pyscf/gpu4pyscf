@@ -44,8 +44,8 @@ typedef struct {
     int nbas_i;
     int nbas_j;
     int nao;
-    int *bas;
-    double *env;
+    int *bas; // the supmol._bas, shaped as [:,PRIMBAS_SLOTS]
+    double *env; // the supmol._env
     // ao_loc points to the addresses of the original contracted GTOs, not the
     // uncontracted GTOs. The adjcent values in ao_loc may point to the same
     // address. (ao_loc[n+1] - ao_loc[n]) cannot be used as the dimension for

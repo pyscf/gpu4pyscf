@@ -44,7 +44,7 @@ THREADS = 256
 
 def aux_e2(mol, auxmol):
     r'''
-    Short-range 3-center integrals (ij|k). The auxiliary basis functions are
+    3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
@@ -471,7 +471,6 @@ def estimate_shl_ovlp(mol):
     ls = cp.asarray(mol._bas[:,ANG_OF])
     bas_coords = cp.asarray(mol.atom_coords()[mol._bas[:,ATOM_OF]])
 
-    norm = cs * ((2*ls+1)/(4*np.pi))**.5
     aij = exps[:,None] + exps
     fi = exps[:,None] / aij
     fj = exps[None,:] / aij
@@ -484,6 +483,6 @@ def estimate_shl_ovlp(mol):
     lj = ls[None,:]
     fac_dri = (li * .5/aij + dri**2) ** (li*.5)
     fac_drj = (lj * .5/aij + drj**2) ** (lj*.5)
-    fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
+    fac_norm = cs[:,None]*cs * (np.pi/aij)**1.5
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj
     return ovlp
