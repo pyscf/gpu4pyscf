@@ -149,7 +149,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -352,7 +352,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -580,7 +580,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -853,7 +853,7 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -1078,7 +1078,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -1351,7 +1351,7 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -1707,7 +1707,7 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -2136,7 +2136,7 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -2676,7 +2676,7 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -2921,7 +2921,7 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -3249,7 +3249,7 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -3671,7 +3671,7 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -4185,7 +4185,7 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -4478,7 +4478,7 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -4896,7 +4896,7 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -5414,7 +5414,7 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 }
 __global__
-void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+static void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 ShellQuartet *pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;

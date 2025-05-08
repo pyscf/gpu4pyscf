@@ -382,7 +382,6 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     ovlp_img_counts = cp.zeros((p_nbas,p_nbas), dtype=np.int32)
     ls = pcell._bas[:,ANG_OF]
     exps, cs = extract_pgto_params(pcell, 'diffused')
-    cs *= ((2*ls+1)/(4*np.pi))**.5
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
     log_cutoff = math.log(cutoff)
@@ -472,9 +471,7 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= ft_ao.LMAX)
 
-    ls = sorted_cell._bas[:,ANG_OF]
     exps, cs = extract_pgto_params(sorted_cell, 'diffused')
-    cs *= ((2*ls+1)/(4*np.pi))**.5
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
     log_cutoff = math.log(cutoff)
@@ -529,7 +526,7 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
             ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
         if err != 0:
-            raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
+            raise RuntimeError(f'{ll_pattern} overlap_img_idx failed')
         img_counts = counts_sorting = None
 
         # bas_ij stores the non-negligible primitive-pair indices.

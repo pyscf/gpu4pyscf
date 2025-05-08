@@ -429,17 +429,18 @@ class _VHFOpt:
         Build JK for the sorted_mol. Density matrices dms and the return JK
         matrices are all corresponding to the sorted_mol
         '''
-        assert dms.ndim == 3
+        if callable(dms):
+            dms = dms()
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        nao = ao_loc[-1]
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = self.l_ctr_offsets
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
+        assert dms.ndim == 3 and dms.shape[-1] == ao_loc[-1]
         dm_cond = condense('absmax', dms, ao_loc)
         if hermi == 0:
             # Wrap the triu contribution to tril
@@ -466,7 +467,7 @@ class _VHFOpt:
             if hermi == 0:
                 # Contract the tril and triu parts separately
                 dms = cp.vstack([dms, dms.transpose(0,2,1)])
-            n_dm = dms.shape[0]
+            n_dm, nao = dms.shape[:2]
             tile_q_cond = self.tile_q_cond
             tile_q_ptr = ctypes.cast(tile_q_cond.data.ptr, ctypes.c_void_p)
             q_ptr = ctypes.cast(self.q_cond.data.ptr, ctypes.c_void_p)
@@ -486,10 +487,10 @@ class _VHFOpt:
 
             tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond,
                                                      log_cutoff-log_max_dm)
+            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
             info = cp.empty(2, dtype=np.uint32)
-            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
 
             init_constant(mol)
             timing_counter = Counter()
@@ -506,6 +507,8 @@ class _VHFOpt:
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 tile_ij_mapping = tile_mappings[i,j]
                 tile_kl_mapping = tile_mappings[k,l]
+                if len(tile_ij_mapping) == 0 or len(tile_kl_mapping) == 0:
+                    continue
                 scheme = schemes[task]
                 err = kern(
                     vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
@@ -606,12 +609,13 @@ class _VHFOpt:
         return vj, vk
 
     def get_j(self, dms, verbose):
-        assert dms.ndim == 3
+        if callable(dms):
+            dms = dms()
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        nao = ao_loc[-1]
-        n_dm = len(dms)
+        n_dm, nao = dms.shape[:2]
+        assert dms.ndim == 3 and nao == ao_loc[-1]
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
@@ -621,7 +625,6 @@ class _VHFOpt:
         l_ctr_bas_loc = self.l_ctr_offsets
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
-        ntiles = mol.nbas // TILE
 
         if isinstance(dms, cp.ndarray):
             dms = dms.get()
@@ -660,28 +663,12 @@ class _VHFOpt:
             if err != 0:
                 raise RuntimeError('CUDA kernel initialization')
 
-            tile_mappings = {}
+            tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond,
+                                                     log_cutoff-log_max_dm)
+            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
             info = cp.empty(2, dtype=np.uint32)
-
-            for i in range(n_groups):
-                for j in range(i+1):
-                    ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-                    jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-                    i0 = ish0 // TILE
-                    i1 = ish1 // TILE
-                    j0 = jsh0 // TILE
-                    j1 = jsh1 // TILE
-                    sub_tile_q = tile_q_cond[i0:i1,j0:j1]
-                    mask = sub_tile_q > log_cutoff - log_max_dm
-                    if i == j:
-                        mask = cp.tril(mask)
-                    t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
-                            cp.arange(j0, j1, dtype=np.int32))
-                    idx = cp.argsort(sub_tile_q[mask])[::-1]
-                    tile_mappings[i,j] = t_ij[mask][idx]
-            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
 
             timing_collection = {}
             kern_counts = 0
@@ -697,6 +684,8 @@ class _VHFOpt:
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 tile_ij_mapping = tile_mappings[i,j]
                 tile_kl_mapping = tile_mappings[k,l]
+                if len(tile_ij_mapping) == 0 or len(tile_kl_mapping) == 0:
+                    continue
                 scheme = schemes[task]
                 err = kern(
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
@@ -821,7 +810,6 @@ def init_constant(mol):
 def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile=TILE):
     n_groups = len(l_ctr_bas_loc) - 1
     ntiles = tile_q_cond.shape[0]
-    tile_mask = cp.tril(tile_q_cond > cutoff)
     tile_mappings = {}
     for i in range(n_groups):
         for j in range(i+1):
@@ -832,7 +820,9 @@ def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile=TILE):
             j0 = jsh0 // tile
             j1 = jsh1 // tile
             sub_tile_q = tile_q_cond[i0:i1,j0:j1]
-            mask = tile_mask[i0:i1,j0:j1]
+            mask = sub_tile_q > cutoff
+            if i == j:
+                mask = cp.tril(mask)
             t_ij = (cp.arange(i0, i1, dtype=np.int32)[:,None] * ntiles +
                     cp.arange(j0, j1, dtype=np.int32))
             idx = cp.argsort(sub_tile_q[mask])[::-1]

@@ -74,6 +74,9 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
@@ -148,6 +151,9 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
@@ -183,11 +189,11 @@ __global__ __maxnreg__(64) static
 #else
 __global__ static
 #endif
-void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_mapping,
-                                  int *ovlp_img_idx, int *ovlp_img_offsets,
-                                  int npairs, int ish0, int jsh0, int nish, int njsh,
-                                  PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
-                                  float *atom_aux_exps, float log_cutoff)
+void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_mapping,
+                           int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
+                           int npairs, int ish0, int jsh0, int nish, int njsh,
+                           PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
+                           float *atom_aux_exps, float log_cutoff)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_id = threadIdx.x;
@@ -240,14 +246,21 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
     float fac_guess = .5f - logf(omega2)/4;
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij) + fac_guess;
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
     float theta = (omega2 * aij) / (omega2 + aij);
     double *ri = env + atm[bas[ish*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
     double *rj = env + atm[bas[jsh*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
 
-    img_idx += pair_id;
-    int jL0 = ovlp_img_offsets[pair_id];
-    int jL1 = ovlp_img_offsets[pair_id+1];
+    if (img_idx != NULL) {
+        int *img_offsets = counts_or_offsets;
+        img_idx += img_offsets[pair_id];
+    }
+    int ovlp_pair_id = pair_sorting[pair_id];
+    int jL0 = ovlp_img_offsets[ovlp_pair_id];
+    int jL1 = ovlp_img_offsets[ovlp_pair_id+1];
     int counts = 0;
     for (int jLp = jL0; jLp < jL1; ++jLp) {
         int jL = ovlp_img_idx[jLp];
@@ -301,13 +314,19 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
             float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
             float estimator = dri_fac + drj_fac - theta_rr_min;
             if (estimator > log_cutoff) {
-                img_idx[counts*npairs] = iL*nimgs+jL;
+                if (img_idx != NULL) {
+                    img_idx[counts] = iL*nimgs+jL;
+                }
                 counts++;
             }
         }
     }
-    img_counts[pair_id] = counts;
+    if (img_idx == NULL) {
+        int *img_counts = counts_or_offsets;
+        img_counts[pair_id] = counts;
+    }
 }
+
 
 // Concatenate dis-continuous 
 __global__ static
@@ -373,12 +392,11 @@ int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     }
     return 0;
 }
-
-int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping,
-                              int *ovlp_img_idx, int *ovlp_img_offsets,
-                              int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
-                              float *exps, float *log_coeff, float *atom_aux_exps,
-                              float log_cutoff)
+int sr_int3c2e_img_idx(int *img_idx, int *counts_or_offsets, int *bas_ij_mapping,
+                       int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
+                       int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
+                       float *exps, float *log_coeff, float *atom_aux_exps,
+                       float log_cutoff)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -390,13 +408,13 @@ int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping
     int blocks = (npairs + threads-1) / threads;
     int cell0_natm = envs->cell0_natm;
     int buflen = cell0_natm * 3 * sizeof(float);
-    sr_int3c2e_img_sparse_kernel<<<blocks, threads, buflen>>>(
-        img_idx, img_counts, bas_ij_mapping, ovlp_img_idx, ovlp_img_offsets,
+    sr_int3c2e_img_kernel<<<blocks, threads, buflen>>>(
+        img_idx, counts_or_offsets, bas_ij_mapping, pair_sorting, ovlp_img_idx, ovlp_img_offsets,
         npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
         log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in sr_int3c2e_img_idx_sparse: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in sr_int3c2e_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
