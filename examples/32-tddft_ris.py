@@ -38,7 +38,7 @@ print(f"total energy = {e_dft}")
 
 
 ''' TDDFT-ris'''
-td = ris.TDDFT(mf=mf.to_gpu(), nstates=10, spectra=True)
+td = ris.TDDFT(mf=mf.to_gpu(), nstates=10, spectra=False) 
 td.kernel()
 # energies, X, Y, oscillator_strength, rotatory_strength = td.kernel()
 
@@ -52,7 +52,7 @@ print("TDDFT-ris ex energies", energies)
 print("TDDFT-ris oscillator_strength", oscillator_strength)
 
 ''' TDA-ris'''
-td = ris.TDA(mf=mf.to_gpu(), nstates=10)
+td = ris.TDA(mf=mf.to_gpu(), nstates=10, incore=False) 
 td.kernel()
 # energies, X, oscillator_strength, rotatory_strength = td.kernel()
 

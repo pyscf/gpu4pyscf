@@ -426,10 +426,10 @@ def VW_nKs_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
         y_tmp = Y_new[j,:].reshape(1,-1)
         x_tmp,y_tmp = S_symmetry_orthogonal(x_tmp,y_tmp)
         xy_norm = (cp.dot(x_tmp, x_tmp.T) + cp.dot(y_tmp, y_tmp.T))**0.5
-        x_tmp = x_tmp/xy_norm
-        y_tmp = y_tmp/xy_norm
+        # x_tmp = x_tmp/xy_norm
+        # y_tmp = y_tmp/xy_norm
 
-        if  xy_norm > 1e-18:
+        if xy_norm > 1e-18:
             x_tmp = x_tmp/xy_norm
             y_tmp = y_tmp/xy_norm
 

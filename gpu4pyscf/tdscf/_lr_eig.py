@@ -1088,12 +1088,16 @@ def _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_fill_holder
     header_time = " ".join(f"{label:>10}" for label in labels)
     log.info(f"{'':<20}  {header_time} | Percentage ")
 
+    t_sum = [t_mvp[i] + t_subgen[i] + t_solve_sub[i] + t_sub2full[i] + t_fill_holder[i] for i in range(len(t_total))] 
+
+    # 计算并打印各计时器
     timers = {
         'mat vec product':t_mvp,
         'proj subspace':  t_subgen,
         'solve subspace': t_solve_sub,
         'proj fullspace': t_sub2full,
         'fill holder':    t_fill_holder,
+        'Sum':            t_sum,
         'Total':          t_total
     }
     for entry, cost in timers.items():
@@ -1517,7 +1521,8 @@ def Davidson_Casida(matrix_vector_product,
                                                             hdiag=hdiag)
 
         '''
-        GS and symmetric orthonormalization
+        put the new guess into the holder, 
+        maybe GS and symmetric orthonormalization
         '''
         t0 = log.init_timer()
         size_old = size_new
@@ -1537,7 +1542,7 @@ def Davidson_Casida(matrix_vector_product,
 
     if ii == (max_iter -1) and max_norm >= conv_tol:
         log.warn(f'===  Warning: TDDFT eigen solver not converged below {conv_tol:.2e} due to max iteration limit ===')
-        log.warn('max residual norms', cp.max(r_norms))
+        log.warn(f'max residual norms: {cp.max(r_norms)}')
 
     log.info(f'Finished in {ii+1:d} steps')
     log.info(f'final subspace = {sub_A.shape[0]}' )
