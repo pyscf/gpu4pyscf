@@ -347,7 +347,8 @@ class TDBase(lib.StreamObject):
 
     def gen_response(self, singlet=True, hermi=0):
         '''Generate function to compute A x'''
-        if self.exclude_nlc and self._scf.do_nlc():
+        if (self.exclude_nlc and
+            isinstance(self._scf, scf.hf.KohnShamDFT) and self._scf.do_nlc()):
             logger.warn(self, 'NLC functional found in the DFT object. Its contribution is '
                         'not included in the TDDFT response function.')
         return self._scf.gen_response(singlet=singlet, hermi=hermi,
