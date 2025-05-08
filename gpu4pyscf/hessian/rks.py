@@ -2195,12 +2195,14 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     gamma_t_i = None
 
     fxc_rho = f_rho_t_i * grids_weights
-    fxc_gamma = 2 * (contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i) +
-                     nabla_rho_t_i * f_gamma_i) * grids_weights
     f_rho_t_i = None
+    fxc_gamma  = contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i)
+    nabla_rho_i = None
     f_gamma_t_i = None
+    fxc_gamma += nabla_rho_t_i * f_gamma_i
     nabla_rho_t_i = None
     f_gamma_i = None
+    fxc_gamma = 2 * fxc_gamma * grids_weights
 
     # ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
     # ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
@@ -2226,9 +2228,9 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
 
     fxc_rho_full = cupy.zeros([n_dm1, ngrids_full])
     fxc_rho_full[:, rho_nonzero_mask] = fxc_rho
+    fxc_rho = None
     fxc_gamma_full = cupy.zeros([n_dm1, 3, ngrids_full])
     fxc_gamma_full[:, :, rho_nonzero_mask] = fxc_gamma
-    fxc_rho = None
     fxc_gamma = None
 
     if return_in_mo:
