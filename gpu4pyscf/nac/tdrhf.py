@@ -16,6 +16,7 @@ from functools import reduce
 import cupy as cp
 import numpy as np
 from pyscf import lib
+import pyscf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
@@ -25,6 +26,21 @@ from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
 from pyscf.scf import _vhf
+
+
+def get_jk(mol, dm):
+    '''J = ((-nabla i) j| kl) D_lk
+    K = ((-nabla i) j| kl) D_jk
+    '''
+    if not isinstance(dm, np.ndarray): dm = dm.get()
+    # vhfopt = _VHFOpt(mol, 'int2e_ip1').build()
+    intor = mol._add_suffix('int2e_ip1')
+    vj, vk = _vhf.direct_mapdm(intor,  # (nabla i,j|k,l)
+                               's2kl', # ip1_sph has k>=l,
+                               ('lk->s1ij', 'jk->s1il'),
+                               dm, 3, # xyz, 3 components
+                               mol._atm, mol._bas, mol._env)
+    return -vj, -vk
 
 
 def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -91,44 +107,83 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
 
     if atmlst is None:
         atmlst = range(mol.natm)
-
-    h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
-    s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
-    ds = contract("xij,ij->xi", s1, (W + W.T) * 0.5)
-
-    dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    if mol.has_ecp():
-        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    extra_force = cp.zeros((len(atmlst), 3))
-
-    dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2) 
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0 * 2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
-
-    delec = 2.0 * (dh_td - ds)
-    aoslices = mol.aoslice_by_atom()
-    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_td + delec + extra_force
-
+    
+    hcore_deriv = pyscf.grad.rhf.hcore_generator(mf_grad.to_cpu(), mol)
+    vj, vk = get_jk(mol, oo0*2) 
+    vj = vj.reshape(3,nao,nao)
+    vk = vk.reshape(3,nao,nao)
+    vhf1 = vj - vk * 0.5
+    vj, vk = get_jk(mol, (dmz1doo + dmz1doo.T)*0.5) 
+    vj = vj.reshape(3,nao,nao)
+    vk = vk.reshape(3,nao,nao)
+    vhf2 = vj - vk * 0.5
     offsetdic = mol.offset_nr_by_atom()
+    de = cp.zeros((len(atmlst),3))
     ds1 = s1.transpose(0,2,1)
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
-    for ia in range(mol.natm):
+    for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
-        de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], xIao[:, p0:p1])
-        de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], yIao[:, p0:p1])
+        h1ao = hcore_deriv(ia)
+        h1ao = cp.asarray(h1ao)
+        v1tmp = vhf1*0.0
+        v1tmp[:,p0:p1] += vhf1[:,p0:p1]
+        v1tmp[:,:,p0:p1] += vhf1[:,p0:p1].transpose(0,2,1)
+        v2tmp = vhf2*0.0
+        v2tmp[:,p0:p1] += vhf2[:,p0:p1]
+        v2tmp[:,:,p0:p1] += vhf2[:,p0:p1].transpose(0,2,1)
+
+        de[k] = cp.einsum('xpq,pq->x', h1ao, (dmz1doo + dmz1doo.T)*0.5)
+        de[k] -= cp.einsum('xpq,pq->x', s1[:,p0:p1], W[p0:p1])
+        de[k] -= cp.einsum('xqp,pq->x', s1[:,p0:p1], W[:,p0:p1])
+        de[k] += cp.einsum('xij,ij->x', v2tmp, oo0*2)
+        de[k] += cp.einsum('xij,ij->x', v1tmp, (dmz1doo + dmz1doo.T)*0.5)
+        import pdb
+        pdb.set_trace()
+        de[k] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], xIao[:, p0:p1])
+        de[k] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], yIao[:, p0:p1])
+
+
+    # h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
+    # s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    # dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
+    # ds = contract("xij,ij->xi", s1, (W + W.T) * 0.5)
+
+    # dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
+    # if mol.has_ecp():
+    #     dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
+    # extra_force = cp.zeros((len(atmlst), 3))
+
+    # dvhf_all = 0
+    # dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2) 
+    # for k, ia in enumerate(atmlst):
+    #     extra_force[k] += mf_grad.extra_force(ia, locals())
+    # dvhf_all += dvhf
+    # dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
+    # for k, ia in enumerate(atmlst):
+    #     extra_force[k] -= mf_grad.extra_force(ia, locals())
+    # dvhf_all -= dvhf
+    # dvhf = td_nac.get_veff(mol, oo0 * 2)
+    # for k, ia in enumerate(atmlst):
+    #     extra_force[k] -= mf_grad.extra_force(ia, locals())
+    # dvhf_all -= dvhf
+
+    # delec = 2.0 * (dh_td - ds)
+    # aoslices = mol.aoslice_by_atom()
+    # delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+    # de = 2.0 * dvhf_all + dh1e_td + delec + extra_force
+
+    # offsetdic = mol.offset_nr_by_atom()
+    # ds1 = s1.transpose(0,2,1)
+    # xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
+    # yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
+    # for ia in range(mol.natm):
+    #     shl0, shl1, p0, p1 = offsetdic[ia]
+    #     de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], xIao[:, p0:p1])
+    #     de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], yIao[:, p0:p1])
+
+    # import pdb
+    # pdb.set_trace()
 
     return -de.get() # derivetive couplings
 
