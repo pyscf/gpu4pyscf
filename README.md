@@ -43,12 +43,12 @@ Features
 - Density fitting scheme and direct SCF scheme;
 - SCF, analytical gradient, and analytical Hessian calculations for Hartree-Fock and DFT;
 - LDA, GGA, mGGA, hybrid, and range-separated functionals via [libXC](https://gitlab.com/libxc/libxc/-/tree/master/);
-- Spin-conserved and spin-flip TDA and TDDFT for excitated states
+- Spin-conserved and spin-flip TDA and TDDFT for excitated states;
 - Geometry optimization and transition state search via [geomeTRIC](https://geometric.readthedocs.io/en/latest/);
 - Atomic Simulation Environment ([ASE](https://gitlab.com/ase/ase)) interface;
 - Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
-- Nonlocal functional correction (vv10) for SCF and gradient;
-- ECP is supported and calculated on GPU;
+- Analytical gradient and analytical Hessian for nonlocal functional correction (vv10);
+- GPU accelerated ECP;
 - PCM models, their analytical gradients, and analytical Hessian matrix;
 - SMD solvent model;
 - Unrestricted Hartree-Fock and unrestricted DFT, gradient, and Hessian;
