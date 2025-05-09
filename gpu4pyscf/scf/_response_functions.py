@@ -89,7 +89,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                                           rho0, vxc, fxc, max_memory=max_memory)
                     if mf.do_nlc():
                         if with_nlc:
-                            raise NotImplementedError("NLC not supported")
+                            v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
                         else:
                             logger.warn(mf, "NLC contribution in gen_response is NOT included")
                 if hybrid:
@@ -115,10 +115,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                     v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, False,
                                           rho0, vxc, fxc, max_memory=max_memory)
                     if mf.do_nlc():
-                        if with_nlc:
-                            raise NotImplementedError("NLC not supported")
-                        else:
-                            logger.warn(mf, "NLC contribution in gen_response is NOT included")
+                        pass # fxc = 0, do nothing
                 if hybrid:
                     vk = mf.get_k(mol, dm1, hermi=hermi)
                     vk *= hyb

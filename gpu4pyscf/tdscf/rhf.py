@@ -246,7 +246,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
             pass
 
         elif xctype == 'NLC':
-            raise NotImplementedError('NLC')
+            pass # Processed later
 
         elif xctype == 'MGGA':
             ao_deriv = 1
@@ -273,6 +273,11 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
                 a += iajb
                 b += iajb
+
+        if mf.do_nlc():
+            raise NotImplementedError('vv10 nlc not implemented in get_ab(). '\
+                                      'However the nlc contribution is small in TDDFT, '\
+                                      'so feel free to take the risk and comment out this line.')
 
     else:
         add_hf_(a, b)
