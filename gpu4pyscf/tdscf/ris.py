@@ -213,7 +213,7 @@ def get_int3c2e(mol, auxmol, aosym=True, omega=None):
 
 def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
                                 calc='JK', aosym=True, omega=None, alpha=None, beta=None,
-                                group_size=BLKSIZE, group_size_aux=AUXBLKSIZE):
+                                group_size=BLKSIZE, group_size_aux=AUXBLKSIZE, log=None):
     """
     (3c2e_{Puv}, C_{up}, C_{vq} -> Ppq)。
 
@@ -226,10 +226,8 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
     Returns:
         Tpq: cupy.ndarray (naux, nao, nao)
     """
-
     intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(aosym=aosym, group_size=group_size, group_size_aux=group_size_aux)
-
+    intopt.build(aosym=aosym, group_size=group_size, group_size_aux=group_size_aux,verbose=mol.verbose)
     nao = mol.nao
     naux = auxmol.nao
 
@@ -251,7 +249,6 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
         k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
 
         int3c_slice = cp.empty((k1 - k0, nao, nao), dtype=cp.float32, order='C')
-
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
@@ -324,21 +321,7 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
     #     tmp = cp.einsum('Puv,up->Ppv', eri_3c2e, C_p)
     #     Ppq = cp.einsum('Ppv,vq->Ppq', tmp, C_q)
 
-        
-    # if calc == 'J':
-    #     Tpq = get_Ppq_to_Tpq(Ppq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-    #     return Tpq
 
-    # if calc == 'K':
-    #     Tpp = get_Ppq_to_Tpq(Ppp[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-    #     Tqq = get_Ppq_to_Tpq(Pqq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-    #     return Tpp, Tqq
-
-    # if calc == 'JK':
-    #     Tpq = get_Ppq_to_Tpq(Ppq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-    #     Tpp = get_Ppq_to_Tpq(Ppp[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-    #     Tqq = get_Ppq_to_Tpq(Pqq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-    #     return Tpq, Tpp, Tqq
 
 
 def get_Pblock_uv(intopt, cp_kl_id, mol, int3c_slice, 
@@ -433,10 +416,6 @@ def gen_mP(mol, auxmol, intopt, C_p, C_q, inv_eri2c,
          
             mP[:,k0:k1] = contract("Pjb,mjb->mP", Pblk_pq, V_mjb)
 
-        # unsorted_aux_ao_index = cp.argsort(intopt._aux_ao_idx)
-        # mP = mP[:,unsorted_aux_ao_index]
-        # inv_eri2c = inv_eri2c[:, intopt._aux_ao_idx]
-        # inv_eri2c = inv_eri2c[intopt._aux_ao_idx, :]
         mP = contract("mP,PQ->mQ", mP, inv_eri2c)
         return mP
     
@@ -579,22 +558,21 @@ def gen_iajb_MVP(T_left, T_right):
         Returns:
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
-        # get_memory_info('before iajb_MVP')
         # Get the shape of the tensors
         nauxao, n_occ_l, n_vir_l = T_left.shape
         nauxao, n_occ_r, n_vir_r = T_right.shape
         n_state, n_occ_r, n_vir_r = V.shape
         # Initialize result tensor
-        iajb_V = cp.zeros((n_state, n_occ_l, n_vir_l), dtype=T_left.dtype)
+        iajb_V = cp.zeros((n_state, n_occ_l, n_vir_l), dtype=V.dtype)
 
         # Estimate the memory size for one chunk
-        estimated_chunk_size_bytes = n_occ_r * n_vir_r * T_right.itemsize * 4  # 4 for each element (complex or float64)
+        estimated_chunk_size_bytes = n_occ_r * n_vir_r * T_right.itemsize 
 
         # Get available GPU memory in bytes
         available_gpu_memory = get_avail_mem()
 
         # Estimate the optimal chunk size based on available GPU memory
-        aux_chunk_size = int(available_gpu_memory * 0.8 // estimated_chunk_size_bytes)
+        aux_chunk_size = int(available_gpu_memory * 0.4 // estimated_chunk_size_bytes)
 
         # Ensure the chunk size is at least 1 and doesn't exceed the total number of auxao
         aux_chunk_size = max(1, min(nauxao, aux_chunk_size))
@@ -603,21 +581,22 @@ def gen_iajb_MVP(T_left, T_right):
         for aux_start in range(0, nauxao, aux_chunk_size):
             aux_end = min(aux_start + aux_chunk_size, nauxao)
 
-            T_left_chunk = T_left[aux_start:aux_end, :, :]  # Shape: (aux_range, n_occ, n_vir)
-            T_right_chunk = T_right[aux_start:aux_end, :, :]   # Shape: (aux_range, n_occ * n_vir)
-
-
+            
+            T_right_chunk = cp.asarray(T_right[aux_start:aux_end, :, :])   # Shape: (aux_range, n_occ * n_vir)
             T_right_jb_V_chunk = contract("Pjb,mjb->Pm", T_right_chunk, V)
+            del T_right_chunk
 
+            T_left_chunk = cp.asarray(T_left[aux_start:aux_end, :, :])  # Shape: (aux_range, n_occ, n_vir)
             iajb_V_chunk = contract("Pia,Pm->mia", T_left_chunk, T_right_jb_V_chunk)
-            del T_right_jb_V_chunk
+
+
+            del T_left_chunk, T_right_jb_V_chunk
 
             iajb_V += iajb_V_chunk  # Accumulate the result
 
             del iajb_V_chunk
             release_memory()
 
-        # get_memory_info('after iajb_MVP')
         return iajb_V
 
 
@@ -786,6 +765,7 @@ class RisBase(lib.StreamObject):
 
         logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
+        self.log.info(f'group_size {group_size}, group_size_aux {group_size_aux}')
 
     
     def get_P(self):
@@ -968,45 +948,31 @@ class RisBase(lib.StreamObject):
             log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
             self.auxmol_K = auxmol_K
 
-        if self._incore:
+        # if self._incore:
 
-            log.info(f'self.dtype.itemsize,{self.dtype.itemsize}')
-            byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
-            log.info(f'T_ia_J will take {byte_T_ia_J / (1024 ** 2):.0f} MB memory') 
+        log.info(f'self.dtype.itemsize,{self.dtype.itemsize}')
+        byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
+        log.info(f'T_ia_J will take {byte_T_ia_J / (1024 ** 2):.0f} MB memory') 
 
-            self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
+        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
 
-            if self.a_x != 0:
-                
-                byte_T_ij_K = auxmol_K.nao_nr() * self.rest_occ **2 * self.dtype.itemsize
-                byte_T_ab_K = auxmol_K.nao_nr() * self.rest_vir **2 * self.dtype.itemsize
-                log.info(f'T_ij_K will take {byte_T_ij_K / (1024 ** 2):.0f} MB memory')
-                log.info(f'T_ab_K will take {byte_T_ab_K / (1024 ** 2):.0f} MB memory')
+        if self.a_x != 0:
+            
+            byte_T_ij_K = auxmol_K.nao_nr() * self.rest_occ **2 * self.dtype.itemsize
+            byte_T_ab_K = auxmol_K.nao_nr() * self.rest_vir **2 * self.dtype.itemsize
+            log.info(f'T_ij_K will take {byte_T_ij_K / (1024 ** 2):.0f} MB memory')
+            log.info(f'T_ab_K will take {byte_T_ab_K / (1024 ** 2):.0f} MB memory')
 
-                byte_T_ia_K = auxmol_K.nao_nr() * self.rest_occ * self.rest_vir * self.dtype.itemsize
-                log.info(f'(if full TDDFT) T_ia_K will take {byte_T_ia_K / (1024 ** 2):.0f} MB memory')
+            byte_T_ia_K = auxmol_K.nao_nr() * self.rest_occ * self.rest_vir * self.dtype.itemsize
+            log.info(f'(if full TDDFT) T_ia_K will take {byte_T_ia_K / (1024 ** 2):.0f} MB memory')
 
-                if self._JK_share_aux:
-                    self.lower_inv_eri2c_K = self.lower_inv_eri2c_J
-                else:
-                    self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
+            if self._JK_share_aux:
+                self.lower_inv_eri2c_K = self.lower_inv_eri2c_J
+            else:
+                self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
              
         self.log = log
 
-    def get_P(self):
-        '''
-        transition dipole u
-        '''
-        int_r = self.mol.intor_symmetric('int1e_r' + self.eri_tag)
-        int_r = cp.asarray(int_r, dtype=cp.float32 if self.single else cp.float64)
-        if self.RKS:
-            P = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ_notrunc, C_vir=self.C_vir_notrunc)
-        else:
-            ''' TODO '''
-            P_alpha = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ[0], C_vir=self.C_vir[0])
-            P_beta = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ[1], C_vir=self.C_vir[1])
-            P = cp.vstack((P_alpha, P_beta))
-        return P
 
 
 class TDA(RisBase):
@@ -1032,8 +998,11 @@ class TDA(RisBase):
                                             omega=0,
                                             group_size=self.group_size, 
                                             group_size_aux=self.group_size_aux)
+        T_ia_J = T_ia_J.get()
+        # del T_ia_J
 
         log.timer('T_ia_J', *cpu0)
+        log.info(get_memory_info('after RIJ'))
 
         log.info('==================== RIK ====================')
         cpu1 = log.init_timer()
@@ -1050,6 +1019,7 @@ class TDA(RisBase):
                                                     group_size_aux = self.group_size_aux)
 
         log.timer('T_ij_K T_ab_K', *cpu1)
+        log.info(get_memory_info('after RIK'))
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
@@ -1085,14 +1055,15 @@ class TDA(RisBase):
         cpu0 = log.init_timer()
 
         intopt = VHFOpt(self.mol, self.auxmol_J, 'int2e')
-        intopt.build(aosym=True, group_size=self.group_size, group_size_aux=self.group_size_aux)
-        
+        intopt.build(aosym=True, group_size=self.group_size, group_size_aux=self.group_size_aux,verbose=self.log)
+        log.timer('total intopt', *cpu0)
+
+        cpu1 = log.init_timer()
         inv_eri2c_J = get_eri2c_inv(self.auxmol_J, dtype=self.dtype)
 
-        inv_eri2c_J = inv_eri2c_J[:, intopt._aux_ao_idx]
-        inv_eri2c_J = inv_eri2c_J[intopt._aux_ao_idx, :]
+        inv_eri2c_J = inv_eri2c_J[:, intopt._aux_ao_idx][intopt._aux_ao_idx, :].copy()
+        # log.timer('inv_eri2c_J', *cpu1)
         
-
         get_mP = gen_mP(mol=self.mol, auxmol=self.auxmol_J, intopt=intopt, dtype=self.dtype,
                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, omega=0,
                         inv_eri2c=inv_eri2c_J)
@@ -1100,20 +1071,18 @@ class TDA(RisBase):
         get_mjb = gen_mjb(mol=self.mol, intopt=intopt, dtype=self.dtype,omega=0,
                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc)
         
+
         iajb_MVP_memsave = gen_iajb_MVP_memsave(get_mP, get_mjb)
+        
+        log.timer('gen_iajb_MVP_memsave', *cpu1)
 
-        log.timer('gen_iajb_MVP_memsave', *cpu0)
-
+        log.info(get_memory_info('after RIJ'))
 
         log.info('==================== RIK ====================')
-        cpu1 = log.init_timer()
-        lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
+        cpu0 = log.init_timer()
 
-        # TODO
-        if self._JK_share_aux:
-            lower_inv_eri2c_K = lower_inv_eri2c_J
-        else: 
-            lower_inv_eri2c_K = get_eri2c_inv_lower(self.auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
+        lower_inv_eri2c_K = get_eri2c_inv_lower(self.auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
+        log.timer('lower_inv_eri2c_K', *cpu0)
 
         T_ij_K, T_ab_K = compute_Tpq_on_gpu_general(self.mol, self.auxmol_K, 
                                                     C_p=self.C_occ_Ktrunc, 
@@ -1126,7 +1095,7 @@ class TDA(RisBase):
                                                     group_size = self.group_size,
                                                     group_size_aux =self.group_size_aux)
 
-        log.timer('T_ij_K T_ab_K', *cpu1)
+        log.timer('T_ij_K T_ab_K', *cpu0)
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
