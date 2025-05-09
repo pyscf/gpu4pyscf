@@ -154,8 +154,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         grids = mf.grids
         ni = mf._numint
         if mf.do_nlc():
-            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
-                        'derivative is not available. Its contribution is '
+            logger.warn(mf, 'NLC functional found in DFT object. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
 
@@ -355,8 +354,12 @@ class TDBase(lib.StreamObject):
     lindep                = tdhf_cpu.TDBase.lindep
     level_shift           = tdhf_cpu.TDBase.level_shift
     max_cycle             = tdhf_cpu.TDBase.max_cycle
+    # threshold to filter positive eigenvalues
     positive_eig_threshold = tdhf_cpu.TDBase.positive_eig_threshold
+    # threshold to determine when states are considered degenerate
     deg_eia_thresh        = tdhf_cpu.TDBase.deg_eia_thresh
+    # Avoid computing NLC response in TDDFT
+    exclude_nlc = True
 
     _keys = tdhf_cpu.TDBase._keys
 
@@ -373,8 +376,13 @@ class TDBase(lib.StreamObject):
 
     def gen_response(self, singlet=True, hermi=0):
         '''Generate function to compute A x'''
-        return self._scf.gen_response(singlet=singlet, hermi=hermi)
-    
+        if (self.exclude_nlc and
+            isinstance(self._scf, scf.hf.KohnShamDFT) and self._scf.do_nlc()):
+            logger.warn(self, 'NLC functional found in the DFT object. Its contribution is '
+                        'not included in the TDDFT response function.')
+        return self._scf.gen_response(singlet=singlet, hermi=hermi,
+                                      with_nlc=not self.exclude_nlc)
+
     def get_ab(self, mf=None):
         if mf is None:
             mf = self._scf
