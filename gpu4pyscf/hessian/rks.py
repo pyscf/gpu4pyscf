@@ -2141,97 +2141,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
 
     dm1s_sorted = opt.sort_orbitals(dm1s, axis=[1,2])
     dm1s = None
-    rho_drho_t = cupy.empty([n_dm1, 4, ngrids_full])
-    g1 = 0
-    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
-        g0, g1 = g1, g1 + split_weights.size
-        for i_dm in range(n_dm1):
-            dm1_sorted = dm1s_sorted[i_dm, :, :]
-            dm1_masked = dm1_sorted[ao_mask_index[:,None], ao_mask_index]
-            rho_drho_t[i_dm, :, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dm1_masked, xctype = "NLC", hermi = 0)
-    dm1s_sorted = None
-    rho_drho_t = rho_drho_t[:, :, rho_nonzero_mask]
-
-    rho_t_i = rho_drho_t[:, 0, :]
-    nabla_rho_t_i = rho_drho_t[:, 1:4, :]
-    gamma_t_i = nabla_rho_i[0, :] * nabla_rho_t_i[:, 0, :] \
-                + nabla_rho_i[1, :] * nabla_rho_t_i[:, 1, :] \
-                + nabla_rho_i[2, :] * nabla_rho_t_i[:, 2, :]
-    gamma_t_i *= 2 # Account for the factor of 2 before gamma_j^t term in equation (22)
-    rho_drho_t = None
-
-    rho_t_i   = cupy.ascontiguousarray(rho_t_i)
-    gamma_t_i = cupy.ascontiguousarray(gamma_t_i)
-    f_rho_t_i   = cupy.empty([n_dm1, ngrids], order = "C")
-    f_gamma_t_i = cupy.empty([n_dm1, ngrids], order = "C")
-
-    libgdft.VXC_vv10nlc_hess_eval_f_t(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(f_rho_t_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(f_gamma_t_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_t_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gamma_t_i.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids),
-        ctypes.c_int(n_dm1),
-    )
-    rho_t_i = None
-    gamma_t_i = None
-
-    fxc_rho = f_rho_t_i * grids_weights
-    f_rho_t_i = None
-    fxc_gamma  = contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i)
-    nabla_rho_i = None
-    f_gamma_t_i = None
-    fxc_gamma += nabla_rho_t_i * f_gamma_i
-    nabla_rho_t_i = None
-    f_gamma_i = None
-    fxc_gamma = 2 * fxc_gamma * grids_weights
-
-    # ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
-    # ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
-    # if return_in_mo:
-    #     vmat = cupy.empty([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
-    # else:
-    #     vmat = cupy.empty([n_dm1, mol.nao, mol.nao])
-    # for i_dm in range(n_dm1):
-    #     # \mu \nu
-    #     fxc_dot_ao = ao_nonzero_rho[0] * fxc_rho[i_dm, :]
-    #     V_munu = contract("ig,jg->ij", ao_nonzero_rho[0], fxc_dot_ao)
-
-    #     # \mu \nabla\nu + \nabla\mu \nu
-    #     nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", fxc_gamma[i_dm, :, :], ao_nonzero_rho[1:4])
-    #     V_munu_gamma = contract("ig,jg->ij", ao_nonzero_rho[0], nabla_fxc_dot_nabla_ao)
-    #     V_munu += V_munu_gamma
-    #     V_munu += V_munu_gamma.T
-
-    #     if return_in_mo:
-    #         vmat[i_dm, :, :] = mo_coeff.T @ V_munu @ mocc
-    #     else:
-    #         vmat[i_dm, :, :] = V_munu
-
-    fxc_rho_full = cupy.zeros([n_dm1, ngrids_full])
-    fxc_rho_full[:, rho_nonzero_mask] = fxc_rho
-    fxc_rho = None
-    fxc_gamma_full = cupy.zeros([n_dm1, 3, ngrids_full])
-    fxc_gamma_full[:, :, rho_nonzero_mask] = fxc_gamma
-    fxc_gamma = None
 
     if return_in_mo:
         vmat = cupy.zeros([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
@@ -2240,32 +2149,114 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     else:
         vmat = cupy.zeros([n_dm1, mol.nao, mol.nao])
 
-    g1 = 0
-    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
-        g0, g1 = g1, g1 + split_weights.size
-        split_fxc_rho = fxc_rho_full[:, g0:g1]
-        split_fxc_gamma = fxc_gamma_full[:, :, g0:g1]
+    available_gpu_memory = get_avail_mem()
+    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+    fxc_nbytes_per_dm1 = ((1*6 + 3*2) * ngrids + (1*2 + 3*2) * ngrids_full) * 8
+    ndm1_per_batch = int(available_gpu_memory / fxc_nbytes_per_dm1)
+    if ndm1_per_batch < 6:
+        raise MemoryError(f"Out of GPU memory for NLC response (orbital hessian), available gpu memory = {get_avail_mem()}"
+                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+    ndm1_per_batch = (ndm1_per_batch + 6 - 1) // 6 * 6
 
-        for i_dm in range(n_dm1):
-            # \mu \nu
-            V_munu = contract("ig,jg->ij", split_ao[0], split_ao[0] * split_fxc_rho[i_dm, :])
+    for i_dm1_batch in range(0, n_dm1, ndm1_per_batch):
+        n_dm1_batch = min(ndm1_per_batch, n_dm1 - i_dm1_batch)
 
-            # \mu \nabla\nu + \nabla\mu \nu
-            nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", split_fxc_gamma[i_dm, :, :], split_ao[1:4])
-            V_munu_gamma = contract("ig,jg->ij", split_ao[0], nabla_fxc_dot_nabla_ao)
-            nabla_fxc_dot_nabla_ao = None
-            V_munu += V_munu_gamma
-            V_munu += V_munu_gamma.T
-            V_munu_gamma = None
+        rho_drho_t = cupy.empty([n_dm1_batch, 4, ngrids_full])
+        g1 = 0
+        for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
+            g0, g1 = g1, g1 + split_weights.size
+            for i_dm in range(n_dm1_batch):
+                dm1_sorted = dm1s_sorted[i_dm + i_dm1_batch, :, :]
+                dm1_masked = dm1_sorted[ao_mask_index[:,None], ao_mask_index]
+                rho_drho_t[i_dm, :, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dm1_masked, xctype = "NLC", hermi = 0)
+                dm1_sorted = None
+                dm1_masked = None
+        rho_drho_t = rho_drho_t[:, :, rho_nonzero_mask]
 
-            vmat_ao = cupy.zeros([mol.nao, mol.nao])
-            add_sparse(vmat_ao, V_munu, ao_mask_index)
+        rho_t_i = rho_drho_t[:, 0, :]
+        nabla_rho_t_i = rho_drho_t[:, 1:4, :]
+        gamma_t_i = nabla_rho_i[0, :] * nabla_rho_t_i[:, 0, :] \
+                    + nabla_rho_i[1, :] * nabla_rho_t_i[:, 1, :] \
+                    + nabla_rho_i[2, :] * nabla_rho_t_i[:, 2, :]
+        gamma_t_i *= 2 # Account for the factor of 2 before gamma_j^t term in equation (22)
+        rho_drho_t = None
 
-            if return_in_mo:
-                vmat[i_dm, :, :] += mo_coeff.T @ vmat_ao @ mocc
-            else:
-                vmat[i_dm, :, :] += opt.unsort_orbitals(vmat_ao, axis=[0,1])
-            vmat_ao = None
+        rho_t_i   = cupy.ascontiguousarray(rho_t_i)
+        gamma_t_i = cupy.ascontiguousarray(gamma_t_i)
+        f_rho_t_i   = cupy.empty([n_dm1_batch, ngrids], order = "C")
+        f_gamma_t_i = cupy.empty([n_dm1_batch, ngrids], order = "C")
+
+        libgdft.VXC_vv10nlc_hess_eval_f_t(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(f_rho_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(f_gamma_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(A_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(B_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dkappa_drho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_dgamma2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2omega_drho_dgamma_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(d2kappa_drho2_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gamma_t_i.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(n_dm1_batch),
+        )
+        rho_t_i = None
+        gamma_t_i = None
+
+        fxc_rho = f_rho_t_i * grids_weights
+        f_rho_t_i = None
+        fxc_gamma  = contract("dg,tg->tdg", nabla_rho_i, f_gamma_t_i)
+        f_gamma_t_i = None
+        fxc_gamma += nabla_rho_t_i * f_gamma_i
+        nabla_rho_t_i = None
+        fxc_gamma = 2 * fxc_gamma * grids_weights
+
+        fxc_rho_full = cupy.zeros([n_dm1_batch, ngrids_full])
+        fxc_rho_full[:, rho_nonzero_mask] = fxc_rho
+        fxc_rho = None
+        fxc_gamma_full = cupy.zeros([n_dm1_batch, 3, ngrids_full])
+        fxc_gamma_full[:, :, rho_nonzero_mask] = fxc_gamma
+        fxc_gamma = None
+
+        g1 = 0
+        for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
+            g0, g1 = g1, g1 + split_weights.size
+            split_fxc_rho = fxc_rho_full[:, g0:g1]
+            split_fxc_gamma = fxc_gamma_full[:, :, g0:g1]
+
+            for i_dm in range(n_dm1_batch):
+                # \mu \nu
+                V_munu = contract("ig,jg->ij", split_ao[0], split_ao[0] * split_fxc_rho[i_dm, :])
+
+                # \mu \nabla\nu + \nabla\mu \nu
+                nabla_fxc_dot_nabla_ao = contract("dg,dig->ig", split_fxc_gamma[i_dm, :, :], split_ao[1:4])
+                V_munu_gamma = contract("ig,jg->ij", split_ao[0], nabla_fxc_dot_nabla_ao)
+                nabla_fxc_dot_nabla_ao = None
+                V_munu += V_munu_gamma
+                V_munu += V_munu_gamma.T
+                V_munu_gamma = None
+
+                vmat_ao = cupy.zeros([mol.nao, mol.nao])
+                add_sparse(vmat_ao, V_munu, ao_mask_index)
+                V_munu = None
+
+                if return_in_mo:
+                    vmat[i_dm + i_dm1_batch, :, :] += mo_coeff.T @ vmat_ao @ mocc
+                else:
+                    vmat[i_dm + i_dm1_batch, :, :] += opt.unsort_orbitals(vmat_ao, axis=[0,1])
+                vmat_ao = None
 
     return vmat
 
