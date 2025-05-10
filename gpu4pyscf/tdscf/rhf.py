@@ -275,8 +275,8 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 b += iajb
 
         if mf.do_nlc():
-            raise NotImplementedError('vv10 nlc not implemented in get_ab(). '\
-                                      'However the nlc contribution is small in TDDFT, '\
+            raise NotImplementedError('vv10 nlc not implemented in get_ab(). '
+                                      'However the nlc contribution is small in TDDFT, '
                                       'so feel free to take the risk and comment out this line.')
 
     else:
