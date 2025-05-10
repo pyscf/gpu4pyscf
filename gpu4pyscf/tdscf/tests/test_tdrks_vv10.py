@@ -16,10 +16,10 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
-from gpu4pyscf.dft import rks
+from gpu4pyscf.dft import rks, uks
 
 def setUpModule():
-    global mol, excitation_energy_threshold, dipole_threshold, oscillator_strength_threshold
+    global mol, unrestricted_mol, excitation_energy_threshold, dipole_threshold, oscillator_strength_threshold
 
     atom = '''
     O  0.0000  0.7375 -0.0528
@@ -32,6 +32,16 @@ def setUpModule():
     mol = pyscf.M(atom=atom, basis=basis, max_memory=32000,
                   output='/dev/null', verbose=1)
 
+    unrestricted_atom = '''
+    O  0.0000  0.7375 -0.0528
+    O  0.0000 -0.7375 -0.1528
+    H  0.8190  0.8170  0.4220
+    H -0.8190 -0.8170  0.8220
+    '''
+
+    unrestricted_mol = pyscf.M(atom=unrestricted_atom, basis=basis, max_memory=32000,
+                               output='/dev/null', verbose=1)
+
     excitation_energy_threshold = 1e-6
     dipole_threshold = 2e-4
     oscillator_strength_threshold = 1e-6
@@ -41,8 +51,11 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def make_mf(mol):
-    mf = rks.RKS(mol, xc = "wb97x-v")
+def make_mf(mol, restricted = True):
+    if restricted:
+        mf = rks.RKS(mol, xc = "wb97x-v")
+    else:
+        mf = uks.UKS(mol, xc = "wb97x-v")
     mf.grids.atom_grid = (99,590)
     mf.nlcgrids.atom_grid = (50,194)
 
@@ -177,6 +190,87 @@ class KnownValues(unittest.TestCase):
         test_excitation_energy, test_state_vector = tda.kernel(nstates = len(reference_excited_state_energy))
 
         assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
+
+    def test_wb97xv_unrestricted_tddft(self):
+        ### Q-Chem input
+        # $rem
+        # JOBTYPE       sp
+        # METHOD        wb97x-v
+        # BASIS         def2-svp
+        # THRESH 16
+        # SCF_CONVERGENCE 13
+        # RPA TRUE
+        # CIS_N_ROOTS          5
+        # CIS_SINGLETS         TRUE
+        # CIS_TRIPLETS         FALSE
+        # UNRESTRICTED TRUE
+        # XC_GRID 000099000590
+        # NL_GRID 000050000194
+        # SYMMETRY FALSE
+        # SYM_IGNORE TRUE
+        # MEM_STATIC 2000
+        # MEM_TOTAL  20000
+        # $end
+        reference_ground_state_energy = -151.3161527151
+        reference_excited_state_energy = np.array([-151.14646960, -151.13543664, -151.13401946, -151.11836352, -151.11473748])
+        reference_excitation_energy = reference_excited_state_energy - reference_ground_state_energy
+
+        mf = make_mf(unrestricted_mol, restricted = False)
+        tddft = mf.TDDFT()
+        tddft.exclude_nlc = False
+        test_excitation_energy, test_state_vector = tddft.kernel(nstates = len(reference_excited_state_energy))
+
+        assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
+
+        reference_transition_dipole = np.array([
+            [-0.0000, -0.0000, -0.0000],
+            [ 0.0000,  0.0000,  0.0000],
+            [-0.0000, -0.0000, -0.0000],
+            [-0.0000, -0.0000, -0.0000],
+            [ 0.0053,  0.0736, -0.1081],
+        ])
+        test_transition_dipole = tddft.transition_dipole()
+
+        for i_dipole in range(reference_transition_dipole.shape[0]):
+            assert np.linalg.norm(test_transition_dipole[i_dipole] - reference_transition_dipole[i_dipole]) < dipole_threshold \
+                or np.linalg.norm(test_transition_dipole[i_dipole] + reference_transition_dipole[i_dipole]) < dipole_threshold
+
+        reference_oscillator_strength = np.array([0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 0.0022997807])
+        test_oscillator_strength = tddft.oscillator_strength()
+
+        assert np.linalg.norm(test_oscillator_strength - reference_oscillator_strength) < oscillator_strength_threshold
+
+    def test_wb97xv_unrestricted_tda(self):
+        # Same Q-Chem input as above, Q-Chem computes both TDA and TDDFT in the same run
+        reference_ground_state_energy = -151.3161527151
+        reference_excited_state_energy = np.array([-151.14341812, -151.13276759, -151.12542218, -151.11386801, -151.11343460])
+        reference_excitation_energy = reference_excited_state_energy - reference_ground_state_energy
+
+        mf = make_mf(unrestricted_mol, restricted = False)
+        tda = mf.TDA()
+        tda.exclude_nlc = False
+        tda.conv_tol = 1e-4 # There's some numerical problem with the default conv_tol == 1e-5
+        test_excitation_energy, test_state_vector = tda.kernel(nstates = len(reference_excited_state_energy))
+
+        assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
+
+        reference_transition_dipole = np.array([
+            [ 0.0000,  0.0000,  0.0000],
+            [-0.0000, -0.0000, -0.0000],
+            [ 0.0000,  0.0000,  0.0000],
+            [-0.0000, -0.0000,  0.0000],
+            [ 0.0122,  0.0739, -0.1050],
+        ])
+        test_transition_dipole = tda.transition_dipole()
+
+        for i_dipole in range(reference_transition_dipole.shape[0]):
+            assert np.linalg.norm(test_transition_dipole[i_dipole] - reference_transition_dipole[i_dipole]) < dipole_threshold \
+                or np.linalg.norm(test_transition_dipole[i_dipole] + reference_transition_dipole[i_dipole]) < dipole_threshold
+
+        reference_oscillator_strength = np.array([0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 0.0022473681])
+        test_oscillator_strength = tda.oscillator_strength()
+
+        assert np.linalg.norm(test_oscillator_strength - reference_oscillator_strength) < oscillator_strength_threshold
 
 
 if __name__ == "__main__":
