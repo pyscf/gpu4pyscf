@@ -28,9 +28,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 start_time = time.time()
-mol = pyscf.M(
-    atom='Vitamin_C.xyz',
-    verbose=4)
+mol = pyscf.M(atom=atom, verbose=4)
 
 print(f'{mol.nao} atomic orbitals')
 mf = rks.RKS(mol, xc='HYB_MGGA_XC_WB97M_V').density_fit()
@@ -42,8 +40,11 @@ e_tot = mf.kernel()
 end_time = time.time()
 print(f'Wallclock time: {end_time-start_time}')
 
-print('calculating gradient')
+# Compute gradient
 gobj = mf.nuc_grad_method()
 gobj.kernel()
 
-# Hessian for nlc is not supported
+# Compute Hessian
+h = mf.Hessian()
+h.auxbasis_response = 2
+h_dft = h.kernel()

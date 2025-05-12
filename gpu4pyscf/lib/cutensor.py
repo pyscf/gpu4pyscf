@@ -78,6 +78,8 @@ def contraction(
     mode_a = list(str_a)
     mode_b = list(str_b)
     mode_c = list(str_c)
+    if len(mode_c) != len(set(mode_c)):
+        raise ValueError('Output subscripts string includes the same subscript multiple times.')
 
     dtype = np.result_type(a.dtype, b.dtype)
     a = cupy.asarray(a, dtype=dtype)
