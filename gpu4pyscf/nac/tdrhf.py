@@ -74,7 +74,7 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)
+        v1ao = vresp(dm + dm.T)  # 2 * Z^S
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
@@ -84,7 +84,6 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         LI*1.0, # only one spin
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0]
-    print(LI.shape, z1.shape)
 
     z1 = z1.reshape(nvir, nocc)
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T)) * 2 # double occupency
@@ -99,9 +98,9 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     zeta1 = mo_energy[cp.newaxis, :nocc]
     zeta1 = z1 * zeta1
     W[nocc:, :nocc] = 0.5*yI + 0.5*zeta1
-    print(np.abs(W[:nocc,:nocc]-W[:nocc,:nocc].T).max())
-    print(np.abs(W[nocc:,nocc:]-W[nocc:,nocc:].T).max())
-    print(np.abs(W[nocc:,:nocc]-W[:nocc,nocc:].T).max())
+    # print(np.abs(W[:nocc,:nocc]-W[:nocc,:nocc].T).max())
+    # print(np.abs(W[nocc:,nocc:]-W[nocc:,nocc:].T).max())
+    # print(np.abs(W[nocc:,:nocc]-W[:nocc,nocc:].T).max())
     W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
