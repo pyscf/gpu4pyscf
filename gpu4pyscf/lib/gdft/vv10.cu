@@ -495,6 +495,62 @@ static void vv10_hess_eval_EUW_grid_response_kernel(double* __restrict__ Egr, do
     Wgr[B_atom * 3 * ngrids + 2 * ngrids + i] =  2 * Wgr_i.z;
 }
 
+template <int n_derivative_per_thread>
+__global__
+static void vv10_hess_eval_EUW_with_weight1_kernel(double* __restrict__ Ew, double* __restrict__ Uw, double* __restrict__ Ww,
+                                                   const double* __restrict__ grid_coord, const double* __restrict__ grid_weight1,
+                                                   const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
+                                                   const int ngrids, const int nderivative)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int i_derivative_start = (blockIdx.y * blockDim.y + threadIdx.y) * n_derivative_per_thread;
+    if (i >= ngrids || i_derivative_start >= nderivative)
+        return;
+
+    const double omega_i = omega[i];
+    const double kappa_i = kappa[i];
+    const double3 r_i = { grid_coord[i * 3 + 0], grid_coord[i * 3 + 1], grid_coord[i * 3 + 2] };
+
+    double Ew_i[n_derivative_per_thread] {0};
+    double Uw_i[n_derivative_per_thread] {0};
+    double Ww_i[n_derivative_per_thread] {0};
+
+    for (int j = 0; j < ngrids; j++) {
+        const double omega_j = omega[j];
+        const double kappa_j = kappa[j];
+        const double3 r_j = { grid_coord[j * 3 + 0], grid_coord[j * 3 + 1], grid_coord[j * 3 + 2] };
+        const double rho_j = rho[j];
+
+        const double r_ij2 = (r_i.x - r_j.x) * (r_i.x - r_j.x) + (r_i.y - r_j.y) * (r_i.y - r_j.y) + (r_i.z - r_j.z) * (r_i.z - r_j.z);
+        const double g_ij = omega_i * r_ij2 + kappa_i;
+        const double g_ji = omega_j * r_ij2 + kappa_j;
+        const double g_ij_1 = 1 / g_ij;
+        const double g_sum_1 = 1 / (g_ij + g_ji);
+        const double Phi_ij = -1.5 / g_ji * g_ij_1 * g_sum_1;
+
+        const double E_ij = rho_j * Phi_ij;
+        const double U_ij = E_ij * (g_sum_1 + g_ij_1);
+        const double W_ij = U_ij * r_ij2;
+
+        #pragma unroll
+        for (int i_derivative = 0; i_derivative < n_derivative_per_thread; i_derivative++) {
+            if (i_derivative + i_derivative_start >= nderivative) continue;
+            const double weight_j = grid_weight1[(i_derivative + i_derivative_start) * ngrids + j];
+            Ew_i[i_derivative] += weight_j * E_ij;
+            Uw_i[i_derivative] += weight_j * U_ij;
+            Ww_i[i_derivative] += weight_j * W_ij;
+        }
+    }
+
+    #pragma unroll
+    for (int i_derivative = 0; i_derivative < n_derivative_per_thread; i_derivative++) {
+        if (i_derivative + i_derivative_start >= nderivative) continue;
+        Ew[(i_derivative + i_derivative_start) * ngrids + i] =  Ew_i[i_derivative];
+        Uw[(i_derivative + i_derivative_start) * ngrids + i] = -Uw_i[i_derivative];
+        Ww[(i_derivative + i_derivative_start) * ngrids + i] = -Ww_i[i_derivative];
+    }
+}
+
 extern "C" {
 __host__
 int VXC_vv10nlc(cudaStream_t stream, double *Fvec, double *Uvec, double *Wvec,
@@ -585,7 +641,7 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
                               const double* rho_t, const double* gamma_t,
                               const int ngrids, const int ntrial)
 {
-    constexpr int n_trial_per_thread = 6; // Notice: ntrial is almost always a multiple of 3
+    constexpr int n_trial_per_thread = 6; // Notice: ntrial is likely a multiple of 3
     const dim3 threads(NG_PER_BLOCK, 1);
     const dim3 blocks((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK,
                       (ntrial + n_trial_per_thread - 1) / n_trial_per_thread);
@@ -624,6 +680,30 @@ int VXC_vv10nlc_hess_eval_EUW_grid_response(const cudaStream_t stream,
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 hess eval_EUW_grid_response: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+__host__
+int VXC_vv10nlc_hess_eval_EUW_with_weight1(const cudaStream_t stream,
+                                           double* Ew, double* Uw, double* Ww,
+                                           const double* grid_coord, const double* grid_weight1,
+                                           const double* rho, const double* omega, const double* kappa,
+                                           const int ngrids, const int nderivative)
+{
+    constexpr int n_derivative_per_thread = 6; // Notice: ntrial is always a multiple of 3
+    const dim3 threads(NG_PER_BLOCK, 1);
+    const dim3 blocks((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK,
+                      (nderivative + n_derivative_per_thread - 1) / n_derivative_per_thread);
+    vv10_hess_eval_EUW_with_weight1_kernel<n_derivative_per_thread> <<<blocks, threads, 0, stream>>> (
+        Ew, Uw, Ww,
+        grid_coord, grid_weight1, rho, omega, kappa,
+        ngrids, nderivative
+    );
+    const cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of vv10 hess eval_EUW_with_weight1: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

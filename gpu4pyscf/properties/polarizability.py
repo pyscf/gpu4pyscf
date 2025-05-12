@@ -49,7 +49,7 @@ def gen_vind(mf, mo_coeff, mo_occ, with_nlc=True):
     return fx
 
 
-def eval_polarizability(mf, max_cycle=20, tol=1e-10, with_nlc=True):
+def eval_polarizability(mf, max_cycle=100, tol=1e-7, with_nlc=True):
     """main function to calculate the polarizability
 
     Args:
