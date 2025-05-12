@@ -2044,6 +2044,13 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         mo_occ_b = mo_occ[1, mo_occ[1] > 0]
         dm0 = (mocc_a * mo_occ_a) @ mocc_a.T + (mocc_b * mo_occ_b) @ mocc_b.T
 
+    output_in_2d = False
+    if dm1s.ndim == 2:
+        assert dm1s.shape == (mol.nao, mol.nao)
+        dm1s = dm1s.reshape((1, mol.nao, mol.nao))
+        output_in_2d = True
+    assert dm1s.ndim == 3
+
     grids = mf.nlcgrids
     if grids.coords is None:
         grids.build()
@@ -2269,6 +2276,9 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                 else:
                     vmat[i_dm + i_dm1_batch, :, :] += opt.unsort_orbitals(vmat_ao, axis=[0,1])
                 vmat_ao = None
+
+    if output_in_2d:
+        vmat = vmat.reshape((mol.nao, mol.nao))
 
     return vmat
 

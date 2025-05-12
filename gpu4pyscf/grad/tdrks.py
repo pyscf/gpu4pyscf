@@ -342,6 +342,11 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
     else:
         raise NotImplementedError(f"td-rks for functional {xc_code}")
 
+    if (not td_grad.base.exclude_nlc) and mf.do_nlc():
+        raise NotImplementedError("TDDFT gradient with NLC contribution is not supported yet. "
+                                  "Please set exclude_nlc field of tdscf object to True, "
+                                  "which will turn off NLC contribution in the whole TDDFT calculation.")
+
     if singlet:
         for ao, mask, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
             if xctype == "LDA":
