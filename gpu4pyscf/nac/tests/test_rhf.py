@@ -52,9 +52,9 @@ class KnownValues(unittest.TestCase):
         nac1.state=(1,0)
         nac1.kernel()
         nacv_gpu = nac1.de
-        ref = np.array([[ -0.388607,  0.000000,  0.000000],
-                        [  0.194304, -0.000000, -0.000000],
-                        [  0.194304,  0.000000, -0.000000]])
+        ref = np.array([[ -0.066695,  0.000000,  0.000000],
+                        [ -0.094903, -0.000000, -0.000000],
+                        [ -0.094903,  0.000000, -0.000000]])
         print(nacv_gpu)
         assert abs(nacv_gpu - ref).max() < 1e-4
 

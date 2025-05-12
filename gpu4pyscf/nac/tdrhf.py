@@ -73,7 +73,7 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     vresp = mf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
+        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
         v1ao = vresp(dm + dm.T)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
@@ -81,13 +81,15 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
         fvind,
         mo_energy,
         mo_occ,
-        LI*2.0,
+        LI*1.0, # only one spin
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0]
+    print(LI.shape, z1.shape)
+
     z1 = z1.reshape(nvir, nocc)
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    z1aoS = (z1ao + z1ao.T)*0.5
-    GZS = vresp(z1aoS)
+    z1ao = reduce(cp.dot, (orbv, z1, orbo.T)) * 2 # double occupency
+    z1aoS = (z1ao + z1ao.T)*0.5 # 0.5 is in the definition of z1aoS
+    GZS = vresp(z1aoS) # generate the double occupency
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
@@ -97,51 +99,54 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     zeta1 = mo_energy[cp.newaxis, :nocc]
     zeta1 = z1 * zeta1
     W[nocc:, :nocc] = 0.5*yI + 0.5*zeta1
+    print(np.abs(W[:nocc,:nocc]-W[:nocc,:nocc].T).max())
+    print(np.abs(W[nocc:,nocc:]-W[nocc:,nocc:].T).max())
+    print(np.abs(W[nocc:,:nocc]-W[:nocc,nocc:].T).max())
     W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
-
-    dmz1doo = z1ao
+    dmz1doo = z1aoS
     oo0 = reduce(cp.dot, (orbo, orbo.T))
 
     if atmlst is None:
         atmlst = range(mol.natm)
     
     hcore_deriv = pyscf.grad.rhf.hcore_generator(mf_grad.to_cpu(), mol)
-    vj, vk = get_jk(mol, oo0*2) 
-    vj = vj.reshape(3,nao,nao)
-    vk = vk.reshape(3,nao,nao)
-    vhf1 = vj - vk * 0.5
-    vj, vk = get_jk(mol, (dmz1doo + dmz1doo.T)*0.5) 
-    vj = vj.reshape(3,nao,nao)
-    vk = vk.reshape(3,nao,nao)
-    vhf2 = vj - vk * 0.5
     offsetdic = mol.offset_nr_by_atom()
     de = cp.zeros((len(atmlst),3))
-    ds1 = s1.transpose(0,2,1)
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
+    eri1 = -mol.intor('int2e_ip1', aosym='s1', comp=3)
+    eri1 = eri1.reshape(3,nao,nao,nao,nao)
     for k, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = offsetdic[ia]
         h1ao = hcore_deriv(ia)
         h1ao = cp.asarray(h1ao)
-        v1tmp = vhf1*0.0
-        v1tmp[:,p0:p1] += vhf1[:,p0:p1]
-        v1tmp[:,:,p0:p1] += vhf1[:,p0:p1].transpose(0,2,1)
-        v2tmp = vhf2*0.0
-        v2tmp[:,p0:p1] += vhf2[:,p0:p1]
-        v2tmp[:,:,p0:p1] += vhf2[:,p0:p1].transpose(0,2,1)
+        s1_tmp = s1.copy()
+        s1_tmp[:,:p0] = 0
+        s1_tmp[:,p1:] = 0
+        s1_tmp = s1_tmp + s1_tmp.transpose(0,2,1)
 
-        de[k] = cp.einsum('xpq,pq->x', h1ao, (dmz1doo + dmz1doo.T)*0.5)
-        de[k] -= cp.einsum('xpq,pq->x', s1[:,p0:p1], W[p0:p1])
-        de[k] -= cp.einsum('xqp,pq->x', s1[:,p0:p1], W[:,p0:p1])
-        de[k] += cp.einsum('xij,ij->x', v2tmp, oo0*2)
-        de[k] += cp.einsum('xij,ij->x', v1tmp, (dmz1doo + dmz1doo.T)*0.5)
-        import pdb
-        pdb.set_trace()
-        de[k] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], xIao[:, p0:p1])
-        de[k] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], yIao[:, p0:p1])
+        eri1a = eri1.copy()
+        eri1a[:,:p0] = 0
+        eri1a[:,p1:] = 0
+        eri1a = eri1a + eri1a.transpose(0,2,1,3,4)
+        eri1a = eri1a + eri1a.transpose(0,3,4,1,2)
+        erijk = eri1a - eri1a.transpose(0,1,4,3,2)*0.5
+
+        ds1_tmp = s1.copy()
+        ds1_tmp = ds1_tmp.transpose(0,2,1)
+        ds1_tmp[:,:,:p0] = 0
+        ds1_tmp[:,:,p1:] = 0
+
+        de[k] = cp.einsum('xpq,pq->x', h1ao, dmz1doo)
+        de[k] -= cp.einsum('xpq,pq->x', s1_tmp, W)
+        de[k] += cp.einsum('xijkl,ij,kl->x', erijk, oo0*2, dmz1doo)
+        de[k] += cp.einsum('xij,ij->x', ds1_tmp, xIao)
+        de[k] += cp.einsum('xij,ij->x', ds1_tmp, yIao)
+        
+    return -de.get() # derivetive couplings
 
 
     # h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
