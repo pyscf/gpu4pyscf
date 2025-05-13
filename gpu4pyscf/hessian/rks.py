@@ -2029,8 +2029,27 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
 
         TODO: check the effect of different grid, using mf.nlcgrids right now
     """
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = 2 * mocc @ mocc.T
+    if mo_coeff.ndim == 2:
+        mocc = mo_coeff[:,mo_occ>0]
+        mo_occ = mo_occ[mo_occ > 0]
+        dm0 = (mocc * mo_occ) @ mocc.T
+    else:
+        assert mo_coeff.ndim == 3 # unrestricted case
+        assert mo_coeff.shape[0] == 2
+        assert mo_occ.shape[0] == 2
+        assert not return_in_mo # Only support gen_response() for now
+        mocc_a = mo_coeff[0][:, mo_occ[0] > 0]
+        mocc_b = mo_coeff[1][:, mo_occ[1] > 0]
+        mo_occ_a = mo_occ[0, mo_occ[0] > 0]
+        mo_occ_b = mo_occ[1, mo_occ[1] > 0]
+        dm0 = (mocc_a * mo_occ_a) @ mocc_a.T + (mocc_b * mo_occ_b) @ mocc_b.T
+
+    output_in_2d = False
+    if dm1s.ndim == 2:
+        assert dm1s.shape == (mol.nao, mol.nao)
+        dm1s = dm1s.reshape((1, mol.nao, mol.nao))
+        output_in_2d = True
+    assert dm1s.ndim == 3
 
     grids = mf.nlcgrids
     if grids.coords is None:
@@ -2257,6 +2276,9 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                 else:
                     vmat[i_dm + i_dm1_batch, :, :] += opt.unsort_orbitals(vmat_ao, axis=[0,1])
                 vmat_ao = None
+
+    if output_in_2d:
+        vmat = vmat.reshape((mol.nao, mol.nao))
 
     return vmat
 
