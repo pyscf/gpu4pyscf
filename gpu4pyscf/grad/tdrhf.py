@@ -261,6 +261,9 @@ class TDSCF_GradScanner(lib.GradScanner):
         td_scanner(mol)
         assert td_scanner.device == 'gpu'
         assert self.device == 'gpu'
+        if getattr(self.base, 'with_solvent', None):
+            self.base.with_solvent.mol = mol
+            self.base.with_solvent.build()
         # TODO: Check root flip.  Maybe avoid the initial guess in TDHF otherwise
         # large error may be found in the excited states amplitudes
         de = self.kernel(state=state, **kwargs)
