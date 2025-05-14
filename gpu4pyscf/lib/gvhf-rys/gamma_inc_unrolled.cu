@@ -6,8 +6,14 @@
 __device__
 static void eval_gamma_inc_fn(double *f, double t, int m)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int t_id = item.get_global_linear_id();
+    int block_size = item.get_local_range(0) * item.get_local_range(1);
+#else
     int t_id = threadIdx.x + blockDim.x * threadIdx.y + blockDim.x * blockDim.y * threadIdx.z;
     int block_size = blockDim.x * blockDim.y * blockDim.z;
+#endif
     if (t < EPS_FLOAT64) {
         f[t_id] = 1.;
         for (int i = 1; i <= m; i++) {

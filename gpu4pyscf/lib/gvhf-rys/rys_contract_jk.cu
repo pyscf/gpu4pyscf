@@ -17,7 +17,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 
 #include "vhf.cuh"
 #include "rys_roots.cu"
@@ -28,13 +32,25 @@
 
 __device__
 static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                           ShellQuartet *shl_quartet_idx, int ntasks)
+                           ShellQuartet *shl_quartet_idx, int ntasks, char* shm_mem)
 {
     // sq is short for shl_quartet
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sq_id = item.get_local_id(1);
+    int nsq_per_block = item.get_local_range(1);
+    int gout_id = item.get_local_id(0);
+    int gout_stride = item.get_local_range(0);
+    double* shared_memory = reinterpret_cast<double*>(shm_mem);
+    auto c_g_pair_idx = s_g_pair_idx.get();
+    auto c_g_pair_offsets = s_g_pair_offsets.get();
+#else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    extern __shared__ double shared_memory[];
+#endif
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -70,7 +86,6 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
 
-    extern __shared__ double shared_memory[];
     double *rjri = shared_memory + sq_id;
     double *rlrk = rjri + nsq_per_block * 3;
     double *Rpq = rlrk + nsq_per_block * 3;
@@ -457,14 +472,25 @@ static void rys_jk_general(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 
 __global__
 void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                   ShellQuartet *pool, uint32_t *batch_head)
+                   ShellQuartet *pool, uint32_t *batch_head
+                   #ifdef USE_SYCL
+                   , sycl::nd_item<2> &item, char* shm_mem
+                   #endif
+                   )
 {
+#ifdef USE_SYCL
+    int b_id = item.get_group(1);
+    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
+    int* batch_id = reinterpret_cast<int*>(shm_mem);
+#else
     int b_id = blockIdx.x;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
     extern __shared__ int batch_id[];
+    char* shm_mem = NULL;
+#endif
+    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
     if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+      batch_id[0] = atomicAdd(batch_head, (uint32_t)1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
@@ -473,20 +499,20 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int batch_ij = batch_id[0] / nbatches_kl;
         int batch_kl = batch_id[0] % nbatches_kl;
         double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
+        uint32_t ntasks;
         if (omega >= 0) {
             ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
+                                    batch_ij, batch_kl, shm_mem);
         } else {
             ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
+                                       batch_ij, batch_kl, shm_mem);
         }
         if (ntasks > 0) {
-            rys_jk_general(envs, jk, bounds, shl_quartet_idx, ntasks);
+            rys_jk_general(envs, jk, bounds, shl_quartet_idx, ntasks, shm_mem);
             __syncthreads();
         }
         if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
+          batch_id[0] = atomicAdd(batch_head, (uint32_t)1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();

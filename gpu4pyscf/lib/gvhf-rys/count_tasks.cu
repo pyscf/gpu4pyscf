@@ -18,21 +18,35 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 
 #include "vhf.cuh"
 #include "create_tasks.cu"
 
 __global__
 static void count_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                            ShellQuartet *pool, uint32_t *batch_head)
+                            ShellQuartet *pool, uint32_t *batch_head
+                            #ifdef USE_SYCL
+                            , sycl::nd_item<2> &item, char *shm_mem
+                            #endif
+                            )
 {
+#ifdef USE_SYCL
+    int b_id = item.get_group(1);
+    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
+    int& batch_id = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+#else
     int b_id = blockIdx.x;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
     __shared__ int batch_id;
+#endif
+    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+      batch_id = atomicAdd(batch_head, (uint32_t)1);
     }
     __syncthreads();
     double omega = envs.env[PTR_RANGE_OMEGA];
@@ -41,16 +55,16 @@ static void count_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     while (batch_id < nbatches) {
         int batch_ij = batch_id / nbatches_kl;
         int batch_kl = batch_id % nbatches_kl;
-        int ntasks;
+        uint32_t ntasks;
         if (omega >= 0) {
             ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
+                                    batch_ij, batch_kl, shm_mem);
         } else {
             ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
+                                       batch_ij, batch_kl, shm_mem);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+          batch_id = atomicAdd(batch_head, (uint32_t)1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -95,11 +109,25 @@ int RYS_count_jk_tasks(double *vj, double *vk, double *dm, int n_dm, int nao,
         q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
 
-    cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
-
     int threads = scheme[0]*scheme[1];
     int buflen = threads;
+
+    #ifdef USE_SYCL
+    sycl::queue& stream = *sycl_get_queue();
+    stream.memset(batch_head, 0, 2*sizeof(uint32_t)).wait();
+    sycl::range<2> blocks(1, workers);
+    sycl::range<2> thread(1, threads);
+    stream.submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+      cgh.parallel_for(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
+        count_jk_kernel(envs, jk, bounds, pool, batch_head,
+                        item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      });
+    });
+    #else
+    cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
     count_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+    #endif
     return 0;
 }
 }

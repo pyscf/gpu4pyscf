@@ -1,4 +1,8 @@
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda.h>
+#endif
 #include "vhf.cuh"
 #include "gamma_inc_unrolled.cu"
 #include "create_tasks.cu"
@@ -8,10 +12,21 @@ int os_jk_unrolled_max_order = 0;
 
 __device__ static
 void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+                 ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0,
+                 char *shm_mem)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sq_id = item.get_local_id(1) + item.get_local_range(1) * item.get_local_id(0);
+    int nsq_per_block = item.get_local_range(1) * item.get_local_range(0);
+    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
+    double *Rpa_cicj = reinterpret_cast<double*>(shm_mem);
+#else
     int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
     int nsq_per_block = blockDim.x * blockDim.y;
+    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
+    extern __shared__ double Rpa_cicj[];
+#endif
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
@@ -22,9 +37,7 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int *bas = envs.bas;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
     double *gamma_inc = Rpa_cicj + iprim*jprim*TILE2*4;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     for (int n = t_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
         int ijp = n / TILE2;
         int sh_ij = n % TILE2;
@@ -91,7 +104,7 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-    
+
         gout0 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
@@ -204,14 +217,25 @@ __global__ __maxnreg__(128)
 __global__
 #endif
 void os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
+                ShellQuartet *pool, uint32_t *batch_head
+#ifdef USE_SYCL
+                 , sycl::nd_item<2> &item, char *shm_mem
+#endif
+                )
 {
+#ifdef USE_SYCL
+    int b_id = item.get_group(1);
+    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
+    int& batch_id = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
+#else
     int b_id = blockIdx.x;
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
     __shared__ int batch_id;
+    char *shm_mem = NULL;
+#endif
+    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
     if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+        batch_id = atomicAdd(batch_head, (uint32_t)1);
     }
     __syncthreads();
     int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
@@ -221,13 +245,13 @@ void os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int batch_kl = batch_id % nbatches_kl;
         int nbas = envs.nbas;
         double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
+        uint32_t ntasks;
         if (omega >= 0) {
             ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
+                                    batch_ij, batch_kl, shm_mem);
         } else {
             ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
+                                       batch_ij, batch_kl, shm_mem);
         }
         if (ntasks > 0) {
             int tile_ij = bounds.tile_ij_mapping[batch_ij];
@@ -236,10 +260,10 @@ void os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int tile_j = tile_ij % nbas_tiles;
             int ish0 = tile_i * TILE;
             int jsh0 = tile_j * TILE;
-            _os_jk_0000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
+            _os_jk_0000(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0, shm_mem);
         }
         if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
+            batch_id = atomicAdd(batch_head, (uint32_t)1);
             atomicAdd(batch_head+1, ntasks);
         }
         __syncthreads();
@@ -265,7 +289,22 @@ int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     }
     int ijkl = li*8 + lj*4 + lk*2 + ll;
     switch (ijkl) {
+#ifdef USE_SYCL
+    case 0: {
+      sycl::range<2> blocks(1, workers);
+      sycl::range<2> thread(1, threads);
+      sycl_get_queue()->submit([&](sycl::handler &cgh) {
+        sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen*sizeof(double)), cgh);
+        cgh.parallel_for(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
+          os_jk_0000(*envs, *jk, *bounds, pool, batch_head,
+                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+        });
+      });
+      break;
+    }
+#else // USE_SYCL
     case 0: os_jk_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+#endif // USE_SYCL
     default: return 1;
     }
     return 0;

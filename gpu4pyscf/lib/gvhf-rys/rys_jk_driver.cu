@@ -18,10 +18,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
 
 #include "vhf.cuh"
+
+#ifndef USE_SYCL
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #define CHECK_SHARED_MEMORY_ATTRIBUTES true
 
@@ -32,7 +34,26 @@ __constant__ int c_g_pair_offsets[LMAX1*LMAX1];
 // TODO: reuse memory of c_g_pair_idx for c_i_in_fold2idx and c_i_in_fold2idx
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
+#endif // ifndef USE_SYCL
 
+
+
+#ifdef USE_SYCL
+SYCL_EXTERNAL __global__ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                                    ShellQuartet *pool, uint32_t *batch_head, sycl::nd_item<2> &item, char *shm_mem);
+SYCL_EXTERNAL __global__ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                                    ShellQuartet *pool, uint32_t *batch_head, sycl::nd_item<2> &item, char *shm_mem);
+SYCL_EXTERNAL __global__ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                                     ShellQuartet *pool, uint32_t *batch_head, sycl::nd_item<2> &item, char *shm_mem);
+SYCL_EXTERNAL __global__ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                                         ShellQuartet *pool, uint32_t *batch_head, sycl::nd_item<2> &item, char *shm_mem);
+SYCL_EXTERNAL __global__ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                                          ShellQuartet *pool, double *dd_pool, uint32_t *batch_head, sycl::nd_item<2> &item, char *shm_mem);
+SYCL_EXTERNAL __global__ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                                          ShellQuartet *pool, double *dd_pool, uint32_t *batch_head, sycl::nd_item<2> &item, char *shm_mem);
+SYCL_EXTERNAL __global__ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                                          ShellQuartet *pool, double *dd_pool, uint32_t *batch_head, sycl::nd_item<2> &item, char *shm_mem);
+#else // USE_SYCL
 extern __global__ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                     ShellQuartet *pool, uint32_t *batch_head);
 extern __global__ void rys_j_with_gout_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
@@ -47,6 +68,7 @@ extern __global__ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk
                                           ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                           ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
+#endif // USE_SYCL
 extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers);
 extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
@@ -111,7 +133,11 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
+    #ifdef USE_SYCL
+    sycl_get_queue()->memset(batch_head, 0, 2*sizeof(uint32_t)).wait();
+    #else
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
+    #endif
 
     if (!rys_j_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
@@ -120,7 +146,6 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         gout_stride *= 2;
 #endif
         int with_gout = scheme[2];
-        dim3 threads(quartets_per_block, gout_stride);
         int nmax = MAX(lij, lkl);
         int nf3_ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
@@ -128,6 +153,17 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         if (with_gout) {
             buflen += nf3_ij*nf3_kl * quartets_per_block;
 
+#ifdef USE_SYCL
+            sycl::range<2> blocks(1, workers);
+            sycl::range<2> threads(gout_stride, quartets_per_block);
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                rys_j_with_gout_kernel(envs, jk, bounds, pool, batch_head,
+                                       item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+#else
             if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
                 cudaFuncAttributes attributes;
                 const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_j_with_gout_kernel);
@@ -140,11 +176,24 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 }
             }
 
+            dim3 threads(quartets_per_block, gout_stride);
             rys_j_with_gout_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+#endif
         } else {
             buflen += (nf3_ij+nf3_kl*2+(lij+1)*(lkl+1)*(nmax+2)) * quartets_per_block;
             buflen += nf3_ij * TILE2; // dm_ij_cache
 
+#ifdef USE_SYCL
+            sycl::range<2> blocks(1, workers);
+            sycl::range<2> threads(gout_stride, quartets_per_block);
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                rys_j_kernel(envs, jk, bounds, pool, batch_head,
+                             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+#else
             if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
                 cudaFuncAttributes attributes;
                 const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_j_kernel);
@@ -157,9 +206,13 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
                 }
             }
 
+            dim3 threads(quartets_per_block, gout_stride);
             rys_j_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+#endif
         }
     }
+
+#ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         int device_id = -1;
@@ -171,6 +224,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         fprintf(stderr, "CUDA Error in RYS_build_j, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -216,7 +270,11 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
 
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm};
+    #ifdef USE_SYCL
+    sycl_get_queue()->memset(batch_head, 0, 2*sizeof(uint32_t)).wait();
+    #else
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
+    #endif
 
     if (order == 0) {
         os_jk_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers, omega);
@@ -224,7 +282,6 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
 
         const int j_cache_size = nfij + nfkl;
         const int k_cache_size = nfi * nfk + nfi * nfl + nfj * nfk + nfj * nfl;
@@ -233,6 +290,17 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         const int shared_root_g_jk_cache_size = (root_g_size > jk_cache_size) ? root_g_size : jk_cache_size;
         const int buflen = (9 + ij_prims + shared_root_g_jk_cache_size) * quartets_per_block;// + ij_prims*4*TILE2;
 
+        #ifdef USE_SYCL
+        sycl::range<2> blocks(1, workers);
+        sycl::range<2> threads(gout_stride, quartets_per_block);
+        sycl_get_queue()->submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+          cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            rys_jk_kernel(envs, jk, bounds, pool, batch_head,
+                          item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          });
+        });
+        #else
         if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
             cudaFuncAttributes attributes;
             const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_jk_kernel);
@@ -245,8 +313,12 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
             }
         }
 
+        dim3 threads(quartets_per_block, gout_stride);
         rys_jk_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        #endif
     }
+
+    #ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         int device_id = -1;
@@ -258,6 +330,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         fprintf(stderr, "CUDA Error in RYS_build_jk, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }
+    #endif // ifndef USE_SYCL
     return 0;
 }
 
@@ -303,16 +376,30 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         q_cond, tile_q_cond, s_estimator, dm_cond, cutoff};
 
     JKMatrix jk = {vj, vk, dm, (uint16_t)n_dm, (uint16_t)atom_offset};
+    #ifdef USE_SYCL
+    sycl_get_queue()->memset(batch_head, 0, 2*sizeof(uint32_t)).wait();
+    #else
     cudaMemset(batch_head, 0, 2*sizeof(uint32_t));
+    #endif
 
     if (!rys_vjk_ip1_unrolled(&envs, &jk, &bounds, pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         buflen += ij_prims*6;
 
+        #ifdef USE_SYCL
+        sycl::range<2> blocks(1, workers);
+        sycl::range<2> threads(gout_stride, quartets_per_block);
+        sycl_get_queue()->submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+          cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            rys_jk_ip1_kernel(envs, jk, bounds, pool, batch_head,
+                              item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          });
+        });
+        #else
         if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
             cudaFuncAttributes attributes;
             const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_jk_ip1_kernel);
@@ -325,8 +412,12 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
             }
         }
 
+        dim3 threads(quartets_per_block, gout_stride);
         rys_jk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool, batch_head);
+        #endif
     }
+
+#ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         int device_id = -1;
@@ -338,6 +429,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         fprintf(stderr, "CUDA Error in RYS_build_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }
+#endif // ifndef USE_SYCL
     return 0;
 }
 
@@ -389,16 +481,30 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
     // Additional factor 1/2 from the two-electron Coulomb operator
     JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, (uint16_t)n_dm};
+    #ifdef USE_SYCL
+    sycl_get_queue()->memset(batch_head, 0, 2*sizeof(int)).wait();
+    #else
     cudaMemset(batch_head, 0, 2*sizeof(int));
+    #endif
 
     if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         buflen = MAX(buflen, 12*gout_stride*quartets_per_block);
 
+#ifdef USE_SYCL
+        sycl::range<2> blocks(1, workers);
+        sycl::range<2> threads(gout_stride, quartets_per_block);
+        sycl_get_queue()->submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+          cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            rys_ejk_ip1_kernel(envs, jk, bounds, pool, dd_pool, batch_head,
+                               item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          });
+        });
+#else
         if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
             cudaFuncAttributes attributes;
             const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_ejk_ip1_kernel);
@@ -411,9 +517,13 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
             }
         }
 
+        dim3 threads(quartets_per_block, gout_stride);
         rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
+#endif
     }
+
+#ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         int device_id = -1;
@@ -425,6 +535,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }
+#endif // ifndef USE_SYCL
     return 0;
 }
 
@@ -476,15 +587,29 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
     // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
     // Additional factor 1/2 from the two-electron Coulomb operator
     JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
+    #ifdef USE_SYCL
+    sycl_get_queue()->memset(batch_head, 0, 2*sizeof(int)).wait();
+    #else
     cudaMemset(batch_head, 0, 2*sizeof(int));
+    #endif
 
     if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
 
+#ifdef USE_SYCL
+        sycl::range<2> blocks(1, workers);
+        sycl::range<2> threads(gout_stride, quartets_per_block);
+        sycl_get_queue()->submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+          cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            rys_ejk_ip2_type12_kernel(envs, jk, bounds, pool, dd_pool, batch_head,
+                                      item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          });
+        });
+#else
         if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
             cudaFuncAttributes attributes;
             const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_ejk_ip2_type12_kernel);
@@ -497,9 +622,13 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
             }
         }
 
+        dim3 threads(quartets_per_block, gout_stride);
         rys_ejk_ip2_type12_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
+#endif
     }
+
+#ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         int device_id = -1;
@@ -511,6 +640,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
         fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip2_type12, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -562,16 +692,30 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
     // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
     // Additional factor 1/2 from the two-electron Coulomb operator
     JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, (uint16_t)n_dm};
+    #ifdef USE_SYCL
+    sycl_get_queue()->memset(batch_head, 0, 2*sizeof(int)).wait();
+    #else
     cudaMemset(batch_head, 0, 2*sizeof(int));
+    #endif
 
     if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, pool, dd_pool, batch_head, scheme, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + ij_prims + 9) * quartets_per_block;
         buflen = MAX(buflen, 9*gout_stride*quartets_per_block);
 
+#ifdef USE_SYCL
+        sycl::range<2> blocks(1, workers);
+        sycl::range<2> threads(gout_stride, quartets_per_block);
+        sycl_get_queue()->submit([&](sycl::handler &cgh) {
+          sycl::local_accessor<char, 1> local_acc(buflen*sizeof(double), cgh);
+          cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            rys_ejk_ip2_type3_kernel(envs, jk, bounds, pool, dd_pool, batch_head,
+                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+          });
+        });
+#else
         if (CHECK_SHARED_MEMORY_ATTRIBUTES) {
             cudaFuncAttributes attributes;
             const cudaError_t err_get_attribute = cudaFuncGetAttributes(&attributes, rys_ejk_ip2_type3_kernel);
@@ -584,9 +728,13 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
             }
         }
 
+        dim3 threads(quartets_per_block, gout_stride);
         rys_ejk_ip2_type3_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, pool, dd_pool, batch_head);
+#endif // ifdef USE_SYCL
     }
+
+#ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         int device_id = -1;
@@ -598,12 +746,20 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
         fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip2_type3, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }
+#endif // ifndef USE_SYCL
     return 0;
 }
 
 int RYS_init_constant(int *g_pair_idx, int *offsets,
                       double *env, int env_size, int shm_size)
 {
+#ifdef USE_SYCL
+    // TODO: test whether the constant memory c_env can improve performance
+    //cudaMemcpyToSymbol(c_env, env, sizeof(double)*env_size);
+    sycl::queue& queue = *sycl_get_queue();
+    queue.memcpy(s_g_pair_idx, g_pair_idx, 3675*sizeof(int)).wait();
+    queue.memcpy(s_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1).wait();
+#else
     // TODO: test whether the constant memory c_env can improve performance
     //cudaMemcpyToSymbol(c_env, env, sizeof(double)*env_size);
     cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
@@ -619,6 +775,7 @@ int RYS_init_constant(int *g_pair_idx, int *offsets,
                 cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -642,6 +799,13 @@ int RYS_init_rysj_constant(int shm_size)
             }
         } }
     }
+#ifdef USE_SYCL
+    // TODO: test whether the constant memory c_env can improve performance
+    //cudaMemcpyToSymbol(c_env, env, sizeof(double)*env_size);
+    sycl::queue& queue = *sycl_get_queue();
+    queue.memcpy(s_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
+    queue.memcpy(s_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
+#else
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(rys_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -652,11 +816,16 @@ int RYS_init_rysj_constant(int shm_size)
                 cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
 int cuda_version()
 {
+#ifdef USE_SYCL
+    return __SYCL_COMPILER_VERSION;
+#else
     return CUDA_VERSION;
+#endif
 }
 }

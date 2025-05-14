@@ -18,7 +18,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 
 #include "vhf.cuh"
 
@@ -26,7 +30,7 @@
 __device__
 static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
                           RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                          int batch_ij, int batch_kl)
+                          int batch_ij, int batch_kl, char* shm_mem)
 {
     int nbas = envs.nbas;
     int *tile_ij_mapping = bounds.tile_ij_mapping;
@@ -35,11 +39,18 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     float *tile_q_cond = bounds.tile_q_cond;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int t_kl0 = batch_kl * TILES_IN_BATCH;
     int t_kl1 = MIN(t_kl0 + TILES_IN_BATCH, bounds.ntile_kl_pairs);
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
+    int threads = item.get_local_range(1) * item.get_local_range(0);
+    int* cum_count = reinterpret_cast<int*>(shm_mem);
+#else
+    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
-
+    extern __shared__ int cum_count[];
+#endif
     int tile_ij = tile_ij_mapping[batch_ij];
     int nbas_tiles = nbas / TILE;
     int tile_i = tile_ij / nbas_tiles;
@@ -97,7 +108,6 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
     }
 
     // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
-    extern __shared__ int cum_count[];
     cum_count[t_id] = count;
     // Up-sweep phase
     for (int stride = 1; stride < threads; stride *= 2) {
@@ -181,7 +191,7 @@ static int _fill_jk_tasks(ShellQuartet *shl_quartet_idx,
 __device__
 static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
                              RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                             int batch_ij, int batch_kl)
+                             int batch_ij, int batch_kl, char* shm_mem)
 {
     int nbas = envs.nbas;
     int *tile_ij_mapping = bounds.tile_ij_mapping;
@@ -193,11 +203,18 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
     float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int t_kl0 = batch_kl * TILES_IN_BATCH;
     int t_kl1 = MIN(t_kl0 + TILES_IN_BATCH, bounds.ntile_kl_pairs);
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int t_id = item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1);
+    int threads = item.get_local_range(1) * item.get_local_range(0);
+    int* cum_count = reinterpret_cast<int*>(shm_mem);
+#else
+    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
-
+    extern __shared__ int cum_count[];
+#endif
     int tile_ij = tile_ij_mapping[batch_ij];
     int tile_i = tile_ij / nbas_tiles;
     int tile_j = tile_ij % nbas_tiles;
@@ -328,7 +345,6 @@ static int _fill_sr_jk_tasks(ShellQuartet *shl_quartet_idx,
     }
 
     // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda
-    extern __shared__ int cum_count[];
     cum_count[t_id] = count;
     // Up-sweep phase
     for (int stride = 1; stride < threads; stride *= 2) {

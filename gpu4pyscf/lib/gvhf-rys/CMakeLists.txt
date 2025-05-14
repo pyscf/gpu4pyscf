@@ -12,10 +12,7 @@ set(GPU_SRCS
 add_library(gvhf_rys SHARED ${GPU_SRCS})
 
 if (USE_SYCL)
-  file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-  file(GLOB ALL_GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
-
-  set_source_files_properties(${ALL_GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   set_target_properties(gvhf_rys PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(gvhf_rys PRIVATE -x c++ -nocudainc -nocudalib)

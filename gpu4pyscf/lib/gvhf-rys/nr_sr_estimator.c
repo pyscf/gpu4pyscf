@@ -10,7 +10,7 @@
 void sr_eri_s_estimator(float *s_estimator, float omega,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
-        float *exps = malloc(sizeof(float) * nbas * 5);
+        float *exps = (float*)malloc(sizeof(float) * nbas * 5);
         float *cs = exps + nbas;
         float *rx = cs + nbas;
         float *ry = rx + nbas;

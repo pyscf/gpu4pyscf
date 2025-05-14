@@ -121,10 +121,23 @@ typedef struct {
 } Fold3Index;
 #endif
 
+
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+
+extern SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx;
+extern SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
+extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
+extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+
+#else // USE_SYCL
+
 #ifdef __CUDACC__
 extern __constant__ int c_g_pair_idx[];
 extern __constant__ int c_g_pair_offsets[];
 //extern __constant__ double c_env[];
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
-#endif
+#endif // __CUDACC__
+
+#endif // USE_SYCL
