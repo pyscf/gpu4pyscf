@@ -30,7 +30,7 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
                                        reduce_to_device, transpose_sum)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import _streams, num_devices, min_grid_blksize
 from gpu4pyscf.hessian import jk
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
 import ctypes
@@ -952,7 +952,6 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     grids = mf.nlcgrids
     if grids.coords is None:
         grids.build()
-    ngrids = grids.coords.shape[0]
 
     if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
@@ -974,16 +973,17 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     rho_drho = cupy.empty([4, ngrids_full])
 
     available_gpu_memory = get_avail_mem()
-    available_gpu_memory = int(available_gpu_memory * 0.1) # Don't use too much gpu memory
-    ao_nbytes_per_grid = (4 * mol.nao) * 8
+    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+    ao_nbytes_per_grid = ((4*2) * mol.nao + 4) * 8 # factor of 2 from the ao sorting inside numint.eval_ao()
     ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
     if ngrids_per_batch < 16:
         raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
-                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids_full}")
     ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
-    for g0 in range(0, ngrids, ngrids_per_batch):
-        g1 = min(g0 + ngrids_per_batch, ngrids)
+    for g0 in range(0, ngrids_full, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids_full)
         split_grids_coords = grids.coords[g0:g1, :]
         split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
         split_rho_drho = numint.eval_rho(mol, split_ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
@@ -1078,6 +1078,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
                           f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
     ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
     for g0 in range(0, ngrids, ngrids_per_batch):
         g1 = min(g0 + ngrids_per_batch, ngrids)
@@ -1356,18 +1357,31 @@ def _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     vmat = contract('Adiq,ip->Adpq', vmat, mo_coeff)
     return vmat
 
-def get_dweight_dA(grids):
-    from gpu4pyscf.grad.rks import grids_response_cc
-    grids_weights_1 = []
-    natm = 0
-    for (coords, weight, weight1) in grids_response_cc(grids):
-        grids_weights_1.append(weight1)
-        natm += 1
-    grids_weights_1.append(cupy.zeros([natm, 3, grids.padding]))
-    grids_weights_1 = cupy.concatenate(grids_weights_1, axis = 2)
+def get_dweight_dA(mol, grids):
+    ngrids = grids.coords.shape[0]
+    assert grids.atm_idx.shape[0] == ngrids
+    assert grids.quadrature_weights.shape[0] == ngrids
+    atm_coords = cupy.asarray(mol.atom_coords(), order = "C")
 
-    grids_weights_1 = grids_weights_1[:, :, grids.grid_sorting_index]
-    return grids_weights_1
+    from gpu4pyscf.dft import radi
+    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii)
+
+    dweight_dA = cupy.zeros([mol.natm, 3, ngrids], order = "C")
+    libgdft.GDFTbecke_partition_weight_derivative(
+        ctypes.cast(dweight_dA.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids.coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids.quadrature_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids.atm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(mol.natm),
+    )
+    dweight_dA[grids.atm_idx, 0, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 0, :], axis=[0])
+    dweight_dA[grids.atm_idx, 1, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 1, :], axis=[0])
+    dweight_dA[grids.atm_idx, 2, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 2, :], axis=[0])
+
+    return dweight_dA
 
 def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     """
@@ -1394,7 +1408,6 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     grids = mf.nlcgrids
     if grids.coords is None:
         grids.build()
-    ngrids = grids.coords.shape[0]
 
     if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
@@ -1416,16 +1429,17 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     rho_drho = cupy.empty([4, ngrids_full])
 
     available_gpu_memory = get_avail_mem()
-    available_gpu_memory = int(available_gpu_memory * 0.1) # Don't use too much gpu memory
-    ao_nbytes_per_grid = (4 * mol.nao) * 8
+    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+    ao_nbytes_per_grid = ((4*2) * mol.nao + 4) * 8 # factor of 2 from the ao sorting inside numint.eval_ao()
     ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
     if ngrids_per_batch < 16:
         raise MemoryError(f"Out of GPU memory for NLC Fock first derivative, available gpu memory = {get_avail_mem()}"
-                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids_full}")
     ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
-    for g0 in range(0, ngrids, ngrids_per_batch):
-        g1 = min(g0 + ngrids_per_batch, ngrids)
+    for g0 in range(0, ngrids_full, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids_full)
         split_grids_coords = grids.coords[g0:g1, :]
         split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
         split_rho_drho = numint.eval_rho(mol, split_ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
@@ -1494,6 +1508,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     aoslices = mol.aoslice_by_atom()
     if grid_response:
+        assert grids.atm_idx.shape[0] == grids.coords.shape[0]
         grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
         atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
 
@@ -1523,6 +1538,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         raise MemoryError(f"Out of GPU memory for NLC Fock first derivative, available gpu memory = {get_avail_mem()}"
                           f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
     ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
     for g0 in range(0, ngrids, ngrids_per_batch):
         g1 = min(g0 + ngrids_per_batch, ngrids)
@@ -1620,13 +1636,14 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     #     d2rho_dAdr_grid_response = None
 
     available_gpu_memory = get_avail_mem()
-    available_gpu_memory = int(available_gpu_memory * 0.2) # Don't use too much gpu memory
+    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
     ao_nbytes_per_grid = ((10 + 1*2 + 3*2 + 9) * mol.nao + (9*2)) * 8
     ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
     if ngrids_per_batch < 16:
         raise MemoryError(f"Out of GPU memory for NLC Fock first derivative, available gpu memory = {get_avail_mem()}"
                           f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
     ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
     for i_atom in range(natm):
         aoslice_one_atom = [aoslices[i_atom]]
@@ -1818,7 +1835,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.c_int(natm),
         )
 
-        grids_weights_1 = get_dweight_dA(grids)
+        grids_weights_1 = get_dweight_dA(mol, grids)
         grids_weights_1 = grids_weights_1[:, :, rho_nonzero_mask]
         grids_weights_1 = cupy.ascontiguousarray(grids_weights_1)
 
@@ -1849,13 +1866,14 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         W_Bgr_i = None
 
         available_gpu_memory = get_avail_mem()
-        available_gpu_memory = int(available_gpu_memory * 0.1) # Don't use too much gpu memory
+        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
         ao_nbytes_per_grid = ((4 + 1*2 + 3*2) * mol.nao) * 8
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for NLC Fock first derivative, available gpu memory = {get_avail_mem()}"
                             f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
         ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
         for g0 in range(0, ngrids, ngrids_per_batch):
             g1 = min(g0 + ngrids_per_batch, ngrids)
