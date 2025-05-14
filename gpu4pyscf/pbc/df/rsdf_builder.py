@@ -580,8 +580,6 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     ao_pair_mapping = []
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
-    print(ft_opt.ao_idx.shape)
-    print(ft_opt.sorted_cell.ao_loc)
     ao_loc = cp.asarray(ft_opt.ao_idx[ft_opt.sorted_cell.ao_loc[:-1]])
 
     aft_envs = _build_aft_envs(ft_opt)
