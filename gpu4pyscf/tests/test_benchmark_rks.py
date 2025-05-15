@@ -292,7 +292,7 @@ def test_df_rb3lyp_631gs_d3bj_hessian(benchmark):
 '''
 
 ###############################
-# Medium molecule with wB97M-B
+# Medium molecule with wB97M-V
 ###############################
 @pytest.mark.benchmark(warmup=True, warmup_iterations=2, min_rounds=3)
 def test_df_rwb97mv_medium(benchmark):
