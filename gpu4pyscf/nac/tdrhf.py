@@ -131,50 +131,6 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     return de, de/EI, de_etf, de_etf/EI
 
 
-    # h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
-    # s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    # dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
-    # ds = contract("xij,ij->xi", s1, (W + W.T) * 0.5)
-
-    # dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    # if mol.has_ecp():
-    #     dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    # extra_force = cp.zeros((len(atmlst), 3))
-
-    # dvhf_all = 0
-    # dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2) 
-    # for k, ia in enumerate(atmlst):
-    #     extra_force[k] += mf_grad.extra_force(ia, locals())
-    # dvhf_all += dvhf
-    # dvhf = td_nac.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
-    # for k, ia in enumerate(atmlst):
-    #     extra_force[k] -= mf_grad.extra_force(ia, locals())
-    # dvhf_all -= dvhf
-    # dvhf = td_nac.get_veff(mol, oo0 * 2)
-    # for k, ia in enumerate(atmlst):
-    #     extra_force[k] -= mf_grad.extra_force(ia, locals())
-    # dvhf_all -= dvhf
-
-    # delec = 2.0 * (dh_td - ds)
-    # aoslices = mol.aoslice_by_atom()
-    # delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    # de = 2.0 * dvhf_all + dh1e_td + delec + extra_force
-
-    # offsetdic = mol.offset_nr_by_atom()
-    # ds1 = s1.transpose(0,2,1)
-    # xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
-    # yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
-    # for ia in range(mol.natm):
-    #     shl0, shl1, p0, p1 = offsetdic[ia]
-    #     de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], xIao[:, p0:p1])
-    #     de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], yIao[:, p0:p1])
-
-    # import pdb
-    # pdb.set_trace()
-
-    return -de.get() # derivetive couplings
-
-
 class NAC(rhf_grad.GradientsBase):
 
     cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 20)

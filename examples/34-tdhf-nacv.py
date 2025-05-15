@@ -36,7 +36,7 @@ mol = pyscf.M(atom=atom, basis='ccpvdz')
 mf = hf.RHF(mol) #  -76.0267656731119
 mf.kernel()
 
-td = mf.TDA().set(nstates=5)
+td = mf.TDA().set(nstates=5) # TDHF is OK
 td.kernel() # [ 9.21540892 10.99036172 11.83380819 13.62301694 15.06349085]
 
 nac = gpu4pyscf.nac.tdrhf.NAC(td)
