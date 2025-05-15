@@ -3,6 +3,7 @@ FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     git \
+    libopenblas-dev \
     gfortran \
     python3-dev \
     python3-pip \
