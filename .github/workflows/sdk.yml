@@ -18,11 +18,10 @@ jobs:
       id: docker_build
       uses: docker/build-push-action@v2
       with:
-        file: dockerfiles/ubuntu_runtime/Dockerfile
+        file: dockerfiles/ubuntu_devel/Dockerfile
         push: true
         tags: |
           pyscf/gpu4pyscf:latest
-          pyscf/gpu4pyscf:test-${{ steps.docker-tag.outputs.version-without-v }}
         #cache-from: type=local,src=/tmp/.buildx-cache
         #cache-to: type=local,dest=/tmp/.buildx-cache
     - name: Image digest

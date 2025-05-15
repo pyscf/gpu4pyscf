@@ -15,8 +15,6 @@ ENV CUDA_HOME="/usr/local/cuda" LD_LIBRARY_PATH="${CUDA_HOME}/lib64::${LD_LIBRAR
 RUN echo "export PATH=${CUDA_HOME}/bin:\$PATH" >> /etc/bash.bashrc
 RUN echo "export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:\$LD_LIBRARY_PATH" >> /etc/bash.bashrc
 
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
 RUN pip3 install cmake
 RUN pip3 install pytest
 RUN pip3 install pytest-cov
