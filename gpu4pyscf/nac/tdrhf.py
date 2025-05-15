@@ -28,22 +28,7 @@ from gpu4pyscf import tdscf
 from pyscf.scf import _vhf
 
 
-def get_jk(mol, dm):
-    '''J = ((-nabla i) j| kl) D_lk
-    K = ((-nabla i) j| kl) D_jk
-    '''
-    if not isinstance(dm, np.ndarray): dm = dm.get()
-    # vhfopt = _VHFOpt(mol, 'int2e_ip1').build()
-    intor = mol._add_suffix('int2e_ip1')
-    vj, vk = _vhf.direct_mapdm(intor,  # (nabla i,j|k,l)
-                               's2kl', # ip1_sph has k>=l,
-                               ('lk->s1ij', 'jk->s1il'),
-                               dm, 3, # xyz, 3 components
-                               mol._atm, mol._bas, mol._env)
-    return -vj, -vk
-
-
-def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
+def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     if singlet is None:
         singlet = True
     mol = td_nac.mol
@@ -59,29 +44,24 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     orbo = mo_coeff[:, :nocc]
 
     xI, yI = x_yI
-    xJ, yJ = x_yJ
     xI = cp.asarray(xI).reshape(nocc, nvir).T
     if not isinstance(yI, np.ndarray):
-        yI = xI * 0.0
+        yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
-    xJ = cp.asarray(xJ).reshape(nocc, nvir).T
-    if not isinstance(yI, np.ndarray):
-        yJ = xJ * 0.0
-    yJ = cp.asarray(yJ).reshape(nocc, nvir).T
     LI = xI-yI
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)  # 2 * Z^S
+        v1ao = vresp(dm + dm.T)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
         fvind,
         mo_energy,
         mo_occ,
-        LI*1.0, # only one spin
+        -LI*1.0*EI, # only one spin
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0]
 
@@ -94,19 +74,16 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
     zeta0 = mo_energy[nocc:, cp.newaxis]
     zeta0 = z1 * zeta0
-    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*xI.T + 0.5*zeta0.T
+    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*yI.T*EI + 0.5*zeta0.T
     zeta1 = mo_energy[cp.newaxis, :nocc]
     zeta1 = z1 * zeta1
-    W[nocc:, :nocc] = 0.5*yI + 0.5*zeta1
-    # print(np.abs(W[:nocc,:nocc]-W[:nocc,:nocc].T).max())
-    # print(np.abs(W[nocc:,nocc:]-W[nocc:,nocc:].T).max())
-    # print(np.abs(W[nocc:,:nocc]-W[:nocc,nocc:].T).max())
+    W[nocc:, :nocc] = 0.5*xI*EI + 0.5*zeta1
     W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
     dmz1doo = z1aoS
-    oo0 = reduce(cp.dot, (orbo, orbo.T))
+    oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -114,6 +91,7 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
     hcore_deriv = pyscf.grad.rhf.hcore_generator(mf_grad.to_cpu(), mol)
     offsetdic = mol.offset_nr_by_atom()
     de = cp.zeros((len(atmlst),3))
+    de_etf = cp.zeros((len(atmlst),3))
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
     eri1 = -mol.intor('int2e_ip1', aosym='s1', comp=3)
@@ -141,11 +119,16 @@ def get_nacv(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logg
 
         de[k] = cp.einsum('xpq,pq->x', h1ao, dmz1doo)
         de[k] -= cp.einsum('xpq,pq->x', s1_tmp, W)
-        de[k] += cp.einsum('xijkl,ij,kl->x', erijk, oo0*2, dmz1doo)
-        de[k] += cp.einsum('xij,ij->x', ds1_tmp, xIao)
-        de[k] += cp.einsum('xij,ij->x', ds1_tmp, yIao)
-        
-    return -de.get() # derivetive couplings
+        de[k] += cp.einsum('xijkl,ij,kl->x', erijk, oo0, dmz1doo)
+        de_etf[k] = de[k]
+        de[k] += cp.einsum('xij,ij->x', ds1_tmp, xIao*EI)
+        de[k] += cp.einsum('xij,ij->x', ds1_tmp, yIao*EI)
+        de_etf[k] += cp.einsum('xij,ij->x', s1_tmp, xIao*EI) * 0.5
+        de_etf[k] += cp.einsum('xij,ij->x', s1_tmp, yIao*EI) * 0.5
+    
+    de = de.get()
+    de_etf = de_etf.get()
+    return de, de/EI, de_etf, de_etf/EI
 
 
     # h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
@@ -210,7 +193,9 @@ class NAC(rhf_grad.GradientsBase):
         "state",
         "atmlst",
         "de",
-        "numerical",
+        "de_scaled",
+        "de_etf",
+        "de_etf_scaled",
     }
 
     def __init__(self, td):
@@ -223,6 +208,9 @@ class NAC(rhf_grad.GradientsBase):
         self.state = (0, 1)  # of which the gradients to be computed.
         self.atmlst = None
         self.de = None
+        self.de_scaled = None
+        self.de_etf = None
+        self.de_etf_scaled = None
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
@@ -240,30 +228,15 @@ class NAC(rhf_grad.GradientsBase):
         return self
 
     @lib.with_doc(get_nacv.__doc__)
-    def get_nacv(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
-        return get_nacv(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
+    def get_nacv(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
+        return get_nacv(self, x_yI, EI, singlet, atmlst, verbose)
 
-    def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, state=None, singlet=None, atmlst=None):
+    def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
         """
         Args:
             state : int
                 Excited state ID.  state = 1 means the first excited state.
         """
-        if xy_I is None or xy_J is None:
-            if state is None:
-                state = self.state
-            else:
-                self.state = state
-
-            if state[1] == 0:
-                x_yJ = self.base.xy[state[1]]
-                E_J = self.base.e[state[1]]
-            else:
-                x_yJ = self.base.xy[state[1] - 1]
-                E_J = self.base.e[state[1] - 1]
-            x_yI = self.base.xy[state[0] - 1]
-            E_I = self.base.e[state[0] - 1]
-
         if singlet is None:
             singlet = self.base.singlet
         if atmlst is None:
@@ -276,8 +249,21 @@ class NAC(rhf_grad.GradientsBase):
         if self.verbose >= logger.INFO:
             self.dump_flags()
 
-        self.de = self.get_nacv(x_yI, x_yJ, E_I, E_J, singlet, atmlst, verbose=self.verbose)
-        self._finalize()
+        if xy_I is None or xy_J is None:
+            state = sorted(self.state)
+            I, J = state
+            if I < 0 or J < 0:
+                raise ValueError("Excited state ID should be non-negetive integers.")
+            elif I > 0:
+                raise NotImplementedError("Only for ground-excited state nonadiabatic coupling.")
+            elif I == 0:
+                xy_I = self.base.xy[J-1]
+                E_I = self.base.e[J-1]
+                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                    = self.get_nacv(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
+                self._finalize()
+            else:
+                raise NotImplementedError("Only for ground-excited state nonadiabatic coupling.")
         return self.de
     
     def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
@@ -306,12 +292,36 @@ class NAC(rhf_grad.GradientsBase):
         if self.verbose >= logger.NOTE:
             logger.note(
                 self,
-                "--------- %s nonadiabatic coupling vector for state %d and %d----------",
+                "--------- %s nonadiabatic derivative coupling for state %d and %d----------",
                 self.base.__class__.__name__,
                 self.state[0],
                 self.state[1],
             )
             self._write(self.mol, self.de, self.atmlst)
+            logger.note(
+                self,
+                "--------- %s nonadiabatic derivative coupling for state %d and %d after E scaled (divided by E)----------",
+                self.base.__class__.__name__,
+                self.state[0],
+                self.state[1],
+            )
+            self._write(self.mol, self.de_scaled, self.atmlst)
+            logger.note(
+                self,
+                "--------- %s nonadiabatic derivative coupling for state %d and %d with ETF----------",
+                self.base.__class__.__name__,
+                self.state[0],
+                self.state[1],
+            )
+            self._write(self.mol, self.de_etf, self.atmlst)
+            logger.note(
+                self,
+                "--------- %s nonadiabatic derivative coupling for state %d and %d with ETF after E scaled (divided by E)----------",
+                self.base.__class__.__name__,
+                self.state[0],
+                self.state[1],
+            )
+            self._write(self.mol, self.de_etf_scaled, self.atmlst)
             logger.note(self, "----------------------------------------------")
 
     def solvent_response(self, dm):
