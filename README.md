@@ -16,6 +16,8 @@ Run ```nvcc --version``` in your terminal to check the installed CUDA toolkit ve
 | **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
 | **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
 
+We recommand users to create the similar environment as ```dockerfiles/ubuntu_runtime/Dockerfile``` for compatibility, as the corresponding docker image is used for nightly benchmarks.
+
 Compilation
 --------
 One can compile the package with
@@ -35,8 +37,6 @@ There shouldn't be cupy or cutensor compilation during pip install process. If y
 ```
 <repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
 ```
-
-The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment.
 
 Features
 --------
