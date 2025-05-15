@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
 
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
@@ -15,4 +15,4 @@ RUN echo "export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:\$LD_LIBRARY_PATH" >> /etc/b
 
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
-RUN pip3 install gpu4pyscf
+RUN pip3 install gpu4pyscf-cuda12x
