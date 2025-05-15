@@ -20,7 +20,9 @@ jobs:
       with:
         file: dockerfiles/ubuntu_runtime/Dockerfile
         push: true
-        tags: pyscf/gpu4pyscf:test-${{ steps.docker-tag.outputs.version }}
+        tags: |
+          pyscf/gpu4pyscf:latest
+          pyscf/gpu4pyscf:test-${{ steps.docker-tag.outputs.version-without-v }}
         #cache-from: type=local,src=/tmp/.buildx-cache
         #cache-to: type=local,dest=/tmp/.buildx-cache
     - name: Image digest
