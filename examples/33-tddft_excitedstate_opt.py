@@ -51,7 +51,7 @@ print('The gradient of first TDA excitation energy by GPU4PySCF after optimizati
 excited_gradf = tdf.nuc_grad_method()
 excited_gradf.kernel() # [ 1.8664593   1.86646751  6.0627608   6.06276617 10.92296501]
 
-mff = rks.RKS(mol1, xc='b3lyp')
+mff = rks.RKS(mol2, xc='b3lyp')
 mff.kernel() #  -76.2224050802565
 tdf = mff.TDA().set(nstates=5)
 output = tdf.kernel()

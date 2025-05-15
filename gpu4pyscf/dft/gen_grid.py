@@ -466,12 +466,15 @@ class Grids(lib.StreamObject):
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
 
         atm_idx = cupy.empty(self.coords.shape[0], dtype=numpy.int32)
+        quadrature_weights = cupy.empty(self.coords.shape[0])
         p0 = p1 = 0
         for ia in range(mol.natm):
             r, vol = atom_grids_tab[mol.atom_symbol(ia)]
             p0, p1 = p1, p1 + vol.size
             atm_idx[p0:p1] = ia
+            quadrature_weights[p0:p1] = vol
         self.atm_idx = atm_idx
+        self.quadrature_weights = quadrature_weights
 
         t0 = log.timer_debug1('generating atomic grids', *t0)
         if self.alignment > 1:
@@ -482,21 +485,17 @@ class Grids(lib.StreamObject):
                 self.coords = cupy.vstack(
                     [self.coords, cupy.full((padding, 3), 1e-4)])
                 self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
+                self.quadrature_weights = cupy.hstack([self.quadrature_weights, cupy.zeros(padding)])
                 self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
-            self.padding = padding
-        else:
-            self.padding = 0
 
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
             idx = atomic_group_grids(mol, self.coords)
             self.coords = self.coords[idx]
             self.weights = self.weights[idx]
+            self.quadrature_weights = self.quadrature_weights[idx]
             self.atm_idx = self.atm_idx[idx]
             t0 = log.timer_debug1('sorting grids', *t0)
-            self.grid_sorting_index = idx
-        else:
-            self.grid_sorting_index = cupy.arange(self.coords.shape[0])
 
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)
@@ -549,6 +548,8 @@ class Grids(lib.StreamObject):
             idx = abs(rho) > threshold / self.weights.size
             self.coords  = cupy.asarray(self.coords [idx], order='C')
             self.weights = cupy.asarray(self.weights[idx], order='C')
+            self.atm_idx = cupy.asarray(self.atm_idx[idx], order='C')
+            self.quadrature_weights = cupy.asarray(self.quadrature_weights[idx], order='C')
             logger.debug(self, 'Drop grids %d', rho.size - self.weights.size)
             if self.alignment > 1:
                 padding = _padding_size(self.size, self.alignment)
@@ -557,6 +558,8 @@ class Grids(lib.StreamObject):
                     self.coords = cupy.vstack(
                         [self.coords, cupy.full((padding, 3), 1e-4)])
                     self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
+                    self.quadrature_weights = cupy.hstack([self.quadrature_weights, cupy.zeros(padding)])
+                    self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
             if self.non0tab is not None:
                 # with_non0tab is enalbed when initialling the grids. Update the
                 # screen_index for the pruned grids
