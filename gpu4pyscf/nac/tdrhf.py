@@ -29,6 +29,13 @@ from pyscf.scf import _vhf
 
 
 def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
+    """
+    Only supports for ground-excited state.
+    Ref:
+    [1] 10.1063/1.4903986 main reference
+    [2] 10.1021/acs.accounts.1c00312
+    [3] 10.1063/1.4885817
+    """
     if singlet is None:
         singlet = True
     mol = td_nac.mol
@@ -48,7 +55,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     if not isinstance(yI, np.ndarray):
         yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
-    LI = xI-yI
+    LI = xI-yI    # eq.(83) in Ref. [1]
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -61,20 +68,22 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
         fvind,
         mo_energy,
         mo_occ,
-        -LI*1.0*EI, # only one spin
+        -LI*1.0*EI, # only one spin, negative in cphf
         max_cycle=td_nac.cphf_max_cycle,
-        tol=td_nac.cphf_conv_tol)[0]
+        tol=td_nac.cphf_conv_tol)[0] # eq.(83) in Ref. [1]
 
     z1 = z1.reshape(nvir, nocc)
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T)) * 2 # double occupency
+    # eq.(50) in Ref. [1]
     z1aoS = (z1ao + z1ao.T)*0.5 # 0.5 is in the definition of z1aoS
-    GZS = vresp(z1aoS) # generate the double occupency
+    # eq.(73) in Ref. [1]
+    GZS = vresp(z1aoS) # generate the double occupency 
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
-    W = cp.zeros((nmo, nmo))
+    W = cp.zeros((nmo, nmo))  # eq.(75) in Ref. [1]
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
     zeta0 = mo_energy[nocc:, cp.newaxis]
     zeta0 = z1 * zeta0
-    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*yI.T*EI + 0.5*zeta0.T
+    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*yI.T*EI + 0.5*zeta0.T #* eq.(43), (56), (28) in Ref. [1]
     zeta1 = mo_energy[cp.newaxis, :nocc]
     zeta1 = z1 * zeta1
     W[nocc:, :nocc] = 0.5*xI*EI + 0.5*zeta1
@@ -96,7 +105,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
     eri1 = -mol.intor('int2e_ip1', aosym='s1', comp=3)
     eri1 = eri1.reshape(3,nao,nao,nao,nao)
-    for k, ia in enumerate(atmlst):
+    for k, ia in enumerate(atmlst): # eq.(58) in Ref. [1]
         shl0, shl1, p0, p1 = offsetdic[ia]
         h1ao = hcore_deriv(ia)
         h1ao = cp.asarray(h1ao)
