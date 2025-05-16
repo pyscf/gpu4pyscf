@@ -21,7 +21,7 @@ jobs:
         file: dockerfiles/ubuntu_devel/Dockerfile
         push: true
         tags: |
-          pyscf/gpu4pyscf:latest
+          pyscf/gpu4pyscf-devel:latest
         #cache-from: type=local,src=/tmp/.buildx-cache
         #cache-to: type=local,dest=/tmp/.buildx-cache
     - name: Image digest
