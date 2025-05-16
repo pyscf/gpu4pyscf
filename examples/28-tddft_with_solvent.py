@@ -14,7 +14,7 @@
 # limitations under the License.
 
 ###################################
-#  Example of TDDFT
+#  Example of TDDFT with solvent
 ###################################
 
 import pyscf
