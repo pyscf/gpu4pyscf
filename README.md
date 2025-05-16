@@ -9,16 +9,26 @@ Installation
 > [!NOTE]
 > The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later).
 
-Run ```nvcc --version``` in your terminal to check the installed CUDA toolkit version. Then, choose the proper package based on your CUDA toolkit version.
+To check your installed CUDA Toolkit version, run
+```sh
+nvcc --version
+```
+Then, install the appropriate package based on your CUDA version:
 
 | Platform      | Command                               | cutensor (**highly recommended**)|
 ----------------| --------------------------------------|----------------------------------|
 | **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
 | **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
 
+We **recommend** creating a dedicated environment using:
+```sh
+pip3 install --no-cache-dir -r requirements.txt
+```
+This ensures compatibility and reproducibility, especially since this configuration is used in our nightly benchmarks.
+
 Compilation
 --------
-One can compile the package with
+To compile the package, run the following commands:
 ```sh
 git clone https://github.com/pyscf/gpu4pyscf.git
 cd gpu4pyscf
@@ -35,8 +45,6 @@ There shouldn't be cupy or cutensor compilation during pip install process. If y
 ```
 <repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
 ```
-
-The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment.
 
 Features
 --------
