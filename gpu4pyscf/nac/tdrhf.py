@@ -11,6 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""
+Nonadiabatic derivetive coupling matrix element calculation is now in experiment.
+This module is under development.
+"""
 
 from functools import reduce
 import cupy as cp
@@ -30,14 +34,14 @@ from pyscf.scf import _vhf
 
 def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     """
-    Only supports for ground-excited state.
+    Only supports for ground-excited states.
     Ref:
     [1] 10.1063/1.4903986 main reference
     [2] 10.1021/acs.accounts.1c00312
     [3] 10.1063/1.4885817
     """
-    if singlet is None:
-        singlet = True
+    if singlet is False:
+        raise NotImplementedError('Only supports for singlet states')
     mol = td_nac.mol
     mf = td_nac.base._scf
     mf_grad = mf.nuc_grad_method()
@@ -52,7 +56,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
 
     xI, yI = x_yI
     xI = cp.asarray(xI).reshape(nocc, nvir).T
-    if not isinstance(yI, np.ndarray):
+    if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
         yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     LI = xI-yI    # eq.(83) in Ref. [1]
@@ -140,7 +144,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     return de, de/EI, de_etf, de_etf/EI
 
 
-class NAC(rhf_grad.GradientsBase):
+class NAC(lib.StreamObject):
 
     cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 20)
     cphf_conv_tol = getattr(__config__, "grad_tdrhf_Gradients_cphf_conv_tol", 1e-8)
@@ -155,7 +159,7 @@ class NAC(rhf_grad.GradientsBase):
         "mol",
         "base",
         "chkfile",
-        "state",
+        "states",
         "atmlst",
         "de",
         "de_scaled",
@@ -164,13 +168,11 @@ class NAC(rhf_grad.GradientsBase):
     }
 
     def __init__(self, td):
-        super().__init__(td)
         self.verbose = td.verbose
         self.stdout = td.stdout
         self.mol = td.mol
         self.base = td
-        self.chkfile = td.chkfile
-        self.state = (0, 1)  # of which the gradients to be computed.
+        self.states = (0, 1)  # of which the gradients to be computed.
         self.atmlst = None
         self.de = None
         self.de_scaled = None
@@ -188,7 +190,7 @@ class NAC(rhf_grad.GradientsBase):
         log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
         log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
         log.info("chkfile = %s", self.chkfile)
-        log.info(f"State ID = {self.state}")
+        log.info(f"States ID = {self.states}")
         log.info("\n")
         return self
 
@@ -197,11 +199,9 @@ class NAC(rhf_grad.GradientsBase):
         return get_nacv(self, x_yI, EI, singlet, atmlst, verbose)
 
     def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
-        """
-        Args:
-            state : int
-                Excited state ID.  state = 1 means the first excited state.
-        """
+
+        logger.warn(self, "This module is under development!!")
+
         if singlet is None:
             singlet = self.base.singlet
         if atmlst is None:
@@ -215,12 +215,12 @@ class NAC(rhf_grad.GradientsBase):
             self.dump_flags()
 
         if xy_I is None or xy_J is None:
-            state = sorted(self.state)
-            I, J = state
+            states = sorted(self.states)
+            I, J = states
             if I < 0 or J < 0:
-                raise ValueError("Excited state ID should be non-negetive integers.")
+                raise ValueError("Excited states ID should be non-negetive integers.")
             elif I > 0:
-                raise NotImplementedError("Only for ground-excited state nonadiabatic coupling.")
+                raise NotImplementedError("Only for ground-excited states nonadiabatic coupling.")
             elif I == 0:
                 xy_I = self.base.xy[J-1]
                 E_I = self.base.e[J-1]
@@ -228,7 +228,7 @@ class NAC(rhf_grad.GradientsBase):
                     = self.get_nacv(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
                 self._finalize()
             else:
-                raise NotImplementedError("Only for ground-excited state nonadiabatic coupling.")
+                raise NotImplementedError("Only for ground-excited states nonadiabatic coupling.")
         return self.de
     
     def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
@@ -257,34 +257,34 @@ class NAC(rhf_grad.GradientsBase):
         if self.verbose >= logger.NOTE:
             logger.note(
                 self,
-                "--------- %s nonadiabatic derivative coupling for state %d and %d----------",
+                "--------- %s nonadiabatic derivative coupling for states %d and %d----------",
                 self.base.__class__.__name__,
-                self.state[0],
-                self.state[1],
+                self.states[0],
+                self.states[1],
             )
             self._write(self.mol, self.de, self.atmlst)
             logger.note(
                 self,
-                "--------- %s nonadiabatic derivative coupling for state %d and %d after E scaled (divided by E)----------",
+                "--------- %s nonadiabatic derivative coupling for states %d and %d after E scaled (divided by E)----------",
                 self.base.__class__.__name__,
-                self.state[0],
-                self.state[1],
+                self.states[0],
+                self.states[1],
             )
             self._write(self.mol, self.de_scaled, self.atmlst)
             logger.note(
                 self,
-                "--------- %s nonadiabatic derivative coupling for state %d and %d with ETF----------",
+                "--------- %s nonadiabatic derivative coupling for states %d and %d with ETF----------",
                 self.base.__class__.__name__,
-                self.state[0],
-                self.state[1],
+                self.states[0],
+                self.states[1],
             )
             self._write(self.mol, self.de_etf, self.atmlst)
             logger.note(
                 self,
-                "--------- %s nonadiabatic derivative coupling for state %d and %d with ETF after E scaled (divided by E)----------",
+                "--------- %s nonadiabatic derivative coupling for states %d and %d with ETF after E scaled (divided by E)----------",
                 self.base.__class__.__name__,
-                self.state[0],
-                self.state[1],
+                self.states[0],
+                self.states[1],
             )
             self._write(self.mol, self.de_etf_scaled, self.atmlst)
             logger.note(self, "----------------------------------------------")
@@ -296,7 +296,5 @@ class NAC(rhf_grad.GradientsBase):
 
     to_gpu = lib.to_gpu
 
-
-Grad = NAC
 
 tdscf.rhf.TDA.NAC = tdscf.rhf.TDHF.NAC = lib.class_as_method(NAC)
