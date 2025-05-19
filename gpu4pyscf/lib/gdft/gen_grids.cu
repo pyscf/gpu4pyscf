@@ -165,7 +165,6 @@ __device__ double3 operator-(const double3& v) { return { -v.x, -v.y, -v.z }; }
 __device__ double3& operator+=(double3& v1, const double3& v2) { v1.x += v2.x; v1.y += v2.y; v1.z += v2.z; return v1; }
 __device__ double3& operator-=(double3& v1, const double3& v2) { v1.x -= v2.x; v1.y -= v2.y; v1.z -= v2.z; return v1; }
 __device__ double3 operator*(const double k, const double3& v) { return { k * v.x, k * v.y, k * v.z }; }
-__device__ double3 operator*(const double3& v, const double k) { return { k * v.x, k * v.y, k * v.z }; }
 __device__ double norm(const double3& v) { return sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
 __device__ double inv(const double x)
 {
@@ -184,7 +183,7 @@ __device__ double switch_function(const double mu, const double a_factor)
     return s;
 }
 
-__device__ double switch_function_dmuds_over_s(const double mu, const double a_factor)
+__device__ double switch_function_dsdmu_over_s(const double mu, const double a_factor)
 {
     const double nu = mu + a_factor * (1 - mu * mu);
     const double dnu_dmu = 1.0 - 2.0 * a_factor * mu;
@@ -192,8 +191,8 @@ __device__ double switch_function_dmuds_over_s(const double mu, const double a_f
     const double f2 = (3.0 - f1 * f1) * f1 * 0.5;
     const double f3 = (3.0 - f2 * f2) * f2 * 0.5;
     const double s = 0.5 * (1.0 - f3);
-    const double dmuds = -0.5 * 1.5 * (1 - f2 * f2) * 1.5 * (1 - f1 * f1) * 1.5 * (1 - nu * nu) * dnu_dmu;
-    return dmuds * inv(s);
+    const double dsdmu = -0.5 * 1.5 * (1 - f2 * f2) * 1.5 * (1 - f1 * f1) * 1.5 * (1 - nu * nu) * dnu_dmu;
+    return dsdmu * inv(s);
 }
 
 __global__
@@ -263,7 +262,7 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
         const double mu_BG = (norm_Br - norm_Gr) * norm_BG_1;
         const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
         const double a_factor_BG = a_factor[j_atom * natm + i_derivative_atom];
-        const double3 dPB_dG = switch_function_dmuds_over_s(mu_BG, a_factor_BG) * P_B * dmuBG_dG;
+        const double3 dPB_dG = switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * P_B * dmuBG_dG;
 
         sum_dPB_dG += dPB_dG;
 
@@ -271,9 +270,8 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
         const double s_GB = switch_function(-mu_BG, a_factor_GB);
         P_G *= s_GB;
 
-        const double norm_Br_1 = inv(norm_Br);
         const double3 dmuGB_dG = -dmuBG_dG;
-        dPG_dG += switch_function_dmuds_over_s(-mu_BG, a_factor_GB) * dmuGB_dG;
+        dPG_dG += switch_function_dsdmu_over_s(-mu_BG, a_factor_GB) * dmuGB_dG;
     }
 
     sum_dPB_dG += P_G * dPG_dG;
@@ -283,7 +281,7 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     const double mu_AG = (norm_Ar - norm_Gr) * norm_AG_1;
     const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + mu_AG * norm_AG_1 * AG);
     const double a_factor_AG = a_factor[i_associated_atom * natm + i_derivative_atom];
-    const double3 dPA_dG = switch_function_dmuds_over_s(mu_AG, a_factor_AG) * P_A * dmuAG_dG;
+    const double3 dPA_dG = switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * P_A * dmuAG_dG;
 
     const double quadrature_weight = grid_quadrature_weights[i_grid];
     const double3 dwi_dG = quadrature_weight * (inv(sum_P_B) * dPA_dG - inv(sum_P_B * sum_P_B) * P_A * sum_dPB_dG);
@@ -291,6 +289,259 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     dwdG[i_derivative_atom * ngrids * 3 + 0 * ngrids + i_grid] = dwi_dG.x;
     dwdG[i_derivative_atom * ngrids * 3 + 1 * ngrids + i_grid] = dwi_dG.y;
     dwdG[i_derivative_atom * ngrids * 3 + 2 * ngrids + i_grid] = dwi_dG.z;
+}
+
+typedef struct {
+    double3 x;
+    double3 y;
+    double3 z;
+} double9;
+__device__ constexpr double9 identity_3 = { 1,0,0, 0,1,0, 0,0,1 };
+__device__ double9 operator+(const double9& v1, const double9& v2) { return { v1.x + v2.x, v1.y + v2.y, v1.z + v2.z }; }
+__device__ double9 operator-(const double9& v1, const double9& v2) { return { v1.x - v2.x, v1.y - v2.y, v1.z - v2.z }; }
+__device__ double9 operator-(const double9& v) { return { -v.x, -v.y, -v.z }; }
+__device__ double9& operator+=(double9& v1, const double9 v2) { v1.x += v2.x; v1.y += v2.y; v1.z += v2.z; return v1; }
+__device__ double9& operator-=(double9& v1, const double9 v2) { v1.x -= v2.x; v1.y -= v2.y; v1.z -= v2.z; return v1; }
+__device__ double9 operator*(const double k, const double9& v) { return { k * v.x, k * v.y, k * v.z }; }
+__device__ double9 outer(const double3& v1, const double3& v2)
+{
+    double9 m;
+    m.x.x = v1.x * v2.x; m.x.y = v1.x * v2.y; m.x.z = v1.x * v2.z;
+    m.y.x = v1.y * v2.x; m.y.y = v1.y * v2.y; m.y.z = v1.y * v2.z;
+    m.z.x = v1.z * v2.x; m.z.y = v1.z * v2.y; m.z.z = v1.z * v2.z;
+    return m;
+}
+
+__device__ double switch_function_d2sdmu2_over_s(const double mu, const double a_factor)
+{
+    const double nu = mu + a_factor * (1 - mu * mu);
+    const double f1 = (3 - nu * nu) * nu * 0.5;
+    const double f2 = (3 - f1 * f1) * f1 * 0.5;
+    const double f3 = (3 - f2 * f2) * f2 * 0.5;
+    const double s = 0.5 * (1 - f3);
+    const double dnu_dmu = 1 - 2 * a_factor * mu;
+    const double df1_dnu = 1.5 * (1 - nu * nu);
+    const double df2_df1 = 1.5 * (1 - f1 * f1);
+    const double df3_df2 = 1.5 * (1 - f2 * f2);
+    const double ds_df3 = -0.5;
+    const double d2sdmu2 =
+        + (0) * (df3_df2 * df2_df1 * df1_dnu * dnu_dmu) * (df3_df2 * df2_df1 * df1_dnu * dnu_dmu)
+        + ds_df3 * (-3 * f2) * (df2_df1 * df1_dnu * dnu_dmu) * (df2_df1 * df1_dnu * dnu_dmu)
+        + ds_df3 * df3_df2 * (-3 * f1) * (df1_dnu * dnu_dmu) * (df1_dnu * dnu_dmu)
+        + ds_df3 * df3_df2 * df2_df1 * (-3 * nu) * (dnu_dmu) * (dnu_dmu)
+        + ds_df3 * df3_df2 * df2_df1 * df1_dnu * (-2 * a_factor);
+    return d2sdmu2 * inv(s);
+}
+
+__global__
+void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d2w_dG1dG2, const double* __restrict__ grid_coords, const double* __restrict__ grid_quadrature_weights,
+                                                          const double* __restrict__ atm_coords, const double* __restrict__ a_factor,
+                                                          const int* __restrict__ atm_idx, const int ngrids, const int natm)
+{
+    const int i_grid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int i_atom_G = blockIdx.y * blockDim.y + threadIdx.y;
+    const int i_atom_H = blockIdx.z * blockDim.z + threadIdx.z;
+    if (i_grid >= ngrids || i_atom_G >= natm || i_atom_H >= natm)
+        return;
+    const int i_atom_A = atm_idx[i_grid];
+    if (i_atom_A < 0) // Pad grid
+        return;
+    if (i_atom_A == i_atom_G || i_atom_A == i_atom_H) // Dealt with later by translation invariance.
+        return;
+    if (i_atom_G == i_atom_H) // Dealt with later in diagonal kernel.
+        return;
+
+    const double3 grid_r = { grid_coords[i_grid * 3 + 0], grid_coords[i_grid * 3 + 1], grid_coords[i_grid * 3 + 2] };
+    const double3 atom_A = { atm_coords[i_atom_A * 3 + 0], atm_coords[i_atom_A * 3 + 1], atm_coords[i_atom_A * 3 + 2] };
+    const double3 Ar = atom_A - grid_r;
+    const double norm_Ar = norm(Ar);
+    double P_A = 1.0;
+    double sum_P_B = 0.0;
+
+    const double3 atom_G = { atm_coords[i_atom_G * 3 + 0], atm_coords[i_atom_G * 3 + 1], atm_coords[i_atom_G * 3 + 2] };
+    const double3 Gr = atom_G - grid_r;
+    const double norm_Gr = norm(Gr);
+    const double norm_Gr_1 = inv(norm_Gr);
+    double3 sum_dPB_dG = { 0.0, 0.0, 0.0 };
+    double P_G = 1.0;
+    double3 dPG_dG = { 0.0, 0.0, 0.0 };
+
+    const double3 atom_H = { atm_coords[i_atom_H * 3 + 0], atm_coords[i_atom_H * 3 + 1], atm_coords[i_atom_H * 3 + 2] };
+    const double3 Hr = atom_H - grid_r;
+    const double norm_Hr = norm(Hr);
+    const double norm_Hr_1 = inv(norm_Hr);
+    double3 sum_dPB_dH = { 0.0, 0.0, 0.0 };
+    double P_H = 1.0;
+    double3 dPH_dH = { 0.0, 0.0, 0.0 };
+
+    double9 sum_d2PB_dGdH = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+
+    for (int i_atom_B = 0; i_atom_B < natm; i_atom_B++) {
+        const double3 atom_B = { atm_coords[i_atom_B * 3 + 0], atm_coords[i_atom_B * 3 + 1], atm_coords[i_atom_B * 3 + 2] };
+        const double3 Br = atom_B - grid_r;
+        const double norm_Br = norm(Br);
+
+        // P_A part
+        const double3 AB = atom_A - atom_B;
+        const double norm_AB_1 = inv(norm(AB));
+
+        const double mu_AB = (norm_Ar - norm_Br) * norm_AB_1;
+        const double a_factor_AB = a_factor[i_atom_A * natm + i_atom_B];
+        const double s_AB = switch_function(mu_AB, a_factor_AB);
+        P_A *= s_AB;
+
+        // P_B part
+        double P_B = 1.0;
+        for (int i_atom_C = 0; i_atom_C < natm; i_atom_C++) {
+            const double3 atom_C = { atm_coords[i_atom_C * 3 + 0], atm_coords[i_atom_C * 3 + 1], atm_coords[i_atom_C * 3 + 2] };
+            const double3 Cr = atom_C - grid_r;
+            const double3 BC = atom_B - atom_C;
+            const double norm_Cr = norm(Cr);
+            const double norm_BC_1 = inv(norm(BC));
+
+            const double mu_BC = (norm_Br - norm_Cr) * norm_BC_1;
+            const double a_factor_BC = a_factor[i_atom_B * natm + i_atom_C];
+            const double s_BC = switch_function(mu_BC, a_factor_BC);
+
+            P_B *= s_BC;
+        }
+        sum_P_B += P_B;
+
+        // dPB_dG part
+        const double3 BG = atom_B - atom_G;
+        const double norm_BG_1 = inv(norm(BG));
+        const double mu_BG = (norm_Br - norm_Gr) * norm_BG_1;
+        const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
+        const double a_factor_BG = a_factor[i_atom_B * natm + i_atom_G];
+        const double3 dsBG_dG = switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * dmuBG_dG;
+        const double3 dPB_dG = P_B * dsBG_dG;
+        sum_dPB_dG += dPB_dG;
+
+        const double a_factor_GB = a_factor[i_atom_G * natm + i_atom_B];
+        const double s_GB = switch_function(-mu_BG, a_factor_GB);
+        P_G *= s_GB;
+
+        const double3 dmuGB_dG = -dmuBG_dG;
+        dPG_dG += switch_function_dsdmu_over_s(-mu_BG, a_factor_GB) * dmuGB_dG;
+
+        // dPB_dH part
+        const double3 BH = atom_B - atom_H;
+        const double norm_BH_1 = inv(norm(BH));
+        const double mu_BH = (norm_Br - norm_Hr) * norm_BH_1;
+        const double3 dmuBH_dH = norm_BH_1 * (-norm_Hr_1 * Hr + mu_BH * norm_BH_1 * BH);
+        const double a_factor_BH = a_factor[i_atom_B * natm + i_atom_H];
+        const double3 dsBH_dH = switch_function_dsdmu_over_s(mu_BH, a_factor_BH) * dmuBH_dH;
+        const double3 dPB_dH = P_B * dsBH_dH;
+        sum_dPB_dH += dPB_dH;
+
+        const double a_factor_HB = a_factor[i_atom_H * natm + i_atom_B];
+        const double s_HB = switch_function(-mu_BH, a_factor_HB);
+        P_H *= s_HB;
+
+        const double3 dmuHB_dH = -dmuBH_dH;
+        dPH_dH += switch_function_dsdmu_over_s(-mu_BH, a_factor_HB) * dmuHB_dH;
+
+        // sum_d2PB_dGdH part
+        sum_d2PB_dGdH += P_B * outer(dsBG_dG, dsBH_dH);
+        // } else {
+        //     const double9 d2mu_BGdG2 = (-norm_BG_1 * norm_BG_1 * norm_BG_1 * norm_Gr_1) * (outer(BG, Gr) + outer(Gr, BG))
+        //                             + (norm_BG_1 * norm_Gr_1 * norm_Gr_1 * norm_Gr_1) * outer(Gr, Gr)
+        //                             + (3 * mu_BG * norm_BG_1 * norm_BG_1 * norm_BG_1 * norm_BG_1) * outer(BG, BG)
+        //                             + (-norm_BG_1 * norm_Gr_1 - mu_BG * norm_BG_1 * norm_BG_1) * identity_3;
+        //     const double9 dsdmu_dmu2dG2 = switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * d2mu_BGdG2;
+        //     const double9 d2sdmu2_dmuBGdG_2 = switch_function_d2sdmu2_over_s(mu_BG, a_factor_BG) * outer(dmuBG_dG, dmuBG_dG);
+        //     sum_d2PB_dGdH += P_B * (dsdmu_dmu2dG2 + d2sdmu2_dmuBGdG_2);
+        // }
+    }
+
+    const double sum_P_B_1 = inv(sum_P_B);
+
+    sum_dPB_dG += P_G * dPG_dG;
+    sum_dPB_dH += P_H * dPH_dH;
+
+    const double3 GH = atom_G - atom_H;
+    const double norm_GH_1 = inv(norm(GH));
+
+    const double mu_GH = (norm_Gr - norm_Hr) * norm_GH_1;
+    const double3 dmuGH_dG = norm_GH_1 * ( norm_Gr_1 * Gr - mu_GH * norm_GH_1 * GH);
+    const double3 dmuGH_dH = norm_GH_1 * (-norm_Hr_1 * Hr + mu_GH * norm_GH_1 * GH);
+    const double a_factor_GH = a_factor[i_atom_G * natm + i_atom_H];
+    const double3 dsGH_dH = switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * dmuGH_dH;
+    const double3 dsGH_dG = switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * dmuGH_dG;
+
+    const double9 d2muGH_dGdH = (norm_GH_1 * norm_GH_1 * norm_GH_1 * norm_Gr_1) * outer(Gr, GH)
+                              + (norm_GH_1 * norm_GH_1 * norm_GH_1 * norm_Hr_1) * outer(GH, Hr)
+                              + (-3 * mu_GH * norm_GH_1 * norm_GH_1 * norm_GH_1 * norm_GH_1) * outer(GH, GH)
+                              + (mu_GH * norm_GH_1 * norm_GH_1) * identity_3;
+    const double9 dsdmu_dmu2GHdGdH = switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * d2muGH_dGdH;
+    const double9 d2sdmu2_dmuGHdGdH = switch_function_d2sdmu2_over_s(mu_GH, a_factor_GH) * outer(dmuGH_dG, dmuGH_dH);
+    const double9 d2sGH_dGdH = dsdmu_dmu2GHdGdH + d2sdmu2_dmuGHdGdH;
+
+    const double9 d2PG_dGdH = P_G * (outer(dPG_dG - dsGH_dG, dsGH_dH) + d2sGH_dGdH);
+    sum_d2PB_dGdH += d2PG_dGdH;
+
+    const double3 dmuHG_dG = -dmuGH_dG;
+    const double3 dmuHG_dH = -dmuGH_dH;
+    const double a_factor_HG = a_factor[i_atom_H * natm + i_atom_G];
+    const double3 dsHG_dG = switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * dmuHG_dG;
+    const double3 dsHG_dH = switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * dmuHG_dH;
+
+    const double9 d2muHG_dGdH = -d2muGH_dGdH;
+    const double9 dsdmu_dmu2HGdGdH = switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * d2muHG_dGdH;
+    const double9 d2sdmu2_dmuHGdGdH = switch_function_d2sdmu2_over_s(-mu_GH, a_factor_HG) * outer(dmuHG_dG, dmuHG_dH);
+    const double9 d2sHG_dGdH = dsdmu_dmu2HGdGdH + d2sdmu2_dmuHGdGdH;
+
+    const double9 d2PH_dGdH = P_H * (outer(dsHG_dG, dPH_dH - dsHG_dH) + d2sHG_dGdH);
+    sum_d2PB_dGdH += d2PH_dGdH;
+
+    // dPA_dG part
+    const double3 AG = atom_A - atom_G;
+    const double norm_AG_1 = inv(norm(AG));
+    const double mu_AG = (norm_Ar - norm_Gr) * norm_AG_1;
+    const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + mu_AG * norm_AG_1 * AG);
+    const double a_factor_AG = a_factor[i_atom_A * natm + i_atom_G];
+    const double3 dsAG_dG = switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * dmuAG_dG;
+    const double3 dPA_dG = P_A * dsAG_dG;
+
+    // dPA_dH part
+    const double3 AH = atom_A - atom_H;
+    const double norm_AH_1 = inv(norm(AH));
+    const double mu_AH = (norm_Ar - norm_Hr) * norm_AH_1;
+    const double3 dmuAH_dH = norm_AH_1 * (-norm_Hr_1 * Hr + mu_AH * norm_AH_1 * AH);
+    const double a_factor_AH = a_factor[i_atom_A * natm + i_atom_H];
+    const double3 dsAH_dH = switch_function_dsdmu_over_s(mu_AH, a_factor_AH) * dmuAH_dH;
+    const double3 dPA_dH = P_A * dsAH_dH;
+
+    // d2PA_dGdH part
+   const double9 d2PA_dGdH = P_A * outer(dsAG_dG, dsAH_dH);
+    // } else {
+    //     const double9 d2muAGdG2 = (-norm_AG_1 * norm_AG_1 * norm_AG_1 * norm_Gr_1) * (outer(AG, Gr) + outer(Gr, AG))
+    //                             + (norm_AG_1 * norm_Gr_1 * norm_Gr_1 * norm_Gr_1) * outer(Gr, Gr)
+    //                             + (3 * mu_AG * norm_AG_1 * norm_AG_1 * norm_AG_1 * norm_AG_1) * outer(AG, AG)
+    //                             + (-norm_AG_1 * norm_Gr_1 - mu_AG * norm_AG_1 * norm_AG_1) * identity_3;
+    //     const double9 dsdmu_dmu2dG2 = switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * d2muAGdG2;
+    //     const double9 d2sdmu2_dmuAGdG_2 = switch_function_d2sdmu2_over_s(mu_AG, a_factor_AG) * outer(dmuAG_dG, dmuAG_dG);
+    //     d2PA_dGdH = P_A * (dsdmu_dmu2dG2 + d2sdmu2_dmuAGdG_2);
+    // }
+
+    double9 d2wi_dGdH = { 0,0,0, 0,0,0, 0,0,0 };
+    d2wi_dGdH += sum_P_B_1 * d2PA_dGdH;
+    d2wi_dGdH -= (sum_P_B_1 * sum_P_B_1) * outer(sum_dPB_dG, dPA_dH);
+    d2wi_dGdH -= (sum_P_B_1 * sum_P_B_1) * outer(dPA_dG, sum_dPB_dH);
+    d2wi_dGdH -= (P_A * sum_P_B_1 * sum_P_B_1) * sum_d2PB_dGdH;
+    d2wi_dGdH += (2 * P_A * sum_P_B_1 * sum_P_B_1 * sum_P_B_1) * outer(sum_dPB_dG, sum_dPB_dH);
+
+    const double quadrature_weight = grid_quadrature_weights[i_grid];
+    d2wi_dGdH = quadrature_weight * d2wi_dGdH;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 0 * ngrids + i_grid] = d2wi_dGdH.x.x;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 1 * ngrids + i_grid] = d2wi_dGdH.x.y;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 2 * ngrids + i_grid] = d2wi_dGdH.x.z;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 3 * ngrids + i_grid] = d2wi_dGdH.y.x;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 4 * ngrids + i_grid] = d2wi_dGdH.y.y;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 5 * ngrids + i_grid] = d2wi_dGdH.y.z;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 6 * ngrids + i_grid] = d2wi_dGdH.z.x;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 7 * ngrids + i_grid] = d2wi_dGdH.z.y;
+    d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_H * 9 * ngrids + 8 * ngrids + i_grid] = d2wi_dGdH.z.z;
 }
 
 __global__
@@ -362,6 +613,27 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess){
         fprintf(stderr, "CUDA Error in GDFTgrid_weight_derivative: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+__host__
+int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const double *grid_coords, const double *grid_quadrature_weights,
+                                                 const double *atm_coords, const double *a_factor,
+                                                 const int *atm_idx, const int ngrids, const int natm)
+{
+    constexpr int n_grid_per_block = 16;
+    constexpr int n_atom_per_block = 4;
+    const dim3 threads(n_grid_per_block, n_atom_per_block, n_atom_per_block);
+    const dim3 blocks((ngrids + n_grid_per_block - 1) / n_grid_per_block,
+                      (natm   + n_atom_per_block - 1) / n_atom_per_block,
+                      (natm   + n_atom_per_block - 1) / n_atom_per_block);
+    GDFTgrid_weight_second_derivative_offdiagonal_kernel<<<blocks, threads>>>(d2w_dG1dG2, grid_coords, grid_quadrature_weights,
+                                                                              atm_coords, a_factor, atm_idx, ngrids, natm);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess){
+        fprintf(stderr, "CUDA Error in GDFTgrid_weight_second_derivative: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
