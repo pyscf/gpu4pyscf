@@ -437,7 +437,9 @@ class Grids(lib.StreamObject):
     level = getattr(__config__, 'dft_gen_grid_Grids_level', 3)
     alignment    = ALIGNMENT_UNIT
     cutoff       = CUTOFF
-    _keys        = gen_grid_cpu.Grids._keys
+    _keys        = gen_grid_cpu.Grids._keys.union({
+        'grid_sorting_index', 'atm_idx', 'padding'
+    })
 
     __init__   = gen_grid_cpu.Grids.__init__
     dump_flags = gen_grid_cpu.Grids.dump_flags
