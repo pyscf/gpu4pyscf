@@ -1383,6 +1383,40 @@ def get_dweight_dA(mol, grids):
 
     return dweight_dA
 
+def get_d2weight_dAdB(mol, grids):
+    ngrids = grids.coords.shape[0]
+    assert grids.atm_idx.shape[0] == ngrids
+    assert grids.quadrature_weights.shape[0] == ngrids
+    atm_coords = cupy.asarray(mol.atom_coords(), order = "C")
+
+    from gpu4pyscf.dft import radi
+    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii)
+
+    d2weight_dAdB = cupy.zeros([mol.natm, mol.natm, 3, 3, ngrids], order = "C")
+    libgdft.GDFTbecke_partition_weight_second_derivative(
+        ctypes.cast(d2weight_dAdB.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids.coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids.quadrature_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids.atm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(mol.natm),
+    )
+
+    range_ngrids = cupy.arange(ngrids)
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            for j_xyz in range(3):
+                d2weight_dAdB[i_atom, grids.atm_idx, i_xyz, j_xyz, range_ngrids] = -cupy.sum(d2weight_dAdB[i_atom, :, i_xyz, j_xyz, :], axis=[0])
+
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            for j_xyz in range(3):
+                d2weight_dAdB[grids.atm_idx, i_atom, i_xyz, j_xyz, range_ngrids] = -cupy.sum(d2weight_dAdB[:, i_atom, i_xyz, j_xyz, :], axis=[0])
+
+    return d2weight_dAdB
+
 def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     """
         Equation notation follows:
