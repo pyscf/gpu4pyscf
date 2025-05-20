@@ -1,3 +1,22 @@
+v1.4.1 (2025-05-20)
+-------------------
+* New Features
+  - Analytical hessian for VV10 functionals
+  - DFT polarizability with VV10 functionals
+  - TDDFT for VV10 functionals
+  - Non-adiabatic coupling constants for TDDFT states
+  - TDDFT gradients and geometry optimization solver for excited states
+  - LR-PCM for TDDFT and TDDFT gradients
+  - TDDFT-ris method
+* Improvements
+  - Optimization CUDA kernel and integral screening for MD J-engine. The MD
+    J-engine is utilized by default for large system HF and DFT computation.
+  - Optimization for PBC gaussian density fitting at gamma point.
+  - ECP gradients CUDA kernel
+  - Reduced atomicAdd overhead in Rys JK kernel
+* Fixes
+  - MINAO initial guess for ghost atoms
+
 v1.4.0 (2025-03-27)
 -------------------
 * New Features
