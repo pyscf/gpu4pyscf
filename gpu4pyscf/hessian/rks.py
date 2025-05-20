@@ -1403,37 +1403,28 @@ def get_d2weight_dAdB(mol, grids):
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
     )
-    # dweight_dA[grids.atm_idx, 0, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 0, :], axis=[0])
-    # dweight_dA[grids.atm_idx, 1, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 1, :], axis=[0])
-    # dweight_dA[grids.atm_idx, 2, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 2, :], axis=[0])
 
-    d2weight_dAdB_numerical = cupy.empty([mol.natm, mol.natm, 3, 3, ngrids])
-    dx = 1e-5
-    mol_copy = mol.copy()
     for i_atom in range(mol.natm):
-        for i_xyz in range(3):
-            xyz_p = mol.atom_coords()
-            xyz_p[i_atom, i_xyz] += dx
-            mol_copy.set_geom_(xyz_p, unit='Bohr')
-            mol_copy.build()
-            grids.reset(mol_copy)
-            grids.build()
-            w_p = get_dweight_dA(mol_copy, grids)
+        d2weight_dAdB[i_atom, grids.atm_idx, 0, 0, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 0, 0, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 0, 1, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 0, 1, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 0, 2, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 0, 2, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 1, 0, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 1, 0, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 1, 1, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 1, 1, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 1, 2, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 1, 2, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 2, 0, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 2, 0, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 2, 1, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 2, 1, :], axis=[0])
+        d2weight_dAdB[i_atom, grids.atm_idx, 2, 2, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[i_atom, :, 2, 2, :], axis=[0])
 
-            xyz_m = mol.atom_coords()
-            xyz_m[i_atom, i_xyz] -= dx
-            mol_copy.set_geom_(xyz_m, unit='Bohr')
-            mol_copy.build()
-            grids.reset(mol_copy)
-            grids.build()
-            w_m = get_dweight_dA(mol_copy, grids)
-
-            d2weight_dAdB_numerical[i_atom, :, i_xyz, :, :] = (w_p - w_m) / (2 * dx)
-    grids.build(mol)
-
-    print(cupy.max(cupy.abs(d2weight_dAdB - d2weight_dAdB_numerical)))
-
-    exit()
+    for i_atom in range(mol.natm):
+        d2weight_dAdB[grids.atm_idx, i_atom, 0, 0, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 0, 0, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 0, 1, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 0, 1, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 0, 2, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 0, 2, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 1, 0, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 1, 0, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 1, 1, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 1, 1, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 1, 2, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 1, 2, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 2, 0, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 2, 0, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 2, 1, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 2, 1, :], axis=[0])
+        d2weight_dAdB[grids.atm_idx, i_atom, 2, 2, cupy.arange(ngrids)] = -cupy.sum(d2weight_dAdB[:, i_atom, 2, 2, :], axis=[0])
 
     return d2weight_dAdB
 
