@@ -16,6 +16,13 @@ Run ```nvcc --version``` in your terminal to check the installed CUDA toolkit ve
 | **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
 | **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
 
+The versions of CuPy and cuTENSOR are strongly interdependent and should not be combined arbitrarily.
+The recommended combinations include:
+1. CuPy 13.3.0 + cuTENSOR 2.0.2
+2. CuPy 13.4.1 + cuTENSOR 2.2.0
+
+Using other versions or combinations may lead to failures in functionality.
+
 Compilation
 --------
 One can compile the package with
