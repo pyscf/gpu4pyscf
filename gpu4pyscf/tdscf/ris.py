@@ -318,22 +318,24 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             out = out.reshape(P, p, q)
             return out
         
-        contract = einsum2dot 
+        tmp_einsum = einsum2dot 
         upper_inv_eri2c = upper_inv_eri2c.get()
+    else:
+        tmp_einsum = contract
 
     if calc == 'J':
-        Tia = contract('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+        Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
         return Tia
 
     if calc == 'K':
-        Tij = contract('PQ,Qij->Pij', upper_inv_eri2c, Pij)
-        Tab = contract('PQ,Qab->Pab', upper_inv_eri2c, Pab)
+        Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
+        Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         return Tij, Tab
 
     if calc == 'JK':
-        Tia = contract('PQ,Qia->Pia', upper_inv_eri2c, Pia)
-        Tij = contract('PQ,Qij->Pij', upper_inv_eri2c, Pij)
-        Tab = contract('PQ,Qab->Pab', upper_inv_eri2c, Pab)
+        Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+        Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
+        Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         return Tia, Tij, Tab
    
 
