@@ -15,6 +15,7 @@
 import numpy as np
 import cupy as cp
 from pyscf.hessian import thermo
+from gpu4pyscf.properties import polarizability
 from gpu4pyscf.lib.cupy_helper import contract
 from pyscf.data import nist
 from gpu4pyscf.scf.hf import RHF
@@ -180,7 +181,6 @@ def eval_raman_intensity(mf, hessian = None):
     assert hessian.shape == (mol.natm, mol.natm, 3, 3)
 
     freq_info = thermo.harmonic_analysis(mol, hessian)
-    thermo_info = thermo.thermo(mf, freq_info['freq_au']) # T and P doesn't matter
 
     norm_mode = freq_info['norm_mode']
     freq_wavenumber = freq_info['freq_wavenumber']
@@ -209,7 +209,7 @@ def eval_raman_intensity(mf, hessian = None):
 
     # You might wonder where does the following unit conversion factor come from, and how does it yields the final unit Angstrom^4 / AMU.
     # The raman intensity has the same unit as (polarizability / length * normal mode eigenvector)^2
-    # So there're two parts of the story: What's the unit of polarizability? And, what's the unit of normal mode eigenvector? 
+    # So there're two parts of the story: What's the unit of polarizability? And, what's the unit of normal mode eigenvector?
     #
     # (1) What's the unit of normal mode eigenvector?
     # The normal mode eigenvector comes from solving the generalized eigenvalue equation H X = lambda M X,
