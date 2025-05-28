@@ -622,7 +622,7 @@ class RisBase(lib.StreamObject):
         self.log = logger.new_logger(self)
         self.log.info(f'group_size {group_size}, group_size_aux {group_size_aux}')
     
-    def get_P(self):
+    def transition_dipole(self):
         '''
         transition dipole u
         '''
@@ -637,7 +637,7 @@ class RisBase(lib.StreamObject):
             P = cp.vstack((P_alpha, P_beta))
         return P
 
-    def get_mdpol(self):
+    def transition_magnetic_dipole(self):
         '''
         magnatic dipole m
         '''
@@ -790,12 +790,12 @@ class RisBase(lib.StreamObject):
 
         if self.a_x != 0:
             if self.K_fit == self.J_fit and (self.omega == 0 or self.omega is None):
-                log.info('J and K uese same aux basis, and they share same set of Tensors')
+                log.info('J and K use same aux basis, and they share same set of Tensors')
                 auxmol_K = auxmol_J
                 self._JK_share_aux = True
 
             else:
-                log.info('J and K uese different aux basis, or RSH omega != 0')
+                log.info('either (1) J and K use different aux basis, or (2) RSH omega != 0')
                 auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit) 
                 self._JK_share_aux = False
 
@@ -953,7 +953,7 @@ class TDA(RisBase):
         log.debug(f'check orthonormality of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies,
-                                                 X=X/(2**0.5), Y=None, P=self.get_P(), mdpol=self.get_mdpol(),
+                                                 X=X/(2**0.5), Y=None, P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(),
                                                  name=self.out_name+'_TDA_ris', RKS=self.RKS, spectra=self.spectra,
                                                  print_threshold = self.print_threshold, n_occ=self.n_occ, n_vir=self.n_vir)
         
@@ -1140,7 +1140,7 @@ class TDDFT(RisBase):
 
 
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, X=X/(2**0.5), Y=Y/(2**0.5),
-                                                    P=self.get_P(), mdpol=self.get_mdpol(), name=self.out_name+'_TDDFT_ris',
+                                                    P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(), name=self.out_name+'_TDDFT_ris',
                                                     spectra=self.spectra, RKS=self.RKS, print_threshold = self.print_threshold,
                                                     n_occ=self.n_occ, n_vir=self.n_vir)
         
