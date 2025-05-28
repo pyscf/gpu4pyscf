@@ -111,13 +111,9 @@ class KnownValues(unittest.TestCase):
 
         test_frequencies, test_raman_intensities, test_depolarization_ratio = eval_raman_intensity(mf)
 
-        print(np.linalg.norm(test_frequencies - reference_frequencies))
-        print(np.linalg.norm(test_raman_intensities - reference_raman_intensities))
-        print(np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio))
         assert np.linalg.norm(test_frequencies - reference_frequencies) < 2.0
         assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.1
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
-        assert False
 
     def test_raman_hf(self):
         ### Q-Chem input
