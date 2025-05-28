@@ -14,7 +14,7 @@
 # limitations under the License.
 
 '''
-IR intensity
+Raman scattering activity and depolarization ratio
 '''
 
 import pyscf
