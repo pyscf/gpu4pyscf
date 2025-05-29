@@ -25,6 +25,8 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
+          --rm \
+          --storage-opt size=30G \
           -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
@@ -44,6 +46,8 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
+          --rm \
+          --storage-opt size=30G \
           -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
