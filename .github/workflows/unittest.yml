@@ -30,7 +30,7 @@ jobs:
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
           -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
 
   multi-gpu:
     runs-on: [self-hosted, Linux, X64, 2T4]
@@ -49,4 +49,4 @@ jobs:
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
           -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
