@@ -204,11 +204,13 @@ class RHF(hf.RHF):
 
         omega = mol.omega
         if omega in self._opt_gpu:
-            vhfopt, jopt = self._opt_gpu[omega]
+            vhfopt = self._opt_gpu[omega]
         else:
-            vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
-            self._opt_gpu[omega] = (vhfopt, jopt)
+            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+        if omega in self._opt_jengine:
+            jopt = self._opt_jengine[omega]
+        else:
+            self._opt_jengine[omega] = jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
 
         #:vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, jopt)

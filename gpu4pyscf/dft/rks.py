@@ -18,7 +18,7 @@ import cupy
 from pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
-from gpu4pyscf.scf import hf
+from gpu4pyscf.scf import hf, j_engine
 from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 from pyscf import __config__
 
@@ -112,20 +112,26 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
             exc += enlc
             vxc += vnlc
-        #logger.debug(ks, 'nelec by numeric integration = %s', n)
+        logger.debug(ks, 'nelec by numeric integration = %s', n)
     t0 = logger.timer_debug1(ks, 'vxc tot', *t0)
 
     #enabling range-separated hybrids
     if not ni.libxc.is_hybrid_xc(ks.xc):
         vk = None
-        if (ks._eri is None and ks.direct_scf and
-            getattr(vhf_last, 'vj', None) is not None):
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-            vj = ks.get_j(mol, ddm, hermi)
-            vj += vhf_last.vj
+        omega = mol.omega
+        if omega in ks._opt_jengine:
+            jopt = ks._opt_jengine[omega]
         else:
-            vj = ks.get_j(mol, dm, hermi)
+            ks._opt_jengine[omega] = jopt = j_engine._VHFOpt(mol, ks.direct_scf_tol).build()
 
+        vj_last = getattr(vhf_last, 'vj', None)
+        if vj_last is not None:
+            ddm = asarray(dm) - asarray(dm_last)
+            vj = j_engine.get_j(mol, ddm, hermi, jopt)
+            vj += asarray(vj_last)
+        else:
+            vj = j_engine.get_j(mol, dm, hermi, jopt)
+        vj_last = None
         vxc += vj
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)

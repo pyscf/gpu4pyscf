@@ -107,11 +107,13 @@ class RKS(rks.RKS):
 
         omega = mol.omega
         if omega in self._opt_gpu:
-            vhfopt, jopt = self._opt_gpu[omega]
+            vhfopt = self._opt_gpu[omega]
         else:
-            vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
-            self._opt_gpu[omega] = (vhfopt, jopt)
+            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+        if omega in self._opt_jengine:
+            jopt = self._opt_jengine[omega]
+        else:
+            self._opt_jengine[omega] = jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
 
         cp.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()

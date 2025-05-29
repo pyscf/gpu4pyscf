@@ -564,6 +564,7 @@ class SCF(pyscf_lib.StreamObject):
         self.scf_summary = {}
 
         self._opt_gpu = {None: None}
+        self._opt_jengine = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
@@ -669,6 +670,7 @@ class SCF(pyscf_lib.StreamObject):
         if mol is not None:
             self.mol = mol
         self._opt_gpu = {None: None}
+        self._opt_jengine = {None: None}
         self.scf_summary = {}
         return self
 

@@ -17,8 +17,8 @@ from pyscf.dft import uks as uks_cpu
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import rks
-from gpu4pyscf.scf import hf, uhf
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.scf import hf, uhf, j_engine
+from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 from gpu4pyscf.lib import utils
 
 
@@ -58,16 +58,23 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
     if not ni.libxc.is_hybrid_xc(ks.xc):
         vk = None
-        if (ks._eri is None and ks.direct_scf and
-            getattr(vhf_last, 'vj', None) is not None):
-            dm_last = cupy.asarray(dm_last)
-            dm = cupy.asarray(dm)
+        omega = mol.omega
+        if omega in ks._opt_jengine:
+            jopt = ks._opt_jengine[omega]
+        else:
+            ks._opt_jengine[omega] = jopt = j_engine._VHFOpt(mol, ks.direct_scf_tol).build()
+
+        vj_last = getattr(vhf_last, 'vj', None)
+        if vj_last is not None:
+            dm_last = asarray(dm_last)
+            dm = asarray(dm)
             assert dm_last.ndim == 0 or dm_last.ndim == dm.ndim
             ddm = dm - dm_last
-            vj = ks.get_j(mol, ddm[0]+ddm[1], hermi)
-            vj += vhf_last.vj
+            vj = j_engine.get_j(mol, ddm, hermi, jopt)
+            vj += asarray(vj_last)
         else:
-            vj = ks.get_j(mol, dm[0]+dm[1], hermi)
+            vj = j_engine.get_j(mol, dm, hermi, jopt)
+        vj_last = None
         vxc += vj
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
