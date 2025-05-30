@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gpu4pyscf.properties import polarizability, ir, shielding
+from gpu4pyscf.properties import polarizability, ir, shielding, raman
