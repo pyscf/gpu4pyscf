@@ -580,7 +580,8 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     ao_pair_mapping = []
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
-    ao_loc = cp.asarray(ft_opt.ao_idx[ft_opt.sorted_cell.ao_loc[:-1]])
+    sorted_ao_loc = ft_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
+    ao_loc = cp.asarray(ft_opt.ao_idx[sorted_ao_loc[:-1]])
 
     aft_envs = _build_aft_envs(ft_opt)
     bas_ij_cache = _make_img_idx_cache(ft_opt, aft_envs, cutoff,
@@ -592,6 +593,8 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     uniq_l = uniq_l_ctr[:,0]
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
 
+    # Determine the addresses of the non-vanished pairs and the diagonal indices
+    # within these elements.
     ij_tasks = bas_ij_cache.keys()
     nf = nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
     if not cell.cart:
