@@ -89,35 +89,10 @@ class DF(lib.StreamObject):
             self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
             self._cderi = {}
             self._cderi[0] = _cholesky_eri_bdiv(intopt, omega=omega)
-            ao_pair_mapping = intopt.create_ao_pair_mapping(cart=mol.cart)
-            rows, cols = divmod(cupy.asarray(ao_pair_mapping), mol.nao)
+            rows, cols, diags = intopt.orbital_pair_nonzero_indices()
             intopt.cderi_row = rows
             intopt.cderi_col = cols
-
-            # intopt.cderi_diag stores the indices for cderi_row that
-            # corresponds to the diagonal blocks. Note this index array can
-            # contain some of the off-diagonal elements which happen to be the
-            # off-diagonal elements while within the diagonal blocks.
-            uniq_l = intopt.uniq_l_ctr[:,0]
-            if mol.cart:
-                nf = (uniq_l + 1) * (uniq_l + 2) // 2
-            else:
-                nf = uniq_l * 2 + 1
-            n_groups = len(uniq_l)
-            ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
-            nbas = intopt.sorted_mol.nbas
-            offset = 0
-            cderi_diag = []
-            for (i, j), bas_ij_idx in zip(ij_tasks, intopt.shl_pair_idx):
-                nfi = nf[i]
-                nfj = nf[j]
-                if i == j: # the diagonal blocks
-                    ish, jsh = divmod(bas_ij_idx, nbas)
-                    idx = np.where(ish == jsh)[0]
-                    addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
-                    cderi_diag.append(addr.ravel())
-                offset += bas_ij_idx.size * nfi * nfj
-            intopt.cderi_diag = cupy.asarray(np.hstack(cderi_diag))
+            intopt.cderi_diag = diags
             log.timer_debug1('cholesky_eri', *t0)
             return self
 
@@ -408,7 +383,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
 def _cholesky_eri_bdiv(intopt, omega=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     assert omega is None
-    eri3c = intopt.int3c2e_bdiv_kernel()
+    eri3c = next(intopt.int3c2e_bdiv_generator())
     if intopt.mol.cart:
         eri3c = intopt.orbital_pair_cart2sph(eri3c)
     auxmol = intopt.auxmol

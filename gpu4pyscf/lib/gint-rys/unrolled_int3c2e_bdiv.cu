@@ -1,19 +1,3 @@
-/*
- * Copyright 2025 The PySCF Developers. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -22,6 +6,7 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
+
 
 __device__ static
 void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
@@ -139,7 +124,7 @@ void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 1 * naux + ksh_in_block * 1;
         eri_tensor[0*naux + 0] = gout0;
     }
@@ -274,7 +259,7 @@ void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 3 * naux + ksh_in_block * 1;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[1*naux + 0] = gout1;
@@ -433,7 +418,7 @@ void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 9 * naux + ksh_in_block * 1;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[1*naux + 0] = gout1;
@@ -586,7 +571,7 @@ void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 6 * naux + ksh_in_block * 1;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[1*naux + 0] = gout1;
@@ -772,7 +757,7 @@ void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 18 * naux + ksh_in_block * 1;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[1*naux + 0] = gout1;
@@ -1021,7 +1006,7 @@ void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 36 * naux + ksh_in_block * 1;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[1*naux + 0] = gout1;
@@ -1191,7 +1176,7 @@ void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 1 * naux + ksh_in_block * 3;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout1;
@@ -1351,7 +1336,7 @@ void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 3 * naux + ksh_in_block * 3;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout3;
@@ -1572,7 +1557,7 @@ void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 9 * naux + ksh_in_block * 3;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout9;
@@ -1781,7 +1766,7 @@ void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 6 * naux + ksh_in_block * 3;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout6;
@@ -2077,7 +2062,7 @@ void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 18 * naux + ksh_in_block * 3;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout18;
@@ -2509,7 +2494,7 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
         }
         if (ijk_idx < nst) {
             int *ao_loc = envs.ao_loc;
-            int k0 = ao_loc[ksh0] - ao_loc[nbas];
+            int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
             double *eri_tensor = out_local + shl_pair_in_block * 36 * naux + k0 + ksh_in_block * 3;
             switch (gout_id) {
             case 0:
@@ -2772,7 +2757,7 @@ void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 1 * naux + ksh_in_block * 6;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout1;
@@ -2960,7 +2945,7 @@ void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 3 * naux + ksh_in_block * 6;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout3;
@@ -3260,7 +3245,7 @@ void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 9 * naux + ksh_in_block * 6;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout9;
@@ -3542,7 +3527,7 @@ void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
             }
         }
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh0] - ao_loc[nbas];
+        int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
         double *eri_tensor = out_local + k0 + shl_pair_in_block * 6 * naux + ksh_in_block * 6;
         eri_tensor[0*naux + 0] = gout0;
         eri_tensor[0*naux + 1] = gout6;
@@ -3945,7 +3930,7 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
         }
         if (ijk_idx < nst) {
             int *ao_loc = envs.ao_loc;
-            int k0 = ao_loc[ksh0] - ao_loc[nbas];
+            int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
             double *eri_tensor = out_local + shl_pair_in_block * 18 * naux + k0 + ksh_in_block * 6;
             switch (gout_id) {
             case 0:
