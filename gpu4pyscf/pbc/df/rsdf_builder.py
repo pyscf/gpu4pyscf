@@ -630,7 +630,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     cderi_idx = (rows.get(), cols.get(), diag_addresses.get())
 
     ft_ao.init_constant(sorted_cell)
-    kern = libpbc.build_ft_ao
+    kern = libpbc.build_ft_aopair
 
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)

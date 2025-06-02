@@ -31,7 +31,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, contract, get_avail_mem, dist_matrix)
+    load_library, contract, get_avail_mem, dist_matrix, asarray)
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
@@ -45,6 +45,7 @@ __all__ = [
 
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
+libpbc.build_ft_aopair.restype = ctypes.c_int
 libpbc.init_constant.restype = ctypes.c_int
 
 LMAX = 4
@@ -61,6 +62,7 @@ def ft_aopair(cell, Gv, kpti_kptj=None, q=None):
     return ft_aopair_kpts(cell, Gv, q, kptj.reshape(1,3))[0]
 
 def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
+    '''Analytical Fourier transform orbital-pair on Gv grids'''
     if q is None:
         q = np.zeros(3)
     if kptjs is None:
@@ -70,12 +72,32 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
 
 def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None):
-    from pyscf.pbc.df.ft_ao import ft_ao
-    out = ft_ao(cell, Gv, shls_slice, b, gxyz, Gvbase, kpt, verbose)
-    if out.flags.c_contiguous:
-        return cp.asarray(out)
-    else:
-        return cp.asarray(out, order='F')
+    '''Analytical Fourier transform basis functions on Gv grids'''
+    assert shls_slice is None
+    sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
+    _atm = cp.array(sorted_cell._atm)
+    _bas = cp.array(sorted_cell._bas)
+    _env = cp.array(_scale_sp_ctr_coeff(sorted_cell))
+    ao_loc_cpu = sorted_cell.ao_loc
+    ao_loc_gpu = cp.array(ao_loc_cpu)
+    envs = AFTIntEnvVars(
+        sorted_cell.natm, sorted_cell.nbas, 1, 1, _atm.data.ptr,
+        _bas.data.ptr, _env.data.ptr, ao_loc_gpu.data.ptr, 0,
+    )
+    GvT = asarray(np.append((Gv.T + kpt[:,None]).ravel(), np.zeros(THREADS)))
+    ngrids = len(Gv)
+    nao_cart = ao_loc_cpu[-1]
+    out = cp.empty((nao_cart, ngrids), dtype=np.complex128)
+    libpbc.build_ft_ao(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.byref(envs), ctypes.c_int(ngrids),
+        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
+        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
+        sorted_cell._env.ctypes
+    )
+    out = out.T.dot(asarray(coeff))
+    return out
 
 def gen_ft_kernel(cell, kpts=None, verbose=None):
     r'''
@@ -197,7 +219,7 @@ class FTOpt:
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
         init_constant(cell)
-        kern = libpbc.build_ft_ao
+        kern = libpbc.build_ft_aopair
 
         def _ft_sub(Gv, q, kptjs, transform_ao=True):
             '''
@@ -296,7 +318,7 @@ class FTOpt:
                     cell._atm.ctypes, ctypes.c_int(cell.natm),
                     cell._bas.ctypes, ctypes.c_int(cell.nbas), cell._env.ctypes)
                 if err != 0:
-                    raise RuntimeError(f'build_ft_ao kernel for {ll_pattern} failed')
+                    raise RuntimeError(f'build_ft_aopair kernel for {ll_pattern} failed')
                 if log.verbose >= logger.DEBUG1:
                     t1, t1p = log.timer_debug1(f'processing {ll_pattern}', *t1), t1
                     if ll_pattern not in timing_collection:
@@ -415,7 +437,7 @@ def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
     unit = g_size*3
     nGv_nsp_max = shm_size//(unit*16)
     nGv_nsp_max = _nearest_power2(nGv_nsp_max)
-    nGv_max = min(nGv_nsp_max, THREADS//gout_stride)
+    nGv_max = min(nGv_nsp_max, THREADS//gout_stride, 64)
 
     # gout_stride*nGv_per_block >= 32 is a must due to syncthreads in CUDA kernel
     nGv_per_block = max(32//gout_stride, 1)

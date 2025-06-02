@@ -32,6 +32,11 @@ extern __global__
 void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                       int compressing);
 extern __global__
+void ft_ao_bdiv_kernel(double *out, AFTIntEnvVars envs, int nGv, double *grids);
+extern __global__
+void ft_aopair_bdiv_kernel(double *out, AFTIntEnvVars envs, BDivAFTBoundsInfo bounds);
+
+extern __global__
 void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv);
 extern __global__
 void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds);
@@ -41,10 +46,10 @@ int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
 int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds);
 
 extern "C" {
-int build_ft_ao(double *out, int compressing, AFTIntEnvVars *envs,
-                int *scheme, int *shls_slice, int npairs_ij, int ngrids,
-                int *bas_ij, double *grids, int *img_offsets, int *img_idx,
-                int *atm, int natm, int *bas, int nbas, double *env)
+int build_ft_aopair(double *out, int compressing, AFTIntEnvVars *envs,
+                    int *scheme, int *shls_slice, int npairs_ij, int ngrids,
+                    int *bas_ij, double *grids, int *img_offsets, int *img_idx,
+                    int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
     uint16_t jsh0 = shls_slice[2];
@@ -77,7 +82,24 @@ int build_ft_ao(double *out, int compressing, AFTIntEnvVars *envs,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in build_ft_ao: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int build_ft_ao(double *out, AFTIntEnvVars *envs, int ngrids, double *grids,
+                int *atm, int natm, int *bas, int nbas, double *env)
+{
+    constexpr int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
+    dim3 threads(NG_PER_BLOCK, nsh_per_block);
+    int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
+    int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
+    dim3 blocks(nbatches_shls, nbatches_grids);
+    ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in ft_aopair_bdiv_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

@@ -20,6 +20,11 @@
 
 #ifndef HAVE_DEFINED_AFTENVVAS_H
 #define HAVE_DEFINED_AFTENVVAS_H
+
+#define WARP_SIZE       32
+#define FT_AO_THREADS   (WARP_SIZE*4)
+#define NG_PER_BLOCK    32
+
 typedef struct {
     uint16_t cell0_natm; // in bvk-cell
     uint16_t cell0_nbas; // in bvk-cell
@@ -48,4 +53,21 @@ typedef struct {
     int *img_offsets; // offset AFTIntEnvVars.img_idx for each shell-pair
     int *img_idx; // indices of img_coords in each shell-pair
 } AFTBoundsInfo;
+
+typedef struct {
+    int ngrids;
+    // The effective basis pair Id = ish*nbas+jsh
+    int *bas_ij_idx;
+    // the bas_ij_idx offset for each blockIdx.x
+    int *shl_pair_offsets;
+    // the AO-pair offset (address) in the output tensor for each blockIdx.x
+    int *ao_pair_loc;
+    // offset AFTIntEnvVars.img_idx for each shell-pair
+    int *img_offsets;
+    // indices of img_coords in each shell-pair
+    int *img_idx;
+    // gout_stride for for each (li,lj) pattern
+    int *gout_stride_lookup;
+    double *grids;
+} BDivAFTBoundsInfo;
 #endif
