@@ -24,7 +24,8 @@ from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import load_library, contract, dist_matrix
+from gpu4pyscf.lib.cupy_helper import (
+    load_library, contract, dist_matrix, asarray)
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
@@ -208,6 +209,13 @@ class Int3c2eOpt:
         return self
 
     def int3c2e_generator(self, cutoff=1e-14, verbose=None):
+        '''Generator that yields the 3c2e integral tensor in multiple batches.
+
+        Each batch is a two-dimensional tensor. The first dimension corresponds
+        to compressed orbital pairs, which can be indexed using the row and cols
+        returned by the .orbital_pair_nonzero_indices() method. The second
+        dimension is a slice along the auxiliary basis dimension.
+        '''
         if self.sorted_mol is None:
             self.build(cutoff)
         log = logger.new_logger(self.mol, verbose)
@@ -299,15 +307,15 @@ class Int3c2eOpt:
         nao_pair = self.ao_pair_loc[-1]
 
         # nst_lookup stores the nst_per_block for each (li,lj,lk) pattern
-        nst_lookup = cp.asarray(create_nst_lookup_table(), dtype=np.int32)
+        nst_lookup = asarray(create_nst_lookup_table(), dtype=np.int32)
 
-        shl_pair_idx = cp.asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
-        shl_pair_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
+        shl_pair_idx = asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
+        shl_pair_offsets = asarray(self.shl_pair_offsets, dtype=np.int32)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         ksh_offsets = self.ksh_offsets
-        ksh_offsets_gpu = cp.asarray(ksh_offsets, dtype=np.int32)
+        ksh_offsets_gpu = asarray(ksh_offsets, dtype=np.int32)
         ksh_blocks = len(ksh_offsets) - 1
-        ao_pair_loc = cp.asarray(self.ao_pair_loc, dtype=np.int32)
+        ao_pair_loc = asarray(self.ao_pair_loc, dtype=np.int32)
         log.debug1('sp_blocks = %d, ksh_blocks = %d', nbatches_shl_pair, ksh_blocks)
 
         # Group ksh_blocks into batches. Use ksh_block_partitions to index the
@@ -323,7 +331,9 @@ class Int3c2eOpt:
         for start, stop in zip(ksh_block_partitions[:-1], ksh_block_partitions[1:]):
             nblocks = stop - start
             ksh_offsets_batch = ksh_offsets_gpu[start:]
-            naux_batch = aux_loc_by_block[stop] - aux_loc_by_block[start]
+            k0 = aux_loc_by_block[start]
+            k1 = aux_loc_by_block[stop]
+            naux_batch = k1 - k0
             eri3c = cp.empty((nao_pair, naux_batch))
             err = kern(
                 ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
@@ -451,7 +461,7 @@ class Int3c2eOpt:
         '''
         mol = self.mol
         ao_pair_mapping = self.create_ao_pair_mapping(cart=mol.cart)
-        rows, cols = divmod(cupy.asarray(ao_pair_mapping), mol.nao)
+        rows, cols = divmod(asarray(ao_pair_mapping), mol.nao)
 
         # diag stores the indices for cderi_row that corresponds to
         # the diagonal blocks. Note this index array can contain some of the
@@ -476,7 +486,7 @@ class Int3c2eOpt:
                 addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
                 diag.append(addr.ravel())
             offset += bas_ij_idx.size * nfi * nfj
-        diag = cupy.asarray(np.hstack(diag))
+        diag = asarray(np.hstack(diag))
         return rows, cols, diag
 
 def _conc_locs(ao_loc1, ao_loc2):
