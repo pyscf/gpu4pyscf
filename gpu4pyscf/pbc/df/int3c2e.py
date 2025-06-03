@@ -30,11 +30,12 @@ from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot, hermi_triu
+from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
                                 extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant, most_diffused_pgto
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 
 __all__ = [
     'sr_aux_e2',
@@ -706,6 +707,14 @@ class SRInt3c2eOpt:
         uniq_l = uniq_l_ctr[:,0]
         lmax = uniq_l.max()
 
+        bvk_ncells = np.prod(self.bvk_kmesh)
+        if bvk_ncells == 1:
+            bvkcell = auxcell
+        else:
+            bvkcell = pbctools.super_cell(auxcell, self.bvk_kmesh, wrap_around=True)
+            # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
+            bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
+
         precision = cell.precision * 1e-3
         ak, ck, lk = most_diffused_pgto(auxcell)
         theta = 1./(self.omega**-2 + 2./ak)
@@ -725,12 +734,11 @@ class SRInt3c2eOpt:
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
 
-        _atm = cp.array(auxcell._atm, dtype=np.int32)
-        _bas = cp.array(auxcell._bas, dtype=np.int32)
-        _env = cp.array(auxcell._env, dtype=np.float64)
-        ao_loc = auxcell.ao_loc_nr(cart=True)
-        ao_loc_gpu = cp.asarray(ao_loc, dtype=np.int32)
-        bvk_ncells = np.prod(self.bvk_kmesh)
+        _atm = cp.array(bvkcell._atm, dtype=np.int32)
+        _bas = cp.array(bvkcell._bas, dtype=np.int32)
+        _env = cp.array(_scale_sp_ctr_coeff(bvkcell), dtype=np.float64)
+        ao_loc = bvkcell.ao_loc_nr(cart=True)
+        ao_loc_gpu = cp.array(ao_loc, dtype=np.int32)
         int3c2e_envs = Int3c2eEnvVars(
             auxcell.natm, auxcell.nbas, bvk_ncells, nimgs,
             _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
@@ -752,22 +760,24 @@ class SRInt3c2eOpt:
             img = cp.arange(bvk_ncells, dtype=np.int32)
             ijsh = ish[:,None] * (nbas*bvk_ncells) + jsh
             if i == j:
-                ijsh = cp.tril(ijsh)
-            idx = (ijsh[:,None] + img[:,None] * nbas).ravel()
+                ijsh = ijsh[cp.tril_indices(ish1-ish0)]
+            else:
+                ijsh = ijsh.ravel()
+            idx = (img[:,None] * nbas + ijsh).ravel()
             nshl_pair = len(idx)
             bas_ij_idx.append(idx)
             sp0, sp1 = sp1, sp1 + nshl_pair
             nsp_per_block = _estimate_shl_pairs_per_block(li, lj, nshl_pair)
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
         shl_pair_offsets.append(np.array([sp1], dtype=np.int32))
-        shl_pair_offsets = cp.asarray(np.hstack(shl_pair_offsets), dtype=np.int32)
-        bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.int32)
+        shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
+        bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
 
         def _create_gout_stride_lookup_table(lmax):
             # based on the shm_size, find optimal gout_stride for each (li,lj)
             # pattern, store them in the gout_stride_lookup
             gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
-            gout_width = 45
+            gout_width = 43 # should be identical to the setting fill_int2c2e.cu
             shm_size = SHM_SIZE
             ls = np.arange(lmax+1)
             nf = (ls+1) * (ls+2) // 2
@@ -787,13 +797,14 @@ class SRInt3c2eOpt:
                     nsp_per_block = min(nsp_max, THREADS // gout_stride)
                     gout_stride_lookup[li, lj] = THREADS // nsp_per_block
                     max_shm_size = max(max_shm_size, nsp_per_block*unit*8)
-            return cp.asarray(gout_stride_lookup, dtype=np.int32), max_shm_size
+            return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
 
         gout_stride_lookup, shm_size = _create_gout_stride_lookup_table(lmax)
 
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         nao_cart, nao = self.aux_coeff.shape
         out = cp.empty((bvk_ncells, nao_cart, nao_cart))
+        init_constant(cell)
         libpbc.fill_int2c2e(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
@@ -805,7 +816,12 @@ class SRInt3c2eOpt:
             auxcell._bas.ctypes, ctypes.c_int(auxcell.nbas),
             auxcell._env.ctypes)
 
-        out = hermi_triu(out, inplace=True)
+        conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
+        conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
+        libpbc.aopair_fill_triu(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nao_cart), ctypes.c_int(bvk_ncells))
         return sandwich_dot(out, asarray(self.aux_coeff))
 
 class Int3c2eEnvVars(ctypes.Structure):

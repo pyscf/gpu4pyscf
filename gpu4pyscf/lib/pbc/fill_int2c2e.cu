@@ -25,14 +25,10 @@
 #include "int3c2e.cuh"
 
 typedef struct {
-    int8_t li;
-    int8_t lj;
     int8_t iprim;
     int8_t jprim;
     int8_t nfi;
     int8_t nfj;
-    int8_t stride_j;
-    int8_t g_size;
 } PackedPGTO;
 
 #define GOUT_WIDTH      43
@@ -50,27 +46,25 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
     int jsh0 = bas_ij0 % nbas;
 
     int *bas = envs.bas;
-    int8_t li = bas[ish0*BAS_SLOTS+ANG_OF];
-    int8_t lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+    int li = bas[ish0*BAS_SLOTS+ANG_OF];
+    int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
     int nroots = (li + lj) / 2 + 1;
     nroots *= 2; // omega < 0
     int8_t nfi = (li + 1) * (li + 2) / 2;
     int8_t nfj = (lj + 1) * (lj + 2) / 2;
-    int8_t stride_j = li + 1;
-    int8_t g_size = stride_j * (lj + 1);
     int8_t iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int8_t jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    int *atm = envs.atm;
+    PackedPGTO pdata = {iprim, jprim, nfi, nfj};
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    PackedPGTO pdata = {li, lj, iprim, jprim, nfi, nfj, stride_j, g_size};
 
     int gout_stride = bounds.gout_stride_lookup[lj*L_AUX1+li];
     int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
 
-    int gx_len = (int)g_size * nsp_per_block;
+    int g_size = (li + 1) * (lj + 1);
+    int gx_len = g_size * nsp_per_block;
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + sp_id;
     double *g = rw + nsp_per_block * nroots*2;
@@ -79,13 +73,13 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
     double *gz = gy + gx_len;
     double *Rpq = gz + gx_len;
     gy[0] = 1.;
-    double gout[GOUT_WIDTH];
-#pragma unroll
-    for (int n = 0; n < GOUT_WIDTH; ++n) {
-        gout[n] = 0.;
-    }
 
     for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+        double gout[GOUT_WIDTH];
+#pragma unroll
+        for (int n = 0; n < GOUT_WIDTH; ++n) {
+            gout[n] = 0.;
+        }
         int pair_ij = task_id + sp_id;
         if (pair_ij >= shl_pair1) {
             pair_ij = shl_pair0;
@@ -93,10 +87,8 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
         int bas_ij = bounds.bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        int ia = bas[ish*BAS_SLOTS+ATOM_OF];
-        int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
-        double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
-        double *rj = env + atm[ja*ATM_SLOTS+PTR_COORD];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -137,14 +129,11 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
                     gx[0] = PI_FAC * cicj / (ai*aj*sqrt(aij));
                 }
 
-                int li = pdata.li;
-                int lj = pdata.lj;
-                int _nroots = (li + lj) / 2 + 1;
-                int nroots = _nroots * 2; // omega < 0
                 double omega = env[PTR_RANGE_OMEGA];
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * Rpq[3*nsp_per_block];
+                int _nroots = nroots / 2;
                 rys_roots(_nroots, theta_rr, rw+nroots*nsp_per_block,
                           nsp_per_block, gout_id, gout_stride);
                 rys_roots(_nroots, theta_fac*theta_rr, rw,
@@ -185,9 +174,9 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
                     }
 
                     if (lj > 0) {
-                        int stride_j = pdata.stride_j;
-                        int g_size = pdata.g_size;
                         int li3 = (li+1)*3;
+                        int stride_j = li + 1;
+                        int g_size = stride_j * (lj + 1);
                         double rt_ak  = rt_aa * ai;
                         double b00 = .5 * rt_aa;
                         double b01 = .5/aj  * (1 - rt_ak);
@@ -238,12 +227,14 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
 
         if (task_id + sp_id < shl_pair1) {
             int *ao_loc = envs.ao_loc;
-            int nao = ao_loc[envs.cell0_nbas];
-            int cell_id = jsh / envs.bvk_ncells;
-            int jshp = jsh % envs.bvk_ncells;
+            int nbas = envs.cell0_nbas;
+            int nao = ao_loc[nbas];
+            size_t nao2 = nao * nao;
+            int cell_id = jsh / nbas;
+            int jshp = jsh % nbas;
             int i0 = ao_loc[ish];
             int j0 = ao_loc[jshp];
-            double *eri_tensor = out + cell_id*nao*nao + i0 * nao + j0;
+            double *eri_tensor = out + cell_id*nao2 + i0 * nao + j0;
             int nfi = pdata.nfi;
             int nfj = pdata.nfj;
             int nfij = nfi * nfj;
@@ -257,4 +248,37 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
             }
         }
     }
+}
+
+__global__ static
+void aopair_fill_triu_kernel(double *out, int *conj_mapping, int bvk_ncells, int nao)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= nao || j >= nao || i <= j) {
+        return;
+    }
+    size_t nao2 = nao * nao;
+    size_t ij = i * nao + j;
+    size_t ji = j * nao + i;
+    for (int k = 0; k < bvk_ncells; ++k) {
+        int ck = conj_mapping[k];
+        out[ji + ck*nao2] = out[ij + k*nao2];
+    }
+}
+
+extern "C" {
+int aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells)
+{
+    dim3 threads(16, 16);
+    int nao_b = (nao + 15) / 16;
+    dim3 blocks(nao_b, nao_b);
+    aopair_fill_triu_kernel<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nao);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in aopair_fill_triu: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
 }

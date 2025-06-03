@@ -13,11 +13,15 @@
 # limitations under the License.
 
 import unittest
+import ctypes
 import numpy as np
+import cupy as cp
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
 from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 def setUpModule():
     global cell
@@ -105,6 +109,20 @@ class KnownValues(unittest.TestCase):
         dat = ft_ao_gpu.ft_ao(pcell, Gv).get()
         ref = ft_ao_cpu.ft_ao(pcell, Gv)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
+    def test_ft_aopair_fill_triu(self):
+        bvk_ncells, nao, nGv = 6, 13, 42
+        out = cp.random.rand(bvk_ncells,nao,nao,nGv) + cp.random.rand(bvk_ncells,nao,nao,nGv) * 1j
+        conj_mapping = cp.asarray(conj_images_in_bvk_cell([bvk_ncells,1,1]), dtype=np.int32)
+        ix, iy = cp.tril_indices(nao, -1)
+        ref = out.copy()
+        for k, ck in enumerate(conj_mapping):
+            ref[ck,iy,ix] = ref[k,ix,iy]
+        libpbc.ft_aopair_fill_triu(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
+        assert abs(out-ref).max() == 0.
 
 if __name__ == '__main__':
     print('Full Tests for ft_ao_cpu')

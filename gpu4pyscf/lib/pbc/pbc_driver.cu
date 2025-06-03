@@ -560,8 +560,6 @@ extern __global__
 void ft_aopair_bdiv_kernel(double *out, AFTIntEnvVars envs, BDivAFTBoundsInfo bounds);
 
 extern __global__
-void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv);
-extern __global__
 void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds);
 extern __global__
 void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bounds);
@@ -630,20 +628,6 @@ int build_ft_ao(double *out, AFTIntEnvVars *envs, int ngrids, double *grids,
     return 0;
 }
 
-int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells, int nGv)
-{
-    int nGv2 = nGv * 2; // *2 for complex number
-    int threads = 1024;
-    dim3 blocks(nao, nao);
-    ft_aopair_fill_triu<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nGv2);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in ft_aopair_fill_triu: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
 int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs, int *scheme, int *shls_slice,
                  int naux, int n_prim_pairs, int n_ctr_pairs,
                  int *bas_ij_idx, int *pair_mapping, int *img_idx, int *img_offsets,
@@ -707,7 +691,7 @@ int fill_int2c2e(double *out, PBCInt3c2eEnvVars *envs, int shm_size,
     PBCInt2c2eBounds bounds = {
         bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
     };
-    pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS>>>(out, *envs, bounds);
+    pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2ce kernel: %s\n", cudaGetErrorString(err));
@@ -720,6 +704,7 @@ int init_constant(int shm_size)
 {
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(pbc_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(pbc_int2c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

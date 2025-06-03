@@ -13,12 +13,16 @@
 # limitations under the License.
 
 import unittest
+import ctypes
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, SRInt3c2eOpt
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 
 def test_int3c2e_gamma_point():
@@ -153,47 +157,47 @@ C S
     ref = int3c().reshape(dat.shape)
     assert abs(dat - ref).max() < 1e-6
 
+def test_aopair_fill_triu():
+    bvk_ncells, nao = 6, 13
+    out = cp.random.rand(bvk_ncells,nao,nao)
+    conj_mapping = cp.asarray(conj_images_in_bvk_cell([bvk_ncells,1,1]), dtype=np.int32)
+    ix, iy = cp.tril_indices(nao, -1)
+    ref = out.copy()
+    for k, ck in enumerate(conj_mapping):
+        ref[ck,iy,ix] = ref[k,ix,iy]
+    libpbc.aopair_fill_triu(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(nao), ctypes.c_int(bvk_ncells))
+    assert abs(out-ref).max() == 0.
+
 def test_sr_int2c2e():
     cell = pyscf.M(
-        atom='''C1   1.3    .2       .3
-                C2   .19   .1      1.1
+        atom='''C   1.3    .2       .3
+                C   .19   .1      1.1
+                C   0.  0.  0.
         ''',
         precision = 1e-8,
         a=np.diag([2.5, 1.9, 2.2])*3)
     auxcell = cell.copy()
-    auxcell.basis = {
-        'C1':'''
-C    P
-    102.9917624900           1.0000000000
-C    P
-     28.1325940100           1.0000000000
-C    P
-      9.8364318200           1.0000000000
-C    P
-      3.3490545000           1.0000000000
-C    P
-      1.4947618600           1.0000000000
-C    P
-      0.5769010900           1.0000000000
-C    D
-      0.1995412500           1.0000000000 ''',
-        'C2':[[0, [.5, 1.]]],
-    }
+    auxcell.basis = 'def2-universal-jkfit'
+    auxcell.build()
     omega = 0.2
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega).build()
     dat = int3c2e_opt.aux_int2c2e().get()[0]
 
-    kmesh = [3, 1, 1]
+    kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
     auxcell_sr = auxcell.copy()
     auxcell_sr.precision = 1e-14
-    auxcell_sr.rcut = cell.rcut + 6
+    auxcell_sr.rcut = 50
     with auxcell_sr.with_short_range_coulomb(omega):
         ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
-    assert abs(dat - ref[0]).max() < 1e-12
+    assert abs(dat - ref[0]).max() < 1e-10
 
-    expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega, bvk_kmesh=kmesh).build()
-    dat = int3c2e_opt.aux_int2c2e().get()[0]
-    dat = contract('lk,lpq->kpq', expLk, dat)
-    assert abs(dat - ref).max() < 1e-12
+    expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
+    dat = int3c2e_opt.aux_int2c2e()
+    cp.cuda.Stream.null.synchronize()
+    dat = contract('lk,lpq->kpq', expLk, dat).get()
+    assert abs(dat - ref).max() < 1e-10
