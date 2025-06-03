@@ -626,6 +626,7 @@ class RisBase(lib.StreamObject):
         self.theta = theta
         self.J_fit = J_fit
         self.K_fit = K_fit
+        self.xy = None
 
         self.Ktrunc = Ktrunc
         self.a_x = a_x
@@ -1661,6 +1662,7 @@ class TDDFT(RisBase):
             X, Y = math_helper.XmY_2_XY(Z=Z, AmB_sq=hdiag_sq, omega=energies)
 
         log.debug(f'check norm of X^TX - Y^YY - I = {cp.linalg.norm( (cp.dot(X, X.T) - cp.dot(Y, Y.T)) - cp.eye(self.nstates) ):.2e}')
+        self.xy = X, Y
 
         P = self.get_P()
         mdpol = self.get_mdpol()
