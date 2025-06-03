@@ -244,7 +244,7 @@ class PCM(lib.StreamObject):
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
-        'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen', 'frozen_right_dm0',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -270,6 +270,7 @@ class PCM(lib.StreamObject):
         self.state_id = 0
 
         self.frozen = False
+        self.frozen_right_dm0 = None
         self.equilibrium_solvation = False
 
         self.e = None
@@ -377,44 +378,33 @@ class PCM(lib.StreamObject):
         if not self._intermediates:
             self.build()
         assert dms is not None
-        nao = dms.shape[-1]
-        dms = dms.reshape(-1,nao,nao)
-        if dms.shape[0] == 2:
-            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
-        if not isinstance(dms, cupy.ndarray):
-            dms = cupy.asarray(dms)
-        v_grids_e = self._get_v(dms)
-        v_grids = self.v_grids_n - v_grids_e
+        v_left = self._get_vgrids(dms, with_nuc = True, ndim = 2)
+        v_right = v_left
 
-        b = self.left_multiply_R(v_grids.T)
+        if self.frozen_right_dm0 is not None:
+            v_right = self._get_vgrids(self.frozen_right_dm0, with_nuc = True, ndim = 2)
+
+        b = self.left_multiply_R(v_right.T)
         q = self.left_solve_K(b).T
 
-        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        vK_1 = self.left_solve_K(v_right.T, K_transpose = True)
         qt = self.left_multiply_R(vK_1, R_transpose = True).T
         q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
-        epcm = 0.5 * cupy.dot(v_grids[0], q_sym[0])
+        epcm = 0.5 * cupy.dot(v_left[0], q_sym[0])
+        if self.frozen_right_dm0 is not None:
+            epcm *= 2
 
         self._intermediates['q'] = q[0]
         self._intermediates['q_sym'] = q_sym[0]
-        self._intermediates['v_grids'] = v_grids[0]
+        self._intermediates['v_grids'] = v_right[0]
         return epcm, vmat[0]
 
     def _get_qsym(self, dms, with_nuc = False):
         if not self._intermediates:
             self.build()
-        nao = dms.shape[-1]
-        dms = dms.reshape(-1,nao,nao)
-        if dms.shape[0] == 2:
-            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
-        if not isinstance(dms, cupy.ndarray):
-            dms = cupy.asarray(dms)
-        v_grids_e = self._get_v(dms)
-        if with_nuc:
-            v_grids = self.v_grids_n - v_grids_e
-        else:
-            v_grids = -1.0 * v_grids_e
+        v_grids = self._get_vgrids(dms, with_nuc, ndim = 2)
 
         b = self.left_multiply_R(v_grids.T)
         q = self.left_solve_K(b).T
@@ -425,7 +415,7 @@ class PCM(lib.StreamObject):
 
         return q_sym[0], q[0]
 
-    def _get_vgrids(self, dms, with_nuc = False):
+    def _get_vgrids(self, dms, with_nuc = False, ndim = 1):
         if not self._intermediates:
             self.build()
         nao = dms.shape[-1]
@@ -440,7 +430,11 @@ class PCM(lib.StreamObject):
         else:
             v_grids = -1.0 * v_grids_e
 
-        return v_grids[0]
+        if ndim == 1:
+            return v_grids[0]
+        else:
+            assert ndim == 2
+            return v_grids
 
     def _get_v(self, dms):
         '''
@@ -484,11 +478,14 @@ class PCM(lib.StreamObject):
         self._intermediates = None
         self.surface = None
         self.intopt = None
+        self.frozen_right_dm0 = None
         return self
 
     def _B_dot_x(self, dms):
         if not self._intermediates:
             self.build()
+        if self.frozen_right_dm0 is not None:
+            dms = self.frozen_right_dm0
         out_shape = dms.shape
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)

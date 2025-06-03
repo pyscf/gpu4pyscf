@@ -216,6 +216,12 @@ def grad_nuc(pcmobj, dm, q_sym = None):
     grid_coords  = pcmobj.surface['grid_coords'].get()
     exponents    = pcmobj.surface['charge_exp'].get()
 
+    if pcmobj.frozen_right_dm0 is not None:
+        # Note: The q_sym computed above actually use frozen_right_dm0 as input, so it's actually q_sym_right
+        q_sym_left, _ = pcmobj._get_qsym(dm, with_nuc = True)
+        q_sym_left = q_sym_left.get()
+        q_sym += q_sym_left
+
     atom_coords = mol.atom_coords(unit='B')
     atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
@@ -266,6 +272,16 @@ def grad_qv(pcmobj, dm, q_sym = None):
                           direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
                           intopt=intopt)
 
+    if pcmobj.frozen_right_dm0 is not None:
+        # Note: The q_sym computed above actually use frozen_right_dm0 as input, so it's actually q_sym_right
+        q_sym_left, _ = pcmobj._get_qsym(dm, with_nuc = True)
+        dvj += int1e_grids_ip1(mol, grid_coords, dm = pcmobj.frozen_right_dm0, charges = q_sym_left,
+                              direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                              intopt=intopt)
+        dq  += int1e_grids_ip2(mol, grid_coords, dm = pcmobj.frozen_right_dm0, charges = q_sym_left,
+                              direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                              intopt=intopt)
+
     aoslice = mol.aoslice_by_atom()
     dvj = 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
@@ -301,6 +317,10 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         A = pcmobj._intermediates['A']
         D = pcmobj._intermediates['D']
         S = pcmobj._intermediates['S']
+
+    if pcmobj.frozen_right_dm0 is not None:
+        # Note: The v_grids computed above actually use frozen_right_dm0 as input, so it's actually v_grids_right
+        v_grids_l = pcmobj._get_vgrids(dm, with_nuc = True)
 
     vK_1 = pcmobj.left_solve_K(v_grids_l, K_transpose = True)
 
@@ -434,6 +454,10 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
 
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
+
+    if pcmobj.frozen_right_dm0 is not None:
+        de *= 2
+
     t1 = log.timer_debug1('grad solver', *t1)
     return de.get()
 

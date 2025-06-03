@@ -20,7 +20,7 @@ from gpu4pyscf.lib.cupy_helper import contract
 from pyscf.data import nist
 from gpu4pyscf.scf.hf import RHF
 
-def polarizability_derivative_numerical_dx(mf):
+def polarizability_derivative_numerical_dx(mf, dx = 1e-3):
     # Return in (   natm, 3,           3, 3      )
     #            < derivative > < polarizability >
     #
@@ -28,7 +28,6 @@ def polarizability_derivative_numerical_dx(mf):
     mol = mf.mol
 
     dpdx = np.empty([mol.natm, 3, 3, 3])
-    dx = 1e-3
     mol_copy = mol.copy()
     mol_copy.verbose = 0
     for i_atom in range(mol.natm):
@@ -55,7 +54,7 @@ def polarizability_derivative_numerical_dx(mf):
 
     return dpdx
 
-def polarizability_derivative_numerical_dEdE(mf):
+def polarizability_derivative_numerical_dEdE(mf, dE = 2.5e-3):
     # Return in (   natm, 3,           3, 3      )
     #            < derivative > < polarizability >
     #
@@ -70,8 +69,31 @@ def polarizability_derivative_numerical_dEdE(mf):
     Hcore = mf.get_hcore()
     Hcore = cp.asarray(Hcore)
 
+    if hasattr(mf, "with_solvent"):
+        if not mf.with_solvent.equilibrium_solvation:
+            dm0 = mf.make_rdm1()
+
+            mf.with_solvent.equilibrium_solvation = True
+            hess_obj = mf.Hessian()
+            mo_coeff = mf.mo_coeff
+            mo_occ = mf.mo_occ
+            mo_energy = mf.mo_energy
+            mocc = mo_coeff[:,mo_occ>0]
+            atmlst = range(mol.natm)
+            h1ao = hess_obj.make_h1(mo_coeff, mo_occ, None, atmlst)
+            fx = hess_obj.gen_vind(mo_coeff, mo_occ)
+            mo1, _ = hess_obj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1ao, fx, atmlst)
+            mo1 = cp.asarray(mo1)
+            # dm1 = 2 * contract('pu,Aduq->Adpq', mo_coeff, mo1 @ mocc.T)
+            # dm1 += dm1.transpose(0,1,3,2)
+            mf.with_solvent.equilibrium_solvation = False
+
     def get_gradient_at_E(mf, E):
         mf.get_hcore = lambda *args: Hcore + cp.einsum('d,dij->ij', E, dipole_integral)
+        if hasattr(mf, "with_solvent"):
+            if not mf.with_solvent.equilibrium_solvation:
+                mf.with_solvent.frozen_right_dm0 = dm0
+
         mf.kernel()
         dm = mf.make_rdm1()
         gradient = mf.nuc_grad_method().kernel()
@@ -89,10 +111,21 @@ def polarizability_derivative_numerical_dEdE(mf):
 
             gradient[i_atom, :] += contract('dEij,ij->dE', d_dipoleintegral_dA, dm) @ E
 
+        if hasattr(mf, "with_solvent"):
+            if not mf.with_solvent.equilibrium_solvation:
+                v_grids = mf.with_solvent._get_vgrids(dm, with_nuc = True)
+                for i_atom in range(mol.natm):
+                    for i_xyz in range(3):
+                        dm1_A = 2 * contract('pu,uq->pq', mo_coeff, mo1[i_atom, i_xyz, :, :] @ mocc.T)
+                        dm1_A += dm1_A.T
+                        dq_sym_dA, _ = mf.with_solvent._get_qsym(dm1_A, with_nuc = False)
+                        gradient[i_atom, i_xyz] += v_grids @ dq_sym_dA
+
+                mf.with_solvent.frozen_right_dm0 = None
+
         return gradient
 
     dpdx = cp.empty([mol.natm, 3, 3, 3])
-    dE = 2.5e-3
 
     E_0 = cp.zeros(3)
     gradient_0 = get_gradient_at_E(mf, E_0)
@@ -173,6 +206,13 @@ def eval_raman_intensity(mf, hessian = None):
     '''
     assert isinstance(mf, RHF)
     mol = mf.mol
+
+    if hasattr(mf, "with_solvent"):
+        if not mf.with_solvent.equilibrium_solvation:
+            print("Warning: The PCM response for polarizability is turned off, "
+                  "because we believe the solvent doesn't response instantaneously under an electric field perturbation. "
+                  "This might not be consistent with other program, for example the Q-Chem default implementation includes PCM response. "
+                  "If you want to reproduce that behavior, set \"mf.with_solvent.equilibrium_solvation = True\"")
 
     if hessian is None:
         hess_obj = mf.Hessian()
