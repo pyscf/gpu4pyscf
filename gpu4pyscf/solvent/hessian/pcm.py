@@ -1019,8 +1019,8 @@ class WithSolventHess:
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         is_equilibrium = self.base.with_solvent.equilibrium_solvation
-        if self.base.with_solvent.frozen_right_dm0 is not None:
-            raise NotImplementedError("frozen_right_dm0 not implemented for PCM Hessian")
+        if self.base.with_solvent.frozen_dm0_for_finite_difference_without_response is not None:
+            raise NotImplementedError("frozen_dm0_for_finite_difference_without_response not implemented for PCM Hessian")
 
         self.base.with_solvent.equilibrium_solvation = True
         self.de_solvent  =    analytical_hess_nuc(self.base.with_solvent, dm, verbose=self.verbose)

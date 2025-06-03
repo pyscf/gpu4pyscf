@@ -92,7 +92,7 @@ def polarizability_derivative_numerical_dEdE(mf, dE = 2.5e-3):
         mf.get_hcore = lambda *args: Hcore + cp.einsum('d,dij->ij', E, dipole_integral)
         if hasattr(mf, "with_solvent"):
             if not mf.with_solvent.equilibrium_solvation:
-                mf.with_solvent.frozen_right_dm0 = dm0
+                mf.with_solvent.frozen_dm0_for_finite_difference_without_response = dm0
 
         mf.kernel()
         dm = mf.make_rdm1()
@@ -121,7 +121,7 @@ def polarizability_derivative_numerical_dEdE(mf, dE = 2.5e-3):
                         dq_sym_dA, _ = mf.with_solvent._get_qsym(dm1_A, with_nuc = False)
                         gradient[i_atom, i_xyz] += v_grids @ dq_sym_dA
 
-                mf.with_solvent.frozen_right_dm0 = None
+                mf.with_solvent.frozen_dm0_for_finite_difference_without_response = None
 
         return gradient
 
