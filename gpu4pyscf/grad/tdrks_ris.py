@@ -27,12 +27,13 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf import tdscf
+from gpu4pyscf.tdscf.ris import get_auxmol
 
 
 #
 # Given Y = 0, TDDFT gradients (XAX+XBY+YBX+YAY)^1 turn to TDA gradients (XAX)^1
 #
-def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verbose=logger.INFO):
     """
     Electronic part of TDA, TDDFT nuclear gradients
 
@@ -74,6 +75,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+    if K_fit == J_fit and (omega == 0 or omega is None):
+        log.info('K uese exactly same basis as J, and they share same set of Tensors')
+        auxmol_K = auxmol_J
+    else:
+        log.info('K uese different basis as J')
+        auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+    
     f1vo, f1oo, vxc1, k1ao = _contract_xc_kernel(td_grad, mf.xc, dmxpy, dmzoo, True, True, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if with_k:
