@@ -20,6 +20,7 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
+#include "int3c2e.cuh"
 #include "ft_ao.cuh"
 
 #define GOUT_WIDTH      19
@@ -64,9 +65,9 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
     int stride_j = bounds.stride_j;
     int g_size = bounds.g_size;
     int gx_len = g_size * nGv_per_block * nsp_per_block;
-    int *idx_ij = c_g_pair_idx + c_g_pair_offsets[li*LMAX1+lj];
-    int *idy_ij = idx_ij + nfij;
-    int *idz_ij = idy_ij + nfij;
+    int16_t *idx_ij = c_pair_idx + c_pair_offsets[li*L_AUX1+lj];
+    int16_t *idy_ij = idx_ij + nfij;
+    int16_t *idz_ij = idy_ij + nfij;
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;

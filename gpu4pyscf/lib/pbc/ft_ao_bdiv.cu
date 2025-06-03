@@ -30,37 +30,6 @@
 #define AUXL            6
 #define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
-__constant__ int c_cart_idx[(AUXL+1)*(AUXL+2)*(AUXL+3)/2] = {
-// l = 0
-0,
-0,
-0,
-// l = 1
-1, 0, 0,
-0, 1, 0,
-0, 0, 1,
-// l = 2
-2, 1, 1, 0, 0, 0,
-0, 1, 0, 2, 1, 0,
-0, 0, 1, 0, 1, 2,
-// l = 3
-3, 2, 2, 1, 1, 1, 0, 0, 0, 0,
-0, 1, 0, 2, 1, 0, 3, 2, 1, 0,
-0, 0, 1, 0, 1, 2, 0, 1, 2, 3,
-// l = 4
-4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0,
-0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0,
-0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4,
-// l = 5
-5, 4, 4, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 1, 0,
-0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5,
-// l = 6
-6, 5, 5, 4, 4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 1, 0, 6, 5, 4, 3, 2, 1, 0,
-0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6,
-};
-
 __global__
 void ft_ao_bdiv_kernel(double *out, AFTIntEnvVars envs, int nGv, double *grids)
 {
@@ -79,9 +48,9 @@ void ft_ao_bdiv_kernel(double *out, AFTIntEnvVars envs, int nGv, double *grids)
     double *env = envs.env;
     int li = bas[sh_id*BAS_SLOTS+ANG_OF];
     int nfi = (li + 1) * (li + 2) / 2;
-    int *idx = c_cart_idx + nfi * li;
-    int *idy = idx + nfi;
-    int *idz = idy + nfi;
+    int16_t *idx = c_pair_idx + nfi * li;
+    int16_t *idy = idx + nfi;
+    int16_t *idz = idy + nfi;
     int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     double *Gv = grids + Gv_id;

@@ -34,7 +34,7 @@ from gpu4pyscf.lib.cupy_helper import (
     load_library, contract, get_avail_mem, dist_matrix, asarray)
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
-    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
+    _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -418,10 +418,7 @@ class AFTIntEnvVars(ctypes.Structure):
     ]
 
 def init_constant(cell):
-    g_idx, offsets = g_pair_idx()
-    err = libpbc.init_constant(
-        g_idx.ctypes, offsets.ctypes, cell._env.ctypes, ctypes.c_int(cell._env.size),
-        ctypes.c_int(SHM_SIZE))
+    err = libpbc.init_constant(ctypes.c_int(SHM_SIZE))
     if err != 0:
         raise RuntimeError('CUDA kernel initialization')
 

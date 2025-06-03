@@ -30,7 +30,7 @@ from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray
+from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot, hermi_triu
 from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
                                 extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
@@ -96,6 +96,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
+    aux_coeff = asarray(int3c2e_opt.aux_coeff)
     for li, lj, c_pair_idx, compressed_eri3c in int3c2e_opt.int3c2e_generator():
         i0, i1 = c_l_offsets[li:li+2]
         j0, j1 = c_l_offsets[lj:lj+2]
@@ -106,7 +107,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         nfij = nfi * nfj
         n_pairs = len(c_pair_idx)
         compressed_eri3c = compressed_eri3c.reshape(-1,nfij*n_pairs)
-        compressed_eri3c = compressed_eri3c.T.dot(cp.asarray(int3c2e_opt.aux_coeff))
+        compressed_eri3c = compressed_eri3c.T.dot(aux_coeff)
         if not cell.cart:
             compressed_eri3c = compressed_eri3c.reshape(nfj,nfi,n_pairs,naux)
             compressed_eri3c = contract('qj,qpmk->jpmk', c2s[lj], compressed_eri3c)
@@ -314,7 +315,7 @@ class SRInt3c2eOpt:
         self.sorted_auxcell = auxcell
         self.uniq_l_ctr_aux = uniq_l_ctr
         self.l_ctr_aux_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        self.aux_coeff = asarray(coeff)
+        self.aux_coeff = coeff
         self.sorted_auxcell.omega = omega
 
         if bvk_kmesh is None:
@@ -696,6 +697,117 @@ class SRInt3c2eOpt:
         raise NotImplementedError(
             'The entire int3c2e tensor evaluated in one kernel is not supported')
 
+    def aux_int2c2e(self):
+        '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+        cell = self.cell
+        auxcell = self.sorted_auxcell
+        l_ctr_offsets = self.l_ctr_aux_offsets
+        uniq_l_ctr = self.uniq_l_ctr_aux
+        uniq_l = uniq_l_ctr[:,0]
+        lmax = uniq_l.max()
+
+        precision = cell.precision * 1e-3
+        ak, ck, lk = most_diffused_pgto(auxcell)
+        theta = 1./(self.omega**-2 + 2./ak)
+        norm_ang = (2*lk+1)/(4*np.pi)
+        c1 = ck**2 * norm_ang
+        fl = 2
+        fac = np.pi**2.5*c1 * theta**(lk*2-.5)
+        vol = cell.vol
+        rad = vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = 2*np.pi*cell.rcut/(vol*theta) + surface
+        fac *= lattice_sum_factor / ak**(lk*2+3) * fl / precision
+        rcut = cell.rcut
+        rcut = (np.log(fac * rcut**(lk*2-1) + 1.) / theta)**.5
+
+        Ls = asarray(self.bvkcell.get_lattice_Ls(rcut=rcut))
+        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+        nimgs = len(Ls)
+
+        _atm = cp.array(auxcell._atm, dtype=np.int32)
+        _bas = cp.array(auxcell._bas, dtype=np.int32)
+        _env = cp.array(auxcell._env, dtype=np.float64)
+        ao_loc = auxcell.ao_loc_nr(cart=True)
+        ao_loc_gpu = cp.asarray(ao_loc, dtype=np.int32)
+        bvk_ncells = np.prod(self.bvk_kmesh)
+        int3c2e_envs = Int3c2eEnvVars(
+            auxcell.natm, auxcell.nbas, bvk_ncells, nimgs,
+            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
+            ao_loc_gpu.data.ptr, Ls.data.ptr,
+        )
+
+        bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
+        shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
+        sp0 = sp1 = 0
+        nbas = auxcell.nbas
+        ij_tasks = [(i, j) for i in range(len(uniq_l)) for j in range(i+1)]
+        for i, j in ij_tasks:
+            li = uniq_l[i]
+            lj = uniq_l[j]
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            ish = cp.arange(ish0, ish1, dtype=np.int32)
+            jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
+            img = cp.arange(bvk_ncells, dtype=np.int32)
+            ijsh = ish[:,None] * (nbas*bvk_ncells) + jsh
+            if i == j:
+                ijsh = cp.tril(ijsh)
+            idx = (ijsh[:,None] + img[:,None] * nbas).ravel()
+            nshl_pair = len(idx)
+            bas_ij_idx.append(idx)
+            sp0, sp1 = sp1, sp1 + nshl_pair
+            nsp_per_block = _estimate_shl_pairs_per_block(li, lj, nshl_pair)
+            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
+        shl_pair_offsets.append(np.array([sp1], dtype=np.int32))
+        shl_pair_offsets = cp.asarray(np.hstack(shl_pair_offsets), dtype=np.int32)
+        bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.int32)
+
+        def _create_gout_stride_lookup_table(lmax):
+            # based on the shm_size, find optimal gout_stride for each (li,lj)
+            # pattern, store them in the gout_stride_lookup
+            gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
+            gout_width = 45
+            shm_size = SHM_SIZE
+            ls = np.arange(lmax+1)
+            nf = (ls+1) * (ls+2) // 2
+            max_shm_size = 0
+            for li in range(lmax+1):
+                for lj in range(lmax+1):
+                    nroots = ((li + lj) // 2 + 1) * 2
+                    g_size = (li+1)*(lj+1)
+                    unit = g_size*3 + nroots*2 + 4
+                    nsp_max = _nearest_power2(shm_size // (unit*8))
+
+                    gout_size = nf[li] * nf[lj]
+                    gout_stride = (gout_size+gout_width-1) / gout_width
+                    # Round up to the next 2^n
+                    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+
+                    nsp_per_block = min(nsp_max, THREADS // gout_stride)
+                    gout_stride_lookup[li, lj] = THREADS // nsp_per_block
+                    max_shm_size = max(max_shm_size, nsp_per_block*unit*8)
+            return cp.asarray(gout_stride_lookup, dtype=np.int32), max_shm_size
+
+        gout_stride_lookup, shm_size = _create_gout_stride_lookup_table(lmax)
+
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        nao_cart, nao = self.aux_coeff.shape
+        out = cp.empty((bvk_ncells, nao_cart, nao_cart))
+        libpbc.fill_int2c2e(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
+            ctypes.c_int(nbatches_shl_pair),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
+            auxcell._atm.ctypes, ctypes.c_int(auxcell.natm),
+            auxcell._bas.ctypes, ctypes.c_int(auxcell.nbas),
+            auxcell._env.ctypes)
+
+        out = hermi_triu(out, inplace=True)
+        return sandwich_dot(out, asarray(self.aux_coeff))
+
 class Int3c2eEnvVars(ctypes.Structure):
     _fields_ = [
         ('cell0_natm', ctypes.c_uint16),
@@ -790,3 +902,6 @@ def estimate_rcut(cell, auxcell, omega):
     r0 = (np.log(fac * (sfac*r0+1e-200)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
+
+def _estimate_shl_pairs_per_block(li, lj, nshl_pair):
+    return _nearest_power2(THREADS*25 // ((li+2)*(lj+2)), return_leq=False)

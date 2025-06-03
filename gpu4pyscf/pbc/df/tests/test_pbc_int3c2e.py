@@ -17,7 +17,8 @@ import numpy as np
 import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2
+from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, SRInt3c2eOpt
+from gpu4pyscf.lib.cupy_helper import contract
 
 
 def test_int3c2e_gamma_point():
@@ -151,3 +152,48 @@ C S
     int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
     ref = int3c().reshape(dat.shape)
     assert abs(dat - ref).max() < 1e-6
+
+def test_sr_int2c2e():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    P
+    102.9917624900           1.0000000000
+C    P
+     28.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    omega = 0.2
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega).build()
+    dat = int3c2e_opt.aux_int2c2e().get()[0]
+
+    kmesh = [3, 1, 1]
+    kpts = cell.make_kpts(kmesh)
+    auxcell_sr = auxcell.copy()
+    auxcell_sr.precision = 1e-14
+    auxcell_sr.rcut = cell.rcut + 6
+    with auxcell_sr.with_short_range_coulomb(omega):
+        ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
+    assert abs(dat - ref[0]).max() < 1e-12
+
+    expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega, bvk_kmesh=kmesh).build()
+    dat = int3c2e_opt.aux_int2c2e().get()[0]
+    dat = contract('lk,lpq->kpq', expLk, dat)
+    assert abs(dat - ref).max() < 1e-12

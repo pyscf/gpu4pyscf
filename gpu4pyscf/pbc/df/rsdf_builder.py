@@ -743,8 +743,18 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         ao_loc = cp.asarray(int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]])
         nao = cell.nao
 
-    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
+    aux_coeff = asarray(int3c2e_opt.aux_coeff)
     log.debug('Avail GPU mem = %s B', get_avail_mem())
+
+    log.debug('Generate auxcell 2c2e integrals')
+    j2c = _get_2c2e(auxcell, None, omega, with_long_range) # on CPU
+    j2c = j2c[0].real
+    t1 = log.timer('int2c2e', *t1)
+    prefer_ed = PREFER_ED
+    if cell.dimension == 2:
+        prefer_ed = True
+    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+        j2c, prefer_ed, linear_dep_threshold)
 
     evaluate = int3c2e_opt.int3c2e_evaluator(verbose=log)
     t1 = log.timer_debug1('initialize int3c2e_kernel', *t1)
@@ -820,17 +830,6 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         diag_addresses = cp.hstack(diag_addresses)
         cderi_idx = (rows.get(), cols.get(), diag_addresses.get())
     t1 = log.timer_debug1('SR int3c2e', *t1)
-
-    log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, None, omega, with_long_range) # on CPU
-    j2c = j2c[0].real
-    t1 = log.timer('int2c2e', *t1)
-
-    prefer_ed = PREFER_ED
-    if cell.dimension == 2:
-        prefer_ed = True
-    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
-        j2c, prefer_ed, linear_dep_threshold)
 
     if j2ctag == 'ED':
         cderi = contract('Lr,pr->Lp', cd_j2c, j3c)
