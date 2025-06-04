@@ -19,7 +19,7 @@ import cupy as cp
 import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, SRInt3c2eOpt
+from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, sr_int2c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.df.ft_ao import libpbc
@@ -183,8 +183,7 @@ def test_sr_int2c2e():
     auxcell.basis = 'def2-universal-jkfit'
     auxcell.build()
     omega = 0.2
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega).build()
-    dat = int3c2e_opt.aux_int2c2e().get()[0]
+    dat = sr_int2c2e(auxcell, -omega).get()[0]
 
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
@@ -195,9 +194,5 @@ def test_sr_int2c2e():
         ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
     assert abs(dat - ref[0]).max() < 1e-10
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, -omega, bvk_kmesh=kmesh).build()
-    expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
-    dat = int3c2e_opt.aux_int2c2e()
-    cp.cuda.Stream.null.synchronize()
-    dat = contract('lk,lpq->kpq', expLk, dat).get()
+    dat = sr_int2c2e(auxcell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10

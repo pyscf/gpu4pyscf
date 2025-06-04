@@ -30,25 +30,26 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import (
     RCUT_THRESHOLD, estimate_ke_cutoff_for_omega)
 from pyscf.pbc.df import aft as aft_cpu
+from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params
+from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params, group_basis
 from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
-from gpu4pyscf.pbc.df.int3c2e import (sr_aux_e2, estimate_rcut, libpbc,
-                                      SRInt3c2eOpt, Int3c2eEnvVars)
+from gpu4pyscf.pbc.df.int3c2e import (
+    libpbc, sr_aux_e2, sr_int2c2e, estimate_rcut, SRInt3c2eOpt, Int3c2eEnvVars)
 
 OMEGA_MIN = 0.3
 
 # In the ED of the j2c2e metric, the default LINEAR_DEP_THR setting in pyscf-2.8
 # is too loose. The linear dependency truncation often leads to serious errors.
 # PBC GDF very differs to the molecular GDF approximation where diffused
-# functions typically have insignificant contributions. The diffused auxliary
-# crystial orbitals have large impacts on the accuracy of Coulomb integrals. A
+# functions typically have insignificant contributions. The diffused auxiliary
+# crystal orbitals have large impacts on the accuracy of Coulomb integrals. A
 # tight linear dependency threshold have to be applied to control the error,
-# even this may cause more numericial stability issues.
+# even this may cause more numerical stability issues.
 LINEAR_DEP_THR = 1e-11
 # Use eigenvalue decomposition in decompose_j2c
 PREFER_ED = False
@@ -107,7 +108,7 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
     kpt_iters = list(kk_adapted_iter(kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, uniq_kpts, omega, with_long_range) # on CPU
+    j2c = _get_2c2e(auxcell, uniq_kpts, omega, with_long_range)
     t1 = log.timer('int2c2e', *t1)
 
     if with_long_range:
@@ -160,7 +161,7 @@ def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True
     t1 = log.timer('pass1: int3c2e', *t0)
 
     log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range) # on CPU
+    j2c = _get_2c2e(auxcell, kpts, omega, with_long_range)
     j2c = j2c[0].real
     t1 = log.timer('int2c2e', *t1)
 
@@ -204,7 +205,7 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
     t1 = log.timer('pass1: int3c2e', *t0)
 
     log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, None, omega, with_long_range) # on CPU
+    j2c = _get_2c2e(auxcell, None, omega, with_long_range)
     j2c = j2c[0].real
     t1 = log.timer('int2c2e', *t1)
 
@@ -259,17 +260,37 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
         bvk_ncells = 1
     else:
         bvk_ncells = np.prod(bvk_kmesh)
-    avail_mem = get_avail_mem() * .8
-    Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
-    Gblksize = min(Gblksize, ngrids, 16384)
-    #logger.debug1(cell, 'Gblksize = %d', Gblksize)
+
+    sorted_auxcell, aux_coeff = group_basis(auxcell, tile=1)[:2]
+    naux = aux_coeff.shape[1]
+
     def ft_ao_iter(kpt=np.zeros(3), kpts=None):
-        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
+        coulG = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws, kpt))
+        auxG_conj = None
+        coeff = asarray(aux_coeff)
+        avail_mem = get_avail_mem() * .8
+        if ngrids * naux * 16 < avail_mem * .4:
+            logger.debug2(cell, 'cache auxG')
+            auxG_conj = ft_ao.ft_ao(sorted_auxcell, Gv+kpt, sort_cell=False).conj()
+            auxG_conj = auxG_conj.dot(coeff)
+            auxG_conj *= coulG[:,None]
+            avail_mem = get_avail_mem() * .8
+            coulG = coeff = None
+        Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
+        Gblksize = min(Gblksize, ngrids, 16384)
+        logger.debug2(cell, 'ft_ao_iter Gblksize = %d', Gblksize)
+
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            auxG_conj = asarray(ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt).conj(), order='C')
-            auxG_conj *= asarray(coulG[p0:p1,None])
+            if auxG_conj is None:
+                auxG_c = ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt,
+                                     sort_cell=False).conj()
+                auxG_c = auxG_c.dot(coeff)
+                auxG_c *= coulG[p0:p1,None]
+            else:
+                auxG_c = auxG_conj[p0:p1]
             pqG = ft_kern(Gv[p0:p1], kpt, kpts).transpose(0,2,3,1)
             yield pqG, auxG_conj
+            pqG = auxG_c = None
     return ft_ao_iter
 
 def decompose_j2c(j2c, prefer_ed=PREFER_ED, linear_dep_threshold=LINEAR_DEP_THR):
@@ -304,62 +325,57 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     j2ctag = 'ED'
     return j2c, j2c_negative, j2ctag
 
-# Create 2c2e, store on CPU
 def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
-    # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
-    precision = auxcell.precision ** 1.5
-    aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
-    aux_exp = aux_exps.min()
-    theta = 1./(2./aux_exp + omega**-2)
-    rad = auxcell.vol**(-1./3) * auxcell.rcut + 1
-    surface = 4*np.pi * rad**2
-    lattice_sum_factor = 2*np.pi*auxcell.rcut/(auxcell.vol*theta) + surface
-    rcut_sr = (np.log(lattice_sum_factor / precision + 1.) / theta)**.5
-    logger.debug1(auxcell, 'auxcell  rcut_sr = %g', rcut_sr)
-    auxcell_sr = auxcell.copy()
-    auxcell_sr.rcut = rcut_sr
-    with auxcell_sr.with_short_range_coulomb(omega):
-        j2c = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=uniq_kpts)
-
+    # Compute SR Coulomb 2c2e
+    j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts)
+    if uniq_kpts is not None:
+        uniq_kpts = uniq_kpts.reshape(-1, 3)
+        bvk_kmesh = kpts_to_kmesh(auxcell, uniq_kpts)
+        bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(auxcell, bvk_kmesh, True)
+        expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(uniq_kpts.T)))
+        j2c = contract('lk,lpq->kpq', expLk, j2c)
     if not with_long_range:
         return j2c
 
+    j2c = cp.asarray(j2c)
+
+    # Compute LR Coulomb 2c2e
+    precision = auxcell.precision * 1e-3
     ke = estimate_ke_cutoff_for_omega(auxcell, omega, precision)
     mesh = auxcell.cutoff_to_mesh(ke)
     mesh = auxcell.symmetrize_mesh(mesh)
     logger.debug(auxcell, 'Set 2c2e integrals precision %g, mesh %s', precision, mesh)
 
     Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
-    b = auxcell.reciprocal_vectors()
-    gxyz = lib.cartesian_prod([np.arange(len(x)) for x in Gvbase])
     ngrids = Gv.shape[0]
     naux = auxcell.nao
-    max_memory = max(1000, auxcell.max_memory - lib.current_memory()[0])
-    blksize = min(ngrids, int(max_memory*.4e6/16/naux), 200000)
-    logger.debug2(auxcell, 'max_memory %s (MB)  blocksize %s', max_memory, blksize)
+    avail_mem = get_avail_mem()
+    mem = avail_mem - naux**2 * 16
+    mem *= .5 # the temporary .conj() consumes another half mem
+    blksize = int(mem/16/naux/2)
+    logger.debug2(auxcell, 'max_memory %s (MB)  blocksize %s', avail_mem, blksize)
 
     if uniq_kpts is None:
-        j2c = cp.asarray(j2c)
-        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        coulG_LR = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws))
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], None, b, gxyz[p0:p1], Gvbase).T
-            j2c += (auxG.conj() * coulG_LR[p0:p1]).dot(auxG.T).real
-            auxG = None
-        j2c = [j2c.real.get()]
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1])
+            auxG_conj = auxG.conj()
+            auxG_conj *= coulG_LR[p0:p1,None]
+            j2c[0] += auxG_conj.T.dot(auxG).real
+            auxG = auxG_conj = None
     else:
         for k, kpt in enumerate(uniq_kpts):
-            j2c_k = cp.asarray(j2c[k])
-            coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
-            gamma_point = is_zero(kpt)
-
+            coulG_LR = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws, kpt))
+            is_gamma_point = is_zero(kpt)
             for p0, p1 in lib.prange(0, ngrids, blksize):
-                auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], None, b, gxyz[p0:p1], Gvbase, kpt).T
-                if gamma_point:
-                    j2c_k += (auxG.conj() * coulG_LR[p0:p1]).dot(auxG.T).real
-                else:
-                    j2c_k += (auxG.conj() * coulG_LR[p0:p1]).dot(auxG.T)
-                auxG = None
-            j2c[k] = j2c_k.get()
+                auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1])
+                auxG_conj = auxG.conj()
+                auxG_conj *= coulG_LR[p0:p1,None]
+                v = auxG_conj.T.dot(auxG)
+                if is_gamma_point:
+                    v = v.real
+                j2c[k] += v
+                auxG = auxG_conj = v = None
     return j2c
 
 def _solve_cderi(cd_j2c, j3c, j2ctag):
@@ -554,7 +570,6 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
     nao = cell.nao
-    naux = auxcell.nao
 
     # The cutoff from the int3c2e is utilized. This is generally smaller than
     # that created by the ft_aopair module. This is to ensure ft_aopair
@@ -612,7 +627,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         p0, p1 = p1, p1 + nfij * n_pairs
         ish, jsh = divmod(bas_ij, nbas)
         aopair_offsets_lookup[jsh,ish] = \
-                aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij)
+                aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
         iaddr = ao_loc[ish,None] + np.arange(nf[i])
         jaddr = ao_loc[jsh,None] + np.arange(nf[j])
         # Note: in each <i|j> block, i is accessed in the inner loop
@@ -632,15 +647,32 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     ft_ao.init_constant(sorted_cell)
     kern = libpbc.build_ft_aopair
 
-    avail_mem = get_avail_mem() * .8
-    Gblksize = max(16, int(avail_mem/(2*16*nao**2))//8*8)
-    Gblksize = min(Gblksize, ngrids, 16384)
-    logger.debug1(cell, 'Gblksize = %d', Gblksize)
-
+    auxG_conj = None
+    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
     coulG = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws))
-    auxG_conj = ft_ao.ft_ao(auxcell, Gv).conj()
-    auxG_conj *= coulG[:,None]
-    j3c_compressed = np.empty((non0_size,naux), dtype=np.float64)
+    sorted_auxcell = int3c2e_opt.sorted_auxcell
+    avail_mem = get_avail_mem() * .8
+    naux = aux_coeff.shape[1]
+    if ngrids * naux * 16 < avail_mem * .4:
+        log.debug1('cache auxG')
+        auxG_conj = ft_ao.ft_ao(sorted_auxcell, Gv, sort_cell=False).conj()
+        auxG_conj = auxG_conj.dot(aux_coeff)
+        auxG_conj *= coulG[:,None]
+        avail_mem = get_avail_mem() * .8
+        aux_coeff = None
+
+    avail_mem = get_avail_mem() * .8
+    Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux)))//8*8)
+    Gblksize = min(Gblksize, ngrids, 16384)
+    log.debug1('Gblksize = %d', Gblksize)
+
+    buflen = 0
+    for (i, j), bas_ij in bas_ij_cache.items():
+        npairs = nf_cart[i] * nf_cart[j] * len(bas_ij[0])
+        buflen = max(buflen, npairs)
+    buf = np.empty(naux*buflen)
+
+    j3c_compressed = np.empty((naux,non0_size), dtype=np.float64)
     pair0 = pair1 = 0
     for i, j in bas_ij_cache:
         li = uniq_l[i]
@@ -653,10 +685,15 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         nfij = nfi * nfj
         bas_ij, img_offsets, img_idx = bas_ij_cache[i, j]
         n_pairs = len(bas_ij)
-        j3c_tmp = cp.zeros((nfij*n_pairs,naux), dtype=np.complex128)
+        j3c_tmp = cp.zeros((naux,nfij*n_pairs), dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
-            auxG = asarray(auxG_conj[p0:p1])
+            if auxG_conj is None:
+                auxG_c = ft_ao.ft_ao(sorted_auxcell, Gv[p0:p1], sort_cell=False).conj()
+                auxG_c = auxG_c.dot(aux_coeff)
+                auxG_c *= coulG[p0:p1,None]
+            else:
+                auxG_c = asarray(auxG_conj[p0:p1])
             GvT = cp.array(Gv[p0:p1].T, order='C', copy=True)
             # Padding zeros, allowing idle threads to access Gv over the bounds.
             GvT = cp.append(GvT, cp.zeros(THREADS))
@@ -682,19 +719,19 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
             # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
             # functions |P> are assumed to be real
-            contract('pG,Gr->pr', pqG, auxG, beta=1., out=j3c_tmp)
+            contract('Gr,pG->rp', auxG_c, pqG, beta=1., out=j3c_tmp)
         t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
 
         j3c_tmp = j3c_tmp.real
         if not cell.cart:
-            j3c_tmp = j3c_tmp.reshape(nfj,nfi,n_pairs,naux)
-            j3c_tmp = contract('qj,qpmk->jpmk', c2s[lj], j3c_tmp)
-            j3c_tmp = contract('pi,jpmk->mjik', c2s[li], j3c_tmp)
-            j3c_tmp = j3c_tmp.reshape(-1,naux)
+            j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+            j3c_tmp = contract('qj,kqpm->kjpm', c2s[lj], j3c_tmp)
+            j3c_tmp = contract('pi,kjpm->kmji', c2s[li], j3c_tmp)
+            j3c_tmp = j3c_tmp.reshape(naux,-1)
 
         pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
-        #:j3c_compressed[pair0:pair1] = j3c_tmp
-        j3c_tmp.get(out=j3c_compressed[pair0:pair1])
+        _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
+        j3c_compressed[:,pair0:pair1] = j3c_tmp.get(out=_buf)
         j3c_tmp = None
     return j3c_compressed, aopair_offsets_lookup, rev_mapping, cderi_idx
 
@@ -703,7 +740,38 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     log = logger.new_logger(cell)
     t1 = log.init_timer()
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-abs(omega)).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega).build()
+    log.debug('Generate auxcell 2c2e integrals')
+    j2c = _get_2c2e(auxcell, None, omega, with_long_range)
+    j2c = j2c[0].real
+    t1 = log.timer('int2c2e', *t1)
+    prefer_ed = PREFER_ED
+    if cell.dimension == 2:
+        prefer_ed = True
+    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+        j2c, prefer_ed, linear_dep_threshold)
+
+    nauxp = None
+    if cd_j2c_negative is not None:
+        # concatenate the ED eigenvectors so that the transformation for the two
+        # vectors can be processed together
+        assert cell.dimension == 2
+        cd_j2c = cp.hstack(cd_j2c, cd_j2c_negative)
+        nauxp = cd_j2c_negative.shape[1]
+    naux = cd_j2c.shape[1]
+
+    aux_coeff = asarray(int3c2e_opt.aux_coeff)
+    if j2ctag == 'ED':
+        aux_coeff = aux_coeff.dot(cd_j2c)
+    else:
+        aux_coeff = solve_triangular(cd_j2c, aux_coeff.T, lower=True).T
+    # overwrite the int3c2e_opt.aux_coeff.  int3c2e_opt.int3c2e_evaluator and
+    # _lr_int3c2e_gamma_point will use this updated aux_coeff to transform the
+    # auxiliary dimension. By doing this, the output integral tensor of these
+    # functions are automatically transformed into the Cholesky decomposed tensor
+    int3c2e_opt.aux_coeff = aux_coeff
+    cd_j2c = cd_j2c_negative = None
+
     c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
     lmax = cell._bas[:,ANG_OF].max()
     uniq_l = np.arange(lmax+1)
@@ -715,7 +783,14 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
-    naux = int3c2e_opt.aux_coeff.shape[1]
+    img_idx_cache = int3c2e_opt.make_img_idx_cache()
+    buflen = 0
+    nao_pairs = 0
+    for (li, lj), img_idx in img_idx_cache.items():
+        npairs = nf[li] * nf[lj] * len(img_idx[4])
+        nao_pairs += npairs
+        buflen = max(buflen, npairs)
+
     if with_long_range:
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
         # To add sr_int3c2e integrals to the corresponding elements in LR
@@ -723,16 +798,11 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         # bas_mapping[n] translates the shell n in sr_int3c2e.sorted_cell to
         # that in ft_aopair.sorted_cell. aopair_offsets_lookup convertes the
         # address in a dense tensor to compressed storage.
-        j3c, aopair_offsets_lookup, bas_mapping, cderi_idx = \
+        cderi, aopair_offsets_lookup, bas_mapping, cderi_idx = \
                 _lr_int3c2e_gamma_point(int3c2e_opt)
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
         t1 = log.init_timer()
-        img_idx_cache = int3c2e_opt.make_img_idx_cache()
-        size = 0
-        for (li, lj), img_idx in img_idx_cache.items():
-            size += nf[li] * nf[lj] * len(img_idx[4])
-        j3c = np.empty((size, naux), dtype=np.float64)
         # ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
         # which allows the decompression for the CUDA kernel generated compressed_eri3c:
         # sparse_eri3c[ao_pair_mapping] => compressed_eri3c
@@ -742,25 +812,17 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         # in the original cell
         ao_loc = cp.asarray(int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]])
         nao = cell.nao
+        cderi = np.empty((naux, nao_pairs))
 
-    aux_coeff = asarray(int3c2e_opt.aux_coeff)
     log.debug('Avail GPU mem = %s B', get_avail_mem())
+    evaluate = int3c2e_opt.int3c2e_evaluator(
+        verbose=log, img_idx_cache=img_idx_cache)
 
-    log.debug('Generate auxcell 2c2e integrals')
-    j2c = _get_2c2e(auxcell, None, omega, with_long_range) # on CPU
-    j2c = j2c[0].real
-    t1 = log.timer('int2c2e', *t1)
-    prefer_ed = PREFER_ED
-    if cell.dimension == 2:
-        prefer_ed = True
-    cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
-        j2c, prefer_ed, linear_dep_threshold)
-
-    evaluate = int3c2e_opt.int3c2e_evaluator(verbose=log)
     t1 = log.timer_debug1('initialize int3c2e_kernel', *t1)
     ij_tasks = ((i, j) for i in range(lmax+1) for j in range(i+1))
     offset = 0
     p0 = p1 = 0
+    buf = np.empty(naux*buflen)
     for li, lj in ij_tasks:
         c_pair_idx, j3c_tmp = evaluate(li, lj)
         if len(c_pair_idx) == 0:
@@ -773,14 +835,15 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         nfj = (lj+1)*(lj+2)//2
         n_pairs = len(c_pair_idx)
         j3c_tmp = j3c_tmp.reshape(-1,nfi*nfj*n_pairs)
-        j3c_tmp = j3c_tmp.T.dot(aux_coeff)
+        j3c_tmp = aux_coeff.T.dot(j3c_tmp)
+
         if not cell.cart:
-            j3c_tmp = j3c_tmp.reshape(nfj,nfi,n_pairs,naux)
-            j3c_tmp = contract('qj,qpmk->jpmk', c2s[lj], j3c_tmp)
-            j3c_tmp = contract('pi,jpmk->jimk', c2s[li], j3c_tmp)
+            j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+            j3c_tmp = contract('qj,kqpm->kjpm', c2s[lj], j3c_tmp)
+            j3c_tmp = contract('pi,kjpm->kjim', c2s[li], j3c_tmp)
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
-            j3c_tmp = j3c_tmp.reshape(-1,naux)
+            j3c_tmp = j3c_tmp.reshape(naux,-1)
 
         c_pair_idx = cp.asnumpy(c_pair_idx)
         ish, jsh = divmod(c_pair_idx, nctrj)
@@ -790,7 +853,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             ish = bas_mapping[ish]
             jsh = bas_mapping[jsh]
             ft_idx = aopair_offsets_lookup[ish,jsh]
-            ij = np.arange(nfi*nfj)
+            ij = np.arange(nfi*nfj, dtype=np.int32)
             idx = ij[:,None] + ft_idx
             # Due to the bas_mapping from int3c2e_opt.cell to ft_opt.cell,
             # the bas_ij pair for int3c2e_opt may correspond to the triu
@@ -802,12 +865,18 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
                 # Note: in each block, i is accessed in the inner loop
                 ijT = ij.reshape(nfj,nfi).T
                 idx[:,triu_mask] = ijT.reshape(-1,1) + ft_idx
-            j3c[idx.ravel()] += j3c_tmp.get()
+            #:cderi[:,idx.ravel()] += j3c_tmp.get()
+            _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
+            idx = np.asarray(idx.ravel(), dtype=np.int32)
+            # NOTE: this copy back operation is extremely slow
+            libpbc.take2d_add(
+                cderi.ctypes, _buf.ctypes, idx.ctypes,
+                ctypes.c_int(naux), ctypes.c_int(nao_pairs), ctypes.c_int(len(idx))
+            )
             idx = ft_idx = ij = ijT = triu_mask = None
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
-            #:j3c[p0:p1] = j3c_tmp
-            j3c_tmp.get(out=j3c[p0:p1])
+            cderi[:,p0:p1] = j3c_tmp.get()
             iaddr = ao_loc[ish] + cp.arange(nfi)[:,None]
             jaddr = ao_loc[jsh] + cp.arange(nfj)[:,None]
             # Note: address is computed in a different way than in the LR tensor.
@@ -820,7 +889,6 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
                 diag_addresses.append(addr.ravel())
             offset += n_pairs * nfi * nfj
         j3c_tmp = ish = jsh = c_pair_idx = None
-    aux_coeff = None
     cp.get_default_memory_pool().free_all_blocks()
     log.debug('Avail GPU mem = %s B', get_avail_mem())
 
@@ -831,15 +899,10 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         cderi_idx = (rows.get(), cols.get(), diag_addresses.get())
     t1 = log.timer_debug1('SR int3c2e', *t1)
 
-    if j2ctag == 'ED':
-        cderi = contract('Lr,pr->Lp', cd_j2c, j3c)
-    else:
-        cderi = solve_triangular(cd_j2c, j3c.T, lower=True)
-
     cderip = None
-    if cd_j2c_negative is not None:
-        assert cell.dimension == 2
-        cderip = contract('Lr,pr->Lp', cd_j2c_negative, j3c)
+    if nauxp is not None:
+        # For low-dimensional systems, CDERI has negative eigenvectors
+        cderi, cderip = cderi[:-nauxp], cderi[-nauxp:]
 
     t1 = log.timer_debug1('solving cderi', *t1)
     return cderi, cderip, cderi_idx

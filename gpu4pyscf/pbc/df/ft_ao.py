@@ -71,10 +71,20 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
     return ft_kernel(Gv, q, kptjs)
 
 def ft_ao(cell, Gv, shls_slice=None, b=None,
-          gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None):
-    '''Analytical Fourier transform basis functions on Gv grids'''
+          gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None,
+          sort_cell=True):
+    '''Analytical Fourier transform basis functions on Gv grids.
+
+    If the sorted_cell in the input is specified, the transform
+    '''
     assert shls_slice is None
-    sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
+    if sort_cell:
+        sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
+    else:
+        assert cell.cart
+        assert all(cell._bas[:,NCTR_OF] == 1)
+        sorted_cell = cell
+
     _atm = cp.array(sorted_cell._atm)
     _bas = cp.array(sorted_cell._bas)
     _env = cp.array(_scale_sp_ctr_coeff(sorted_cell))
@@ -96,7 +106,10 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
         sorted_cell._env.ctypes
     )
-    out = out.T.dot(asarray(coeff))
+    if sort_cell:
+        out = out.T.dot(asarray(coeff))
+    else:
+        out = out.T
     return out
 
 def gen_ft_kernel(cell, kpts=None, verbose=None):
