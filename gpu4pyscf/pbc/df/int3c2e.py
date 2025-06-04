@@ -280,16 +280,7 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     if err != 0:
         raise RuntimeError('fill_int2c2e failed')
 
-    # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
-    conj_mapping = conj_images_in_bvk_cell(bvk_kmesh)
-    conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
-    err = libpbc.aopair_fill_triu(
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(nao_cart), ctypes.c_int(bvk_ncells))
-    if err != 0:
-        raise RuntimeError('aopair_fill_triu failed')
-
+    out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
     out = sandwich_dot(out, asarray(coeff))
 
     if kpts is not None:
@@ -297,6 +288,20 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
         expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
         out = contract('lk,lpq->kpq', expLk, out)
     return out
+
+def fill_triu_bvk_conj(a, nao, bvk_kmesh):
+    # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
+    assert a.flags.c_contiguous
+    conj_mapping = conj_images_in_bvk_cell(bvk_kmesh)
+    conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
+    bvk_ncells = np.prod(bvk_kmesh)
+    err = libpbc.aopair_fill_triu(
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(nao), ctypes.c_int(bvk_ncells))
+    if err != 0:
+        raise RuntimeError('aopair_fill_triu failed')
+    return a
 
 def to_primitive_bas(cell):
     '''Decontract the cell basis sets into primitive bases'''
@@ -469,26 +474,28 @@ class SRInt3c2eOpt:
         if bvk_kmesh is None:
             bvk_kmesh = np.ones(3, dtype=int)
         self.bvk_kmesh = bvk_kmesh
-        self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-
-        if np.prod(bvk_kmesh) == 1:
-            bvkcell = prim_cell
-        else:
-            bvkcell = pbctools.super_cell(prim_cell, bvk_kmesh, wrap_around=True)
-            # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
-            bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-        self.bvkcell = bvkcell
 
         self.rcut = None
         self.int3c2e_envs = None
+        self.bvk_cell = None
+        self.bvkmesh_Ls = None
 
     def build(self, verbose=None):
         '''integral screening'''
         log = logger.new_logger(self.cell, verbose)
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
-        bvkcell = self.bvkcell
-        bvk_ncells = np.prod(self.bvk_kmesh)
+
+        bvk_kmesh = self.bvk_kmesh
+        bvk_ncells = np.prod(bvk_kmesh)
+        self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(pcell, bvk_kmesh, True)
+        if np.prod(bvk_kmesh) == 1:
+            bvkcell = pcell
+        else:
+            bvkcell = pbctools.super_cell(pcell, bvk_kmesh, wrap_around=True)
+            # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
+            bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
+        self.bvkcell = bvkcell
 
         self.rcut = rcut = estimate_rcut(pcell, auxcell, self.omega).max()
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=rcut))
@@ -523,6 +530,7 @@ class SRInt3c2eOpt:
         # Keep a reference to these arrays, prevent releasing them upon returning the closure
         int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
         self.int3c2e_envs = int3c2e_envs
+        init_constant(pcell)
 
         log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
         log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
@@ -743,8 +751,7 @@ class SRInt3c2eOpt:
     def int3c2e_evaluator(self, verbose=None, img_idx_cache=None):
         log = logger.new_logger(self.cell, verbose)
         if self.int3c2e_envs is None:
-            self.build()
-        pcell = self.prim_cell
+            self.build(verbose)
         auxcell = self.sorted_auxcell
         bvkcell = self.bvkcell
         l_ctr_aux_offsets = self.l_ctr_aux_offsets
@@ -760,7 +767,6 @@ class SRInt3c2eOpt:
         lmax = len(l_counts) - 1
         uniq_l = np.arange(lmax+1)
         nfcart = (uniq_l + 1) * (uniq_l + 2) // 2
-        init_constant(pcell)
         kern = libpbc.fill_int3c2e
 
         if img_idx_cache is None:

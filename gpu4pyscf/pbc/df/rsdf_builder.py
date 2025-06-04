@@ -32,14 +32,16 @@ from pyscf.pbc.df.rsdf_builder import (
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray
+from gpu4pyscf.lib.cupy_helper import (
+    contract, get_avail_mem, asarray, sandwich_dot)
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params, group_basis
 from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, sr_aux_e2, sr_int2c2e, estimate_rcut, SRInt3c2eOpt, Int3c2eEnvVars)
+    libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, estimate_rcut,
+    SRInt3c2eOpt, Int3c2eEnvVars)
 
 OMEGA_MIN = 0.3
 
@@ -457,33 +459,13 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     ovlp_mask = c_ovlp_mask[mapping[:,None],mapping]
     return ovlp_mask, mapping
 
-def _build_aft_envs(ft_opt):
-    sorted_cell = ft_opt.sorted_cell
-    Ls = cp.asarray(sorted_cell.get_lattice_Ls())
-    Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
-    nimgs = len(Ls)
-    nbas = sorted_cell.nbas
-
-    _atm = cp.array(sorted_cell._atm)
-    _bas = cp.array(sorted_cell._bas)
-    _env = cp.array(_scale_sp_ctr_coeff(sorted_cell))
-    ao_loc = cp.array(sorted_cell.ao_loc)
-    aft_envs = ft_ao.AFTIntEnvVars(
-        sorted_cell.natm, nbas, 1, nimgs, _atm.data.ptr,
-        _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
-    )
-    # Keep a reference to these arrays, prevent releasing them upon returning the closure
-    aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
-    return aft_envs
-
 def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
     log = logger.new_logger(ft_opt.cell, verbose)
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
 
-    uniq_l_ctr = ft_opt.uniq_l_ctr
+    uniq_l = ft_opt.uniq_l_ctr[:,0]
     l_ctr_offsets = ft_opt.l_ctr_offsets
-    uniq_l = uniq_l_ctr[:,0]
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     n_groups = np.count_nonzero(uniq_l <= ft_ao.LMAX)
 
@@ -582,7 +564,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     rev_mapping = np.empty_like(mapping)
     rev_mapping[mapping] = np.arange(len(mapping))
 
-    ft_opt = ft_ao.FTOpt(cell)
+    ft_opt = ft_ao.FTOpt(cell).build()
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
 
@@ -598,14 +580,13 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     sorted_ao_loc = ft_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
     ao_loc = ft_opt.ao_idx[sorted_ao_loc[:-1]]
 
-    aft_envs = _build_aft_envs(ft_opt)
+    aft_envs = ft_opt.aft_envs
     bas_ij_cache = _make_img_idx_cache(ft_opt, aft_envs, cutoff,
                                        int3c2e_ovlp_mask, log)
     t1 = log.timer_debug2('generating bas_ij indices', *t1)
 
-    uniq_l_ctr = ft_opt.uniq_l_ctr
+    uniq_l = ft_opt.uniq_l_ctr[:,0]
     l_ctr_offsets = ft_opt.l_ctr_offsets
-    uniq_l = uniq_l_ctr[:,0]
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
 
     # Determine the addresses of the non-vanished pairs and the diagonal indices
@@ -615,8 +596,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     if not cell.cart:
         nf = uniq_l * 2 + 1
         c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
-        diag_addresses = [] # addresses wrt the compressed indices
-    offset = 0
+    diag_addresses = [] # addresses wrt the compressed indices
     p0 = p1 = 0
     for i, j in ij_tasks:
         nfi = nf[i]
@@ -630,22 +610,19 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
                 aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
         iaddr = ao_loc[ish,None] + np.arange(nf[i])
         jaddr = ao_loc[jsh,None] + np.arange(nf[j])
+        #FIXME: data storage order 'kjim' for cart and 'kmji' for sph
         # Note: in each <i|j> block, i is accessed in the inner loop
         ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
         if i == j:
             idx = np.where(ish == jsh)[0]
-            addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
+            addr = p0 + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
             diag_addresses.append(addr.ravel())
-        offset += n_pairs * nfij
     non0_size = p1
 
     ao_pair_mapping = np.hstack(ao_pair_mapping)
     rows, cols = divmod(ao_pair_mapping, nao)
     diag_addresses = np.hstack(diag_addresses)
     cderi_idx = (rows, cols, diag_addresses)
-
-    ft_ao.init_constant(sorted_cell)
-    kern = libpbc.build_ft_aopair
 
     auxG_conj = None
     aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
@@ -672,6 +649,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         buflen = max(buflen, npairs)
     buf = np.empty(naux*buflen)
 
+    kern = libpbc.build_ft_aopair
     j3c_compressed = np.empty((naux,non0_size), dtype=np.float64)
     pair0 = pair1 = 0
     for i, j in bas_ij_cache:
@@ -726,6 +704,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         if not cell.cart:
             j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
             j3c_tmp = contract('qj,kqpm->kjpm', c2s[lj], j3c_tmp)
+            #FIXME: as 'pi,kjpm->kjim'
             j3c_tmp = contract('pi,kjpm->kmji', c2s[li], j3c_tmp)
             j3c_tmp = j3c_tmp.reshape(naux,-1)
 
@@ -909,16 +888,21 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
 
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
-    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
+    from gpu4pyscf.pbc.dft.multigrid import eval_nucG, eval_vpplocG
+    log = logger.new_logger(cell, verbose)
     cell_exps, cs = extract_pgto_params(cell, 'diffused')
     omega = (2*cell_exps.min())**.5
-    logger.debug(cell, 'omega guess in get_pp_loc_part1 = %g', omega)
+    log.debug('omega guess in get_pp_loc_part1 = %g', omega)
 
     if kpts is None or is_zero(kpts):
         kpts = None
         bvk_kmesh = np.ones(3, dtype=int)
+        bvk_ncells = 1
     else:
         bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        bvk_ncells = np.prod(bvk_kmesh)
+    # TODO: compress
+    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     nuc = sr_aux_e2(cell, fakenuc, -omega, kpts, bvk_kmesh, j_only=True)
     charges = -cp.asarray(cell.atom_charges())
     if kpts is None:
@@ -926,21 +910,108 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     else:
         nuc = contract('kpqr,r->kpq', nuc, charges)
 
-    # TODO: consider time-reversal symmetry
-    ft_ao_iter = _ft_ao_iter_generator(cell, fakenuc, bvk_kmesh, omega, verbose)
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    mesh = cell.symmetrize_mesh(mesh)
+    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    if with_pseudo:
+        ZG = eval_vpplocG(cell, mesh).conj()
+    else:
+        ZG = eval_nucG(cell, mesh).conj()
     kpt = np.zeros(3)
-    for i, (pqG, auxG_conj) in enumerate(ft_ao_iter(kpt, kpts)):
-        ZG = auxG_conj.dot(charges)
-        # contributions due to pseudo.pp_int.get_gth_vlocG_part1
-        if (with_pseudo and i == 0 and
-            (cell.dimension == 3 or
-             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
-            ZG[0] -= charges.dot(np.pi/exps) / cell.vol
-        if kpts is None:
-            nuc += contract('pqG,G->pq', pqG[0], ZG).real
-        else:
-            nuc += contract('kpqG,G->kpq', pqG, ZG)
+    ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws, kpt))
+
+    ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()
+    sorted_cell = ft_opt.sorted_cell
+    bvkcell = ft_opt.bvkcell
+    uniq_l = ft_opt.uniq_l_ctr[:,0]
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    l_ctr_offsets = ft_opt.l_ctr_offsets
+
+    img_idx_cache = ft_opt.make_img_idx_cache(True, log)
+
+    # Determine the addresses of the non-vanished pairs and the diagonal indices
+    # within these elements.
+    nbas = sorted_cell.nbas
+    ao_loc = sorted_cell.ao_loc
+    nao = ao_loc[nbas]
+    ao_loc = cp.asarray(ao_loc)
+    nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    cart_idx = [cp.arange(n) for n in nf]
+    aopair_idx = []
+    p0 = p1 = 0
+    for i, j in img_idx_cache:
+        bas_ij = img_idx_cache[i, j][0]
+        ish, J, jsh = cp.unravel_index(bas_ij, (nbas, bvk_ncells, nbas))
+        nfij = nf[i] * nf[j]
+        p0, p1 = p1, p1 + nfij * len(bas_ij)
+        iaddr = ao_loc[ish] + cart_idx[i][:,None]
+        jaddr = ao_loc[jsh] + cart_idx[j][:,None]
+        # Note: in ft_aopair blocks, data is stored (nfj,nfi,npairs,nGv)
+        ijaddr = iaddr * nao + jaddr[:,None,:] + J * nao**2
+        aopair_idx.append(ijaddr.ravel())
+        iaddr = jaddr = ijaddr = None
+    nao_pairs = p1
+    aopair_idx = cp.hstack(aopair_idx)
+
+    avail_mem = get_avail_mem() * .8
+    ngrids = len(Gv)
+    Gblksize = max(16, int(avail_mem/(2*16*nao_pairs*bvk_ncells))//8*8)
+    Gblksize = min(Gblksize, ngrids, 16384)
+    log.debug2('ft_ao_iter Gblksize = %d', Gblksize)
+    kern = libpbc.build_ft_aopair
+    nuc_compressed = 0
+    for p0, p1 in lib.prange(0, ngrids, Gblksize):
+        # Padding zeros, allowing idle threads to access these data
+        GvT = cp.append(cp.asarray(Gv[p0:p1]).T.ravel(), cp.zeros(THREADS))
+        nGv = p1 - p0
+        pqG = cp.empty((nao_pairs, nGv), dtype=np.complex128)
+        pair0 = 0
+        for i, j in img_idx_cache:
+            bas_ij, img_offsets, img_idx = img_idx_cache[i, j]
+            npairs = len(bas_ij)
+            if npairs == 0:
+                continue
+
+            li = uniq_l[i]
+            lj = uniq_l[j]
+            ll_pattern = f'{l_symb[i]}{l_symb[j]}'
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
+            log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
+            err = kern(
+                ctypes.cast(pqG[pair0:].data.ptr, ctypes.c_void_p),
+                ctypes.c_int(1), # Do not remove zero elements
+                ctypes.byref(ft_opt.aft_envs), (ctypes.c_int*3)(*scheme),
+                (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                ctypes.c_int(npairs), ctypes.c_int(nGv),
+                ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                bvkcell._atm.ctypes, ctypes.c_int(bvkcell.natm),
+                bvkcell._bas.ctypes, ctypes.c_int(bvkcell.nbas),
+                bvkcell._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'build_ft_aopair kernel for {ll_pattern} failed')
+            pair0 += npairs * nf[i] * nf[j]
+
+        nuc_compressed += contract('pG,G->p', pqG, ZG[p0:p1]).real
+        pqG = GvT = None
+
+    nuc_raw = cp.zeros((bvk_ncells * nao * nao))
+    nuc_raw[aopair_idx] = nuc_compressed
+    nuc_raw = nuc_raw.reshape(bvk_ncells, nao, nao)
+    nuc_raw = fill_triu_bvk_conj(nuc_raw, nao, bvk_kmesh)
+    nuc_raw = sandwich_dot(nuc_raw, ft_opt.coeff)
+
+    if kpts is None:
+        nuc += nuc_raw[0]
+    else:
+        bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+        expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+        nuc += contract('lk,lpq->kpq', expLk, nuc_raw)
     return nuc
 
 def get_nuc(cell, kpts=None):
