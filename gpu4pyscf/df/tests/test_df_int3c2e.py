@@ -1,3 +1,4 @@
+import pytest
 import cupy as cp
 import pyscf
 from pyscf.df import incore
@@ -140,3 +141,9 @@ H       4.224    0.640    0.837
     out[rows,cols] = eri3c
     out[cols,rows] = eri3c
     assert abs(out.get()-ref).max() < 1e-10
+
+def test_group_blocks():
+    assert int3c2e_bdiv.group_blocks([0, 1, 3, 6], 3) == [0, 2, 3]
+    assert int3c2e_bdiv.group_blocks([0, 1, 3, 4], 3) == [0, 2, 3]
+    with pytest.raises(RuntimeError):
+        int3c2e_bdiv.group_blocks([0, 4, 9, 14], 3)

@@ -324,7 +324,7 @@ class Int3c2eOpt:
         if batch_size is None:
             ksh_block_partitions = [0, ksh_blocks]
         else:
-            ksh_block_partitions = _parition(aux_loc_by_block, batch_size)
+            ksh_block_partitions = group_blocks(aux_loc_by_block, batch_size)
 
         init_constant(sorted_mol)
         kern = libgint_rys.fill_int3c2e_bdiv
@@ -571,7 +571,7 @@ def estimate_shl_ovlp(mol):
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj
     return ovlp
 
-def _parition(offsets, block_size):
+def group_blocks(offsets, block_size):
     '''Partition shells into groups. num functions in each group <= block_size'''
     offsets = np.asarray(offsets)
     nbas = len(offsets) - 1
@@ -588,8 +588,3 @@ def _parition(offsets, block_size):
         i += next_i - 1
     partitions.append(min(i, nbas))
     return partitions
-#
-#if __name__ == '__main__':
-#    #print(_parition([0, 1, 3, 6], 3))
-#    #print(_parition([0, 1, 3, 4], 3))
-#    print(_parition([0, 4, 9, 14], 3))
