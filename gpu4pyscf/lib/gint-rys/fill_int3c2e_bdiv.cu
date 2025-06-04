@@ -287,7 +287,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
 
             if (ijk_idx < nst) {
                 int *ao_loc = envs.ao_loc;
-                int k0 = ao_loc[ksh0] - ao_loc[nbas];
+                int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
                 double *eri_tensor = out_local + shl_pair_in_block * nfij * naux
                         + k0 + ksh_in_block * nfk;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
