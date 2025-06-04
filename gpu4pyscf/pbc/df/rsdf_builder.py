@@ -280,7 +280,7 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
             coulG = coeff = None
         Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
         Gblksize = min(Gblksize, ngrids, 16384)
-        logger.debug2(cell, 'ft_ao_iter Gblksize = %d', Gblksize)
+        logger.debug2(cell, 'ft_ao_iter ngrids = %d, Gblksize = %d', ngrids, Gblksize)
 
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             if auxG_conj is None:
@@ -608,14 +608,12 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         ish, jsh = divmod(bas_ij, nbas)
         aopair_offsets_lookup[jsh,ish] = \
                 aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
-        iaddr = ao_loc[ish,None] + np.arange(nf[i])
-        jaddr = ao_loc[jsh,None] + np.arange(nf[j])
-        #FIXME: data storage order 'kjim' for cart and 'kmji' for sph
-        # Note: in each <i|j> block, i is accessed in the inner loop
-        ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+        iaddr = ao_loc[ish] + np.arange(nf[i])[:,None]
+        jaddr = ao_loc[jsh] + np.arange(nf[j])[:,None]
+        ao_pair_mapping.append((iaddr * nao + jaddr[:,None,:]).ravel())
         if i == j:
             idx = np.where(ish == jsh)[0]
-            addr = p0 + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
+            addr = p0 + idx * nfi**2 + np.arange(nfi**2)[:,None]
             diag_addresses.append(addr.ravel())
     non0_size = p1
 
@@ -641,7 +639,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux)))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
-    log.debug1('Gblksize = %d', Gblksize)
+    log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
 
     buflen = 0
     for (i, j), bas_ij in bas_ij_cache.items():
@@ -704,8 +702,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         if not cell.cart:
             j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
             j3c_tmp = contract('qj,kqpm->kjpm', c2s[lj], j3c_tmp)
-            #FIXME: as 'pi,kjpm->kjim'
-            j3c_tmp = contract('pi,kjpm->kmji', c2s[li], j3c_tmp)
+            j3c_tmp = contract('pi,kjpm->kjim', c2s[li], j3c_tmp)
             j3c_tmp = j3c_tmp.reshape(naux,-1)
 
         pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
@@ -789,7 +786,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         diag_addresses = [] # addresses wrt the compressed indices
         # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset
         # in the original cell
-        ao_loc = cp.asarray(int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]])
+        ao_loc = int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]]
         nao = cell.nao
         cderi = np.empty((naux, nao_pairs))
 
@@ -856,15 +853,15 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
             cderi[:,p0:p1] = j3c_tmp.get()
-            iaddr = ao_loc[ish] + cp.arange(nfi)[:,None]
-            jaddr = ao_loc[jsh] + cp.arange(nfj)[:,None]
+            iaddr = ao_loc[ish] + np.arange(nfi)[:,None]
+            jaddr = ao_loc[jsh] + np.arange(nfj)[:,None]
             # Note: address is computed in a different way than in the LR tensor.
-            # The storage order here is [j,i,pair_id,aux].
+            # The storage order here is [aux,j,i,pair_id].
             ao_pair_mapping.append((iaddr * nao + jaddr[:,None,:]).ravel())
             if li == lj:
-                idx = cp.where(ish == jsh)[0]
+                idx = np.where(ish == jsh)[0]
                 # The addresses for the compressed tensor
-                addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
+                addr = offset + idx * nfi**2 + np.arange(nfi**2)[:,None]
                 diag_addresses.append(addr.ravel())
             offset += n_pairs * nfi * nfj
         j3c_tmp = ish = jsh = c_pair_idx = None
@@ -872,10 +869,10 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     log.debug('Avail GPU mem = %s B', get_avail_mem())
 
     if not with_long_range:
-        ao_pair_mapping = cp.hstack(ao_pair_mapping)
+        ao_pair_mapping = np.hstack(ao_pair_mapping)
         rows, cols = divmod(ao_pair_mapping, nao)
-        diag_addresses = cp.hstack(diag_addresses)
-        cderi_idx = (rows.get(), cols.get(), diag_addresses.get())
+        diag_addresses = np.hstack(diag_addresses)
+        cderi_idx = (rows, cols, diag_addresses)
     t1 = log.timer_debug1('SR int3c2e', *t1)
 
     cderip = None
@@ -886,12 +883,11 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     t1 = log.timer_debug1('solving cderi', *t1)
     return cderi, cderip, cderi_idx
 
-
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     from gpu4pyscf.pbc.dft.multigrid import eval_nucG, eval_vpplocG
     log = logger.new_logger(cell, verbose)
     cell_exps, cs = extract_pgto_params(cell, 'diffused')
-    omega = (2*cell_exps.min())**.5
+    omega = cell_exps.min()**.5
     log.debug('omega guess in get_pp_loc_part1 = %g', omega)
 
     if kpts is None or is_zero(kpts):
@@ -958,7 +954,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     ngrids = len(Gv)
     Gblksize = max(16, int(avail_mem/(2*16*nao_pairs*bvk_ncells))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
-    log.debug2('ft_ao_iter Gblksize = %d', Gblksize)
+    log.debug2('ft_ao_iter ngrids = %d Gblksize = %d', ngrids, Gblksize)
     kern = libpbc.build_ft_aopair
     nuc_compressed = 0
     for p0, p1 in lib.prange(0, ngrids, Gblksize):

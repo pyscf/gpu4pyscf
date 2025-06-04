@@ -69,7 +69,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             rcut = estimate_rcut(cell, auxcell, omega).max()
             bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh)
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh).build()
     nao = cell.nao
     naux = int3c2e_opt.aux_coeff.shape[1]
 
