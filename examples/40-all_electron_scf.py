@@ -47,6 +47,11 @@ mf = cell.RKS(xc='pbe0').to_gpu().density_fit()
 mf.grids = BeckeGrids(cell)
 mf.run()
 
+# The density fitting code can handle ~2000 basis functions
+from pyscf.pbc.tools.pbc import super_cell
+scell = super_cell(cell, [3,3,3])
+mf = scell.RHF().to_gpu().density_fit().run()
+
 #
 # K-point sampled HF and DFT 
 #

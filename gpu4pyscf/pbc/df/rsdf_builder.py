@@ -291,7 +291,7 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
             else:
                 auxG_c = auxG_conj[p0:p1]
             pqG = ft_kern(Gv[p0:p1], kpt, kpts).transpose(0,2,3,1)
-            yield pqG, auxG_conj
+            yield pqG, auxG_c
             pqG = auxG_c = None
     return ft_ao_iter
 
@@ -307,14 +307,14 @@ def cholesky_decomposed_metric(j2c):
     j2ctag = 'CD'
     # Cupy cholesky does not check positive-definite, seems returning nan in the
     # resultant CD matrix silently.
-    j2c = cp.asarray(j2c)
+    j2c = cp.asarray(j2c, order='C')
     j2c = cp.linalg.cholesky(j2c)
     if cp.isnan(j2c[-1,-1]):
         raise RuntimeError('j2c is not positive definite')
     return j2c, j2c_negative, j2ctag
 
 def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
-    j2c = cp.asarray(j2c)
+    j2c = cp.asarray(j2c, order='C')
     w, v = cp.linalg.eigh(j2c)
     mask = w > linear_dep_threshold
     v1 = v[:,mask].conj().T
@@ -334,8 +334,6 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     else:
         uniq_kpts = uniq_kpts.reshape(-1, 3)
         bvk_kmesh = kpts_to_kmesh(auxcell, uniq_kpts)
-        bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(auxcell, bvk_kmesh, True)
-        expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(uniq_kpts.T)))
     j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
     j2c = cp.asarray(j2c)
 
@@ -793,6 +791,8 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         # address in a dense tensor to compressed storage.
         cderi, aopair_offsets_lookup, bas_mapping, cderi_idx = \
                 _lr_int3c2e_gamma_point(int3c2e_opt)
+        # LR int3c2e would generate more nao_pairs than the SR int3c2e!
+        nao_pairs = cderi.shape[1]
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
         t1 = log.init_timer()
@@ -866,8 +866,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             #:cderi[:,idx.ravel()] += j3c_tmp.get()
             _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
             idx = np.asarray(idx.ravel(), dtype=np.int32)
-            # NOTE: this copy back operation is extremely slow
-            libpbc.take2d_add(
+            libpbc.take2d_add( # this copy back operation is really slow
                 cderi.ctypes, _buf.ctypes, idx.ctypes,
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs), ctypes.c_int(len(idx))
             )
