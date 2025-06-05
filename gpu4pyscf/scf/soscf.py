@@ -553,7 +553,6 @@ class _CIAH_SOSCF:
 
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
 
     def __init__(self, mf):
         self.__dict__.update(mf.__dict__)
@@ -638,6 +637,9 @@ class _CIAH_SOSCF:
 
     def rotate_mo(self, mo_coeff, u, log=None):
         return mo_coeff.dot(u)
+
+    def to_cpu(self):
+        return self.undo_soscf().to_cpu()
 
 class _SecondOrderROHF(_CIAH_SOSCF):
     gen_g_hop = gen_g_hop_rohf
