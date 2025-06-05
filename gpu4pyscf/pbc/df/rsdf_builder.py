@@ -591,14 +591,14 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
 
     # Determine the addresses of the non-vanished pairs and the diagonal indices
     # within these elements.
-    ij_tasks = bas_ij_cache.keys()
-    nf = nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
-    if not cell.cart:
+    if cell.cart:
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    else:
         nf = uniq_l * 2 + 1
         c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
     diag_addresses = [] # addresses wrt the compressed indices
     p0 = p1 = 0
-    for i, j in ij_tasks:
+    for i, j in bas_ij_cache:
         nfi = nf[i]
         nfj = nf[j]
         nfij = nfi * nfj
@@ -608,12 +608,13 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         ish, jsh = divmod(bas_ij, nbas)
         aopair_offsets_lookup[jsh,ish] = \
                 aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
-        iaddr = ao_loc[ish] + np.arange(nf[i])[:,None]
-        jaddr = ao_loc[jsh] + np.arange(nf[j])[:,None]
-        ao_pair_mapping.append((iaddr * nao + jaddr[:,None,:]).ravel())
+        # Note: corresponding to the storage order (npairs,nfj,nfi,nGv)
+        iaddr = ao_loc[ish,None] + np.arange(nf[i])
+        jaddr = ao_loc[jsh,None] + np.arange(nf[j])
+        ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
         if i == j:
             idx = np.where(ish == jsh)[0]
-            addr = p0 + idx * nfi**2 + np.arange(nfi**2)[:,None]
+            addr = p0 + idx[:,None] * nfi**2 + np.arange(nfi**2)
             diag_addresses.append(addr.ravel())
     non0_size = p1
 
@@ -642,6 +643,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
 
     buflen = 0
+    nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
     for (i, j), bas_ij in bas_ij_cache.items():
         npairs = nf_cart[i] * nf_cart[j] * len(bas_ij[0])
         buflen = max(buflen, npairs)
@@ -674,7 +676,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             # Padding zeros, allowing idle threads to access Gv over the bounds.
             GvT = cp.append(GvT, cp.zeros(THREADS))
 
-            pqG = cp.zeros((nfij*n_pairs, nGv), dtype=np.complex128)
+            pqG = cp.empty((nfij*n_pairs, nGv), dtype=np.complex128)
             scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
             log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
             err = kern(
@@ -696,13 +698,27 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
             # functions |P> are assumed to be real
             contract('Gr,pG->rp', auxG_c, pqG, beta=1., out=j3c_tmp)
+            pqG = None
         t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
 
         j3c_tmp = j3c_tmp.real
-        if not cell.cart:
+        if cell.cart:
             j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
-            j3c_tmp = contract('qj,kqpm->kjpm', c2s[lj], j3c_tmp)
-            j3c_tmp = contract('pi,kjpm->kjim', c2s[li], j3c_tmp)
+            # Note: bas_ij_idx for the LR part and the SR int3c2e are different.
+            # In the (nfj,nfi,n_pairs) storage, the address of the non-zero
+            # elements are accessed as
+            #     offset + np.arange(nfj*nfi) * len(bas_ij_idx) + bas_ij_idx
+            # The differences in bas_ij_idx for LR and SR part will complicates
+            # the address mapping.  To simplify the mapping, the storage order
+            # is flipped. By placing the nfj,nfi to the last dimension, the
+            # non-zero elements address can be computed as
+            #     offset + bas_ij_idx * (nfj*nfi) + np.arange(nfj*nfi)
+            # Address mapping can be achieved by adjustment for the offset.
+            j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
+        else:
+            j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+            j3c_tmp = contract('qj,kqpm->kmjp', c2s[lj], j3c_tmp)
+            j3c_tmp = contract('pi,kmjp->kmji', c2s[li], j3c_tmp)
             j3c_tmp = j3c_tmp.reshape(naux,-1)
 
         pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
@@ -813,10 +829,15 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         j3c_tmp = j3c_tmp.reshape(-1,nfi*nfj*n_pairs)
         j3c_tmp = aux_coeff.T.dot(j3c_tmp)
 
-        if not cell.cart:
+        if cell.cart:
             j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
-            j3c_tmp = contract('qj,kqpm->kjpm', c2s[lj], j3c_tmp)
-            j3c_tmp = contract('pi,kjpm->kjim', c2s[li], j3c_tmp)
+            # Flip the storage order to simplify address mapping. See the
+            # comments in the _lr_int3c2e_gamma_point function
+            j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
+        else:
+            j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+            j3c_tmp = contract('qj,kqpm->kmjp', c2s[lj], j3c_tmp)
+            j3c_tmp = contract('pi,kmjp->kmji', c2s[li], j3c_tmp)
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
             j3c_tmp = j3c_tmp.reshape(naux,-1)
@@ -830,7 +851,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             jsh = bas_mapping[jsh]
             ft_idx = aopair_offsets_lookup[ish,jsh]
             ij = np.arange(nfi*nfj, dtype=np.int32)
-            idx = ij[:,None] + ft_idx
+            idx = ij + ft_idx[:,None]
             # Due to the bas_mapping from int3c2e_opt.cell to ft_opt.cell,
             # the bas_ij pair for int3c2e_opt may correspond to the triu
             # bas-pair in ft_opt.cell. For these bas_ij, a transpose on <i|j>
@@ -839,8 +860,8 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             ft_idx = ft_idx[triu_mask]
             if len(ft_idx) > 0:
                 # Note: in each block, i is accessed in the inner loop
-                ijT = ij.reshape(nfj,nfi).T
-                idx[:,triu_mask] = ijT.reshape(-1,1) + ft_idx
+                ijT = ij.reshape(nfj,nfi).T.ravel()
+                idx[triu_mask] = ijT + ft_idx[:,None]
             #:cderi[:,idx.ravel()] += j3c_tmp.get()
             _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
             idx = np.asarray(idx.ravel(), dtype=np.int32)
@@ -853,15 +874,14 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
             cderi[:,p0:p1] = j3c_tmp.get()
-            iaddr = ao_loc[ish] + np.arange(nfi)[:,None]
-            jaddr = ao_loc[jsh] + np.arange(nfj)[:,None]
-            # Note: address is computed in a different way than in the LR tensor.
-            # The storage order here is [aux,j,i,pair_id].
-            ao_pair_mapping.append((iaddr * nao + jaddr[:,None,:]).ravel())
+            iaddr = ao_loc[ish,None] + np.arange(nfi)
+            jaddr = ao_loc[jsh,None] + np.arange(nfj)
+            # Note: corresponding to the storage order (npairs,nfj,nfi,naux)
+            ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
             if li == lj:
                 idx = np.where(ish == jsh)[0]
                 # The addresses for the compressed tensor
-                addr = offset + idx * nfi**2 + np.arange(nfi**2)[:,None]
+                addr = offset + idx * nfi**2[:,None] + np.arange(nfi**2)
                 diag_addresses.append(addr.ravel())
             offset += n_pairs * nfi * nfj
         j3c_tmp = ish = jsh = c_pair_idx = None
@@ -941,9 +961,9 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         ish, J, jsh = cp.unravel_index(bas_ij, (nbas, bvk_ncells, nbas))
         nfij = nf[i] * nf[j]
         p0, p1 = p1, p1 + nfij * len(bas_ij)
+        # Note: corresponding to the storage order (nfj,nfi,npairs,nGv)
         iaddr = ao_loc[ish] + cart_idx[i][:,None]
         jaddr = ao_loc[jsh] + cart_idx[j][:,None]
-        # Note: in ft_aopair blocks, data is stored (nfj,nfi,npairs,nGv)
         ijaddr = iaddr * nao + jaddr[:,None,:] + J * nao**2
         aopair_idx.append(ijaddr.ravel())
         iaddr = jaddr = ijaddr = None
