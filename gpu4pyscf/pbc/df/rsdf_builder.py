@@ -43,7 +43,7 @@ from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, estimate_rcut,
     SRInt3c2eOpt, Int3c2eEnvVars)
 
-OMEGA_MIN = 0.3
+OMEGA_MIN = 0.25
 
 # In the ED of the j2c2e metric, the default LINEAR_DEP_THR setting in pyscf-2.8
 # is too loose. The linear dependency truncation often leads to serious errors.
@@ -296,10 +296,13 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
     return ft_ao_iter
 
 def decompose_j2c(j2c, prefer_ed=PREFER_ED, linear_dep_threshold=LINEAR_DEP_THR):
-    if prefer_ed:
-        return eigenvalue_decomposed_metric(j2c, linear_dep_threshold)
-    else:
-        return cholesky_decomposed_metric(j2c)
+    if not prefer_ed:
+        try:
+            return cholesky_decomposed_metric(j2c)
+        except LinearDepencyError:
+            # Restore to ED if the j2c metric is found to be linearly dependent
+            pass
+    return eigenvalue_decomposed_metric(j2c, linear_dep_threshold)
 
 def cholesky_decomposed_metric(j2c):
     '''Return L for j2c = L L^T'''
@@ -310,20 +313,20 @@ def cholesky_decomposed_metric(j2c):
     j2c = cp.asarray(j2c, order='C')
     j2c = cp.linalg.cholesky(j2c)
     if cp.isnan(j2c[-1,-1]):
-        raise RuntimeError('j2c is not positive definite')
+        raise LinearDepencyError('j2c is not positive definite')
     return j2c, j2c_negative, j2ctag
 
 def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     j2c = cp.asarray(j2c, order='C')
     w, v = cp.linalg.eigh(j2c)
     mask = w > linear_dep_threshold
-    v1 = v[:,mask].conj().T
-    v1 *= w[mask, None]**-.5
+    v1 = v[:,mask].conj()
+    v1 *= w[mask]**-.5
     j2c = v1
     idx = cp.where(w < -linear_dep_threshold)[0]
     j2c_negative = None
     if len(idx) > 0:
-        j2c_negative = (v[:,idx] * (-w[idx])**-.5).conj().T
+        j2c_negative = (v[:,idx] * (-w[idx])**-.5).conj()
     j2ctag = 'ED'
     return j2c, j2c_negative, j2ctag
 
@@ -381,7 +384,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
 
 def _solve_cderi(cd_j2c, j3c, j2ctag):
     if j2ctag == 'ED':
-        return contract('Lr,pqr->Lpq', cd_j2c, j3c)
+        return contract('rL,pqr->Lpq', cd_j2c, j3c)
     else:
         nao, naux = j3c.shape[1:3]
         j3c = solve_triangular(cd_j2c, j3c.reshape(-1,naux).T, lower=True)
@@ -1062,3 +1065,6 @@ def get_pp(cell, kpts=None):
     t1 = log.timer_debug1('get_pp_loc_part1', *t1)
     log.timer('get_pp', *t0)
     return vpp
+
+class LinearDepencyError(RuntimeError):
+    pass
