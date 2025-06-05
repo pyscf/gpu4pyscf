@@ -170,26 +170,56 @@ def test_aopair_fill_triu():
 
 def test_sr_int2c2e():
     cell = pyscf.M(
-        atom='''C   1.3    .2       .3
-                C   .19   .1      1.1
-                C   0.  0.  0.
+        atom='''C1  1.3    .2       .3
+                C2  .19   .1      1.1
+                C3  0.  0.  0.
         ''',
         precision = 1e-8,
-        a=np.diag([2.5, 1.9, 2.2])*3)
-    auxcell = cell.copy()
-    auxcell.basis = 'def2-universal-jkfit'
-    auxcell.build()
+        a=np.diag([2.5, 1.9, 2.2])*3,
+        basis='def2-universal-jkfit')
     omega = 0.2
-    dat = sr_int2c2e(auxcell, -omega).get()[0]
+    dat = sr_int2c2e(cell, -omega).get()[0]
 
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    auxcell_sr = auxcell.copy()
+    auxcell_sr = cell.copy()
     auxcell_sr.precision = 1e-14
     auxcell_sr.rcut = 50
     with auxcell_sr.with_short_range_coulomb(omega):
         ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = sr_int2c2e(auxcell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    assert abs(dat - ref).max() < 1e-10
+
+    cell = cell.copy()
+    cell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.6                    1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    cell.build()
+    omega = 0.2
+    dat = sr_int2c2e(cell, -omega).get()[0]
+    auxcell_sr = cell.copy()
+    auxcell_sr.precision = 1e-14
+    auxcell_sr.rcut = 50
+    with auxcell_sr.with_short_range_coulomb(omega):
+        ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
+    assert abs(dat - ref[0]).max() < 1e-10
+
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10

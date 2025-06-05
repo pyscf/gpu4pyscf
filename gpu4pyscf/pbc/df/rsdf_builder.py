@@ -329,17 +329,18 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
 
 def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     # Compute SR Coulomb 2c2e
-    j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts)
-    if uniq_kpts is not None:
+    if uniq_kpts is None:
+        bvk_kmesh = None
+    else:
         uniq_kpts = uniq_kpts.reshape(-1, 3)
         bvk_kmesh = kpts_to_kmesh(auxcell, uniq_kpts)
         bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(auxcell, bvk_kmesh, True)
         expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(uniq_kpts.T)))
-        j2c = contract('lk,lpq->kpq', expLk, j2c)
+    j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
+    j2c = cp.asarray(j2c)
+
     if not with_long_range:
         return j2c
-
-    j2c = cp.asarray(j2c)
 
     # Compute LR Coulomb 2c2e
     precision = auxcell.precision * 1e-3
@@ -370,7 +371,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
             coulG_LR = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws, kpt))
             is_gamma_point = is_zero(kpt)
             for p0, p1 in lib.prange(0, ngrids, blksize):
-                auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1])
+                auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt)
                 auxG_conj = auxG.conj()
                 auxG_conj *= coulG_LR[p0:p1,None]
                 v = auxG_conj.T.dot(auxG)
@@ -881,7 +882,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             if li == lj:
                 idx = np.where(ish == jsh)[0]
                 # The addresses for the compressed tensor
-                addr = offset + idx * nfi**2[:,None] + np.arange(nfi**2)
+                addr = offset + idx[:,None] * nfi**2 + np.arange(nfi**2)
                 diag_addresses.append(addr.ravel())
             offset += n_pairs * nfi * nfj
         j3c_tmp = ish = jsh = c_pair_idx = None
@@ -907,7 +908,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     from gpu4pyscf.pbc.dft.multigrid import eval_nucG, eval_vpplocG
     log = logger.new_logger(cell, verbose)
     cell_exps, cs = extract_pgto_params(cell, 'diffused')
-    omega = cell_exps.min()**.5
+    omega = 0.2
     log.debug('omega guess in get_pp_loc_part1 = %g', omega)
 
     if kpts is None or is_zero(kpts):
@@ -931,11 +932,18 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     mesh = cell.symmetrize_mesh(mesh)
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     if with_pseudo:
-        ZG = eval_vpplocG(cell, mesh).conj()
+        #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
+        ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
+        ZG = ZG.dot(charges)
+        ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
+        if (with_pseudo and
+            (cell.dimension == 3 or
+             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
+            ZG[0] -= charges.dot(np.pi/exps) / cell.vol
     else:
         ZG = eval_nucG(cell, mesh).conj()
-    kpt = np.zeros(3)
-    ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws, kpt))
+        ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
 
     ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()
     sorted_cell = ft_opt.sorted_cell
