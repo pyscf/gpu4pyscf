@@ -33,7 +33,9 @@ def cart2sph_by_l(l, normalized='sp'):
     return _c2s[l,device_id,normalized]
 
 def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
-    '''transform generally contracted basis to segment contracted basis
+    '''transform generally contracted basis to segment contracted basis.
+    Note return_mol.cart is set to True.
+
     Kwargs:
         allow_replica:
             when angular momentum lower than (or equal to) this value, transform

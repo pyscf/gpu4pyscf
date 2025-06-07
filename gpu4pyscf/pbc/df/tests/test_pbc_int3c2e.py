@@ -13,11 +13,16 @@
 # limitations under the License.
 
 import unittest
+import ctypes
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2
+from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 
 def test_int3c2e_gamma_point():
@@ -151,3 +156,70 @@ C S
     int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
     ref = int3c().reshape(dat.shape)
     assert abs(dat - ref).max() < 1e-6
+
+def test_aopair_fill_triu():
+    bvk_ncells, nao = 6, 13
+    out = cp.random.rand(bvk_ncells,nao,nao)
+    conj_mapping = cp.asarray(conj_images_in_bvk_cell([bvk_ncells,1,1]), dtype=np.int32)
+    ix, iy = cp.tril_indices(nao, -1)
+    ref = out.copy()
+    for k, ck in enumerate(conj_mapping):
+        ref[ck,iy,ix] = ref[k,ix,iy]
+    out = fill_triu_bvk_conj(out, nao, [bvk_ncells,1,1])
+    assert abs(out-ref).max() == 0.
+
+def test_sr_int2c2e():
+    cell = pyscf.M(
+        atom='''C1  1.3    .2       .3
+                C2  .19   .1      1.1
+                C3  0.  0.  0.
+        ''',
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3,
+        basis='def2-universal-jkfit')
+    omega = 0.2
+    dat = sr_int2c2e(cell, -omega).get()[0]
+
+    kmesh = [6, 1, 1]
+    kpts = cell.make_kpts(kmesh)
+    auxcell_sr = cell.copy()
+    auxcell_sr.precision = 1e-14
+    auxcell_sr.rcut = 50
+    with auxcell_sr.with_short_range_coulomb(omega):
+        ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
+    assert abs(dat - ref[0]).max() < 1e-10
+
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    assert abs(dat - ref).max() < 1e-10
+
+    cell = cell.copy()
+    cell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.6                    1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    cell.build()
+    omega = 0.2
+    dat = sr_int2c2e(cell, -omega).get()[0]
+    auxcell_sr = cell.copy()
+    auxcell_sr.precision = 1e-14
+    auxcell_sr.rcut = 50
+    with auxcell_sr.with_short_range_coulomb(omega):
+        ref = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=kpts)
+    assert abs(dat - ref[0]).max() < 1e-10
+
+    dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
+    assert abs(dat - ref).max() < 1e-10
