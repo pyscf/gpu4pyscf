@@ -86,7 +86,6 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     dump_chk = dump_chk and mf.chkfile is not None
     if dump_chk:
         log.warn('Low-mem SCF does not support dumping chkfile')
-    cp.get_default_memory_pool().free_all_blocks()
     mem_avail1 = get_avail_mem()
     log.debug1('available GPU memory after SCF initialization: %.3f GB', mem_avail1/1e9)
     natm = mol.natm
@@ -96,6 +95,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         mo_coeff = mo_occ = mo_energy = fock = None
         last_hf_e = e_tot
 
+        cp.get_default_memory_pool().free_all_blocks()
         s1e = asarray(mf.get_ovlp(mol))
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis) # on GPU
         t1 = log.timer_debug1('DIIS', *t0)
@@ -104,10 +104,10 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('eig', *t1)
 
         mo_occ = mf.get_occ(mo_energy, mo_coeff) # on GPU
+        cp.get_default_memory_pool().free_all_blocks()
         # Update mo_coeff and mo_occ, allowing get_veff to generate DMs on the fly
         dm, dm_last = mf.make_wfn(mo_coeff, mo_occ), dm # on GPU
         vhf = mf.get_veff(mol, dm, dm_last, vhf) # on CPU
-        cp.get_default_memory_pool().free_all_blocks()
 
         fock = mf.get_fock(h1e, None, vhf)  # = h1e + vhf, no DIIS
         norm_gorb = cp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))

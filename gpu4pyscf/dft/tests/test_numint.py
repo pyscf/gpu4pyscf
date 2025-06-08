@@ -21,6 +21,7 @@ from pyscf.dft import Grids
 from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
+from gpu4pyscf.dft import numint, gen_grid
 
 def setUpModule():
     global mol, grids_cpu, grids_gpu, dm, dm0, dm1, mo_occ, mo_coeff
@@ -233,6 +234,42 @@ class KnownValues(unittest.TestCase):
             rho = ni_gpu.eval_rho(mol, ao_gpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
             ref = ni_cpu.eval_rho(mol, ao_cpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
             self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 10)
+
+    def test_sparse_index(self):
+        mol = pyscf.M(atom='''
+O   0.     0.    0.
+H   5.5    0.3   2.8
+H   1.7   -2.0   0.4''',
+                      basis='def2-tzvpp')
+        grids = gen_grid.Grids(mol).set(atom_grid=(200, 1454)).build()
+        ni = NumInt()
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+        opt.l_ctr_offsets
+        ao_loc = opt._sorted_mol.ao_loc
+        ngrids = grids.size
+        dat = grids.get_non0ao_idx(opt)
+        assert lib.fp(cupy.hstack([x[1] for x in dat]).get()) == 103.60117204957997
+        assert lib.fp(cupy.hstack([x[2] for x in dat]).get()) == 5.616197331343498
+        assert lib.fp(cupy.hstack([x[3] for x in dat]).get()) == -22.394314323727
+        assert lib.fp(cupy.hstack([x[4] for x in dat]).get()) == 351.2385939586691
+        assert [i.size for x in dat for i in x[1:]] == [
+            46, 18, 9, 19, 50, 20, 9, 21, 28, 12, 9, 13, 49, 19, 9, 20, 45, 17,
+            9, 18, 45, 17, 9, 18, 45, 17, 9, 18, 45, 17, 9, 18, 50, 20, 9, 21,
+            55, 21, 9, 22, 53, 19, 9, 20, 48, 18, 9, 19, 53, 19, 9, 20, 48, 18,
+            9, 19, 43, 17, 9, 18, 40, 16, 9, 17, 48, 18, 9, 19, 48, 18, 9, 19,
+            48, 18, 9, 19, 57, 21, 9, 22, 23, 11, 9, 12, 28, 12, 9, 13, 37, 15,
+            9, 16, 33, 13, 9, 14, 32, 14, 9, 15, 20, 10, 9, 11, 23, 11, 9, 12,
+            23, 11, 9, 12, 23, 11, 9, 12, 37, 15, 9, 16]
+        assert all(x.dtype == np.int32 for x in dat[0][1:])
+
+        if hasattr(numint, '_sparse_index'):
+            for i, i0 in enumerate(range(0, ngrids, numint.MIN_BLK_SIZE)):
+                i1 = min(i0+numint.MIN_BLK_SIZE, ngrids)
+                ref = numint._sparse_index(
+                    opt._sorted_mol, grids.coords[i0:i1], opt.l_ctr_offsets, ao_loc, opt)
+                assert all(np.array_equal(r, x) for r, x in zip(ref[1:], dat[i][1:]))
+
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

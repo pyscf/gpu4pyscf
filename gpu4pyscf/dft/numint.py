@@ -33,7 +33,7 @@ from gpu4pyscf.__config__ import _streams, num_devices
 
 LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
-MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 64*64)
+MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 4096)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 AO_ALIGNMENT = getattr(__config__, 'ao_aligned', 16)
 AO_THRESHOLD = 1e-10
@@ -992,12 +992,6 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         dm = cupy.asarray(dm)
         dm = opt.sort_orbitals(dm, axis=[0,1])
 
-    mem_avail = get_avail_mem()
-    blksize = mem_avail*.2/8/nao//ALIGNED * ALIGNED
-    blksize = min(blksize, MIN_BLK_SIZE)
-    GB = 1024*1024*1024
-    log.debug(f'GPU Memory {mem_avail/GB:.3f} GB available, block size {blksize}')
-
     ao_deriv = 0
     ngrids = grids.weights.size
     rho = cupy.empty(ngrids)
@@ -1610,7 +1604,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
     non0shl_mask = cupy.zeros(nbas, dtype=np.int32)
     coords = cupy.asarray(coords, order='F')
     
-    libgdft.GDFTscreen_index(
+    libgdft.GDFTscreen_index_legacy(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(non0shl_mask.data.ptr, ctypes.c_void_p),
         ctypes.c_double(cutoff),
@@ -1639,7 +1633,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
         ao_seg_idx = np.split(np.arange(nao, dtype=np.int32), ao_loc[1:-1])
         idx = np.hstack([ao_seg_idx[x] for x in non0shl_idx])
         zero_idx = np.hstack(list(itertools.compress(ao_seg_idx, ~non0shl_mask)))
-        pad = (len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)
+        pad = 0#(len(idx) + AO_ALIGNMENT - 1) // AO_ALIGNMENT * AO_ALIGNMENT - len(idx)
         idx = np.hstack([idx, zero_idx[:pad]])
         pad = min(pad, len(zero_idx))
         ao_dims = ao_loc[1:] - ao_loc[:-1]
@@ -1679,54 +1673,43 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grids.build(with_non0tab=False, sort_grids=True)
     if nao is None:
         nao = mol.nao
+    if blksize is not None:
+        assert blksize == MIN_BLK_SIZE
 
+    ngrids = grids.size
     if grid_range is None:
-        grid_start, grid_end = 0, grids.coords.shape[0]
+        grid_start, grid_end = 0, ngrids
     else:
         grid_start, grid_end = grid_range
-    ngrids = grid_end - grid_start
+    assert grid_start % MIN_BLK_SIZE == 0
+    block_start = grid_start // MIN_BLK_SIZE
+    block_end = grid_end // MIN_BLK_SIZE
 
     device_id = cupy.cuda.Device().id
     log.debug1(f'{grid_start} - {grid_end} grids are calculated on Device {device_id}.')
 
-    comp = (deriv+1)*(deriv+2)*(deriv+3)//6
-    if blksize is None:
-        # By default, a memory space of [comp,nao,blksize] is reserved
-        mem_avail = get_avail_mem()
-        blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
-        log.debug1(f'{mem_avail/1e6} MB memory is available on Device {device_id}, block_size {blksize}')
-        if blksize < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
+    # a memory space of [comp,nao,blksize] is required
+    mem_avail = get_avail_mem()
+    log.debug1(f'{mem_avail/1e6} MB memory is available on Device {device_id}, block_size {blksize}')
 
     opt = getattr(ni, 'gdftopt', None)
     if (opt is not None) and (mol not in [opt.mol, opt._sorted_mol]):
         raise RuntimeError("mol object is incompatiable with ni.gdftopt")
-    
+
     if opt is None:
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    coords_device = cupy.asarray(grids.coords)
-    weights_device = cupy.asarray(grids.weights)
+    non0ao_idx = grids.get_non0ao_idx(opt)
     _sorted_mol = opt._sorted_mol
-    ao_loc = _sorted_mol.ao_loc_nr()
 
     mol = None
-    lookup_cache_size = 0
-    for block_id, (ip0, ip1) in enumerate(lib.prange(grid_start, grid_end, blksize)):
-        coords = coords_device[ip0:ip1]
-        weight = weights_device[ip0:ip1]
-        # cache ao indices
-        lookup_key = (device_id, block_id, blksize, ngrids)
-        
-        if lookup_key not in ni.non0ao_idx:
-            ni.non0ao_idx[lookup_key] = res = _sparse_index(
-                _sorted_mol, coords, opt.l_ctr_offsets, ao_loc, opt)
-            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
-            lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
-        else:
-            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[lookup_key]
+    for block_id in range(block_start, block_end):
+        ip0 = block_id * MIN_BLK_SIZE
+        ip1 = min(ip0 + MIN_BLK_SIZE, ngrids)
+        coords = cupy.asarray(grids.coords[ip0:ip1])
+        weight = cupy.asarray(grids.weights[ip0:ip1])
+        pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = non0ao_idx[block_id]
 
         if len(idx) == 0:
             continue
@@ -1747,9 +1730,6 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 ao_mask[:,-pad:,:] = 0.0
         yield ao_mask, idx, weight, coords
 
-    if lookup_cache_size != 0:
-        log.debug1('Cached non-zero AO look up table: %.3f GB', lookup_cache_size/1e9)
-
 def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 non0tab=None, blksize=None, buf=None, extra=0):
     '''
@@ -1761,18 +1741,10 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grids.build(with_non0tab=False, sort_grids=True)
     if nao is None:
         nao = mol.nao
+    if blksize is not None:
+        assert blksize == MIN_BLK_SIZE
     ngrids = grids.coords.shape[0]
-    comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     log = logger.new_logger(mol)
-
-    if blksize is None:
-        #cupy.get_default_memory_pool().free_all_blocks()
-        mem_avail = get_avail_mem()
-        blksize = int((mem_avail*.2/8/((comp+1)*nao + extra))/ ALIGNED) * ALIGNED
-        blksize = min(blksize, MIN_BLK_SIZE)
-        log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, blksize)
-        if blksize < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
 
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -1786,23 +1758,16 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     total_used_bytes = 0
     mem_limit = get_avail_mem()
 
+    non0ao_idx = grids.get_non0ao_idx(opt)
     _sorted_mol = opt._sorted_mol
-    ao_loc = _sorted_mol.ao_loc_nr()
-    lookup_cache_size = 0
 
     block_id = 0
     t1 = log.init_timer()
-    for ip0, ip1 in lib.prange(0, ngrids, blksize):
-        coords = grids.coords[ip0:ip1]
-        weight = grids.weights[ip0:ip1]
-        # cache ao indices
-        if (block_id, blksize, ngrids) not in ni.non0ao_idx:
-            ni.non0ao_idx[block_id, blksize, ngrids] = res = _sparse_index(
-                _sorted_mol, coords, opt.l_ctr_offsets, ao_loc, opt)
-            pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = res
-            lookup_cache_size += idx.nbytes + non0shl_idx.nbytes + ao_loc_slice.nbytes
-
-        pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = ni.non0ao_idx[block_id, blksize, ngrids]
+    for block_id, ip0 in enumerate(range(0, ngrids, MIN_BLK_SIZE)):
+        ip1 = min(ip0 + MIN_BLK_SIZE, ngrids)
+        coords = cupy.asarray(grids.coords[ip0:ip1])
+        weight = cupy.asarray(grids.weights[ip0:ip1])
+        pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = non0ao_idx[block_id]
 
         ao_mask = eval_ao(
             _sorted_mol, coords, deriv,
@@ -1819,7 +1784,6 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
                 ao_mask[-pad:,:] = 0.0
             else:
                 ao_mask[:,-pad:,:] = 0.0
-        block_id += 1
         total_used_bytes += ao_mask.nbytes
         ao_mask_group.append(ao_mask)
         idx_group.append(idx)
@@ -1836,9 +1800,6 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
     if total_used_bytes > 0:
         t1 = log.timer_debug2('evaluate ao slice', *t1)
         yield ao_mask_group, idx_group, weight_group, coords_group
-
-    if lookup_cache_size != 0:
-        log.debug1('Cached non-zero AO look up table: %.3f GB', lookup_cache_size/1e9)
 
 class LibXCMixin:
     libxc = libxc
@@ -1913,26 +1874,6 @@ class NumInt(lib.StreamObject, LibXCMixin):
         self.grid_blksize = None
         self.non0ao_idx = {}
         return self
-
-def _make_pairs2shls_idx(pair_mask, l_bas_loc, hermi=0):
-    if hermi:
-        pair_mask = np.tril(pair_mask)
-    locs = l_bas_loc // BAS_ALIGNED
-    assert locs[-1] == pair_mask.shape[0]
-    pair2bra = []
-    pair2ket = []
-    for i0, i1 in zip(locs[:-1], locs[1:]):
-        for j0, j1 in zip(locs[:-1], locs[1:]):
-            idx, idy = np.where(pair_mask[i0:i1,j0:j1])
-            pair2bra.append((i0 + idx) * BAS_ALIGNED)
-            pair2ket.append((j0 + idy) * BAS_ALIGNED)
-            if hermi and i0 == j0:
-                break
-    bas_pairs_locs = np.append(
-            0, np.cumsum([x.size for x in pair2bra])).astype(np.int32)
-    bas_pair2shls = np.hstack(
-            pair2bra + pair2ket).astype(np.int32).reshape(2,-1)
-    return bas_pair2shls, bas_pairs_locs
 
 def _contract_rho(bra, ket, rho=None):
     if bra.flags.c_contiguous and ket.flags.c_contiguous:
@@ -2139,7 +2080,7 @@ class _GDFTOpt:
         if hasattr(mol, '_decontracted') and mol._decontracted:
             raise RuntimeError('mol object is already decontracted')
 
-        pmol = basis_seg_contraction(mol, allow_replica=True)[0]
+        pmol, _ = basis_seg_contraction(mol, allow_replica=True, sparse_coeff=True)
         pmol.cart = mol.cart
 
         # Sort basis according to angular momentum and contraction patterns so

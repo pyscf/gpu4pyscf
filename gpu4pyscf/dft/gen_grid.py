@@ -27,7 +27,9 @@ Reference for Lebedev-Laikov grid:
 import sys
 import ctypes
 import numpy
+import numpy as np
 import cupy
+import cupy as cp
 from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid as gen_grid_cpu
@@ -36,7 +38,7 @@ from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
 from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
-from gpu4pyscf.lib.cupy_helper import load_library
+from gpu4pyscf.lib.cupy_helper import load_library, asarray
 from gpu4pyscf import __config__ as __gpu4pyscf_config__
 
 libdft = lib.load_library('libdft')
@@ -47,8 +49,6 @@ from pyscf.dft.gen_grid import GROUP_BOUNDARY_PENALTY, NELEC_ERROR_TOL, LEBEDEV_
 
 GROUP_BOX_SIZE = 3.0
 ALIGNMENT_UNIT = getattr(__gpu4pyscf_config__, 'grid_aligned', 128)
-# SG0
-# S. Chien and P. Gill,  J. Comput. Chem. 27 (2006) 730-739.
 
 
 def sg1_prune(nuc, rads, n_ang, radii=radi.SG1RADII):
@@ -504,6 +504,9 @@ class Grids(lib.StreamObject):
         else:
             self.screen_index = self.non0tab = None
         log.info('tot grids = %d', len(self.weights))
+
+        # (idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice)
+        self._non0ao_idx = None
         return self
 
     def kernel(self, mol=None, with_non0tab=False):
@@ -518,6 +521,7 @@ class Grids(lib.StreamObject):
         self.weights = None
         self.non0tab = None
         self.screen_index = None
+        self._non0ao_idx = None
         return self
 
     gen_atomic_grids = lib.module_method(
@@ -568,7 +572,100 @@ class Grids(lib.StreamObject):
         else:
             logger.debug(self, 'Electron density is not accurate enough. '
                          'Grids are not pruned.')
+
+        # The existing cache stores the indices for old grids, should be cleared.
+        self._non0ao_idx = None
         return self
+
+    def _build_non0ao_idx_cache(self, opt=None):
+        '''cache ao indices'''
+        from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD, MIN_BLK_SIZE
+        if opt is None:
+            opt = _GDFTOpt.from_mol(self.mol)
+        mol = opt._sorted_mol
+        log = logger.new_logger(mol, mol.verbose)
+        t1 = log.init_timer()
+        stream = cp.cuda.get_current_stream()
+
+        coords = cp.asarray(self.coords.T, order='C')
+        _sorted_mol = opt._sorted_mol
+        ao_loc = _sorted_mol.ao_loc_nr()
+        nao = ao_loc[-1]
+        nbas = len(ao_loc) - 1
+        ngrids = self.size
+        cutoff = AO_THRESHOLD
+        nblocks = (ngrids + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE
+        non0shl_mask = cp.zeros((nblocks, nbas), dtype=np.int8)
+        coords = cp.asarray(self.coords, order='F')
+        _atm_gpu = cp.asarray(_sorted_mol._atm, dtype=np.int32)
+        _bas_gpu = cp.asarray(_sorted_mol._bas, dtype=np.int32)
+        _env_gpu = cp.asarray(_sorted_mol._env, dtype=np.float64)
+
+        libgdft.GDFTscreen_index(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(non0shl_mask.data.ptr, ctypes.c_void_p),
+            ctypes.c_double(np.log(cutoff)),
+            ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ngrids), ctypes.c_int(MIN_BLK_SIZE),
+            ctypes.cast(_atm_gpu.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(_atm_gpu)),
+            ctypes.cast(_bas_gpu.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(_bas_gpu)),
+            ctypes.cast(_env_gpu.data.ptr, ctypes.c_void_p))
+
+        # offset of contraction pattern, used in eval_ao
+        l_ctr_offsets = opt.l_ctr_offsets
+        non0shl_counts = cp.zeros(nblocks, dtype=np.int32)
+        ctr_offsets_slice = [non0shl_counts]
+        for i, (p0, p1) in enumerate(zip(l_ctr_offsets[:-1], l_ctr_offsets[1:])):
+            non0shl_counts = non0shl_counts + cp.count_nonzero(non0shl_mask[:,p0:p1], axis=1)
+            ctr_offsets_slice.append(non0shl_counts)
+
+        non0shl_idx_sections = non0shl_counts.cumsum()[:-1].get()
+        non0shl_mask = non0shl_mask.view(bool)
+        non0shl_idx = cp.where(non0shl_mask)[1].astype(np.int32).get()
+
+        ao_dims = ao_loc[1:] - ao_loc[:-1]
+        ao_seg_idx = np.split(np.arange(nao, dtype=np.int32), ao_loc[1:-1])
+        idx = []
+        ao_loc_slice = []
+        for _non0shl_idx in np.split(non0shl_idx, non0shl_idx_sections):
+            if len(_non0shl_idx) == 0:
+                idx.append(np.empty(0, dtype=np.int32))
+                ao_loc_slice.append(np.zeros(1, dtype=np.int32))
+                continue
+            idx_in_block = [ao_seg_idx[x] for x in _non0shl_idx]
+            idx.append(np.hstack(idx_in_block))
+            _offsets = np.append(np.int32(0), ao_dims[_non0shl_idx]).cumsum(dtype=np.int32)
+            ao_loc_slice.append(_offsets)
+
+        idx_sections = np.cumsum([len(x) for x in idx])[:-1]
+        ao_loc_slice_sections = np.cumsum([len(x) for x in ao_loc_slice])[:-1]
+        idx = np.asarray(np.hstack(idx), dtype=np.int32)
+        ao_loc_slice = np.asarray(np.hstack(ao_loc_slice), dtype=np.int32)
+        ctr_offsets_slice = np.asarray(
+            cp.stack(ctr_offsets_slice).T.get(order='C'), dtype=np.int32)
+
+        non0ao_idx = ((idx, idx_sections),
+                      (non0shl_idx, non0shl_idx_sections),
+                      ctr_offsets_slice,
+                      (ao_loc_slice, ao_loc_slice_sections))
+        t1 = log.timer_debug2('init ao sparsity', *t1)
+        return non0ao_idx
+
+    def get_non0ao_idx(self, opt=None):
+        if self._non0ao_idx is None:
+            self._non0ao_idx = self._build_non0ao_idx_cache(opt)
+
+        ((idx, idx_sections),
+         (non0shl_idx, non0shl_idx_sections),
+         ctr_offsets_slice,
+         (ao_loc_slice, ao_loc_slice_sections)) = self._non0ao_idx
+        idx = cp.split(asarray(idx, dtype=np.int32), idx_sections)
+        non0shl_idx = cp.split(asarray(non0shl_idx, dtype=np.int32), non0shl_idx_sections)
+        ao_loc_slice = cp.split(asarray(ao_loc_slice, dtype=np.int32), ao_loc_slice_sections)
+        paddings = [0] * len(idx)
+        return list(zip(paddings, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice))
 
     def to_cpu(self):
         grids = gen_grid_cpu.Grids(self.mol)
