@@ -21,7 +21,8 @@ import numpy as np
 import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
-from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import (
+    asarray, pack_tril, unpack_tril, eigh)
 from gpu4pyscf import lib
 from gpu4pyscf.scf import diis, jk, j_engine, hf
 from gpu4pyscf.lib import logger
@@ -37,10 +38,19 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     log = logger.new_logger(mol, verbose)
     cput0 = cput1 = log.init_timer()
 
+    # Preallocate a cupy block as a buffer for small-sized arrays, such as the
+    # mo_energy, mo_occ, numint idx, weights etc. Without this buffer, these
+    # small arrays may occupy the N^2 sized arrays and cause inefficient use of
+    # the memory pool
+    #workspace = cp.empty(max(20*mol.nao, 20*4096))
+    #workspace = None
+    #workspace = cp.empty(1)
+
     mf.dump_flags()
     mf.build(mf.mol)
-    mem_avail0 = get_avail_mem()
-    log.debug1('available GPU memory for SCF: %.3f GB', mem_avail0/1e9)
+    if log.verbose >= logger.DEBUG1:
+        mem_avail = log.print_mem_info()
+        log.debug1('available GPU memory for SCF: %.3f GB', mem_avail/1e9)
 
     conv_tol = mf.conv_tol
     if(conv_tol_grad is None):
@@ -53,12 +63,19 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
             dm0 = mf.make_rdm1()
         else:
             dm0 = mf.get_init_guess(mol, mf.init_guess)
+            if hasattr(dm0, 'mo_coeff') and dm0.mo_coeff.size > dm0.size:
+                # Discard the mo_coeff attribute, force the vxc evaluator to
+                # eval_rho using dm directly 
+                dm0 = asarray(dm0, order='C')
+            else:
+                dm0 = mf.make_wfn(dm0.mo_coeff, dm0.mo_occ)
         cput1 = log.timer_debug1('generating initial guess', *cput1)
 
     h1e = mf.get_hcore(mol) # On CPU
     cput1 = log.timer_debug1('hcore', *cput1)
-    dm, dm0 = asarray(dm0, order='C'), None # on GPU
+    dm, dm0 = dm0, None # on GPU
     vhf = mf.get_veff(mol, dm) # On CPU
+    cp.get_default_memory_pool().free_all_blocks()
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
     scf_conv = False
@@ -80,34 +97,47 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
+        # The Corth in DIIS calls the eigh function that does not overwrite
+        # the input matrices. The input can be overwritten so as to reduce GPU
+        # memory footprint.
+        s1e = asarray(mf.get_ovlp(mol))
+        c = eigh(unpack_tril(asarray(h1e)), s1e, overwrite=True)[1]
+        mf_diis.Corth = c.get()
+        s1e = c = None
     else:
         mf_diis = None
 
     dump_chk = dump_chk and mf.chkfile is not None
     if dump_chk:
         log.warn('Low-mem SCF does not support dumping chkfile')
-    mem_avail1 = get_avail_mem()
-    log.debug1('available GPU memory after SCF initialization: %.3f GB', mem_avail1/1e9)
+    cp.get_default_memory_pool().free_all_blocks()
+    if log.verbose >= logger.DEBUG1:
+        mem_avail = log.print_mem_info()
+        log.debug1('available GPU memory after SCF initialization: %.3f GB', mem_avail/1e9)
+    t1 = log.timer_debug1('SCF initialization', *cput1)
     natm = mol.natm
 
     for cycle in range(mf.max_cycle):
-        t0 = log.init_timer()
+        t0 = t1
         mo_coeff = mo_occ = mo_energy = fock = None
         last_hf_e = e_tot
 
-        cp.get_default_memory_pool().free_all_blocks()
         s1e = asarray(mf.get_ovlp(mol))
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis) # on GPU
-        t1 = log.timer_debug1('DIIS', *t0)
+        t1 = log.timer_debug1('DIIS', *t1)
+        cp.get_default_memory_pool().free_all_blocks()
         mo_energy, mo_coeff = mf.eig(fock, s1e) # on GPU
         fock = s1e = None
         t1 = log.timer_debug1('eig', *t1)
 
         mo_occ = mf.get_occ(mo_energy, mo_coeff) # on GPU
-        cp.get_default_memory_pool().free_all_blocks()
         # Update mo_coeff and mo_occ, allowing get_veff to generate DMs on the fly
         dm, dm_last = mf.make_wfn(mo_coeff, mo_occ), dm # on GPU
         vhf = mf.get_veff(mol, dm, dm_last, vhf) # on CPU
+        cp.get_default_memory_pool().free_all_blocks()
+        if log.verbose >= logger.DEBUG1:
+            mem_avail = log.print_mem_info()
+            log.debug1('available GPU memory: %.3f GB', mem_avail/1e9)
 
         fock = mf.get_fock(h1e, None, vhf)  # = h1e + vhf, no DIIS
         norm_gorb = cp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
@@ -116,8 +146,6 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('SCF iteration', *t0)
         log.info('cycle= %d E= %.15g  delta_E= %4.3g',
                  cycle+1, e_tot, e_tot-last_hf_e)
-        mem_avail1 = get_avail_mem()
-        log.debug1('available GPU memory: %.3f GB', mem_avail1/1e9)
 
         e_diff = abs(e_tot-last_hf_e)
         if e_diff < conv_tol and norm_gorb/natm**.5 < conv_tol_grad:
@@ -297,10 +325,13 @@ class RHF(hf.RHF):
             f = hf.damping(s1e, dm*.5, f, damp_factor)
         if diis is not None and cycle >= diis_start_cycle:
             f = diis.update(s1e, dm, f)
+            cp.get_default_memory_pool().free_all_blocks()
 
         if abs(level_shift_factor) > 1e-4:
+            dm_vir, dm = dm, None
             #:f = hf.level_shift(s1e, dm*.5, f, level_shift_factor)
-            dm_vir = s1e.dot(dm).dot(s1e)
+            dm_vir = s1e.dot(dm_vir)
+            dm_vir = dm_vir.dot(s1e)
             dm_vir *= -.5
             dm_vir += s1e
             dm_vir *= level_shift_factor
@@ -332,6 +363,16 @@ class RHF(hf.RHF):
         self.scf_summary['e2'] = e_coul
         logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
         return e_tot, e_coul
+
+    def _eigh(self, h, s):
+        # In DIIS, fock and overlap matrices are temporarily constructed and
+        # discarded, they can be overwritten in the eigh solver.
+        e, c = eigh(h, s, overwrite=True)
+        # eigh allocates a large memory buffer "work". Immediately free the cupy
+        # memory after the eigh function to avoid this buffer being trapped by
+        # small-sized arrays.
+        cp.get_default_memory_pool().free_all_blocks()
+        return e, c
 
     def to_cpu(self):
         raise NotImplementedError

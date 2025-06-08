@@ -25,7 +25,7 @@ for device_id in range(num_devices):
 props = cupy.cuda.runtime.getDeviceProperties(0)
 GB = 1024*1024*1024
 min_ao_blksize = 256        # maxisum batch size of AOs
-min_grid_blksize = 128*128  # maximum batch size of grids for DFT
+min_grid_blksize = 64*64    # maximum batch size of grids for DFT
 ao_aligned = 32             # global AO alignment for slicing
 grid_aligned = 256          # 256 alignment for grids globally
 

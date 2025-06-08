@@ -554,6 +554,12 @@ class _VHFOpt:
             return vj, vk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
+        if self.h_shls:
+            dms = dms.get()
+            dms_cond = None
+        else:
+            dms = dms_cond = None
+
         kern_counts = 0
         timing_collection = Counter()
         vj_dist = []
@@ -589,7 +595,6 @@ class _VHFOpt:
                 else:
                     scripts.append('jk->s1il')
             shls_excludes = [0, h_shls[0]] * 4
-            dms = dms.get()
             vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                      dms, 1, mol._atm, mol._bas, mol._env,
                                      shls_excludes=shls_excludes)
@@ -722,6 +727,8 @@ class _VHFOpt:
             return vj_xyz, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dm_xyz, dm_cond), non_blocking=True)
+        dm_xyz = dms_cond = None
+
         kern_counts = 0
         timing_collection = Counter()
         vj_dist = []

@@ -455,13 +455,15 @@ def take_last2d(a, indices, out=None):
     assert a.flags.c_contiguous
     assert a.shape[-1] == a.shape[-2]
     nao = a.shape[-1]
-    assert len(indices) == nao
+    nidx = len(indices)
     if a.ndim == 2:
         count = 1
     else:
         count = np.prod(a.shape[:-2])
     if out is None:
-        out = cupy.zeros_like(a)
+        out = cupy.zeros((count, nidx, nidx))
+    else:
+        assert out.size == count*nidx*nidx
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.take_last2d(
@@ -470,10 +472,13 @@ def take_last2d(a, indices, out=None):
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(indices_int32.data.ptr, ctypes.c_void_p),
         ctypes.c_int(count),
+        ctypes.c_int(nidx),
         ctypes.c_int(nao)
     )
     if err != 0:
         raise RuntimeError('failed in take_last2d kernel')
+    if a.ndim == 2:
+        out = out.reshape(nidx,nidx)
     return out
 
 def takebak(out, a, indices, axis=-1):
