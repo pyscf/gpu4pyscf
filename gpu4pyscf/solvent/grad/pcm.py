@@ -321,7 +321,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
 
     if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
         # Note: The v_grids computed above actually use frozen_dm0 as input, so it's actually v_grids_right
-        v_grids_l = pcmobj._get_vgrids(dm, with_nuc = True)
+        v_grids_l = pcmobj._get_vgrids(dm, with_nuc = True)[0]
 
         # TODO: In the case where left and right dm are not the same,
         #       we indeed need to compute the derivative of 0.5 * (K^-1 R + R^T (K^-1)^T).
@@ -467,6 +467,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
 
     if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        # Refer to the comments in gpu4pyscf/solvent/pcm.py::_get_vind()
         de *= 2
 
     t1 = log.timer_debug1('grad solver', *t1)

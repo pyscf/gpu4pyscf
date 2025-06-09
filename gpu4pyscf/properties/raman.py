@@ -113,7 +113,7 @@ def polarizability_derivative_numerical_dEdE(mf, dE = 2.5e-3):
 
         if hasattr(mf, "with_solvent"):
             if not mf.with_solvent.equilibrium_solvation:
-                v_grids = mf.with_solvent._get_vgrids(dm, with_nuc = True)
+                v_grids = mf.with_solvent._get_vgrids(dm, with_nuc = True)[0]
                 for i_atom in range(mol.natm):
                     for i_xyz in range(3):
                         dm1_A = 2 * contract('pu,uq->pq', mo_coeff, mo1[i_atom, i_xyz, :, :] @ mocc.T)

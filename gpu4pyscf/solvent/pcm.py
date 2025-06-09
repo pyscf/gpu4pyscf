@@ -379,12 +379,12 @@ class PCM(lib.StreamObject):
         if not self._intermediates:
             self.build()
         assert dms is not None
-        v_left = self._get_vgrids(dms, with_nuc = True, ndim = 2)
+        v_left = self._get_vgrids(dms, with_nuc = True)
         v_right = v_left
 
         if self.frozen_dm0_for_finite_difference_without_response is not None:
             frozen_dm0 = self.frozen_dm0_for_finite_difference_without_response
-            v_right = self._get_vgrids(frozen_dm0, with_nuc = True, ndim = 2)
+            v_right = self._get_vgrids(frozen_dm0, with_nuc = True)
 
         b = self.left_multiply_R(v_right.T)
         q = self.left_solve_K(b).T
@@ -411,6 +411,8 @@ class PCM(lib.StreamObject):
             # and D(0) is the unperturbed density, not optimized in the perturbed SCF,
             # we call it frozen dm0 or right dm0.
             # Compared to the original E^{PCM}, the factor of 0.5 disappears.
+            #
+            # Refer to https://github.com/pyscf/gpu4pyscf/pull/423 for more discussion.
             epcm *= 2
 
         self._intermediates['q'] = q[0]
@@ -421,7 +423,7 @@ class PCM(lib.StreamObject):
     def _get_qsym(self, dms, with_nuc = False):
         if not self._intermediates:
             self.build()
-        v_grids = self._get_vgrids(dms, with_nuc, ndim = 2)
+        v_grids = self._get_vgrids(dms, with_nuc)
 
         b = self.left_multiply_R(v_grids.T)
         q = self.left_solve_K(b).T
@@ -432,7 +434,7 @@ class PCM(lib.StreamObject):
 
         return q_sym[0], q[0]
 
-    def _get_vgrids(self, dms, with_nuc = False, ndim = 1):
+    def _get_vgrids(self, dms, with_nuc = False):
         if not self._intermediates:
             self.build()
         nao = dms.shape[-1]
@@ -447,11 +449,7 @@ class PCM(lib.StreamObject):
         else:
             v_grids = -1.0 * v_grids_e
 
-        if ndim == 1:
-            return v_grids[0]
-        else:
-            assert ndim == 2
-            return v_grids
+        return v_grids
 
     def _get_v(self, dms):
         '''
