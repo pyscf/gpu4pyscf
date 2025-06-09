@@ -26,6 +26,11 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf import lib
 from gpu4pyscf.scf import diis, jk, j_engine, hf
 from gpu4pyscf.lib import logger
+from gpu4pyscf import __config__
+
+if getattr(__config__, 'mempool_threshold', 0) > 0:
+    from gpu4pyscf.lib.cupy_helper import set_conditional_mempool_malloc
+    set_conditional_mempool_malloc(__config__.mempool_threshold)
 
 __all__ = [
     'RHF',

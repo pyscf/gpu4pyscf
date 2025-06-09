@@ -38,6 +38,10 @@ if props['totalGlobalMem'] < 16 * GB:
 mem_fraction = 0.9
 cupy.get_default_memory_pool().set_limit(fraction=mem_fraction)
 
+# Threshold (in bytes) to control the custom memory allocator. The custom memory
+# allocator only cache the small-sized memory blocks in the memory pool.
+mempool_threshold = 0
+
 if props['sharedMemPerBlockOptin'] > 65536:
     shm_size = props['sharedMemPerBlockOptin']
 else:
