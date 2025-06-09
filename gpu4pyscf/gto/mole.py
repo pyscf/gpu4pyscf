@@ -54,7 +54,7 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
 
     # Preallocate a buffer in cupy memory pool for small arrays held in # bas_templates
     workspace = cp.empty(30**2*100)
-    workspace = None
+    workspace = None # noqa: F841
     bas_templates = {}
     _bas = []
     _env = mol._env.copy()

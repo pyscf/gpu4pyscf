@@ -556,9 +556,9 @@ class _VHFOpt:
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         if self.h_shls:
             dms = dms.get()
-            dms_cond = None
+            dm_cond = None
         else:
-            dms = dms_cond = None
+            dms = dm_cond = None
 
         kern_counts = 0
         timing_collection = Counter()
@@ -727,7 +727,7 @@ class _VHFOpt:
             return vj_xyz, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dm_xyz, dm_cond), non_blocking=True)
-        dm_xyz = dms_cond = None
+        dm_xyz = dm_cond = None
 
         kern_counts = 0
         timing_collection = Counter()

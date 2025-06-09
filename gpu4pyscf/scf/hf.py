@@ -446,7 +446,7 @@ def init_guess_by_minao(mol):
     dm = cupy.zeros((nao, nao))
     # Preallocate a buffer in cupy memory pool for small arrays held in atm_conf
     workspace = cupy.empty(50**2*12)
-    workspace = None
+    workspace = None # noqa: F841
     atm_conf = {}
     mo_coeff = []
     mo_occ = []
