@@ -1095,11 +1095,11 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-def set_conditional_mempool_malloc(n_bytes_threshold=200000000):
+def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
     '''
     Customize CuPy memory allocator.
 
-    For large memory allocations (>200MB by default), the custom allocator bypasses
+    For large memory allocations (>100MB by default), the custom allocator bypasses
     the CuPy memory pool, directly calling the CUDA malloc API. The large memory
     chunks will be released back to the system when the associated object is
     destroyed. Only small memory blocks are allocated from the CuPy memory pool.

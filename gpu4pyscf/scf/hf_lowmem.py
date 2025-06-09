@@ -21,16 +21,10 @@ import numpy as np
 import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
-from gpu4pyscf.lib.cupy_helper import (
-    asarray, pack_tril, unpack_tril, eigh)
+from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, eigh
 from gpu4pyscf import lib
 from gpu4pyscf.scf import diis, jk, j_engine, hf
 from gpu4pyscf.lib import logger
-from gpu4pyscf import __config__
-
-if getattr(__config__, 'mempool_threshold', 0) > 0:
-    from gpu4pyscf.lib.cupy_helper import set_conditional_mempool_malloc
-    set_conditional_mempool_malloc(__config__.mempool_threshold)
 
 __all__ = [
     'RHF',
@@ -42,14 +36,6 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     verbose = mf.verbose
     log = logger.new_logger(mol, verbose)
     cput0 = cput1 = log.init_timer()
-
-    # Preallocate a cupy block as a buffer for small-sized arrays, such as the
-    # mo_energy, mo_occ, numint idx, weights etc. Without this buffer, these
-    # small arrays may occupy the N^2 sized arrays and cause inefficient use of
-    # the memory pool
-    #workspace = cp.empty(max(20*mol.nao, 20*4096))
-    #workspace = None
-    #workspace = cp.empty(1)
 
     mf.dump_flags()
     mf.build(mf.mol)

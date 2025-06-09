@@ -15,3 +15,7 @@
 __version__ = '1.4.1'
 
 from . import lib, grad, hessian, solvent, scf, dft, tdscf, nac
+
+# Overwrite the cupy memory allocator. Make memory pool manage small-sized
+# arrays only.
+lib.cupy_helper.set_conditional_mempool_malloc()
