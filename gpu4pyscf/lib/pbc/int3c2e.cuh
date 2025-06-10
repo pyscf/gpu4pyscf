@@ -19,8 +19,10 @@
 #define WARP_SIZE       32
 // corresponding to 256 threads
 #define WARPS           8
+#define THREADS         (WARP_SIZE*WARPS)
 #define IMG_MASK_SLOTS  1024
 #define L_AUX_MAX       6
+#define L_AUX1          7
 #define SPTAKS_PER_BLOCK        32
 #define IMG_BLOCK       16384
 
@@ -60,9 +62,16 @@ typedef struct {
     int *img_idx; // indices of img_coords in each shell-pair
 } PBCInt3c2eBounds;
 
+typedef struct {
+    int *bas_ij_idx;
+    // the bas_ij_idx offset for each blockIdx.x
+    int *shl_pair_offsets;
+    // gout_stride for for each (li,lj) pattern
+    int *gout_stride_lookup;
+} PBCInt2c2eBounds;
+
 #ifdef __CUDACC__
-extern __constant__ int c_g_pair_idx[];
-extern __constant__ int c_g_pair_offsets[];
-extern __constant__ int c_g_cart_idx[];
+extern __constant__ int16_t c_pair_idx[];
+extern __constant__ int c_pair_offsets[];
 #endif
 #endif

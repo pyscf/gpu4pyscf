@@ -34,13 +34,16 @@ from pyscf.pbc.df.gdf_builder import libpbc
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import (
+    return_cupy_array, pack_tril, get_avail_mem, asarray)
 from gpu4pyscf.lib.memcpy import copy_array
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import _check_kpts, AFTDF
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.__config__ import num_devices
+
+DEBUG = False
 
 
 class GDF(lib.StreamObject):
@@ -109,10 +112,23 @@ class GDF(lib.StreamObject):
             else:
                 assert cell.omega < 0
                 omega = abs(cell.omega)
-            cderi, self._cderip, self._cderi_idx = \
-                rsdf_builder.compressed_cderi_gamma_point(
-                    cell, auxcell, omega, with_long_range,
-                    self.linear_dep_threshold)
+            if DEBUG:
+                cderi, cderip = \
+                    rsdf_builder.build_cderi_gamma_point(
+                        cell, auxcell, omega, with_long_range,
+                        self.linear_dep_threshold)
+                nao = cell.nao
+                rows, cols = np.tril_indices(nao)
+                diag_idx = np.arange(nao)
+                diag_idx = diag_idx*(diag_idx+1)//2 + diag_idx
+                cderi = cderi.popitem()[1]
+                cderi = cderi[:, rows, cols]
+                self._cderi_idx = rows, cols, diag_idx
+            else:
+                cderi, self._cderip, self._cderi_idx = \
+                    rsdf_builder.compressed_cderi_gamma_point(
+                        cell, auxcell, omega, with_long_range,
+                        self.linear_dep_threshold)
             self._cderi = [None] * num_devices
             self.nao = cell.nao
             if num_devices == 1:
@@ -278,7 +294,7 @@ class GDF(lib.StreamObject):
             if isinstance(cderi_sparse, cp.ndarray):
                 buf = cderi_sparse[p0:p1,:]
             else:
-                buf = cp.asarray(cderi_sparse[p0:p1,:])
+                buf = asarray(cderi_sparse[p0:p1,:])
             if unpack:
                 buf2 = buf_cderi[:p1-p0]
                 buf2[:,cols,rows] = buf2[:,rows,cols] = buf

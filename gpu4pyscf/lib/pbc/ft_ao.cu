@@ -17,9 +17,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
+#include "int3c2e.cuh"
 #include "ft_ao.cuh"
 
 #define GOUT_WIDTH      19
@@ -64,9 +66,9 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
     int stride_j = bounds.stride_j;
     int g_size = bounds.g_size;
     int gx_len = g_size * nGv_per_block * nsp_per_block;
-    int *idx_ij = c_g_pair_idx + c_g_pair_offsets[li*LMAX1+lj];
-    int *idy_ij = idx_ij + nfij;
-    int *idz_ij = idy_ij + nfij;
+    int16_t *idx_ij = c_pair_idx + c_pair_offsets[li*L_AUX1+lj];
+    int16_t *idy_ij = idx_ij + nfij;
+    int16_t *idz_ij = idy_ij + nfij;
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -259,21 +261,20 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
     }
 }
 
-__global__
-void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv)
+__global__ static
+void ft_aopair_fill_triu_kernel(double *out, int *conj_mapping, int bvk_ncells,
+                                int nao, int nGv)
 {
-    int j = blockIdx.x;
-    int i = blockIdx.y;
-    if (i <= j) {
+    int Gv_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int j = blockIdx.y * blockDim.y + threadIdx.y;
+    int i = blockIdx.z * blockDim.z + threadIdx.z;
+    if (Gv_id >= nGv || i >= nao || j >= nao || i <= j) {
         return;
     }
-    size_t nao = gridDim.x;
     size_t nao2_nGv = nao * nao * nGv;
     size_t ij = (i * nao + j) * nGv;
     size_t ji = (j * nao + i) * nGv;
-    for (int n = threadIdx.x; n < bvk_ncells*nGv; n += blockDim.x) {
-        int Gv_id = n % nGv;
-        int k = n / nGv;
+    for (int k = 0; k < bvk_ncells; ++k) {
         int ck = conj_mapping[k];
         out[ji + ck*nao2_nGv+Gv_id] = out[ij + k*nao2_nGv+Gv_id];
     }
@@ -284,6 +285,25 @@ void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv
 //                       int *conj_mapping, int bvk_ncells, int nGv)
 //{
 //}
+
+extern "C" {
+int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells, int nGv)
+{
+    dim3 threads(16, 8, 8);
+    int nao_b = (nao + 7) / 8;
+    int nGv2 = nGv * 2; // *2 for complex number
+    int nGv2b = (nGv2 + 15) / 16;
+    dim3 blocks(nGv2b, nao_b, nao_b);
+    ft_aopair_fill_triu_kernel<<<blocks, threads>>>(
+        out, conj_mapping, bvk_ncells, nao, nGv2);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in ft_aopair_fill_triu: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+}
 
 #define REMOTE_THRESHOLD 50
 
