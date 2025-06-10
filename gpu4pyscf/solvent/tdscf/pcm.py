@@ -59,6 +59,10 @@ class WithSolventTDSCF:
         if not self.with_solvent.equilibrium_solvation:
             self.with_solvent.build()
 
+    def reset(self, mol=None):
+        self.with_solvent.reset(mol)
+        return super().reset(mol)
+
     def gen_response(self, *args, **kwargs):
         pcmobj = self.with_solvent
         mf = self._scf
@@ -98,6 +102,8 @@ class WithSolventTDSCF:
     def nuc_grad_method(self):
         grad_method = super().nuc_grad_method()
         return make_tdscf_gradient_object(grad_method)
+
+    Gradients = nuc_grad_method
 
 
 class WithSolventTDSCFGradient:

@@ -467,11 +467,10 @@ class WithSolventGrad:
 
     def to_cpu(self):
         from pyscf.solvent.grad import pcm  # type: ignore
-        grad_method = self.undo_solvent().to_cpu()
+        grad_method = self.base.to_cpu().PCM().Gradients()
         return pcm.make_grad_object(grad_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-        dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:

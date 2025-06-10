@@ -43,10 +43,19 @@ def pcm_for_scf(mf, solvent_obj=None, dm=None):
         solvent_obj = PCM(mf.mol)
     return _attach_solvent._for_scf(mf, solvent_obj, dm)
 
+def pcm_for_tdscf(method, solvent_obj, dm=None):
+    msg = ('Solvent model for TDDFT methods must be initialized at SCF level. '
+           'The TDDFT can then be applied as a submethod of the SCF object. '
+           'For example, mf.PCM().TDA(), mf.PCM().TDDFT()')
+    raise RuntimeError(msg)
+
 # Inject PCM to SCF, TODO: add it to other methods later
 from gpu4pyscf import scf
+from gpu4pyscf import tdscf
 scf.hf.RHF.PCM = pcm_for_scf
 scf.uhf.UHF.PCM = pcm_for_scf
+tdscf.rhf.TDBase.PCM = pcm_for_tdscf
+
 # TABLE II,  J. Chem. Phys. 122, 194110 (2005)
 XI = {
     6: 4.84566077868,
@@ -459,24 +468,16 @@ class PCM(lib.StreamObject):
         return vmat
 
     def nuc_grad_method(self, grad_method):
-        from gpu4pyscf.solvent.grad import pcm as pcm_grad
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(grad_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return pcm_grad.make_grad_object(grad_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def grad(self):
+        raise NotImplementedError
 
     def Hessian(self, hess_method):
-        from gpu4pyscf.solvent.hessian import pcm as pcm_hess
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(hess_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return pcm_hess.make_hess_object(hess_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def hess(self):
+        raise NotImplementedError
 
     def reset(self, mol=None):
         if mol is not None:

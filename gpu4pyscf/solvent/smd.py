@@ -414,24 +414,16 @@ class SMD(pcm.PCM):
         return get_cds_legacy(self)[0]
 
     def nuc_grad_method(self, grad_method):
-        from gpu4pyscf.solvent.grad import smd as smd_grad
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(grad_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return smd_grad.make_grad_object(grad_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def grad(self):
+        raise NotImplementedError
 
     def Hessian(self, hess_method):
-        from gpu4pyscf.solvent.hessian import smd as smd_hess
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(hess_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return smd_hess.make_hess_object(hess_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def hess(self):
+        raise NotImplementedError
 
     def reset(self, mol=None):
         super().reset(mol)

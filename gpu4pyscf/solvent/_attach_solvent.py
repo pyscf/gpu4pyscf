@@ -134,8 +134,23 @@ class SCFWithSolvent(_Solvation):
         return e_tot, e_coul
 
     def nuc_grad_method(self):
-        grad_method = super().nuc_grad_method()
-        return self.with_solvent.nuc_grad_method(grad_method)
+        # TODO: merge the two make_grad_object functions into a general one
+        from gpu4pyscf.solvent.pcm import PCM
+        if isinstance(self.with_solvent, PCM):
+            from gpu4pyscf.solvent.grad.pcm import make_grad_object
+        else:
+            from gpu4pyscf.solvent.grad.smd import make_grad_object
+        return make_grad_object(super().Gradients())
+
+    Gradients = nuc_grad_method
+
+    def Hessian(self, hess_method):
+        from gpu4pyscf.solvent.pcm import PCM
+        if isinstance(self.with_solvent, PCM):
+            from gpu4pyscf.solvent.hessian.pcm import make_hess_object
+        else:
+            from gpu4pyscf.solvent.hessian.smd import make_hess_object
+        return make_hess_object(super().Hessian())
 
     def TDA(self, equilibrium_solvation=None, eps_optical=1.78):
         if equilibrium_solvation is None:
@@ -164,12 +179,6 @@ class SCFWithSolvent(_Solvation):
         td = super().CasidaTDDFT()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-
-    Gradients = nuc_grad_method
-
-    def Hessian(self):
-        hess_method = super().Hessian()
-        return self.with_solvent.Hessian(hess_method)
 
     def gen_response(self, *args, **kwargs):
         vind = super().gen_response(*args, **kwargs)
