@@ -216,6 +216,12 @@ def grad_nuc(pcmobj, dm, q_sym = None):
     grid_coords  = pcmobj.surface['grid_coords'].get()
     exponents    = pcmobj.surface['charge_exp'].get()
 
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        # Note: The q_sym computed above actually use frozen_dm0 as input, so it's actually q_sym_right
+        q_sym_left, _ = pcmobj._get_qsym(dm, with_nuc = True)
+        q_sym_left = q_sym_left.get()
+        q_sym += q_sym_left
+
     atom_coords = mol.atom_coords(unit='B')
     atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
@@ -266,6 +272,17 @@ def grad_qv(pcmobj, dm, q_sym = None):
                           direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
                           intopt=intopt)
 
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        frozen_dm0 = pcmobj.frozen_dm0_for_finite_difference_without_response
+        # Note: The q_sym computed above actually use frozen_dm0 as input, so it's actually q_sym_right
+        q_sym_left, _ = pcmobj._get_qsym(dm, with_nuc = True)
+        dvj += int1e_grids_ip1(mol, grid_coords, dm = frozen_dm0, charges = q_sym_left,
+                              direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                              intopt=intopt)
+        dq  += int1e_grids_ip2(mol, grid_coords, dm = frozen_dm0, charges = q_sym_left,
+                              direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                              intopt=intopt)
+
     aoslice = mol.aoslice_by_atom()
     dvj = 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
@@ -301,6 +318,20 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         A = pcmobj._intermediates['A']
         D = pcmobj._intermediates['D']
         S = pcmobj._intermediates['S']
+
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        # Note: The v_grids computed above actually use frozen_dm0 as input, so it's actually v_grids_right
+        v_grids_l = pcmobj._get_vgrids(dm, with_nuc = True)[0]
+
+        # TODO: In the case where left and right dm are not the same,
+        #       we indeed need to compute the derivative of 0.5 * (K^-1 R + R^T (K^-1)^T).
+        #       This is not the same as the derivative of K^-1 R, if IEFPCM or SSVPE is used.
+        #       However the difference is too small, and in the use case of computing polarizability derivative,
+        #       we are not able to observe the difference.
+        #       If there are other use cases where the error is more significant,
+        #       we probably need to fix this.
+        #       This is the only term affected by this problem in energy and gradient calculation.
+        #       In hessian calculation, similar problems occur in energy 2nd derivative and Fock derivative terms.
 
     vK_1 = pcmobj.left_solve_K(v_grids_l, K_transpose = True)
 
@@ -434,6 +465,11 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
 
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
+
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        # Refer to the comments in gpu4pyscf/solvent/pcm.py::_get_vind()
+        de *= 2
+
     t1 = log.timer_debug1('grad solver', *t1)
     return de.get()
 
