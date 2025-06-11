@@ -461,7 +461,6 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
         else:
             rho_tot = cupy.empty([5,ngrids_local])
 
-        dm_mask_buf = vtmp_buf = cupy.empty(nao*nao)
         if mo_coeff is None:
             buf = cupy.empty(MIN_BLK_SIZE * nao)
             dm_mask_buf = cupy.empty(nao*nao)
@@ -510,6 +509,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
         exc = den = vxc = rho_tot = weights = None
         t0 = log.timer_debug1(f'eval vxc on Device {device_id}', *t0)
 
+        vtmp_buf = cupy.empty(nao*nao)
         vmat = cupy.zeros((nao, nao))
         p0 = p1 = 0
         for ao_mask, idx, weight, _ in ni.block_loop(
@@ -517,7 +517,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
                 grid_range=(grid_start, grid_end)):
             p1 = p0 + weight.size
             nao_sub = len(idx)
-            vtmp = vtmp_buf[:nao_sub**2].reshape(nao_sub, nao_sub)
+            vtmp = cupy.ndarray((nao_sub, nao_sub), memptr=vtmp_buf.data)
             if xctype == 'LDA':
                 aow = _scale_ao(ao_mask, wv[0,p0:p1], out=buf)
                 add_sparse(vmat, ao_mask.dot(aow.T, out=vtmp), idx)
@@ -527,9 +527,9 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
             elif xctype == 'NLC':
                 raise NotImplementedError('NLC')
             elif xctype == 'MGGA':
-                aow = _scale_ao(ao_mask, wv[:4,p0:p1], out=buf)
                 vtmp = _tau_dot(ao_mask, ao_mask, wv[4,p0:p1], buf=buf, out=vtmp)
-                vtmp = contract('ig,jg->ij', ao_mask[0], aow.T, beta=1., out=vtmp)
+                aow = _scale_ao(ao_mask, wv[:4,p0:p1], out=buf)
+                vtmp = contract('ig,jg->ij', ao_mask[0], aow, beta=1., out=vtmp)
                 add_sparse(vmat, vtmp, idx)
             elif xctype == 'HF':
                 pass
@@ -1710,7 +1710,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grid_start, grid_end = grid_range
     assert grid_start % MIN_BLK_SIZE == 0
     block_start = grid_start // MIN_BLK_SIZE
-    block_end = grid_end // MIN_BLK_SIZE
+    block_end = (grid_end + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE
 
     device_id = cupy.cuda.Device().id
     log.debug1(f'{grid_start} - {grid_end} grids are calculated on Device {device_id}.')
@@ -2094,9 +2094,9 @@ def _scale_ao(ao, wv, out=None):
 def _tau_dot(bra, ket, wv, buf=None, out=None):
     '''1/2 <nabla i| v | nabla j>'''
     wv = cupy.asarray(.5 * wv)
-    mat  = contract('ig,jg->ij', bra[1], _scale_ao(ket[1], wv, out=buf).T, out=out)
-    mat += contract('ig,jg->ij', bra[2], _scale_ao(ket[2], wv, out=buf).T, beta=1., out=mat)
-    mat += contract('ig,jg->ij', bra[3], _scale_ao(ket[3], wv, out=buf).T, beta=1., out=mat)
+    mat = contract('ig,jg->ij', bra[1], _scale_ao(ket[1], wv, out=buf), out=out)
+    mat = contract('ig,jg->ij', bra[2], _scale_ao(ket[2], wv, out=buf), beta=1., out=mat)
+    mat = contract('ig,jg->ij', bra[3], _scale_ao(ket[3], wv, out=buf), beta=1., out=mat)
     return mat
 
 class _GDFTOpt:
