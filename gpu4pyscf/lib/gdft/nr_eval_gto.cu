@@ -26,7 +26,6 @@
 #include "contract_rho.cuh"
 
 #define NG_PER_BLOCK      256
-#define MIN_BLK_SIZE    4096
 #define LMAX            8
 
 #define MIN(X,Y)        ((X)<(Y)?(X):(Y))

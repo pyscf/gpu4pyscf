@@ -52,7 +52,7 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
     elif allow_replica is False:
         allow_replica = -1
 
-    # Preallocate a buffer in cupy memory pool for small arrays held in # bas_templates
+    # Preallocate a buffer in cupy memory pool for small arrays held in bas_templates
     workspace = cp.empty(30**2*100)
     workspace = None # noqa: F841
     bas_templates = {}
