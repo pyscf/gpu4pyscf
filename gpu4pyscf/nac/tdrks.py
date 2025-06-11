@@ -23,6 +23,7 @@ from pyscf import lib
 import pyscf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad import tdrks
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
@@ -60,6 +61,12 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
         yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     LI = xI-yI    # eq.(83) in Ref. [1]
+
+    ni = mf._numint
+    ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    f1vo, f1oo, vxc1, _ = tdrks._contract_xc_kernel(td_grad, mf.xc, dmxpy, dmzoo, True, False, singlet)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -109,6 +116,11 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
     eri1 = -mol.intor('int2e_ip1', aosym='s1', comp=3)
     eri1 = eri1.reshape(3,nao,nao,nao,nao)
+    
+    fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
+    veff1_0 = vxc1[1:]
+    veff1_1 = (f1oo[1:] + fxcz1[1:] + k1ao[1:] * 2) * 2  # *2 for dmz1doo+dmz1oo.T
+
     for k, ia in enumerate(atmlst): # eq.(58) in Ref. [1]
         shl0, shl1, p0, p1 = offsetdic[ia]
         h1ao = hcore_deriv(ia)

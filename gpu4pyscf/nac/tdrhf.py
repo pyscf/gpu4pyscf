@@ -22,6 +22,7 @@ import numpy as np
 from pyscf import lib
 import pyscf
 from gpu4pyscf.lib import logger
+from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
@@ -131,13 +132,66 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
         ds1_tmp[:,:,p1:] = 0
 
         de[k] = cp.einsum('xpq,pq->x', h1ao, dmz1doo)
-        de[k] -= cp.einsum('xpq,pq->x', s1_tmp, W)
-        de[k] += cp.einsum('xijkl,ij,kl->x', erijk, oo0, dmz1doo)
+        # de[k] -= cp.einsum('xpq,pq->x', s1_tmp, W)
+        # de[k] += cp.einsum('xijkl,ij,kl->x', erijk, oo0, dmz1doo)
         de_etf[k] = de[k]
-        de[k] += cp.einsum('xij,ij->x', ds1_tmp, xIao*EI)
-        de[k] += cp.einsum('xij,ij->x', ds1_tmp, yIao*EI)
+        # de[k] += cp.einsum('xij,ij->x', ds1_tmp, xIao*EI)
+        # de[k] += cp.einsum('xij,ij->x', ds1_tmp, yIao*EI)
         de_etf[k] += cp.einsum('xij,ij->x', s1_tmp, xIao*EI) * 0.5
         de_etf[k] += cp.einsum('xij,ij->x', s1_tmp, yIao*EI) * 0.5
+    
+    h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
+    s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    dh_td = contract("xij,ij->xi", h1, dmz1doo)
+    ds = contract("xij,ij->xi", s1, (W + W.T))
+
+    dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
+    if mol.has_ecp():
+        dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+    extra_force = cp.zeros((len(atmlst), 3))
+
+    dvhf_all = 0
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0 * 2) 
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_nac.get_veff(mol, dmz1doo)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
+    dvhf = td_nac.get_veff(mol, oo0 * 2)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
+
+    delec = dh_td*2 #- ds
+    aoslices = mol.aoslice_by_atom()
+    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+
+    offsetdic = mol.offset_nr_by_atom()
+    xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
+    yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
+    ds_x = contract("xji,ij->xi", s1, xIao)
+    ds_y = contract("xji,ij->xi", s1, yIao)
+    ds_x_etf = contract("xij,ij->xi", s1, (xIao*EI + xIao*EI.T) * 0.5)
+    ds_y_etf = contract("xij,ij->xi", s1, (yIao*EI + yIao*EI.T) * 0.5)
+    dsxy = cp.asarray([cp.sum(ds_x[:, p0:p1] + ds_y[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+    dsxy_etf = cp.asarray([cp.sum(ds_x_etf[:, p0:p1] + ds_y_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+    # de2 = 2.0 * dvhf_all + dh1e_td + delec + extra_force + dsxy
+    # de_etf2 = de2 + dsxy_etf
+    de2 = dh1e_td + delec #+ extra_force + dsxy
+    de_etf2 = de2 + dsxy_etf
+    import pdb
+    pdb.set_trace()
+
+
+    # for ia in range(mol.natm):
+    #     shl0, shl1, p0, p1 = offsetdic[ia]
+    #     de_etf[k] = de[k]
+    #     de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], xIao[:, p0:p1])
+    #     de[ia] += cp.einsum('xij,ij->x', ds1[:, :, p0:p1], yIao[:, p0:p1])
+    # de_etf[k] += cp.einsum('xij,ij->x', s1_tmp, xIao*EI) * 0.5
+    # de_etf[k] += cp.einsum('xij,ij->x', s1_tmp, yIao*EI) * 0.5
     
     de = de.get()
     de_etf = de_etf.get()
@@ -165,6 +219,7 @@ class NAC(lib.StreamObject):
         "de_scaled",
         "de_etf",
         "de_etf_scaled",
+        "_write"
     }
 
     def __init__(self, td):
@@ -178,6 +233,8 @@ class NAC(lib.StreamObject):
         self.de_scaled = None
         self.de_etf = None
         self.de_etf_scaled = None
+
+    _write      = rhf_grad_cpu.GradientsBase._write
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
