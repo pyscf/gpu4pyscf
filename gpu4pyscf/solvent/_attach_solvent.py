@@ -152,47 +152,35 @@ class SCFWithSolvent(_Solvation):
             from gpu4pyscf.solvent.hessian.smd import make_hess_object
         return make_hess_object(super().Hessian())
 
-    def TDA(self, equilibrium_solvation=None, eps_optical=1.78):
-        if equilibrium_solvation is None:
-            raise ValueError('equilibrium_solvation must be specified')
+    def TDA(self, equilibrium_solvation=False, **kwargs):
         td = super().TDA()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation=equilibrium_solvation)
 
-    def TDDFT(self, equilibrium_solvation=None, eps_optical=1.78):
-        if equilibrium_solvation is None:
-            raise ValueError('equilibrium_solvation must be specified')
+    def TDDFT(self, equilibrium_solvation=False, **kwargs):
         td = super().TDDFT()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-    
-    def TDHF(self, equilibrium_solvation=None, eps_optical=1.78):
-        if equilibrium_solvation is None:
-            raise ValueError('equilibrium_solvation must be specified')
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation=equilibrium_solvation)
+
+    def TDHF(self, equilibrium_solvation=False, **kwargs):
         td = super().TDHF()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-    
-    def CasidaTDDFT(self, equilibrium_solvation=None, eps_optical=1.78):
-        if equilibrium_solvation is None:
-            raise ValueError('equilibrium_solvation must be specified')
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation=equilibrium_solvation)
+
+    def CasidaTDDFT(self, equilibrium_solvation=False, **kwargs):
         td = super().CasidaTDDFT()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
-        return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
+        return pcm_td.make_tdscf_object(td, equilibrium_solvation=equilibrium_solvation)
 
     def gen_response(self, *args, **kwargs):
-        vind = super().gen_response(*args, **kwargs)
+        vind = self.undo_solvent().gen_response(*args, **kwargs)
         is_uhf = isinstance(self, scf.uhf.UHF)
-        # singlet=None is orbital hessian or CPHF type response function
-        singlet = kwargs.get('singlet', True)
-        singlet = singlet or singlet is None
         def vind_with_solvent(dm1):
             v = vind(dm1)
             if self.with_solvent.equilibrium_solvation:
                 if is_uhf:
-                    v_solvent = self.with_solvent._B_dot_x(dm1[0]+dm1[1])
-                    v += v_solvent
-                elif singlet:
+                    v += self.with_solvent._B_dot_x(dm1[0]+dm1[1])
+                else:
                     v += self.with_solvent._B_dot_x(dm1)
             return v
         return vind_with_solvent

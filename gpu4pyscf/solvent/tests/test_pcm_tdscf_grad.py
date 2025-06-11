@@ -393,31 +393,31 @@ class KnownValues(unittest.TestCase):
         mol1 = gto.M(atom='H  0.  0.  1.803; F  0.  0.  0.', verbose=0, unit='B')
         mol2 = gto.M(atom='H  0.  0.  1.805; F  0.  0.  0.', verbose=0, unit='B')
         mf = mol0.UKS(xc='b3lyp').to_gpu().PCM().run()
-        td = mf.TDA(equilibrium_solvation=False).PCM().run()
+        td = mf.TDA().PCM().run()
         g1 = td.nuc_grad_method().kernel()
 
         mf = mol1.UKS(xc='b3lyp').PCM().run()
-        td1 = mf.TDA(equilibrium_solvation=False).run()
+        td1 = mf.TDA().run()
         mf = mol2.UKS(xc='b3lyp').PCM().run()
-        td2 = mf.TDA(equilibrium_solvation=False).run()
+        td2 = mf.TDA().run()
         self.assertAlmostEqual((td2.e_tot[0]-td1.e_tot[0])/0.002, g1[0,2], 5)
 
     def test_scanner(self):
-        mol0 = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
-        td = mol0.RHF().to_gpu().PCM().TDA(equilibrium_solvation=False).Gradients()
+        mol = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
+        td = mol.RHF().to_gpu().PCM().TDA().Gradients()
         scan = td.as_scanner()
         e, de = scan('H 0 0 0; F .1 0 2.1')
 
-        td_ref = mol0.RHF().to_gpu().PCM().run().TDA(equilibrium_solvation=False).run()
-        self.assertAlmostEqual(e, -98.20641861937548, 8)
-        self.assertAlmostEqual(e, td_ref._scf.e_tot + td_ref.e[0], 7)
-        self.assertAlmostEqual(abs(ref - de).max(), 0, 5)
+        mol0 = gto.M(atom='H 0 0 0; F .1 0 2.1', verbose=0, unit='B')
+        td_ref = mol0.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA().run(conf_tol=1e-10)
+        assert abs(e - -98.20372872285137) < 1e-8
+        assert abs(e - td_ref.e_tot[0]) < 1e-8
 
-        mol1 = gto.M(atom='H 0 0 -0.01; F .1 0 2.1', verbose=0, unit='B')
-        td1 = mol1.RHF().to_gpu().PCM().run().TDA(equilibrium_solvation=False).run()
-        mol2 = gto.M(atom='H 0 0  0.01; F .1 0 2.1', verbose=0, unit='B')
-        td2 = mol1.RHF().to_gpu().PCM().run().TDA(equilibrium_solvation=False).run()
-        self.assertAlmostEqual((td2.e_tot[0]-td1.e_tot[0])/0.02, de[0,2], 3)
+        mol1 = gto.M(atom='H 0 0 -0.001; F .1 0 2.1', verbose=0, unit='B')
+        td1 = mol1.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA().run(conf_tol=1e-10)
+        mol2 = gto.M(atom='H 0 0  0.001; F .1 0 2.1', verbose=0, unit='B')
+        td2 = mol2.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA().run(conf_tol=1e-10)
+        assert abs((td2.e_tot[0]-td1.e_tot[0])/0.002- de[0,2]) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for TDHF and TDDFT Gradient with PCM")

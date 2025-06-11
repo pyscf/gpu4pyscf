@@ -43,10 +43,10 @@ def pcm_for_scf(mf, solvent_obj=None, dm=None):
         solvent_obj = PCM(mf.mol)
     return _attach_solvent._for_scf(mf, solvent_obj, dm)
 
-def pcm_for_tdscf(method, solvent_obj, dm=None):
+def pcm_for_tdscf(method, *args, **kwargs):
     msg = ('Solvent model for TDDFT methods must be initialized at SCF level. '
            'The TDDFT can then be applied as a submethod of the SCF object. '
-           'For example, mf.PCM().TDA(), mf.PCM().TDDFT()')
+           'For example, mf.PCM().TDA(equilibrium_solvation=False)')
     raise RuntimeError(msg)
 
 # Inject PCM to SCF, TODO: add it to other methods later
@@ -470,14 +470,23 @@ class PCM(lib.StreamObject):
     def nuc_grad_method(self, grad_method):
         raise DeprecationWarning
 
-    def grad(self):
-        raise NotImplementedError
+    def grad(self, dm):
+        from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_nuc, grad_solver
+        de_solvent = grad_qv(self, dm)
+        de_solvent+= grad_solver(self, dm)
+        de_solvent+= grad_nuc(self, dm)
+        return de_solvent
 
     def Hessian(self, hess_method):
         raise DeprecationWarning
 
-    def hess(self):
-        raise NotImplementedError
+    def hess(self, dm):
+        from gpu4pyscf.solvent.hessian.pcm import (
+            analytical_hess_nuc, analytical_hess_qv, analytical_hess_solver)
+        de_solvent  =    analytical_hess_nuc(self, dm, verbose=self.verbose)
+        de_solvent +=     analytical_hess_qv(self, dm, verbose=self.verbose)
+        de_solvent += analytical_hess_solver(self, dm, verbose=self.verbose)
+        return de_solvent
 
     def reset(self, mol=None):
         if mol is not None:

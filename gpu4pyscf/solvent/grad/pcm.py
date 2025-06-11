@@ -475,10 +475,10 @@ class WithSolventGrad:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
+        log.debug('Compute gradients from solvents')
+        self.de_solvent = self.base.with_solvent.grad(dm)
+        log.debug('Compute gradients from solutes')
         self.de_solute = super().kernel(*args, **kwargs)
-        self.de_solvent = grad_qv(self.base.with_solvent, dm)
-        self.de_solvent+= grad_solver(self.base.with_solvent, dm)
-        self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
         self.de = self.de_solute + self.de_solvent
 
         if self.verbose >= logger.NOTE:

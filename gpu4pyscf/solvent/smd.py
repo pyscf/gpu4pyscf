@@ -416,14 +416,23 @@ class SMD(pcm.PCM):
     def nuc_grad_method(self, grad_method):
         raise DeprecationWarning
 
-    def grad(self):
-        raise NotImplementedError
+    def grad(self, dm):
+        from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_nuc, grad_solver
+        de_solvent = grad_qv(self, dm)
+        de_solvent+= grad_solver(self, dm)
+        de_solvent+= grad_nuc(self, dm)
+        return de_solvent
 
     def Hessian(self, hess_method):
         raise DeprecationWarning
 
-    def hess(self):
-        raise NotImplementedError
+    def hess(self, dm):
+        from gpu4pyscf.solvent.hessian.pcm import (
+            analytical_hess_nuc, analytical_hess_qv, analytical_hess_solver)
+        de_solvent  =    analytical_hess_nuc(self, dm, verbose=self.verbose)
+        de_solvent +=     analytical_hess_qv(self, dm, verbose=self.verbose)
+        de_solvent += analytical_hess_solver(self, dm, verbose=self.verbose)
+        return de_solvent
 
     def reset(self, mol=None):
         super().reset(mol)
