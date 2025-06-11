@@ -70,9 +70,9 @@ class WithSolventGrad:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        log.debug('Compute gradients from solvents')
+        logger.debug(self, 'Compute gradients from solvents')
         self.de_solvent = self.base.with_solvent.grad(dm)
-        log.debug('Compute gradients from solutes')
+        logger.debug(self, 'Compute gradients from solutes')
         self.de_solute  = super().kernel(*args, **kwargs)
         self.de_cds     = get_cds(self.base.with_solvent)
         self.de = self.de_solute + self.de_solvent + self.de_cds

@@ -97,9 +97,9 @@ class WithSolventHess:
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         with lib.temporary_env(self.base.with_solvent, equilibrium_solvation=True):
-            log.debug('Compute hessian from solvents')
+            logger.debug(self, 'Compute hessian from solvents')
             self.de_solvent = self.base.with_solvent.hess(dm)
-        log.debug('Compute hessian from solutes')
+        logger.debug(self, 'Compute hessian from solutes')
         self.de_solute = super().kernel(*args, **kwargs)
         self.de_cds = get_cds(self.base.with_solvent)
         self.de = self.de_solute + self.de_solvent + self.de_cds
