@@ -254,6 +254,7 @@ class PCM(lib.StreamObject):
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n'
     }
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -279,6 +280,7 @@ class PCM(lib.StreamObject):
         self.state_id = 0
 
         self.frozen = False
+        self.frozen_dm0_for_finite_difference_without_response = None
         self.equilibrium_solvation = False
 
         self.e = None
@@ -386,44 +388,51 @@ class PCM(lib.StreamObject):
         if not self._intermediates:
             self.build()
         assert dms is not None
-        nao = dms.shape[-1]
-        dms = dms.reshape(-1,nao,nao)
-        if dms.shape[0] == 2:
-            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
-        if not isinstance(dms, cupy.ndarray):
-            dms = cupy.asarray(dms)
-        v_grids_e = self._get_v(dms)
-        v_grids = self.v_grids_n - v_grids_e
+        v_left = self._get_vgrids(dms, with_nuc = True)
+        v_right = v_left
 
-        b = self.left_multiply_R(v_grids.T)
+        if self.frozen_dm0_for_finite_difference_without_response is not None:
+            frozen_dm0 = self.frozen_dm0_for_finite_difference_without_response
+            v_right = self._get_vgrids(frozen_dm0, with_nuc = True)
+
+        b = self.left_multiply_R(v_right.T)
         q = self.left_solve_K(b).T
 
-        vK_1 = self.left_solve_K(v_grids.T, K_transpose = True)
+        vK_1 = self.left_solve_K(v_right.T, K_transpose = True)
         qt = self.left_multiply_R(vK_1, R_transpose = True).T
         q_sym = (q + qt)/2.0
 
         vmat = self._get_vmat(q_sym)
-        epcm = 0.5 * cupy.dot(v_grids[0], q_sym[0])
+        epcm = 0.5 * cupy.dot(v_left[0], q_sym[0])
+        if self.frozen_dm0_for_finite_difference_without_response is not None:
+            # This factor of two originates from the derivative of the PCM energy:
+            # E^PCM = 0.5 * D @ I3c @ (0.5*(K^-1 @ R + R^T @ (K^-1)^T)) @ I3c @ D
+            # dE^PCM/dG = 0.5 * dD/dG @ I3c @ (0.5*(K^-1 @ R + R^T @ (K^-1)^T)) @ I3c @ D
+            #           + 0.5 * dD @ d(I3c @ (0.5*(K^-1 @ R + R^T @ (K^-1)^T)) @ I3c)/dG @ D
+            #           + 0.5 * dD @ I3c @ (0.5*(K^-1 @ R + R^T @ (K^-1)^T)) @ I3c @ dD/dG
+            # when G is the electric field, I3c, K, R doesn't depend on G, so
+            # dE^PCM/dG = dD/dG @ I3c @ (0.5*(K^-1 @ R + R^T @ (K^-1)^T)) @ I3c @ D
+            # when we are trying to take the numerical derivative of the above expression,
+            # and we want to remove the PCM response from electric field,
+            # E^PCM(dG) = D(dG) @ I3c @ (0.5*(K^-1 @ R + R^T @ (K^-1)^T)) @ I3c @ D(0)
+            # where D(dG) is the perturbed density, optimized during the perturbed SCF,
+            # we sometimes call it left dm,
+            # and D(0) is the unperturbed density, not optimized in the perturbed SCF,
+            # we call it frozen dm0 or right dm0.
+            # Compared to the original E^{PCM}, the factor of 0.5 disappears.
+            #
+            # Refer to https://github.com/pyscf/gpu4pyscf/pull/423 for more discussion.
+            epcm *= 2
 
         self._intermediates['q'] = q[0]
         self._intermediates['q_sym'] = q_sym[0]
-        self._intermediates['v_grids'] = v_grids[0]
+        self._intermediates['v_grids'] = v_right[0]
         return epcm, vmat[0]
 
     def _get_qsym(self, dms, with_nuc = False):
         if not self._intermediates:
             self.build()
-        nao = dms.shape[-1]
-        dms = dms.reshape(-1,nao,nao)
-        if dms.shape[0] == 2:
-            dms = (dms[0] + dms[1]).reshape(-1,nao,nao)
-        if not isinstance(dms, cupy.ndarray):
-            dms = cupy.asarray(dms)
-        v_grids_e = self._get_v(dms)
-        if with_nuc:
-            v_grids = self.v_grids_n - v_grids_e
-        else:
-            v_grids = -1.0 * v_grids_e
+        v_grids = self._get_vgrids(dms, with_nuc)
 
         b = self.left_multiply_R(v_grids.T)
         q = self.left_solve_K(b).T
@@ -449,7 +458,7 @@ class PCM(lib.StreamObject):
         else:
             v_grids = -1.0 * v_grids_e
 
-        return v_grids[0]
+        return v_grids
 
     def _get_v(self, dms):
         '''
@@ -494,11 +503,14 @@ class PCM(lib.StreamObject):
         self._intermediates = None
         self.surface = None
         self.intopt = None
+        self.frozen_dm0_for_finite_difference_without_response = None
         return self
 
     def _B_dot_x(self, dms):
         if not self._intermediates:
             self.build()
+        if self.frozen_dm0_for_finite_difference_without_response is not None:
+            dms = self.frozen_dm0_for_finite_difference_without_response
         out_shape = dms.shape
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)

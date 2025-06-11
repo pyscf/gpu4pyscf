@@ -1018,6 +1018,9 @@ class WithSolventHess:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
+        if self.base.with_solvent.frozen_dm0_for_finite_difference_without_response is not None:
+            raise NotImplementedError("frozen_dm0_for_finite_difference_without_response not implemented for PCM Hessian")
+
         with lib.temporary_env(self.base.with_solvent, equilibrium_solvation=True):
             log.debug('Compute hessian from solvents')
             self.de_solvent = self.base.with_solvent.hess(dm)
