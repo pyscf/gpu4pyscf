@@ -579,9 +579,9 @@ class Grids(lib.StreamObject):
 
     def _build_non0ao_idx_cache(self, opt=None):
         '''cache ao indices'''
-        from gpu4pyscf.dft.numint import _GDFTOpt, AO_THRESHOLD, MIN_BLK_SIZE
+        from gpu4pyscf.dft import numint
         if opt is None:
-            opt = _GDFTOpt.from_mol(self.mol)
+            opt = numint._GDFTOpt.from_mol(self.mol)
         mol = opt._sorted_mol
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
@@ -593,8 +593,9 @@ class Grids(lib.StreamObject):
         nao = ao_loc[-1]
         nbas = len(ao_loc) - 1
         ngrids = self.size
-        cutoff = AO_THRESHOLD
-        nblocks = (ngrids + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE
+        cutoff = numint.AO_THRESHOLD
+        block_size = numint.MIN_BLK_SIZE
+        nblocks = (ngrids + block_size - 1) // block_size
         non0shl_mask = cp.zeros((nblocks, nbas), dtype=np.int8)
         coords = cp.asarray(self.coords, order='F')
         _atm_gpu = cp.asarray(_sorted_mol._atm, dtype=np.int32)
@@ -606,7 +607,7 @@ class Grids(lib.StreamObject):
             ctypes.cast(non0shl_mask.data.ptr, ctypes.c_void_p),
             ctypes.c_double(np.log(cutoff)),
             ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ngrids), ctypes.c_int(MIN_BLK_SIZE),
+            ctypes.c_int(ngrids), ctypes.c_int(block_size),
             ctypes.cast(_atm_gpu.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(_atm_gpu)),
             ctypes.cast(_bas_gpu.data.ptr, ctypes.c_void_p),
