@@ -16,11 +16,7 @@
 Hessian SMD solvent model (for experiment and education)
 '''
 
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 import numpy as np
 from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent.smd_experiment import (
@@ -193,4 +189,4 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             sig_OP = get_bond_tension(('O','P'))
             tension += sig_OC * dt_OC + sig_ON * dt_ON + sig_OO * dt_OO + sig_OP * dt_OP
             tensions.append(tension)
-    return gpunp.asarray(tensions)
+    return cupy.asarray(tensions)

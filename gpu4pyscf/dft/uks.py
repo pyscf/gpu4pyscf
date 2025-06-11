@@ -12,19 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+import cupy
 from pyscf.dft import uks as uks_cpu
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import hf, uhf
+from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.lib import utils
 
 
@@ -36,7 +30,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     if dm is None: dm = ks.make_rdm1()
     assert dm.ndim == 3
     t0 = logger.init_timer(ks)
-    rks.initialize_grids(ks, mol, gpunp.asarray(dm[0]+dm[1]))
+    rks.initialize_grids(ks, mol, cupy.asarray(dm[0]+dm[1]))
 
     if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
         ks.direct_scf_tol = ks.screen_tol
@@ -47,7 +41,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         n, exc, vxc = (0,0), 0, 0
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
-        n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, dm.view(gpunp.ndarray), max_memory=max_memory)
+        n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, dm.view(cupy.ndarray), max_memory=max_memory)
         logger.debug(ks, 'nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
@@ -66,8 +60,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vk = None
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vj', None) is not None):
-            dm_last = gpunp.asarray(dm_last)
-            dm = gpunp.asarray(dm)
+            dm_last = cupy.asarray(dm_last)
+            dm = cupy.asarray(dm)
             assert dm_last.ndim == 0 or dm_last.ndim == dm.ndim
             ddm = dm - dm_last
             vj = ks.get_j(mol, ddm[0]+ddm[1], hermi)
@@ -79,8 +73,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vk', None) is not None):
-            dm_last = gpunp.asarray(dm_last)
-            dm = gpunp.asarray(dm)
+            dm_last = cupy.asarray(dm_last)
+            dm = cupy.asarray(dm)
             assert dm_last.ndim == 0 or dm_last.ndim == dm.ndim
             ddm = dm - dm_last
             vj, vk = ks.get_jk(mol, ddm, hermi)
@@ -102,10 +96,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vxc += vj - vk
 
         if ground_state:
-            exc -=(gpunp.einsum('ij,ji', dm[0], vk[0]).real +
-                   gpunp.einsum('ij,ji', dm[1], vk[1]).real) * .5
+            exc -=(cupy.einsum('ij,ji', dm[0], vk[0]).real +
+                   cupy.einsum('ij,ji', dm[1], vk[1]).real) * .5
     if ground_state:
-        ecoul = gpunp.einsum('ij,ji', dm[0]+dm[1], vj).real * .5
+        ecoul = cupy.einsum('ij,ji', dm[0]+dm[1], vj).real * .5
     else:
         ecoul = None
     t0 = logger.timer_debug1(ks, 'jk total', *t0)
@@ -118,7 +112,7 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     if h1e is None: h1e = ks.get_hcore()
     if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = ks.get_veff(ks.mol, dm)
-    if not (isinstance(dm, gpunp.ndarray) and dm.ndim == 2):
+    if not (isinstance(dm, cupy.ndarray) and dm.ndim == 2):
         dm = dm[0] + dm[1]
     return rks.energy_elec(ks, dm, h1e, vhf)
 

@@ -17,11 +17,7 @@ Gradient of SMD solvent model (for experiment and education)
 '''
 
 import numpy as np
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 from pyscf.data import radii
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf.solvent import smd_experiment as smd
@@ -188,7 +184,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             tensions.append(tension)
             continue
 
-    return gpunp.asarray(tensions)
+    return cupy.asarray(tensions)
 
 def get_cds(smdobj):
     mol = smdobj.mol
@@ -210,8 +206,8 @@ def get_cds(smdobj):
     _, grad_area = pcm_grad.get_dF_dA(surface)
     area = surface['area']
     gridslice = surface['gslice_by_atom']
-    SASA = gpunp.asarray([gpunp.sum(area[p0:p1], axis=0) for p0,p1, in gridslice]).get()
-    grad_SASA = gpunp.asarray([gpunp.sum(grad_area[p0:p1], axis=0) for p0,p1, in gridslice]).get()
+    SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice]).get()
+    grad_SASA = cupy.asarray([cupy.sum(grad_area[p0:p1], axis=0) for p0,p1, in gridslice]).get()
     SASA *= radii.BOHR**2
     grad_SASA *= radii.BOHR**2
     mol_cds = mol_tension * np.sum(grad_SASA, axis=0) / 1000

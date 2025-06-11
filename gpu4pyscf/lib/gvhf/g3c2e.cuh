@@ -50,9 +50,9 @@ static void GINTkernel_int3c2e_getj_pass1(GINTEnvVars envs, JKMatrix jk, double*
     int i_l = envs.i_l;
     int j_l = envs.j_l;
     int k_l = envs.k_l;
-    int *idx = c_idx;
-    int *idy = c_idx + TOT_NF;
-    int *idz = c_idx + TOT_NF * 2;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     for (k = k0; k < k1; ++k) {
         int kp = k - k0;
@@ -107,9 +107,9 @@ static void GINTkernel_int3c2e_getj_pass2(GINTEnvVars envs, JKMatrix jk, double*
     int i_l = envs.i_l;
     int j_l = envs.j_l;
     int k_l = envs.k_l;
-    int *idx = c_idx;
-    int *idy = c_idx + TOT_NF;
-    int *idz = c_idx + TOT_NF * 2;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     double rhoj[GPU_CART_MAX];
     for (k = 0; k < k1-k0; k++){

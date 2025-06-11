@@ -21,14 +21,7 @@ Non-relativistic RKS analytical Hessian
 
 
 import numpy
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import contract
+import cupy
 from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
@@ -37,6 +30,7 @@ from gpu4pyscf.hessian.rks import _get_enlc_deriv2, _get_vnlc_deriv1
 from gpu4pyscf.df.hessian import rhf as df_rhf_hess
 from gpu4pyscf.df.hessian.rhf import _get_jk_ip, _partial_hess_ejk
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -82,7 +76,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         for j0, ja in enumerate(atmlst[:i0+1]):
             q0, q1 = aoslices[ja][2:]
             #:contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
-            de2[i0,j0] += 2.0*gpunp.sum(veff_dm[:,:,q0:q1], axis=2)
+            de2[i0,j0] += 2.0*cupy.sum(veff_dm[:,:,q0:q1], axis=2)
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
 

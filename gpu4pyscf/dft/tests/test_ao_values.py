@@ -15,14 +15,7 @@
 import unittest
 import numpy as np
 import pyscf
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+import cupy
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf.dft import numint
 
@@ -66,74 +59,74 @@ class KnownValues(unittest.TestCase):
     def test_ao_sph_deriv0(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv0', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_sph, coords, deriv=0)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
         
     def test_ao_sph_deriv1(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv1', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_sph, coords, deriv=1)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv2(self):
-        coords = np.random.random((4,3))
+        coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv2', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_sph, coords, deriv=2)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv3(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv3', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_sph, coords, deriv=3)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_sph_deriv4(self):
         coords = np.random.random((100,3))
         ao = mol_sph.eval_gto('GTOval_sph_deriv4', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_sph, coords, deriv=4)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     # cart mol
     def test_ao_cart_deriv0(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv0', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_cart, coords, deriv=0)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv1(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv1', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_cart, coords, deriv=1)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv2(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv2', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_cart, coords, deriv=2)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv3(self):
-        coords = np.random.random((100,3))
+        coords = np.random.random((1000,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv3', coords)
-        ao_cpu = gpunp.asarray(ao)
-        ni = NumInt()
-        ao_gpu = ni.eval_ao(mol_cart, coords, deriv=3)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        ao_cpu = cupy.asarray(ao)
+        #ni = NumInt()
+        ao_gpu = numint.eval_ao(mol_cart, coords, deriv=3)
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
     def test_ao_cart_deriv4(self):
         coords = np.random.random((100,3))
         ao = mol_cart.eval_gto('GTOval_cart_deriv4', coords)
-        ao_cpu = gpunp.asarray(ao)
+        ao_cpu = cupy.asarray(ao)
         ao_gpu = numint.eval_ao(mol_cart, coords, deriv=4)
-        assert gpunp.linalg.norm(ao_cpu - ao_gpu) < 1e-8
+        assert cupy.linalg.norm(ao_cpu - ao_gpu) < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

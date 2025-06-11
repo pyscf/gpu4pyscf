@@ -22,14 +22,7 @@ __all__ = [
 
 import ctypes
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import contract, get_avail_mem
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import (is_zero, group_by_conj_pairs,
@@ -38,6 +31,7 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.lib import logger
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):

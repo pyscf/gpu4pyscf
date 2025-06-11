@@ -15,12 +15,7 @@
 import unittest
 import tempfile
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
@@ -184,7 +179,7 @@ class KnownValues(unittest.TestCase):
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
         mf = scf.RHF(mol1)
-        vj, vk = mf.get_jk(mol1, gpunp.asarray(dm), hermi=0)
+        vj, vk = mf.get_jk(mol1, cupy.asarray(dm), hermi=0)
         self.assertAlmostEqual(lib.fp(vj.get()), 89.57263277687994, 7)
         self.assertAlmostEqual(lib.fp(vk.get()),-26.36969769724246, 7)
 
@@ -273,7 +268,7 @@ class KnownValues(unittest.TestCase):
         mf.chkfile = ftmp.name
         mf.kernel()
         dm_stored = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
-        dm_stored = gpunp.asnumpy(dm_stored)
+        dm_stored = cupy.asnumpy(dm_stored)
 
         mf_copy = scf.RHF(mol)
         mf_copy.chkfile = ftmp.name

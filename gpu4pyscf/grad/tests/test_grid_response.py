@@ -14,12 +14,7 @@
 
 import numpy as np
 import pyscf
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 import unittest
 import pytest
 from pyscf.dft import rks as cpu_rks

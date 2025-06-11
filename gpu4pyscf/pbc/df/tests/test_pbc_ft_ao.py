@@ -13,10 +13,15 @@
 # limitations under the License.
 
 import unittest
+import ctypes
 import numpy as np
+import cupy as cp
 from pyscf.pbc import gto as pgto
-from pyscf.pbc.df import ft_ao
+from pyscf.pbc.df import ft_ao as ft_ao_cpu
+from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 def setUpModule():
     global cell
@@ -37,12 +42,12 @@ class KnownValues(unittest.TestCase):
     def test_ft_aopair_gamma_point(self):
         Gv = cell.get_Gv([7,3,3])
         dat = ft_aopair(cell, Gv).get()
-        ref = ft_ao.ft_aopair(cell, Gv)
+        ref = ft_ao_cpu.ft_aopair(cell, Gv)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
         Gv = cell.get_Gv([7]*3)[-257:]
         dat = ft_aopair(cell, Gv).get()
-        ref = ft_ao.ft_aopair(cell, Gv)
+        ref = ft_ao_cpu.ft_aopair(cell, Gv)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
     def test_ft_aopair_kpt(self):
@@ -51,30 +56,30 @@ class KnownValues(unittest.TestCase):
 
         Gv = cell.get_Gv([7,3,3])
         dat = ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj)).get()
-        ref = ft_ao.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
+        ref = ft_ao_cpu.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
         Gv = cell.get_Gv([7]*3)[-257:]
         dat = ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj)).get()
-        ref = ft_ao.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
+        ref = ft_ao_cpu.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
         np.random.seed(1)
         kpti = kptj = np.random.random(3)
         dat = ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj)).get()
-        ref = ft_ao.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
+        ref = ft_ao_cpu.ft_aopair(cell, Gv, kpti_kptj=(kpti,kptj))
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
     def test_ft_aopair_kpts(self):
         kpts = cell.make_kpts([3,4,3])
         Gv = cell.get_Gv([7,3,3])
         dat = ft_aopair_kpts(cell, Gv, kptjs=kpts).get()
-        ref = ft_ao.ft_aopair_kpts(cell, Gv, kptjs=kpts)
+        ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, kptjs=kpts)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
         Gv = cell.get_Gv([7]*3)[-257:]
         dat = ft_aopair_kpts(cell, Gv, kptjs=kpts).get()
-        ref = ft_ao.ft_aopair_kpts(cell, Gv, kptjs=kpts)
+        ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, kptjs=kpts)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
     def test_ft_aopair_kpt_no_aosym(self):
@@ -82,7 +87,7 @@ class KnownValues(unittest.TestCase):
         kpti, kptj = kpti_kptj = np.random.random((2,3))
         Gv = cell.get_Gv([3]*3)
         dat = ft_aopair(cell, Gv, kpti_kptj=kpti_kptj).get()
-        ref = ft_ao.ft_aopair(cell, Gv, kpti_kptj=kpti_kptj)
+        ref = ft_ao_cpu.ft_aopair(cell, Gv, kpti_kptj=kpti_kptj)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
     def test_ft_aopair_kpts_nosym(self):
@@ -90,9 +95,35 @@ class KnownValues(unittest.TestCase):
         kpts = np.random.random((4,3))
         Gv = cell.get_Gv([3]*3)
         dat = ft_aopair_kpts(cell, Gv, kptjs=kpts).get()
-        ref = ft_ao.ft_aopair_kpts(cell, Gv, kptjs=kpts)
+        ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, kptjs=kpts)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
+    def test_ft_ao(self):
+        Gv = cell.get_Gv(mesh=[9,7,7])
+        dat = ft_ao_gpu.ft_ao(cell, Gv).get()
+        ref = ft_ao_cpu.ft_ao(cell, Gv)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
+        pcell = cell.copy()
+        pcell.cart = True
+        dat = ft_ao_gpu.ft_ao(pcell, Gv).get()
+        ref = ft_ao_cpu.ft_ao(pcell, Gv)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
+    def test_ft_aopair_fill_triu(self):
+        bvk_ncells, nao, nGv = 6, 13, 42
+        out = cp.random.rand(bvk_ncells,nao,nao,nGv) + cp.random.rand(bvk_ncells,nao,nao,nGv) * 1j
+        conj_mapping = cp.asarray(conj_images_in_bvk_cell([bvk_ncells,1,1]), dtype=np.int32)
+        ix, iy = cp.tril_indices(nao, -1)
+        ref = out.copy()
+        for k, ck in enumerate(conj_mapping):
+            ref[ck,iy,ix] = ref[k,ix,iy]
+        libpbc.ft_aopair_fill_triu(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nao), ctypes.c_int(bvk_ncells), ctypes.c_int(nGv))
+        assert abs(out-ref).max() == 0.
+
 if __name__ == '__main__':
-    print('Full Tests for ft_ao')
+    print('Full Tests for ft_ao_cpu')
     unittest.main()

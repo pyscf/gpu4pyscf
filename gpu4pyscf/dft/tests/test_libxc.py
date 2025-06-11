@@ -19,12 +19,7 @@ from pyscf import lib
 from pyscf.dft import Grids
 from gpu4pyscf.dft.numint import NumInt as numint_gpu
 from pyscf.dft.numint import NumInt as numint_cpu
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 
 def setUpModule():
     global mol, dm1, dm0
@@ -72,7 +67,7 @@ class KnownValues(unittest.TestCase):
             rho = (rho, rho)
 
         exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=2, xctype=xctype)
-        exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, gpunp.array(rho), deriv=2, xctype=xctype)
+        exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=2, xctype=xctype)
 
         assert _diff(exc_gpu[:,0].get(), exc_cpu).max() < 1e-10
         assert _diff(vxc_gpu.get(), vxc_cpu).max() < 1e-10

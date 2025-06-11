@@ -14,19 +14,11 @@
 
 import copy
 import numpy
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from cupyx.scipy.linalg import solve_triangular
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract, cholesky
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array, contract, cholesky    
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf, gto
 from gpu4pyscf.df import int3c2e, df
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, cholesky
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
@@ -48,10 +40,10 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
         except Exception:
             pass
 
-    w, v = gpunp.linalg.eigh(int2c)
+    w, v = cupy.linalg.eigh(int2c)
     mask = w > lindep
     v1 = v[:,mask]
-    j2c = gpunp.dot(v1/w[mask], v1.conj().T)
+    j2c = cupy.dot(v1/w[mask], v1.conj().T)
     w = v = v1 = mask = None
     def j2c_solver(b): # noqa: F811
         return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
@@ -91,8 +83,8 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
 
     if isinstance(mf_grad.base, scf.rohf.ROHF):
         raise NotImplementedError()
-    mo_coeff = gpunp.asarray(mf_grad.base.mo_coeff)
-    mo_occ = gpunp.asarray(mf_grad.base.mo_occ)
+    mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
+    mo_occ = cupy.asarray(mf_grad.base.mo_occ)
 
     dm = intopt.sort_orbitals(dm0, axis=[0,1])
     orbo = mo_coeff[:,mo_occ>0] * mo_occ[mo_occ>0] ** 0.5
@@ -107,7 +99,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
             int2c_e1 = auxmol.intor('int2c2e_ip1')
     else:
         int2c_e1 = auxmol.intor('int2c2e_ip1')
-    int2c_e1 = gpunp.asarray(int2c_e1)
+    int2c_e1 = cupy.asarray(int2c_e1)
 
     rhoj_cart = rhok_cart = None
     auxslices = auxmol.aoslice_by_atom()
@@ -118,7 +110,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     ejaux = ekaux = None
     if with_j:
         if low.tag == 'eig':
-            rhoj = gpunp.dot(low_t.T, rhoj)
+            rhoj = cupy.dot(low_t.T, rhoj)
         elif low.tag == 'cd':
             #rhoj = solve_triangular(low_t, rhoj, lower=False)
             rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)

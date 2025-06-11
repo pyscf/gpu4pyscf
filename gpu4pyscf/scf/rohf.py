@@ -14,16 +14,10 @@
 
 from functools import reduce
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array, contract
+import cupy
 from pyscf.scf import rohf as rohf_cpu
 from gpu4pyscf.scf import hf, uhf
+from gpu4pyscf.lib.cupy_helper import tag_array, contract
 
 
 def get_roothaan_fock(focka_fockb, dma_dmb, s):
@@ -48,15 +42,15 @@ def get_roothaan_fock(focka_fockb, dma_dmb, s):
     dma, dmb = dma_dmb
     fc = (focka + fockb) * .5
 # Projector for core, open-shell, and virtual
-    pc = gpunp.dot(dmb, s)
-    po = gpunp.dot(dma-dmb, s)
-    pv = gpunp.eye(nao) - gpunp.dot(dma, s)
-    fock  = reduce(gpunp.dot, (pc.conj().T, fc, pc)) * .5
-    fock += reduce(gpunp.dot, (po.conj().T, fc, po)) * .5
-    fock += reduce(gpunp.dot, (pv.conj().T, fc, pv)) * .5
-    fock += reduce(gpunp.dot, (po.conj().T, fockb, pc))
-    fock += reduce(gpunp.dot, (po.conj().T, focka, pv))
-    fock += reduce(gpunp.dot, (pv.conj().T, fc, pc))
+    pc = cupy.dot(dmb, s)
+    po = cupy.dot(dma-dmb, s)
+    pv = cupy.eye(nao) - cupy.dot(dma, s)
+    fock  = reduce(cupy.dot, (pc.conj().T, fc, pc)) * .5
+    fock += reduce(cupy.dot, (po.conj().T, fc, po)) * .5
+    fock += reduce(cupy.dot, (pv.conj().T, fc, pv)) * .5
+    fock += reduce(cupy.dot, (po.conj().T, fockb, pc))
+    fock += reduce(cupy.dot, (po.conj().T, focka, pv))
+    fock += reduce(cupy.dot, (pv.conj().T, fc, pc))
     fock = fock + fock.conj().T
     fock = tag_array(fock, focka=focka, fockb=fockb)
     return fock
@@ -116,13 +110,13 @@ class ROHF(hf.RHF):
         '''
         if mo_coeff is None: mo_coeff = self.mo_coeff
         if mo_occ is None: mo_occ = self.mo_occ
-        if isinstance(mo_occ, gpunp.ndarray) and mo_occ.ndim == 1:
+        if isinstance(mo_occ, cupy.ndarray) and mo_occ.ndim == 1:
             mo_occa = (mo_occ > 0).astype(np.double)
             mo_occb = (mo_occ ==2).astype(np.double)
         else:
             mo_occa, mo_occb = mo_occ
-        dm_a = gpunp.dot(mo_coeff*mo_occa, mo_coeff.conj().T)
-        dm_b = gpunp.dot(mo_coeff*mo_occb, mo_coeff.conj().T)
+        dm_a = cupy.dot(mo_coeff*mo_occa, mo_coeff.conj().T)
+        dm_b = cupy.dot(mo_coeff*mo_occb, mo_coeff.conj().T)
         return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
     def eig(self, fock, s):
@@ -135,7 +129,7 @@ class ROHF(hf.RHF):
 
     def energy_elec(self, dm=None, h1e=None, vhf=None):
         if dm is None: dm = self.make_rdm1()
-        elif isinstance(dm, gpunp.ndarray) and dm.ndim == 2:
+        elif isinstance(dm, cupy.ndarray) and dm.ndim == 2:
             dm = [dm*.5, dm*.5]
         return uhf.energy_elec(self, dm, h1e, vhf)
 
@@ -149,8 +143,8 @@ class ROHF(hf.RHF):
         if s1e is None: s1e = self.get_ovlp()
         if vhf is None: vhf = self.get_veff(self.mol, dm)
         if dm is None: dm = self.make_rdm1()
-        if isinstance(dm, gpunp.ndarray) and dm.ndim == 2:
-            dm = gpunp.repeat(dm[None]*.5, 2, axis=0)
+        if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
+            dm = cupy.repeat(dm[None]*.5, 2, axis=0)
 # To Get orbital energy in get_occ, we saved alpha and beta fock, because
 # Roothaan effective Fock cannot provide correct orbital energy with `eig`
 # TODO, check other treatment  J. Chem. Phys. 133, 141102
@@ -181,7 +175,7 @@ class ROHF(hf.RHF):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         if getattr(dm, 'ndim', 0) == 2:
-            dm = gpunp.stack((dm*.5,dm*.5))
+            dm = cupy.stack((dm*.5,dm*.5))
 
         if dm_last is None or not self.direct_scf:
             if getattr(dm, 'mo_coeff', None) is not None:
@@ -193,7 +187,7 @@ class ROHF(hf.RHF):
             vj, vk = self.get_jk(mol, dm, hermi)
             vhf = vj[0] + vj[1] - vk
         else:
-            ddm = gpunp.asarray(dm) - gpunp.asarray(dm_last)
+            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
             vj, vk = self.get_jk(mol, ddm, hermi)
             vhf = vj[0] + vj[1] - vk
             vhf += vhf_last
@@ -222,7 +216,7 @@ class ROHF(hf.RHF):
         focka = mo_coeff.conj().T.dot(focka).dot(mo_coeff)
         fockb = mo_coeff.conj().T.dot(fockb).dot(mo_coeff)
 
-        g = gpunp.zeros_like(focka)
+        g = cupy.zeros_like(focka)
         g[uniq_var_a]  = focka[uniq_var_a]
         g[uniq_var_b] += fockb[uniq_var_b]
         return g[uniq_var_a | uniq_var_b]

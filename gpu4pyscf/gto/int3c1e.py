@@ -190,6 +190,7 @@ class VHFOpt(_vhf.VHFOpt):
             idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
             fancy_index.append(indices.reshape(idx_shape))
         mat = cp.empty_like(sorted_mat)
+        print("fancy_index: ", type(fancy_index), type(fancy_index[0]))
         mat[tuple(fancy_index)] = sorted_mat
         return mat
 
@@ -372,7 +373,12 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
         int1e_charge_contracted[j0:j1, i0:i1] = int1e_angular_slice
 
     row, col = np.tril_indices(nao)
+    #ABB: next line is commented since it doesnt work on DPNP
+    # int1e_charge_contracted[row, col] = int1e_charge_contracted[col, row]    
+    row = cp.asarray(row)
+    col = cp.asarray(col)
     int1e_charge_contracted[row, col] = int1e_charge_contracted[col, row]
+    # int1e_charge_contracted[row, col] = int1e_charge_contracted[col, row]
     #ao_idx = np.argsort(intopt._ao_idx)
     #int1e_charge_contracted = int1e_charge_contracted[np.ix_(ao_idx, ao_idx)]
     int1e_charge_contracted = intopt.unsort_orbitals(int1e_charge_contracted, axis=[0,1])

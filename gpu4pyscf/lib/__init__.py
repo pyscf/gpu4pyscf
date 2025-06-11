@@ -18,21 +18,14 @@ import os
 import numpy
 from gpu4pyscf.lib import diis
 
-
 has_dpctl = find_spec("dpctl")
-
 if not has_dpctl:
     from gpu4pyscf.lib import cupy_helper
     from gpu4pyscf.lib import cutensor
 else:
     from gpu4pyscf.lib import dpnp_helper
 
-try:
-    from gpu4pyscf.lib import dftd3
-except Exception:
-    print('failed to load DFTD3')
+from gpu4pyscf.lib import utils
 
-try:
-    from gpu4pyscf.lib import dftd4
-except Exception:
-    print('failed to load DFTD4')
+from pyscf import lib
+lib.misc.format_sys_info = utils.format_sys_info

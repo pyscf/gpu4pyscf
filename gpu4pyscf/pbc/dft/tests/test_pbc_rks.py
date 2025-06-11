@@ -80,6 +80,20 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
         self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
 
+    def test_kpts_mgga(self):
+        cell = self.cell
+        mf = pbcdft.RKS(cell, xc='tpss').run()
+        mf_ref = mf.to_cpu().run()
+        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+
+        # test bands
+        np.random.seed(1)
+        kpts_band = np.random.random((2,3))
+        e0, c0 = mf_ref.get_bands(kpts_band)
+        e1, c1 = mf.get_bands(kpts_band)
+        self.assertAlmostEqual(abs(e1[0].get() - e0[0]).max(), 0, 7)
+        self.assertAlmostEqual(abs(e1[1].get() - e0[1]).max(), 0, 7)
+
     def test_lda_gdf(self):
         from pyscf.pbc.df.df import _load3c
         cell = self.cell

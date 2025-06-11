@@ -14,19 +14,13 @@
 
 import unittest
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+import cupy
 import pyscf
 from pyscf import df, lib
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.df.df import DF
+from gpu4pyscf.lib.cupy_helper import tag_array
 
 atom='''
 Ti 0.0 0.0 0.0
@@ -59,50 +53,50 @@ class KnownValues(unittest.TestCase):
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True, direct_scf_tol=1e-14)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        gpunp.random.seed(np.asarray(1, dtype=np.uint64))
+        cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = intopt.mol.nao
-        dm = gpunp.random.rand(nao, nao)
+        dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
 
         # pass 1
-        rhoj_outcore = gpunp.einsum('ijL,ij->L', int3c_gpu, dm)
+        rhoj_outcore = cupy.einsum('ijL,ij->L', int3c_gpu, dm)
         rhoj_incore = 2.0*int3c2e.get_j_int3c2e_pass1(intopt, dm)
-        assert gpunp.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
+        assert cupy.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
 
         # pass 2
-        vj_outcore = gpunp.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
+        vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
         vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
-        assert gpunp.linalg.norm(vj_outcore - vj_incore) < 1e-5
+        assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
     
     def test_vj_sph_incore(self):
         int3c_gpu = int3c2e.get_int3c2e(mol_sph, auxmol, aosym=True, direct_scf_tol=1e-14)
         intopt = int3c2e.VHFOpt(mol_sph, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        gpunp.random.seed(np.asarray(1, dtype=np.uint64))
+        cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = intopt.mol.nao
-        dm = gpunp.random.rand(nao, nao)
+        dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
         
         # pass 1
-        rhoj_outcore = gpunp.einsum('ijL,ij->L', int3c_gpu, dm)
+        rhoj_outcore = cupy.einsum('ijL,ij->L', int3c_gpu, dm)
         rhoj_incore = 2.0*int3c2e.get_j_int3c2e_pass1(intopt, dm)
-        assert gpunp.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
+        assert cupy.linalg.norm(rhoj_outcore - rhoj_incore) < 1e-8
 
         # pass 2
-        vj_outcore = gpunp.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
+        vj_outcore = cupy.einsum('ijL,L->ij', int3c_gpu, rhoj_outcore)
         vj_incore = int3c2e.get_j_int3c2e_pass2(intopt, rhoj_incore)
-        assert gpunp.linalg.norm(vj_outcore - vj_incore) < 1e-5
+        assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
 
     def test_j_outcore(self):
-        gpunp.random.seed(np.asarray(1, dtype=np.uint64))
+        cupy.random.seed(np.asarray(1, dtype=np.uint64))
         nao = mol.nao
-        dm = gpunp.random.rand(nao, nao)
+        dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
         mf = gpu_scf.RHF(mol).density_fit()
         mf.kernel()
         vj0, _ = mf.get_jk(dm=dm, with_j=True, with_k=False, hermi=1)
         vj = df_jk.get_j(mf.with_df, dm)
-        assert gpunp.linalg.norm(vj - vj0) < 1e-4
+        assert cupy.linalg.norm(vj - vj0) < 1e-4
     
     def test_jk_hermi0(self):
         dfobj = DF(mol, 'sto3g').build()
@@ -125,8 +119,8 @@ class KnownValues(unittest.TestCase):
         mo_occ[:3] = 2
         dm = 2.0*mo_coeff[:,mo_occ>1].dot(mo_coeff[:,mo_occ>1].T)
         refj, refk = dfobj.to_cpu().get_jk(dm)
-        dm = gpunp.asarray(dm)
-        dm = tag_array(dm, mo_coeff=gpunp.asarray(mo_coeff), mo_occ=gpunp.asarray(mo_occ))
+        dm = cupy.asarray(dm)
+        dm = tag_array(dm, mo_coeff=cupy.asarray(mo_coeff), mo_occ=cupy.asarray(mo_occ))
         vj, vk = dfobj.get_jk(dm)
         vj = vj.get()
         vk = vk.get()
@@ -143,8 +137,8 @@ class KnownValues(unittest.TestCase):
         mo_occ[:3] = 2
         dm = 2.0*mo_coeff[:,mo_occ>1].dot(mo_coeff[:,mo_occ>1].T)
         refj, refk = dfobj.to_cpu().get_jk(dm)
-        dm = gpunp.asarray(dm)
-        dm = tag_array(dm, mo_coeff=gpunp.asarray(mo_coeff), mo_occ=gpunp.asarray(mo_occ))
+        dm = cupy.asarray(dm)
+        dm = tag_array(dm, mo_coeff=cupy.asarray(mo_coeff), mo_occ=cupy.asarray(mo_occ))
         vj, vk = dfobj.get_jk(dm)
         vj = vj.get()
         vk = vk.get()

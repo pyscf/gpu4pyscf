@@ -21,17 +21,7 @@ least two t2 tensors.
 
 import time
 import ctypes
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import load_library
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import load_library, get_avail_mem
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
-
+import cupy
 import numpy as np
 from pyscf import gto
 from pyscf import lib
@@ -41,6 +31,7 @@ from pyscf.cc import ccsd
 from pyscf.cc import _ccsd
 from pyscf import __config__
 from gpu4pyscf.scf import int4c2e
+from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.lib import logger
 
 FREE_CUPY_CACHE = True
@@ -64,7 +55,7 @@ def update_amps(mycc, t1, t2, eris):
     wpq, t1new, t2new, wVOov, wVooV = _direct_ovvv_vvvv(mycc, t1, t2)
     t2new *= .5  # *.5 because t2+t2.transpose(1,0,3,2) at the end
 
-    _einsum = gpunp.einsum
+    _einsum = cupy.einsum
 
     fov = fock[:nocc,nocc:].copy()
     t1new += fock[:nocc,nocc:]
@@ -81,12 +72,12 @@ def update_amps(mycc, t1, t2, eris):
     foo += lib.einsum('pi,qp,qj->ij', orbo, wpq, orbo)
     fov += lib.einsum('pi,qp,qa->ia', orbo, wpq, orbv)
 
-    t1, t1_cpu = gpunp.asarray(t1), t1
-    t2, t2_cpu = gpunp.asarray(t2), t2
+    t1, t1_cpu = cupy.asarray(t1), t1
+    t2, t2_cpu = cupy.asarray(t2), t2
     tau = _einsum('ia,jb->ijab', t1, t1)
     tau += t2
     woooo = _einsum('ijab,kabl->ijkl', tau, eris.ovvo)
-    woooo += gpunp.asarray(eris.oooo).transpose(0,2,1,3)
+    woooo += cupy.asarray(eris.oooo).transpose(0,2,1,3)
     tmp = _einsum('la,jaik->lkji', t1, eris.ovoo)
     woooo += tmp
     woooo += tmp.transpose(1,0,3,2)
@@ -168,16 +159,12 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     max_memory = max(MEMORYMIN, mycc.max_memory - lib.current_memory()[0])
     blksize = ((max_memory*.9e6-t2.size*4*8)/8/nao_cart**2/3.5)**.5
     Ht2_mem = nocc2*nao_cart**2 * 8 * 2  # x2 and Ht2
-    if not has_dpctl:
-        mem_avail = int(gpunp.cuda.runtime.memGetInfo()[0] * .75)
-    else:
-        mem_avail = get_avail_mem()
-        
+    mem_avail = int(cupy.cuda.runtime.memGetInfo()[0] * .75)
     if mem_avail * .9 < Ht2_mem:
         raise RuntimeError(
             f'Not enough GPU memory. Available {mem_avail*1e-6} MB, required {Ht2_mem/.9e-6} MB')
     # Reserve some memory for ERIs?
-    gpunp.get_default_memory_pool().set_limit(mem_avail)
+    cupy.get_default_memory_pool().set_limit(mem_avail)
 
     blksize = max(BLKMIN, int(min((nao_cart+3)/4, blksize,
                                   ((mem_avail-Ht2_mem)*.5/8/nao_cart**2)**.5)))
@@ -187,12 +174,12 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     vhfopt.build(group_size=blksize, diag_block_with_triu=True)
     mol = vhfopt.mol
 
-    _einsum = gpunp.einsum
+    _einsum = cupy.einsum
 
-    mo = vhfopt.coeff.dot(gpunp.asarray(mycc.mo_coeff))
-    orbo = gpunp.asarray(mo[:,:nocc])
-    orbv = gpunp.asarray(mo[:,nocc:])
-    t1po = orbv.dot(gpunp.asarray(t1).T)
+    mo = vhfopt.coeff.dot(cupy.asarray(mycc.mo_coeff))
+    orbo = cupy.asarray(mo[:,:nocc])
+    orbv = cupy.asarray(mo[:,nocc:])
+    t1po = orbv.dot(cupy.asarray(t1).T)
     tau = make_tau_tril(t1, t2)
     x2 = _einsum('xab,pa->xpb', tau, orbv)
     x2 = _einsum('xpb,qb->xpq', x2, orbv)
@@ -202,15 +189,12 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     ao_loc = mol.ao_loc
     nao2 = nao * nao
 
-    x2 = gpunp.asarray(x2, order='C')
-    Ht2ao = gpunp.zeros_like(x2)
-    if not has_dpctl:
-        _dgemm = gpunp.cuda.cublas.dgemm
-        handle = gpunp.cuda.device.get_cublas_handle()
-        N = gpunp.cuda.cublas.CUBLAS_OP_N
-        T = gpunp.cuda.cublas.CUBLAS_OP_T
-    else:
-        
+    x2 = cupy.asarray(x2, order='C')
+    Ht2ao = cupy.zeros_like(x2)
+    _dgemm = cupy.cuda.cublas.dgemm
+    handle = cupy.cuda.device.get_cublas_handle()
+    N = cupy.cuda.cublas.CUBLAS_OP_N
+    T = cupy.cuda.cublas.CUBLAS_OP_T
     one = np.ones(1)
     one_ptr = one.ctypes.data
     x2_ptr = np.int64(x2.data.ptr)
@@ -236,14 +220,14 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
 
     if vhfopt.uniq_l_ctr[:,0].max() <= int4c2e.LMAX_ON_GPU:
         # Computing ERIs on GPU
-        idx, idy = gpunp.tril_indices(nao)
-        #eribuf = gpunp.empty(blksize**2*nao**2)
+        idx, idy = cupy.tril_indices(nao)
+        #eribuf = cupy.empty(blksize**2*nao**2)
         def fint(ish0, ish1, jsh0, jsh1, group_id):
             i0, i1 = ao_loc[ish0], ao_loc[ish1]
             j0, j1 = ao_loc[jsh0], ao_loc[jsh1]
-            #eri = gpunp.ndarray((i1-i0, nao, j1-j0, nao), memptr=eribuf.data)
+            #eri = cupy.ndarray((i1-i0, nao, j1-j0, nao), memptr=eribuf.data)
             #eri.fill(0.)
-            eri = gpunp.zeros([i1-i0,nao,j1-j0,nao])
+            eri = cupy.zeros([i1-i0,nao,j1-j0,nao])
 
             # strides to ensure data order consistent with eri(k1-k0,nao,l1-l0,nao)
             strides = [1, (j1-j0)*nao, (j1-j0)*nao**2, nao]
@@ -283,12 +267,12 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
                                        eri.ctypes.data_as(ctypes.c_void_p),
                                        (ctypes.c_int*4)(i0, i1, i0, i1),
                                        ctypes.c_int(nao))
-            return gpunp.asarray(aoblk)
+            return cupy.asarray(aoblk)
 
     wVVoo = np.zeros((nao,nao,nocc,nocc))
     wVvoO = np.zeros((nao,nao,nocc,nocc))
 
-    #mempool = gpunp.get_default_memory_pool()
+    #mempool = cupy.get_default_memory_pool()
     for cp_ij_id, log_q_ij in enumerate(log_qs):
         cpi = cp_idx[cp_ij_id]
         cpj = cp_jdx[cp_ij_id]
@@ -337,7 +321,7 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     # part of ovvv-t2 contractions back to MO repr.
     #: tmp = np.einsum('ijcd,ka,kdcb->ijba', tau, t1, eris.ovvv)
     #: t2new -= tmp + tmp.transpose(1,0,3,2)
-    t1pv = orbo.dot(gpunp.asarray(t1))
+    t1pv = orbo.dot(cupy.asarray(t1))
     tmp = _einsum('xpq,pa->xaq', Ht2ao, orbv)
     Ht2tril -= _einsum('xaq,qb->xab', tmp, t1pv)
 
@@ -351,29 +335,29 @@ def _direct_ovvv_vvvv(mycc, t1, t2):
     wpq = 2 * lib.einsum('pqkk,pi,qj->ij', wVVoo, c, c)
     wpq -= lib.einsum('pqkk,pi,qj->ji', wVvoO, c, c)
 
-    tmp = _einsum('pqji,qb->pbji', gpunp.asarray(wVvoO), orbv)
+    tmp = _einsum('pqji,qb->pbji', cupy.asarray(wVvoO), orbv)
     wVOov = _einsum('pbji,pa->bjia', tmp, orbv).get()
-    #wVOov = _einsum('pqji,qb,pa->bjia', gpunp.asarray(wVvoO), orbv, orbv).get()
+    #wVOov = _einsum('pqji,qb,pa->bjia', cupy.asarray(wVvoO), orbv, orbv).get()
 
-    tmp = _einsum('pqji,pa->aqji', gpunp.asarray(wVVoo), -orbv)
+    tmp = _einsum('pqji,pa->aqji', cupy.asarray(wVVoo), -orbv)
     wVooV = _einsum('aqji,qb->bjia', tmp, orbv).get()
-    #wVooV = _einsum('pqji,pa,qb->bjia', gpunp.asarray(wVVoo),-orbv, orbv).get()
+    #wVooV = _einsum('pqji,pa,qb->bjia', cupy.asarray(wVVoo),-orbv, orbv).get()
     wVVoo = None
 
     if FREE_CUPY_CACHE:
-        gpunp.get_default_memory_pool().free_all_blocks()
+        cupy.get_default_memory_pool().free_all_blocks()
     return wpq, t1new, t2new, wVOov, wVooV
 
 def make_tau_tril(t1, t2):
     nocc, nvir = t1.shape
-    t1 = gpunp.asarray(t1)
-    tau = gpunp.einsum('ia,jb->ijab', t1, t1)
-    tau += gpunp.asarray(t2)
-    return tau[gpunp.tril_indices(nocc)]
+    t1 = cupy.asarray(t1)
+    tau = cupy.einsum('ia,jb->ijab', t1, t1)
+    tau += cupy.asarray(t2)
+    return tau[cupy.tril_indices(nocc)]
 
 def _unpack_t2_tril(t2tril, nocc, nvir):
-    t2 = gpunp.empty((nocc,nocc,nvir,nvir))
-    idx,idy = gpunp.tril_indices(nocc)
+    t2 = cupy.empty((nocc,nocc,nvir,nvir))
+    idx,idy = cupy.tril_indices(nocc)
     t2[idy,idx] = t2tril.transpose(0,2,1)
     t2[idx,idy] = t2tril
     return t2
@@ -393,10 +377,7 @@ def _fill_eri_block(eri, strides, ao_offsets, vhfopt, group_id):
     if lk > int4c2e.LMAX_ON_GPU or ll > int4c2e.LMAX_ON_GPU:
         raise NotImplementedError
 
-    #stream = gpunp.cuda.get_current_stream()
-    dev = get_default_cached_device()
-    stream = get_device_cached_queue(dev)
-
+    stream = cupy.cuda.get_current_stream()
     log_cutoff = np.log(vhfopt.direct_scf_tol)
     omega = 0.
 
@@ -432,7 +413,7 @@ def _fill_eri_block(eri, strides, ao_offsets, vhfopt, group_id):
                  ctypes.c_double(log_cutoff),
                  ctypes.c_double(omega))
         if err != 0:
-            detail = f'CUDA/SYCL Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
+            detail = f'CUDA Error for ({l_symb[li]}{l_symb[lj]}|{l_symb[lk]}{l_symb[ll]})'
             raise RuntimeError(detail)
         logger.debug1(vhfopt.mol, '(%s%s|%s%s) on GPU %.3fs',
                       l_symb[li], l_symb[lj], l_symb[lk], l_symb[ll],
@@ -447,10 +428,10 @@ def _make_eris_incore(mycc, mo_coeff=None):
 
     # Cupy memory buffer may be created in previous SCF calculations.
     if FREE_CUPY_CACHE:
-        gpunp.get_default_memory_pool().free_all_blocks()
+        cupy.get_default_memory_pool().free_all_blocks()
 
     mol = mycc.mol
-    mo_coeff = gpunp.asarray(eris.mo_coeff, order='F')
+    mo_coeff = cupy.asarray(eris.mo_coeff, order='F')
     nocc = eris.nocc
     nmo = mo_coeff.shape[1]
     nvir = nmo - nocc
@@ -458,12 +439,8 @@ def _make_eris_incore(mycc, mo_coeff=None):
     nao_cart = mycc.mol.nao_nr(cart=True)
     max_memory = max(MEMORYMIN, mycc.max_memory - lib.current_memory()[0])
     blksize = ((max_memory*.9e6-nocc**2*nao_cart**2*2*8)/8/nao_cart**2/2.5)**.5
-    mem_avail = 0
-    if not has_dpctl:
-        mem_avail = int(gpunp.cuda.runtime.memGetInfo()[0] * .75)
-        gpunp.get_default_memory_pool().set_limit(mem_avail)
-    else:
-        mem_avail = #ABB
+    mem_avail = int(cupy.cuda.runtime.memGetInfo()[0] * .75)
+    cupy.get_default_memory_pool().set_limit(mem_avail)
     blksize = max(BLKMIN, int(min((nao_cart+3)/4, blksize,
                                   (mem_avail*.5/8/nao_cart**2)**.5)))
     logger.debug1(mycc, 'blksize %d nao %d', blksize, nao_cart)
@@ -472,8 +449,8 @@ def _make_eris_incore(mycc, mo_coeff=None):
     vhfopt.build(group_size=blksize, diag_block_with_triu=True)
     mol = vhfopt.mol
     mo = vhfopt.coeff.dot(mo_coeff)
-    orbo = gpunp.asarray(mo[:,:nocc])
-    orbv = gpunp.asarray(mo[:,nocc:])
+    orbo = cupy.asarray(mo[:,:nocc])
+    orbv = cupy.asarray(mo[:,nocc:])
     ao_loc = mol.ao_loc
     nao = mo.shape[0]
 
@@ -483,9 +460,9 @@ def _make_eris_incore(mycc, mo_coeff=None):
 
     ppOO = np.empty((nao,nao,nocc,nocc))
     pPoO = np.zeros((nao,nao,nocc,nocc))
-    eribuf = gpunp.empty(blksize**2*nao**2)
-    #mempool = gpunp.get_default_memory_pool()
-    idx, idy = gpunp.tril_indices(nao)
+    eribuf = cupy.empty(blksize**2*nao**2)
+    #mempool = cupy.get_default_memory_pool()
+    idx, idy = cupy.tril_indices(nao)
 
     for cp_ij_id, log_q_ij in enumerate(log_qs):
         cpi = cp_idx[cp_ij_id]
@@ -501,7 +478,7 @@ def _make_eris_incore(mycc, mo_coeff=None):
         jsh1 = l_ctr_offsets[cpj+1]
         i0, i1 = ao_loc[ish0], ao_loc[ish1]
         j0, j1 = ao_loc[jsh0], ao_loc[jsh1]
-        eri = gpunp.ndarray((nao, i1-i0, j1-j0, nao), memptr=eribuf.data)
+        eri = cupy.ndarray((nao, i1-i0, j1-j0, nao), memptr=eribuf.data)
         eri.fill(0.)
         # strides to ensure data order consistent with eri(nao,k1-k0,l1-l0,nao)
         strides = [1, (i1-i0)*(j1-j0)*nao, (j1-j0)*nao, nao]
@@ -510,45 +487,45 @@ def _make_eris_incore(mycc, mo_coeff=None):
         # Fill lower triangular part
         eri[idx,:,:,idy] = eri[idy,:,:,idx]
 
-        pijo = gpunp.dot(eri.reshape(-1,nao), orbo)
-        ijoo = gpunp.dot(pijo.reshape(nao,-1).T, orbo)
+        pijo = cupy.dot(eri.reshape(-1,nao), orbo)
+        ijoo = cupy.dot(pijo.reshape(nao,-1).T, orbo)
         ppOO[i0:i1,j0:j1] = ijoo.get().reshape(i1-i0,j1-j0,nocc,nocc)
         ijoo = None
 
-        jopi = gpunp.asarray(pijo.reshape(nao*(i1-i0),(j1-j0)*nocc).T, order='C')
-        jopo = gpunp.dot(jopi.reshape(-1,i1-i0), orbo[i0:i1])
+        jopi = cupy.asarray(pijo.reshape(nao*(i1-i0),(j1-j0)*nocc).T, order='C')
+        jopo = cupy.dot(jopi.reshape(-1,i1-i0), orbo[i0:i1])
         pPoO[j0:j1] += jopo.get().reshape(j1-j0,nocc,nao,nocc).transpose(0,2,1,3)
         pijo = jopo = None
 
         if ish0 != jsh0:
             ppOO[j0:j1,i0:i1] = ppOO[i0:i1,j0:j1].transpose(1,0,2,3)
-            opio = gpunp.dot(jopi.reshape(j1-j0,-1).T, orbo[j0:j1])
+            opio = cupy.dot(jopi.reshape(j1-j0,-1).T, orbo[j0:j1])
             pPoO[i0:i1] += opio.get().reshape(nocc,nao,i1-i0,nocc).transpose(2,1,0,3)
             jopi = opio = None
 
-    ppOO = gpunp.asarray(ppOO)
-    pooo = gpunp.dot(ppOO.reshape(nao,-1).T, orbo)
-    oooo = gpunp.dot(pooo.reshape(nao,-1).T, orbo).reshape(nocc,nocc,nocc,nocc)
-    ooov = gpunp.dot(pooo.reshape(nao,-1).T, orbv).reshape(nocc,nocc,nocc,nvir)
+    ppOO = cupy.asarray(ppOO)
+    pooo = cupy.dot(ppOO.reshape(nao,-1).T, orbo)
+    oooo = cupy.dot(pooo.reshape(nao,-1).T, orbo).reshape(nocc,nocc,nocc,nocc)
+    ooov = cupy.dot(pooo.reshape(nao,-1).T, orbv).reshape(nocc,nocc,nocc,nvir)
     eris.oooo = oooo.get()
     eris.ovoo = lib.transpose(ooov.get().reshape(nocc*nocc,nocc*nvir)).reshape(nocc,nvir,nocc,nocc)
     pooo = oooo = ooov = None
 
-    poov = gpunp.dot(ppOO.reshape(nao,-1).T, orbv)
-    oovv = gpunp.dot(poov.reshape(nao,-1).T, orbv).reshape(nocc,nocc,nvir,nvir)
+    poov = cupy.dot(ppOO.reshape(nao,-1).T, orbv)
+    oovv = cupy.dot(poov.reshape(nao,-1).T, orbv).reshape(nocc,nocc,nvir,nvir)
     eris.oovv = oovv.get()
     ppOO = poov = oovv = None
 
-    pPoO = gpunp.asarray(pPoO)
-    poov = gpunp.dot(pPoO.reshape(nao,-1).T, orbv)
-    voov = gpunp.dot(orbv.T, poov.reshape(nao,-1))
+    pPoO = cupy.asarray(pPoO)
+    poov = cupy.dot(pPoO.reshape(nao,-1).T, orbv)
+    voov = cupy.dot(orbv.T, poov.reshape(nao,-1))
     eris.ovvo = lib.transpose(voov.get().reshape(nvir*nocc,nocc*nvir)).reshape(nocc,nvir,nvir,nocc)
     eris.ovov = eris.ovvo.transpose(0,1,3,2)
     pPoO = poov = voov = None
     log.timer('CCSD integral transformation', *cput0)
 
     if FREE_CUPY_CACHE:
-        gpunp.get_default_memory_pool().free_all_blocks()
+        cupy.get_default_memory_pool().free_all_blocks()
     return eris
 
 class CCSDBase(lib.StreamObject):

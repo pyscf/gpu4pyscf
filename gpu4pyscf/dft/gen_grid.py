@@ -27,16 +27,7 @@ Reference for Lebedev-Laikov grid:
 import sys
 import ctypes
 import numpy
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.dpnp_helper import load_library
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import load_library
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy
 from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid as gen_grid_cpu
@@ -45,6 +36,7 @@ from pyscf.gto.eval_gto import BLKSIZE, NBINS, CUTOFF, make_screen_index
 from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
+from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf import __config__ as __gpu4pyscf_config__
 
 libdft = lib.load_library('libdft')
@@ -238,7 +230,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 angs = [n_ang] * n_rad
             logger.debug(mol, 'atom %s rad-grids = %d, ang-grids = %s',
                          symb, n_rad, angs)
-            if isinstance(angs, gpunp.ndarray): angs = angs.get()
+            if isinstance(angs, cupy.ndarray): angs = angs.get()
             angs = numpy.array(angs)
             coords = []
             vol = []
@@ -252,10 +244,13 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                                                grid[:,:3]).reshape(-1,3))
                     vol.append(numpy.einsum('i,j->ji', rad_weight[idx[i0:i1]],
                                             grid[:,3]).ravel())
-                #coords.append(gpunp.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
-                #vol.append(gpunp.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
+                #coords.append(cupy.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
+                #vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
 
-            atom_grids_tab[symb] = (gpunp.vstack(coords), gpunp.hstack(vol))
+            print(type(coords), type(vol))
+            coords_dp = [cupy.array(c) if isinstance(c, numpy.ndarray) else c for c in coords]
+            vol_dp = [cupy.array(v) if isinstance(v, numpy.ndarray) else v for v in vol]
+            atom_grids_tab[symb] = (cupy.vstack(coords_dp), cupy.hstack(vol_dp))
 
     return atom_grids_tab
 
@@ -346,8 +341,8 @@ def argsort_group(group_ids, ngroup):
     '''
     groups = []
     for i in range(ngroup):
-        groups.append(gpunp.argwhere(group_ids==i)[0])
-    return gpunp.hstack(groups)
+        groups.append(cupy.argwhere(group_ids==i)[0])
+    return cupy.hstack(groups)
 
 def atomic_group_grids(mol, coords):
     '''
@@ -369,14 +364,12 @@ def atomic_group_grids(mol, coords):
         next_node = numpy.argmin(distances_to_unvisited)
         path.append(next_node)
         current_node = next_node
-    atom_coords = gpunp.asarray(atom_coords[path])
+    atom_coords = cupy.asarray(atom_coords[path])
 
-    coords = gpunp.asarray(coords, order='F')
-    atom_coords = gpunp.asarray(atom_coords, order='F')
-    group_ids = gpunp.empty([ngrids], dtype=numpy.int32)
-    #stream = gpunp.cuda.get_current_stream()
-    dev = get_default_cached_device()
-    stream = get_device_cached_queue(dev)
+    coords = cupy.asarray(coords, order='F')
+    atom_coords = cupy.asarray(atom_coords, order='F')
+    group_ids = cupy.empty([ngrids], dtype=numpy.int32)
+    stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTgroup_grids(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(group_ids.data.ptr, ctypes.c_void_p),
@@ -386,7 +379,7 @@ def atomic_group_grids(mol, coords):
         ctypes.c_int(ngrids)
     )
     if err != 0:
-        raise RuntimeError('CUDA/SYCL Error')
+        raise RuntimeError('CUDA Error')
     idx = group_ids.argsort()
     return idx
 
@@ -403,9 +396,9 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     tot_boxes = numpy.prod(boxes + 2)
     logger.debug(mol, 'tot_boxes %d, boxes in each direction %s', tot_boxes, boxes)
     # box_size is the length of each edge of the box
-    box_size = gpunp.asarray((boundary[1] - boundary[0]) / boxes)
-    frac_coords = (coords - gpunp.asarray(boundary[0])) * (1./box_size)
-    box_ids = gpunp.floor(frac_coords).astype(int)
+    box_size = cupy.asarray((boundary[1] - boundary[0]) / boxes)
+    frac_coords = (coords - cupy.asarray(boundary[0])) * (1./box_size)
+    box_ids = cupy.floor(frac_coords).astype(int)
     box_ids[box_ids<-1] = -1
     box_ids[box_ids[:,0] > boxes[0], 0] = boxes[0]
     box_ids[box_ids[:,1] > boxes[1], 1] = boxes[1]
@@ -414,7 +407,7 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
     boxes *= 2 # for safety
     box_id = box_ids[:,0] + box_ids[:,1] * boxes[0] + box_ids[:,2] * boxes[0] * boxes[1]
     #rev_idx = numpy.unique(box_ids.get(), axis=0, return_inverse=True)[1]
-    rev_idx = gpunp.unique(box_id, return_inverse=True)[1]
+    rev_idx = cupy.unique(box_id, return_inverse=True)[1]
     return rev_idx.argsort()
 
 def _load_conf(mod, name, default):
@@ -551,7 +544,7 @@ class Grids(lib.StreamObject):
             return self
 
         mol = self.mol
-        n = gpunp.dot(rho, self.weights)
+        n = cupy.dot(rho, self.weights)
         if abs(n-mol.nelectron) < NELEC_ERROR_TOL*n:
             rho *= self.weights
             idx = abs(rho) > threshold / self.weights.size

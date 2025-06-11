@@ -14,4 +14,11 @@
 
 __version__ = '1.4.0'
 
-from . import lib, grad, hessian, solvent, scf, dft, tdscf
+import sys
+from gpu4pyscf.lib import dpnp_helper
+# Inject alias before any other submodules are imported
+sys.modules['gpu4pyscf.lib.cupy_helper'] = dpnp_helper
+
+#from . import cupy, lib, grad, hessian, solvent, scf, dft, tdscf
+from . import cupy
+

@@ -19,3 +19,9 @@ from .uhf import UHF
 from .ghf import GHF
 from .rohf import ROHF
 from . import dispersion
+
+def HF(mol, *args):
+    if mol.nelectron == 1 or mol.spin == 0:
+        return RHF(mol, *args)
+    else:
+        return UHF(mol, *args)

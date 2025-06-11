@@ -17,8 +17,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
@@ -29,8 +32,28 @@
 #define REMOTE_THRESHOLD 50
 
 __global__
-void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                        #ifdef USE_SYCL
+                        , sycl::nd_item<3> &item, char *shm_mem
+                        #endif
+                        )
 {
+#ifdef USE_SYCL
+    int nksh_per_block = item.get_local_range(2);
+    int gout_stride = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int ksh_id = item.get_local_id(2);
+    int gout_id = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = (item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1)) * item.get_local_range(2) + item.get_local_id(2);
+    double *rw_buffer = reinterpret_cast<double *>(shm_mem);
+    int (&img_counts_in_warp)[WARPS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[WARPS]>(item.get_group());
+    auto c_g_pair_idx = s_g_pair_idx.get();
+    auto c_g_pair_offsets = s_g_pair_offsets.get();
+    auto c_g_cart_idx = s_g_cart_idx.get();
+#else
     int nksh_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int nsp_per_block = blockDim.z;
@@ -39,10 +62,13 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_buffer[];
+    __shared__ int img_counts_in_warp[WARPS];
+#endif
 
     int nksp_per_block = nksh_per_block * nsp_per_block;
     int ksp_id = nksh_per_block * sp_id + ksh_id;
-    int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
@@ -77,7 +103,6 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     double omega = env[PTR_RANGE_OMEGA];
 
     int gx_len = g_size * nksp_per_block;
-    extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + ksp_id;
     double *g = rw + nksp_per_block * nroots*2;
     double *gx = g;
@@ -85,7 +110,6 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     double *gz = gy + gx_len;
     double *rjri = gz + gx_len;
     double *Rpq = rjri + nksp_per_block * 3;
-    __shared__ int img_counts_in_warp[WARPS];
     double gout[GOUT_WIDTH];
 
     int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;

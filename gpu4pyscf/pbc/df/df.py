@@ -25,28 +25,25 @@ import warnings
 import ctypes
 import tempfile
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import return_gpunp_array, pack_tril, get_avail_mem
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import return_gpunp_array, pack_tril, get_avail_mem
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df import aft as aft_cpu
+from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from pyscf.pbc.df import df as df_cpu
 from pyscf.pbc.df.gdf_builder import libpbc
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import return_cupy_array, pack_tril, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import (
+    return_cupy_array, pack_tril, get_avail_mem, asarray)
 from gpu4pyscf.lib.memcpy import copy_array
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import _check_kpts, AFTDF
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.__config__ import num_devices
+
+DEBUG = False
 
 
 class GDF(lib.StreamObject):
@@ -115,10 +112,23 @@ class GDF(lib.StreamObject):
             else:
                 assert cell.omega < 0
                 omega = abs(cell.omega)
-            cderi, self._cderip, self._cderi_idx = \
-                rsdf_builder.compressed_cderi_gamma_point(
-                    cell, auxcell, omega, with_long_range,
-                    self.linear_dep_threshold)
+            if DEBUG:
+                cderi, cderip = \
+                    rsdf_builder.build_cderi_gamma_point(
+                        cell, auxcell, omega, with_long_range,
+                        self.linear_dep_threshold)
+                nao = cell.nao
+                rows, cols = np.tril_indices(nao)
+                diag_idx = np.arange(nao)
+                diag_idx = diag_idx*(diag_idx+1)//2 + diag_idx
+                cderi = cderi.popitem()[1]
+                cderi = cderi[:, rows, cols]
+                self._cderi_idx = rows, cols, diag_idx
+            else:
+                cderi, self._cderip, self._cderi_idx = \
+                    rsdf_builder.compressed_cderi_gamma_point(
+                        cell, auxcell, omega, with_long_range,
+                        self.linear_dep_threshold)
             self._cderi = [None] * num_devices
             self.nao = cell.nao
             if num_devices == 1:
@@ -146,7 +156,7 @@ class GDF(lib.StreamObject):
         return self
 
     has_kpts = df_cpu.GDF.has_kpts
-    weighted_coulG = return_gpunp_array(aft_cpu.weighted_coulG)
+    weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
     pw_loop = NotImplemented
     ft_loop = df_cpu.GDF.ft_loop
     get_naoaux = df_cpu.GDF.get_naoaux
@@ -235,7 +245,7 @@ class GDF(lib.StreamObject):
             #   sample density in vacuum.
             if cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum':
                 mydf = AFTDF(cell, self.kpts)
-                ke_cutoff = aft_cpu.estimate_ke_cutoff_for_omega(cell, omega)
+                ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
                 mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
             else:
                 mydf = self
@@ -284,7 +294,7 @@ class GDF(lib.StreamObject):
             if isinstance(cderi_sparse, cp.ndarray):
                 buf = cderi_sparse[p0:p1,:]
             else:
-                buf = cp.asarray(cderi_sparse[p0:p1,:])
+                buf = asarray(cderi_sparse[p0:p1,:])
             if unpack:
                 buf2 = buf_cderi[:p1-p0]
                 buf2[:,cols,rows] = buf2[:,rows,cols] = buf

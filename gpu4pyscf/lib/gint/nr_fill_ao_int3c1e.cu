@@ -104,11 +104,11 @@ static int GINTfill_int3c1e_charge_contracted_tasks(double* output, const BasisP
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ngrids = (offsets.ntasks_kl + n_charge_sum_per_thread - 1) / n_charge_sum_per_thread;
+    const int type_ij = i_l * 10 + j_l;
 
 #ifdef USE_SYCL
     sycl::range<2> threads(THREADSY, THREADSX);
     sycl::range<2> blocks((ngrids+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
-    const int type_ij = i_l * 10 + j_l;
     switch (type_ij) {
     case 00: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_charge_contracted_kernel00(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
     case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c1e_charge_contracted_kernel10(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
@@ -134,7 +134,6 @@ static int GINTfill_int3c1e_charge_contracted_tasks(double* output, const BasisP
 #else // USE_SYCL
     const dim3 threads(THREADSX, THREADSY);
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
-    const int type_ij = i_l * 10 + j_l;
     switch (type_ij) {
     case 00: GINTfill_int3c1e_charge_contracted_kernel00<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
     case 10: GINTfill_int3c1e_charge_contracted_kernel10<<<blocks, threads, 0, stream>>>(output, offsets, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;

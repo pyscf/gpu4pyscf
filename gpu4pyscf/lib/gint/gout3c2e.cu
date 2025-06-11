@@ -27,9 +27,9 @@
 template <int NROOTS> __device__
 static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ f, double* __restrict__ g)
 {
-    int *idx = c_idx;
-    int *idy = c_idx + TOT_NF;
-    int *idz = c_idx + TOT_NF * 2;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     const int di = envs.stride_i;
     const int dj = envs.stride_j;
@@ -74,9 +74,9 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
 template <int LI, int LJ, int LK, int NROOTS> __device__
 static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ f, double* __restrict__ g)
 {
-    int *idx = c_idx;
-    int *idy = c_idx + TOT_NF;
-    int *idz = c_idx + TOT_NF * 2;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     const int di = envs.stride_i;
     const int dj = envs.stride_j;
@@ -117,8 +117,8 @@ static void GINTgout3c2e_ip(GINTEnvVars envs, double* __restrict__ gout, double*
 template <int NROOTS> __device__
 static void GINTgout3c2e(GINTEnvVars envs, double* __restrict__ gout, double* __restrict__ g)
 {
-    int * __restrict__ c_idy = c_idx + TOT_NF;
-    int * __restrict__ c_idz = c_idx + TOT_NF * 2;
+    const int * __restrict__ c_idy = c_idx + TOT_NF;
+    const int * __restrict__ c_idz = c_idx + TOT_NF * 2;
 
     const int di = envs.stride_i;
     const int dj = envs.stride_j;

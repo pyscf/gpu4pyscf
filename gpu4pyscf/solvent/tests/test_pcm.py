@@ -21,6 +21,12 @@ from pyscf import gto
 from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import pcm
 from packaging import version
+try:
+    # Some PCM methods are registered when importing the CPU version.
+    # However, pyscf-2.7 does note automatically import this module.
+    from pyscf.solvent import pcm as pcm_on_cpu
+except ImportError:
+    pass
 
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
@@ -54,6 +60,7 @@ def _energy_with_solvent(mf, method):
     e_tot = mf.kernel()
     return e_tot
 
+@unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
     def test_D_S(self):
         cm = pcm.PCM(mol)
@@ -141,7 +148,7 @@ class KnownValues(unittest.TestCase):
         assert abs(e_cpu - e_gpu) < 1e-8
 
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_cpu(self):
+    def test_to_cpu_1(self):
         mf = dft.RKS(mol, xc='b3lyp').PCM()
         e_gpu = mf.kernel()
         mf = mf.to_cpu()
@@ -153,6 +160,7 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()

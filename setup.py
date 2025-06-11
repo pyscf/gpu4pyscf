@@ -86,12 +86,26 @@ class CMakeBuildPy(build_py):
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
+# For setuptools<70
 from wheel.bdist_wheel import bdist_wheel
-initialize_options = bdist_wheel.initialize_options
+initialize_options_1 = bdist_wheel.initialize_options
 def initialize_with_default_plat_name(self):
-    initialize_options(self)
+    initialize_options_1(self)
     self.plat_name = get_platform()
+    self.plat_name_supplied = True
 bdist_wheel.initialize_options = initialize_with_default_plat_name
+
+# For setuptools>=70
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+    initialize_options_2 = bdist_wheel.initialize_options
+    def initialize_with_default_plat_name(self):
+        initialize_options_2(self)
+        self.plat_name = get_platform()
+        self.plat_name_supplied = True
+    bdist_wheel.initialize_options = initialize_with_default_plat_name
+except ImportError:
+    pass
 
 if 'sdist' in sys.argv:
     # The sdist release
@@ -120,17 +134,10 @@ setup(
     ],
     cmdclass={'build_py': CMakeBuildPy},
     install_requires=[
-<<<<<<< HEAD
-        'pyscf~=2.6.0',
-        f'cupy-cuda{CUDA_VERSION}',
-        'geometric',
-        f'gpu4pyscf-libxc-cuda{CUDA_VERSION}',
-=======
-        'pyscf~=2.8.0',
+        'pyscf>=2.8.0',
         'pyscf-dispersion',
         f'cupy-cuda{CUDA_VERSION}>=13.0,!=13.4.0', # Due to expm in cupyx.scipy.linalg and cutensor 2.0
         'geometric',
         f'gpu4pyscf-libxc-cuda{CUDA_VERSION}==0.5',
->>>>>>> origin/master
     ]
 )

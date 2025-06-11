@@ -22,18 +22,12 @@ __all__ = [
 ]
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import contract
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero, member
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):

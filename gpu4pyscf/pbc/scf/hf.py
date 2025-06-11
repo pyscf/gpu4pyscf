@@ -21,17 +21,11 @@ __all__ = [
 ]
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import return_gpunp_array, contract
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import return_gpunp_array, contract
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import hf as hf_cpu
 from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
 
@@ -140,7 +134,7 @@ class SCF(mol_hf.SCF):
     get_bands = get_bands
     get_rho = get_rho
 
-    get_ovlp = return_gpunp_array(hf_cpu.SCF.get_ovlp)
+    get_ovlp = return_cupy_array(hf_cpu.SCF.get_ovlp)
 
     def get_hcore(self, cell=None, kpt=None):
         if cell is None: cell = self.cell

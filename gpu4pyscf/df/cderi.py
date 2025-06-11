@@ -13,15 +13,9 @@
 # limitations under the License.
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import load_library    
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import load_library    
+import cupy
 import ctypes
+from gpu4pyscf.lib.cupy_helper import load_library
 
 libcupy_helper = load_library('libcupy_helper')
 
@@ -57,9 +51,9 @@ class CDERI():
         self.col.append(cols)
         self.data.append(data)
 
-        rows = gpunp.asarray(rows, dtype=gpunp.int64)
-        cols = gpunp.asarray(cols, dtype=gpunp.int64)
-        assert rows.dtype == gpunp.int64 and cols.dtype == gpunp.int64
+        rows = cupy.asarray(rows, dtype=cupy.int64)
+        cols = cupy.asarray(cols, dtype=cupy.int64)
+        assert rows.dtype == cupy.int64 and cols.dtype == cupy.int64
         nij = len(rows)
         err = libcupy_helper.add_block(
             ctypes.byref(self.handle),
@@ -73,7 +67,7 @@ class CDERI():
         return
 
     def unpack(self, p0, p1, out=None):
-        if out is None: out = gpunp.zeros([p1-p0, self.nao, self.nao])
+        if out is None: out = cupy.zeros([p1-p0, self.nao, self.nao])
 
         libcupy_helper.unpack(
             ctypes.byref(self.handle),
@@ -82,3 +76,4 @@ class CDERI():
             ctypes.cast(out.data.ptr, ctypes.c_void_p)
         )
         return out
+

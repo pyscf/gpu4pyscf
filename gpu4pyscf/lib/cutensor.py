@@ -13,7 +13,10 @@
 # limitations under the License.
 
 import numpy as np
-import cupy
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy
 from gpu4pyscf.lib import logger
 
 try:
@@ -116,7 +119,10 @@ def contraction(
 import os
 contract_engine = None
 if cutensor is None:
-    contract_engine = 'cupy'  # default contraction engine
+    if not has_dpctl:
+        contract_engine = 'cupy'  # default contraction engine
+    else:
+        contract_engine = 'dpnp' # default contraction engine for SYCL using Intel's DPNP
 contract_engine = os.environ.get('CONTRACT_ENGINE', contract_engine)
 
 # override the 'contract' function if einsum is customized or cutensor is not found
@@ -129,6 +135,9 @@ if contract_engine is not None:
         from cuquantum import contract as einsum # type: ignore
     elif contract_engine == 'cupy':
         einsum = cupy.einsum
+    elif contract_engine == 'dpnp':
+        import dpnp
+        einsum = dpnp.einsum
     else:
         raise RuntimeError('unknown tensor contraction engine.')
 

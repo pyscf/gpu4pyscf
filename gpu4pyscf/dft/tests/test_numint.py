@@ -15,14 +15,7 @@
 import unittest
 import numpy as np
 import pyscf
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+import cupy
 from pyscf import lib, scf
 from pyscf.dft import Grids
 from pyscf.dft.numint import NumInt as pyscf_numint
@@ -58,8 +51,8 @@ H        0.000000   -0.755453   -0.471161''',
     grids_gpu.level = 1
     grids_gpu.build()
 
-    grids_gpu.weights = gpunp.asarray(grids_gpu.weights)
-    grids_gpu.coords = gpunp.asarray(grids_gpu.coords)
+    grids_gpu.weights = cupy.asarray(grids_gpu.weights)
+    grids_gpu.coords = cupy.asarray(grids_gpu.coords)
 
 def tearDownModule():
     global mol, grids_cpu, grids_gpu
@@ -85,12 +78,12 @@ class KnownValues(unittest.TestCase):
         fn = getattr(ni_pyscf, method)
         nref, eref, vref = fn(mol, grids_cpu, xc, dm, hermi=1)
 
-        v = gpunp.asarray(v)
-        vref = gpunp.asarray(vref)
+        v = cupy.asarray(v)
+        vref = cupy.asarray(vref)
 
-        assert gpunp.allclose(e, eref)
-        assert gpunp.allclose(n, nref)
-        assert gpunp.allclose(v, vref)
+        assert cupy.allclose(e, eref)
+        assert cupy.allclose(n, nref)
+        assert cupy.allclose(v, vref)
 
     def _check_rks_fxc(self, xc, hermi=1):
         if hermi == 1:
@@ -107,13 +100,13 @@ class KnownValues(unittest.TestCase):
         vxc0 = vxc.copy()
         fxc0 = fxc.copy()
         ni = NumInt()
-        rho, vxc, fxc = ni.cache_xc_kernel(mol, grids_gpu, xc, gpunp.asarray(mo_coeff[0]), gpunp.asarray(mo_occ[0]), spin)
+        rho, vxc, fxc = ni.cache_xc_kernel(mol, grids_gpu, xc, cupy.asarray(mo_coeff[0]), cupy.asarray(mo_occ[0]), spin)
         v = ni.nr_rks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
 
-        assert gpunp.linalg.norm(rho - gpunp.asarray(rho0)) < 1e-6 * gpunp.linalg.norm(rho)
-        assert gpunp.linalg.norm(vxc - gpunp.asarray(vxc0)) < 1e-6 * gpunp.linalg.norm(vxc)
-        assert gpunp.linalg.norm(fxc - gpunp.asarray(fxc0)) < 1e-6 * gpunp.linalg.norm(fxc)
-        assert gpunp.allclose(v, vref)
+        assert cupy.linalg.norm(rho - cupy.asarray(rho0)) < 1e-6 * cupy.linalg.norm(rho)
+        assert cupy.linalg.norm(vxc - cupy.asarray(vxc0)) < 1e-6 * cupy.linalg.norm(vxc)
+        assert cupy.linalg.norm(fxc - cupy.asarray(fxc0)) < 1e-6 * cupy.linalg.norm(fxc)
+        assert cupy.allclose(v, vref)
 
     def _check_rks_fxc_st(self, xc, fpref):
         ni = NumInt()
@@ -138,7 +131,7 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         spin = 1
         rho, vxc, fxc = ni.cache_xc_kernel(
-            mol, grids_gpu, xc, gpunp.asarray(mo_coeff), gpunp.asarray(mo_occ), spin)
+            mol, grids_gpu, xc, cupy.asarray(mo_coeff), cupy.asarray(mo_occ), spin)
         v = ni.nr_uks_fxc(mol, grids_gpu, xc, dms=t1, fxc=fxc, hermi=hermi)
 
         ni = pyscf_numint()
@@ -150,10 +143,10 @@ class KnownValues(unittest.TestCase):
         vxc_ref = np.asarray(vxc_ref)
         rho_ref = np.asarray(rho_ref)
 
-        assert gpunp.linalg.norm(rho - gpunp.asarray(rho_ref)) < 1e-6 * gpunp.linalg.norm(rho)
-        assert gpunp.linalg.norm(vxc - gpunp.asarray(vxc_ref)) < 1e-6 * gpunp.linalg.norm(vxc)
-        assert gpunp.linalg.norm(fxc - gpunp.asarray(fxc_ref)) < 1e-6 * gpunp.linalg.norm(fxc)
-        assert gpunp.linalg.norm(v - gpunp.asarray(v_ref)) < 1e-6 * gpunp.linalg.norm(v)
+        assert cupy.linalg.norm(rho - cupy.asarray(rho_ref)) < 1e-6 * cupy.linalg.norm(rho)
+        assert cupy.linalg.norm(vxc - cupy.asarray(vxc_ref)) < 1e-6 * cupy.linalg.norm(vxc)
+        assert cupy.linalg.norm(fxc - cupy.asarray(fxc_ref)) < 1e-6 * cupy.linalg.norm(fxc)
+        assert cupy.linalg.norm(v - cupy.asarray(v_ref)) < 1e-6 * cupy.linalg.norm(v)
 
     def test_rks_lda(self):
         self._check_vxc('nr_rks', LDA)
@@ -192,7 +185,7 @@ class KnownValues(unittest.TestCase):
         self._check_uks_fxc(MGGA_M06, hermi=1)
     '''
     # Not implemented yet
-
+    
     def test_rks_fxc_st_lda(self):
         self._check_rks_fxc_st('lda', -0.06358425564270553)
 
@@ -211,11 +204,11 @@ class KnownValues(unittest.TestCase):
         vvcoords = (np.random.random((60,3))-.5)*3
         nlc_pars = .8, .3
 
-        rho = gpunp.asarray(rho)
-        coords = gpunp.asarray(coords)
-        vvrho = gpunp.asarray(vvrho)
-        vvweight = gpunp.asarray(vvweight)
-        vvcoords = gpunp.asarray(vvcoords)
+        rho = cupy.asarray(rho)
+        coords = cupy.asarray(coords)
+        vvrho = cupy.asarray(vvrho)
+        vvweight = cupy.asarray(vvweight)
+        vvcoords = cupy.asarray(vvcoords)
 
         v = dft.numint._vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars)
         self.assertAlmostEqual(lib.fp(v[0].get()), 0.15894647203764295, 8)
@@ -232,6 +225,7 @@ class KnownValues(unittest.TestCase):
                 deriv = 0
             ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
             ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
+            
             rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
             ref = ni_cpu.eval_rho(mol, ao_cpu, dm, xctype=xctype, hermi=0, with_lapl=False)
             self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 10)

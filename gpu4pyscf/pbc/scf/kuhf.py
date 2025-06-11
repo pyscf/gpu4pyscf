@@ -21,22 +21,15 @@ __all__ = [
 ]
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import (
-        return_gpunp_array, contract, tag_array, sandwich_dot)
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import (
-        return_gpunp_array, contract, tag_array, sandwich_dot)    
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import kuhf as kuhf_cpu
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.scf import uhf as pbcuhf
 from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import (
+    return_cupy_array, contract, tag_array, sandwich_dot)
 
 
 def make_rdm1(mo_coeff_kpts, mo_occ_kpts, **kwargs):
@@ -308,7 +301,7 @@ class KUHF(khf.KSCF):
             c = c[:,0]
         return e, c
 
-    init_guess_by_chkfile = return_gpunp_array(kuhf_cpu.KUHF.init_guess_by_chkfile)
+    init_guess_by_chkfile = return_cupy_array(kuhf_cpu.KUHF.init_guess_by_chkfile)
 
     mulliken_meta = NotImplemented
     mulliken_meta_spin = NotImplemented

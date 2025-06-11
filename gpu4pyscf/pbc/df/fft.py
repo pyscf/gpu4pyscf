@@ -19,14 +19,7 @@ __all__ = [
 ]
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import contract
+import cupy as cp
 from pyscf import gto
 from pyscf import lib
 from pyscf.pbc.df import fft as fft_cpu
@@ -34,6 +27,7 @@ from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk
 from gpu4pyscf.pbc.df.aft import _check_kpts

@@ -21,14 +21,7 @@ __all__ = [
 ]
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import return_gpunp_array, tag_array
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import return_gpunp_array, tag_array
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.lib import logger, utils
@@ -38,6 +31,7 @@ from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
 from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from pyscf import __config__
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
@@ -63,6 +57,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if kpt is None: kpt = ks.kpt
     log = logger.new_logger(ks)
     t0 = log.init_timer()
+    mem_avail = get_avail_mem()
+    log.debug1('available GPU memory for uks.get_veff: %.3f GB', mem_avail/1e9)
 
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
@@ -92,7 +88,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                 vk += vklr
             vxc -= vk * .5
             exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
-        t0 = log.timer('veff', *t0)
+        log.timer_debug1('veff', *t0)
         return vxc
 
     ground_state = (isinstance(dm, cp.ndarray) and dm.ndim == 2
@@ -115,7 +111,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             exc += enlc
             vxc += vnlc
             log.debug('nelec with nlc grids = %s', n)
-        log.timer('vxc', *t0)
+        log.timer_debug1('vxc', *t0)
 
     if not hybrid:
         vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
@@ -150,7 +146,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     else:
         ecoul = None
 
-    log.timer('veff', *t0)
+    log.timer_debug1('veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
     return vxc
 

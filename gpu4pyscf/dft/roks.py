@@ -13,17 +13,11 @@
 # limitations under the License.
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import tag_array
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+import cupy as cp
 from pyscf.dft import roks as roks_cpu
 from gpu4pyscf.scf.rohf import ROHF
 from gpu4pyscf.dft import rks, uks
+from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.lib import utils
 
 class ROKS(rks.KohnShamDFT, ROHF):

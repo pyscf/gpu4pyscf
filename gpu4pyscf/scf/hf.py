@@ -13,20 +13,7 @@
 # limitations under the License.
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy
-    from gpu4pyscf.lib.cupy_helper import (
-        eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
-        block_diag, sandwich_dot)
-else:
-    import dpnp as cupy
-    from gpu4pyscf.lib.dpnp_helper import (
-        eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
-        block_diag, sandwich_dot)
-    from dpctl._sycl_queue_manager import get_device_cached_queue
-import h5py
+import cupy
 import h5py
 import itertools
 from functools import reduce
@@ -37,6 +24,9 @@ from pyscf.scf import chkfile
 from gpu4pyscf.gto.ecp import get_ecp
 from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib.cupy_helper import (
+    eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
+    block_diag, sandwich_dot)
 from gpu4pyscf.scf import diis, jk
 from gpu4pyscf.lib import logger
 
@@ -250,10 +240,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
         dm = asarray(dm) # Remove the attached attributes
         t1 = log.timer_debug1('veff', *t1)
-
-        fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
-        e_tot = mf.energy_tot(dm, h1e, vhf)
 
         fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
         norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
@@ -585,6 +571,7 @@ class SCF(pyscf_lib.StreamObject):
 
     def check_sanity(self):
         s1e = self.get_ovlp()
+        print("value of s1e: ", type(s1e), s1e.ndim, s1e.shape)
         if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
             c = cond(s1e)
         else:
@@ -608,7 +595,7 @@ class SCF(pyscf_lib.StreamObject):
     init_guess_by_1e         = hf_cpu.SCF.init_guess_by_1e
     init_guess_by_chkfile    = hf_cpu.SCF.init_guess_by_chkfile
     from_chk                 = hf_cpu.SCF.from_chk
-    get_init_guess           = return_gpunp_array(hf_cpu.SCF.get_init_guess)
+    get_init_guess           = return_cupy_array(hf_cpu.SCF.get_init_guess)
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     energy_tot               = energy_tot

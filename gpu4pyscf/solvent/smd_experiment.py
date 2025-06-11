@@ -18,11 +18,7 @@ SMD solvent model (for experiment and education)
 
 import numpy as np
 import scipy
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 from pyscf.data import radii
 from gpu4pyscf.solvent.smd import hartree2kcal
 from gpu4pyscf.solvent import pcm
@@ -222,7 +218,7 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
             tension += sig_OC * t_OC + sig_ON * t_ON + sig_OO * t_OO + sig_OP * t_OP
             tensions.append(tension)
             continue
-    return gpunp.asarray(tensions)
+    return cupy.asarray(tensions)
 
 def molecular_surface_tension(beta, gamma, phi, psi):
     sig_gamma = sigma_gamma * gamma / gamma0
@@ -248,7 +244,7 @@ def naive_sasa(mol, rad):
                     overlap = (r1 + r2 - r) / (r1 + r2)
                     area -= overlap * area
         sasa.append(area)
-    return gpunp.asarray(sasa)
+    return cupy.asarray(sasa)
 
 def get_cds(smdobj):
     mol = smdobj.mol
@@ -268,8 +264,8 @@ def get_cds(smdobj):
     surface = pcm.gen_surface(mol, ng=smdobj.sasa_ng, rad=rad)
     area = surface['area']
     gridslice = surface['gslice_by_atom']
-    SASA = gpunp.asarray([gpunp.sum(area[p0:p1], axis=0) for p0,p1, in gridslice])
+    SASA = cupy.asarray([cupy.sum(area[p0:p1], axis=0) for p0,p1, in gridslice])
     SASA *= radii.BOHR**2
-    mol_cds = mol_tension * gpunp.sum(SASA) / 1000 # in kcal/mol
-    atm_cds = gpunp.sum(SASA * atm_tension) / 1000 # in kcal/mol
+    mol_cds = mol_tension * cupy.sum(SASA) / 1000 # in kcal/mol
+    atm_cds = cupy.sum(SASA * atm_tension) / 1000 # in kcal/mol
     return (mol_cds + atm_cds)/hartree2kcal # hartree

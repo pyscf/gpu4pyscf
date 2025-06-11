@@ -124,7 +124,7 @@ void Et_dot_dm(double *Et_dm, double *dm, int *ao_loc, int *pair_loc,
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double*)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
 
         size_t nao = ao_loc[c_nbas];
@@ -169,7 +169,7 @@ void jengine_dot_Et(double *vj, double *jvec, int *ao_loc, int *pair_loc,
         int l2 = 2*LMAX;
         int Et_size = (l2+1)*(l2+2)*(l2+3)/6*NCART_MAX*NCART_MAX;
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
-        double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
+        double *Et = (double *)malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
 
         size_t nao = ao_loc[c_nbas];

@@ -14,8 +14,11 @@
  * limitations under the License.
  */
 
-
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 #include <stdio.h>
 #define THREADS       32
 #define BDIM 32
@@ -23,9 +26,16 @@
 __global__ static
 void _pack_tril(double *a_tril, double *a, int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<3>();
+    int j = item.get_global_id(2);
+    int i = item.get_global_id(1);
+    int p = item.get_group(0);
+#else
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
+#endif
     int stride = ((n + 1) * n) / 2;
 
     if (i >= n || j >= n || i < j) {
@@ -38,9 +48,16 @@ void _pack_tril(double *a_tril, double *a, int n)
 __global__ static
 void _unpack_tril(double *eri_tril, double *eri, int nao)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<3>();
+    int j = item.get_global_id(2);
+    int i = item.get_global_id(1);
+    int p = item.get_group(0);
+#else
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
+#endif
     int stride = ((nao + 1) * nao) / 2;
 
     if (i >= nao || j >= nao || i < j) {
@@ -53,9 +70,16 @@ void _unpack_tril(double *eri_tril, double *eri, int nao)
 __global__ static
 void _fill_triu_sym(double *eri, int nao)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<3>();
+    int j = item.get_global_id(2);
+    int i = item.get_global_id(1);
+    int p = item.get_group(0);
+#else
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
+#endif
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
@@ -66,9 +90,16 @@ void _fill_triu_sym(double *eri, int nao)
 __global__ static
 void _fill_triu_antisym(double *eri, int nao)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<3>();
+    int j = item.get_global_id(2);
+    int i = item.get_global_id(1);
+    int p = item.get_group(0);
+#else
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
     int p = blockIdx.z;
+#endif
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
@@ -80,8 +111,14 @@ __global__ static
 void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col,
                     double *out, int nao, int nij, int stride_sparse, int p0, int p1)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int ij = item.get_global_id(1);
+    int k = item.get_global_id(0);
+#else
     int ij = blockIdx.x * blockDim.x + threadIdx.x;
     int k = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
 
     int idx_aux = k + p0;
     if (idx_aux >= p1 || ij >= nij){
@@ -98,6 +135,21 @@ void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col
 extern "C" {
 int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi)
 {
+#ifdef USE_SYCL
+    sycl::range<3> threads(1, THREADS, THREADS);
+    int nx = (n + threads[2] - 1) / threads[2];
+    int ny = (n + threads[1] - 1) / threads[1];
+    sycl::range<3> blocks(counts, ny, nx);
+    if (hermi == 1) {
+      stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        _fill_triu_sym(a, n);
+      });
+    } else if (hermi == 2) {
+      stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        _fill_triu_antisym(a, n);
+      });
+    }
+#else
     dim3 threads(THREADS, THREADS);
     int nx = (n + threads.x - 1) / threads.x;
     int ny = (n + threads.y - 1) / threads.y;
@@ -111,11 +163,21 @@ int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi)
     if (err != cudaSuccess) {
         return 1;
     }
+#endif
     return 0;
 }
 
 int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
 {
+#ifdef USE_SYCL
+    sycl::range<3> threads(1, THREADS, THREADS);
+    int nx = (n + threads[2] - 1) / threads[2];
+    int ny = (n + threads[1] - 1) / threads[1];
+    sycl::range<3> blocks(counts, ny, nx);
+    stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+      _pack_tril(a_tril, a, n);
+    });
+#else
     dim3 threads(THREADS, THREADS);
     int nx = (n + threads.x - 1) / threads.x;
     int ny = (n + threads.y - 1) / threads.y;
@@ -125,12 +187,31 @@ int pack_tril(cudaStream_t stream, double *a_tril, double *a, int n, int counts)
     if (err != cudaSuccess) {
         return 1;
     }
+#endif
     return 0;
 }
 
 int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
                 int nao, int blk_size, int hermi)
 {
+#ifdef USE_SYCL
+    sycl::range<3> threads(1, THREADS, THREADS);
+    int nx = (nao + threads[2] - 1) / threads[2];
+    int ny = (nao + threads[1] - 1) / threads[1];
+    sycl::range<3> blocks(blk_size, ny, nx);
+    stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+      _unpack_tril(eri_tril, eri, nao);
+    });
+    if (hermi == 1) {
+      stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        _fill_triu_sym(eri, nao);
+      });
+    } else if (hermi == 2) {
+      stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        _fill_triu_antisym(eri, nao);
+      });
+    }
+#else
     dim3 threads(THREADS, THREADS);
     int nx = (nao + threads.x - 1) / threads.x;
     int ny = (nao + threads.y - 1) / threads.y;
@@ -145,6 +226,7 @@ int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
     if (err != cudaSuccess) {
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -153,6 +235,14 @@ int unpack_sparse(cudaStream_t stream, const double *cderi_sparse, const long *r
 {
     int blockx = (nij + THREADS - 1) / THREADS;
     int blocky = (p1 - p0 + THREADS - 1) / THREADS;
+
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(blocky, blockx);
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _unpack_sparse(cderi_sparse, row, col, eri, nao, nij, naux, p0, p1);
+    });
+    #else
     dim3 threads(THREADS, THREADS);
     dim3 blocks(blockx, blocky);
 
@@ -161,6 +251,7 @@ int unpack_sparse(cudaStream_t stream, const double *cderi_sparse, const long *r
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 

@@ -15,20 +15,14 @@
 import time
 import ctypes
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract
-else:
-    import dpnp as cupy
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract
+import cupy
 import numpy
 from pyscf import lib, gto
 from pyscf.grad import uhf
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad

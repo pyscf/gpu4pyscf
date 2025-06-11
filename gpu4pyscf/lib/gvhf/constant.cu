@@ -22,9 +22,6 @@ SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
 #else
 __constant__ BasisProdCache c_bpcache;
 //__constant__ int16_t c_idx4c[NFffff*3];
-#endif
-
-
 
 // Generated with GINTinit_index1d_xyz
 __constant__ int c_idx[TOT_NF*3] = {
@@ -41,3 +38,5 @@ __constant__ int c_idx[TOT_NF*3] = {
     0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6};
 
 __constant__ int c_l_locs[GPU_LMAX+2] = {0, 1, 4, 10, 20, 35, 56, 84};
+
+#endif

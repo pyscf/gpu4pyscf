@@ -15,6 +15,31 @@
 import sys
 import time
 import cupy
+# from importlib.util import find_spec
+# has_dpctl = find_spec("dpctl")
+# if not has_dpctl:
+#     import cupy as cupy
+# else:
+#     import dpctl
+#     import types
+
+#     # Create dummy cupy.cuda module
+#     cupy_module = types.ModuleType("cupy")
+#     cuda_module = types.ModuleType("cupy.cuda")
+
+#     # Alias Event to dpctl.SyclEvent
+#     cuda_module.Event = dpctl.SyclEvent
+
+#     # Attach the fake cuda module to cupy
+#     cupy_module.cuda = cuda_module
+
+#     # Insert the fake cupy module into sys.modules
+#     sys.modules["cupy"] = cupy_module
+#     sys.modules["cupy.cuda"] = cuda_module
+
+#     # Now code that imports cupy.cuda.Event will work
+#     from cupy.cuda import Event
+
 from pyscf import lib
 
 INFO = lib.logger.INFO

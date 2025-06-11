@@ -21,12 +21,7 @@ __all__ = [
 ]
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-else:
-    import dpnp as cp
+import cupy as cp
 from pyscf.pbc.scf import uhf as uhf_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.scf import uhf as mol_uhf

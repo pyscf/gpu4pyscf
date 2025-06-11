@@ -18,19 +18,8 @@ PCM family solvent model
 # pylint: disable=C0103
 import ctypes
 import numpy
-
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy
-    import cupyx.scipy as scipy
-    from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
-    from cupyx.scipy.linalg import lu_factor, lu_solve
-else:
-    import dpctl
-    import dpnp as cupy
-    from gpu4pyscf.lib.dpnp_helper import dist_matrix, load_library
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy
+import cupyx.scipy as scipy
 from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid
@@ -39,6 +28,8 @@ from gpu4pyscf.solvent import _attach_solvent
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
+from cupyx.scipy.linalg import lu_factor, lu_solve
 
 libdft = lib.load_library('libdft')
 try:
@@ -109,12 +100,12 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
     '''J. Phys. Chem. A 1999, 103, 11060-11079'''
     unit_sphere = numpy.empty((ng,4))
     libdft.MakeAngularGrid(unit_sphere.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ng))
-    unit_sphere = gpunp.asarray(unit_sphere)
+    unit_sphere = cupy.asarray(unit_sphere)
 
-    atom_coords = gpunp.asarray(mol.atom_coords(unit='B'))
+    atom_coords = cupy.asarray(mol.atom_coords(unit='B'))
     charges = mol.atom_charges()
-    N_J = ng * gpunp.ones(mol.natm)
-    R_J = gpunp.asarray([rad[chg] for chg in charges])
+    N_J = ng * cupy.ones(mol.natm)
+    R_J = cupy.asarray([rad[chg] for chg in charges])
     R_sw_J = R_J * (14.0 / N_J)**0.5
     alpha_J = 1.0/2.0 + R_J/R_sw_J - ((R_J/R_sw_J)**2 - 1.0/28)**0.5
     R_in_J = R_J - alpha_J * R_sw_J
@@ -135,7 +126,7 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
 
         atom_grid = r_vdw * unit_sphere[:,:3] + atom_coords[ia,:]
         #riJ = scipy.spatial.distance.cdist(atom_grid[:,:3], atom_coords)
-        #riJ = gpunp.sum((atom_grid[:,None,:] - atom_coords[None,:,:])**2, axis=2)**0.5
+        #riJ = cupy.sum((atom_grid[:,None,:] - atom_coords[None,:,:])**2, axis=2)**0.5
         riJ = dist_matrix(atom_grid, atom_coords)
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
@@ -144,7 +135,7 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
         fiJ = switch_h(diJ)
 
         w = unit_sphere[:,3] * 4.0 * PI
-        swf = gpunp.prod(fiJ, axis=1)
+        swf = cupy.prod(fiJ, axis=1)
         idx = w*swf > 1e-12
 
         p0, p1 = p1, p1+sum(idx).get()
@@ -155,16 +146,16 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
         norm_vec.append(unit_sphere[idx,:3])
         xi = XI[ng] / (r_vdw * w[idx]**0.5)
         charge_exp.append(xi)
-        R_vdw.append(gpunp.ones(idx.sum().get()) * r_vdw)
+        R_vdw.append(cupy.ones(idx.sum().get()) * r_vdw)
         area.append(w[idx]*r_vdw**2*swf[idx])
 
-    grid_coords = gpunp.vstack(grid_coords)
-    norm_vec = gpunp.vstack(norm_vec)
-    weights = gpunp.concatenate(weights)
-    charge_exp = gpunp.concatenate(charge_exp)
-    switch_fun = gpunp.concatenate(switch_fun)
-    area = gpunp.concatenate(area)
-    R_vdw = gpunp.concatenate(R_vdw)
+    grid_coords = cupy.vstack(grid_coords)
+    norm_vec = cupy.vstack(norm_vec)
+    weights = cupy.concatenate(weights)
+    charge_exp = cupy.concatenate(charge_exp)
+    switch_fun = cupy.concatenate(switch_fun)
+    area = cupy.concatenate(area)
+    R_vdw = cupy.concatenate(R_vdw)
 
     surface = {
         'ng': ng,
@@ -203,19 +194,19 @@ def get_D_S_slow(surface, with_S=True, with_D=False):
     norm_vec    = surface['norm_vec']
     R_vdw       = surface['R_vdw']
 
-    xi_i, xi_j = gpunp.meshgrid(charge_exp, charge_exp, indexing='ij')
+    xi_i, xi_j = cupy.meshgrid(charge_exp, charge_exp, indexing='ij')
     xi_ij = xi_i * xi_j / (xi_i**2 + xi_j**2)**0.5
     rij = dist_matrix(grid_coords, grid_coords)
     xi_r_ij = xi_ij * rij
-    gpunp.fill_diagonal(rij, 1)
+    cupy.fill_diagonal(rij, 1)
     S = scipy.special.erf(xi_r_ij) / rij
-    gpunp.fill_diagonal(S, charge_exp * (2.0 / PI)**0.5 / switch_fun)
+    cupy.fill_diagonal(S, charge_exp * (2.0 / PI)**0.5 / switch_fun)
 
     D = None
     if with_D:
-        nrij = grid_coords.dot(norm_vec.T) - gpunp.sum(grid_coords * norm_vec, axis=-1)
-        D = S*nrij/rij**2 -2.0*xi_r_ij/PI**0.5*gpunp.exp(-xi_r_ij**2)*nrij/rij**3
-        gpunp.fill_diagonal(D, -charge_exp * (2.0 / PI)**0.5 / (2.0 * R_vdw))
+        nrij = grid_coords.dot(norm_vec.T) - cupy.sum(grid_coords * norm_vec, axis=-1)
+        D = S*nrij/rij**2 -2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2)*nrij/rij**3
+        cupy.fill_diagonal(D, -charge_exp * (2.0 / PI)**0.5 / (2.0 * R_vdw))
     return D, S
 
 def get_D_S(surface, with_S=True, with_D=False, stream=None):
@@ -226,16 +217,15 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
     norm_vec    = surface['norm_vec']
     R_vdw       = surface['R_vdw']
     n = charge_exp.shape[0]
-    S = gpunp.empty([n,n])
+    S = cupy.empty([n,n])
     D = None
     S_ptr = ctypes.cast(S.data.ptr, ctypes.c_void_p)
     D_ptr = lib.c_null_ptr()
     if with_D:
-        D = gpunp.empty([n,n])
+        D = cupy.empty([n,n])
         D_ptr = ctypes.cast(D.data.ptr, ctypes.c_void_p)
     if stream is None:
-        dev = get_default_cached_device()
-        stream = get_device_cached_queue(dev)
+        stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_d_s(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         D_ptr, S_ptr,
@@ -330,13 +320,13 @@ class PCM(lib.StreamObject):
         elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
-            DAS = gpunp.dot(DA, S)
+            DAS = cupy.dot(DA, S)
             K = S - f_epsilon/(2.0*PI) * DAS
             # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
         elif self.method.upper() == 'SS(V)PE':
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
             DA = D*A
-            DAS = gpunp.dot(DA, S)
+            DAS = cupy.dot(DA, S)
             K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
             # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
         else:
@@ -377,7 +367,7 @@ class PCM(lib.StreamObject):
         fakemol_nuc = gto.fakemol_for_charges(atom_coords)
         v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol_charge)
         v_grids_n = numpy.dot(atom_charges, v_ng)
-        self.v_grids_n = gpunp.asarray(v_grids_n)
+        self.v_grids_n = cupy.asarray(v_grids_n)
 
     def kernel(self, dm):
         self.e, self.v = self._get_vind(dm)
@@ -538,3 +528,4 @@ class PCM(lib.StreamObject):
         K_LU       = self._intermediates['K_LU']
         K_LU_pivot = self._intermediates['K_LU_pivot']
         return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
+

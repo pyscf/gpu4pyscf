@@ -18,14 +18,7 @@ from pyscf import lib
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import aft as aft_cpu, aft_jk as aft_jk_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import tag_array
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array
 
 
 def setUpModule():

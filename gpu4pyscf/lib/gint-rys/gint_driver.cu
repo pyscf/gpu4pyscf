@@ -21,7 +21,11 @@
 #include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
 
-#ifndef USE_SYCL
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx; // corresponding to LMAX=4
+SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
+SYCL_EXTERNAL sycl_device_global<int[252]> s_g_cart_idx; // corresponding to LMAX=6
+#else
 __constant__ int c_g_pair_idx[3675]; // corresponding to LMAX=4
 __constant__ int c_g_pair_offsets[LMAX1*LMAX1];
 __constant__ int c_g_cart_idx[252]; // corresponding to LMAX=6

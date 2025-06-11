@@ -190,7 +190,7 @@ static int GINTfill_int3c2e_ip1_tasks(ERITensor *eri, BasisProdOffsets *offsets,
             sycl::range<2> threads(1, THREADSX*THREADSY);
             sycl::range<2> blocks(ntasks_kl, ntasks_ij);
 	    stream.submit([&](sycl::handler &cgh) {
-		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize), cgh);
+		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize+16), cgh);
 		cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                   GINTfill_int3c2e_ip1_general_kernel(*envs, *eri, *offsets, item,
 			GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));

@@ -17,7 +17,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 
 #include "gvhf-rys/vhf.cuh"
 #include "ft_ao.cuh"
@@ -29,9 +33,25 @@
 
 __global__
 void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
-                      int compressing)
+                      int compressing
+                      #ifdef USE_SYCL
+                      , sycl::nd_item<3> &item, double *g
+                      #endif
+                      )
 {
     // sp is short for shl_pair
+#ifdef USE_SYCL
+    int sp_block_id = item.get_group(2);
+    int Gv_block_id = item.get_group(1);
+    int nGv_per_block = item.get_local_range(2);
+    int gout_stride = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(2);
+    int gout_id = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+    auto c_g_pair_idx = s_g_pair_idx.get();
+    auto c_g_pair_offsets = s_g_pair_offsets.get();
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
@@ -40,6 +60,8 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
     int Gv_id_in_block = threadIdx.x;
     int gout_id = threadIdx.y;
     int sp_id = threadIdx.z;
+    extern __shared__ double g[];
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -90,7 +112,6 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
     double kk = kx * kx + ky * ky + kz * kz;
     double rjri[3];
 
-    extern __shared__ double g[];
     double *gxR = g + g_size * nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len;
     double *gyR = gxI + gx_len;
@@ -262,16 +283,28 @@ void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
 __global__
 void ft_aopair_fill_triu(double *out, int *conj_mapping, int bvk_ncells, int nGv)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int j = item.get_group(1);
+    int i = item.get_group(0);
+    int gridDim_x = item.get_group_range(1);
+    int blockDim_x = item.get_local_range(1);
+    int threadIdx_x = item.get_local_id(1);
+#else
     int j = blockIdx.x;
     int i = blockIdx.y;
+    int gridDim_x = gridDim.x;
+    int blockDim_x = blockDim.x;
+    int threadIdx_x = threadIdx.x;
+#endif
     if (i <= j) {
         return;
     }
-    size_t nao = gridDim.x;
+    size_t nao = gridDim_x;
     size_t nao2_nGv = nao * nao * nGv;
     size_t ij = (i * nao + j) * nGv;
     size_t ji = (j * nao + i) * nGv;
-    for (int n = threadIdx.x; n < bvk_ncells*nGv; n += blockDim.x) {
+    for (int n = threadIdx_x; n < bvk_ncells*nGv; n += blockDim_x) {
         int Gv_id = n % nGv;
         int k = n / nGv;
         int ck = conj_mapping[k];
@@ -293,7 +326,12 @@ void overlap_img_counts_kernel(int *img_counts, int ish0, int jsh0, int nish, in
                                AFTIntEnvVars envs, float *exps, float *log_coeff,
                                float log_cutoff, int permutation_symmetry)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int bas_ij = item.get_global_id(0);
+#else
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     int s_njsh = envs.bvk_ncells * njsh;
     if (bas_ij >= nish*s_njsh) {
         return;
@@ -368,7 +406,12 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
                             AFTIntEnvVars envs, float *exps, float *log_coeff,
                             float log_cutoff)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int pair_id = item.get_global_id(0);
+#else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (pair_id >= npairs) {
         return;
     }
@@ -451,6 +494,11 @@ int overlap_img_counts(int *img_counts, int *shls_slice, AFTIntEnvVars *envs,
     constexpr int threads = 512;
     int ncells = envs->bvk_ncells;
     int blocks = (nish*ncells*njsh + threads-1)/threads;
+    #ifdef USE_SYCL
+    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      overlap_img_counts_kernel(img_counts, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, log_cutoff, permutation_symmetry);
+    });
+    #else
     overlap_img_counts_kernel<<<blocks, threads>>>(
         img_counts, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, log_cutoff,
         permutation_symmetry);
@@ -459,6 +507,7 @@ int overlap_img_counts(int *img_counts, int *shls_slice, AFTIntEnvVars *envs,
         fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -474,6 +523,12 @@ int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     int njsh = jsh1 - jsh0;
     constexpr int threads = 512;
     int blocks = (npairs + threads-1)/threads;
+    #ifdef USE_SYCL
+    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      overlap_img_idx_kernel(img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
+                             *envs, exps, log_coeff, log_cutoff);
+    });
+    #else
     overlap_img_idx_kernel<<<blocks, threads>>>(
         img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
         *envs, exps, log_coeff, log_cutoff);
@@ -482,6 +537,7 @@ int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

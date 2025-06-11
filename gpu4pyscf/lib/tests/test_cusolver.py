@@ -15,8 +15,14 @@
 import unittest
 import numpy as np
 import scipy.linalg
-import cupy as cp
-from gpu4pyscf.lib.cusolver import eigh, cholesky
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
+if not has_dpctl:
+    import cupy as cp    
+    from gpu4pyscf.lib.cusolver import eigh, cholesky    
+else:
+    import dpnp as cp    
+    from gpu4pyscf.lib.onemkl_lapack import eigh, cholesky
 
 def test_eigh_real():
     np.random.seed(6)

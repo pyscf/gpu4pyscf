@@ -16,16 +16,8 @@ import time
 import ctypes
 import math
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device, transpose_sum
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device, transpose_sum
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy as cp
+import cupy
 import numpy
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +26,7 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device, transpose_sum
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
@@ -83,74 +76,62 @@ def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
 
         dms = cp.asarray(dms)
 
-    tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
-    q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
-    s_ptr = lib.c_null_ptr()
-    if mol.omega < 0:
-        s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
+        tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
+        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
+        s_ptr = lib.c_null_ptr()
+        if mol.omega < 0:
+            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
 
-    ejk = cp.zeros((mol.natm, 3))
+        ejk = cp.zeros((mol.natm, 3))
 
-    ao_loc = mol.ao_loc
-    dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = float(dm_cond.max())
-    log_cutoff = math.log(vhfopt.direct_scf_tol)
-    tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
-                                             log_cutoff-log_max_dm)
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-    dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
-    info = cp.empty(2, dtype=np.uint32)
-    t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
+        ao_loc = mol.ao_loc
+        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+        log_max_dm = float(dm_cond.max())
+        log_cutoff = math.log(vhfopt.direct_scf_tol)
+        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
+                                                 log_cutoff-log_max_dm)
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
+        info = cp.empty(2, dtype=np.uint32)
+        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
-    ao_loc = mol.ao_loc
-    dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-    log_max_dm = float(dm_cond.max())
-    log_cutoff = math.log(vhfopt.direct_scf_tol)
-    tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
-                                             log_cutoff-log_max_dm)
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-    dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
-    info = cp.empty(2, dtype=np.uint32)
-    t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
-
-    for i, j, k, l in task_list:
-        ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
-                   l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
-        tile_ij_mapping = tile_mappings[i,j]
-        llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-        kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                    l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-        tile_kl_mapping = tile_mappings[k,l]
-        scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-        err = kern(
-            ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-            ctypes.c_double(j_factor), ctypes.c_double(k_factor),
-            ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(n_dm), ctypes.c_int(nao),
-            vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-            (ctypes.c_int*8)(*ij_shls, *kl_shls),
-            ctypes.c_int(tile_ij_mapping.size),
-            ctypes.c_int(tile_kl_mapping.size),
-            ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-            ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-            tile_q_ptr, q_ptr, s_ptr,
-            ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff),
-            ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-            ctypes.cast(info.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(workers),
-            mol._atm.ctypes, ctypes.c_int(mol.natm),
-            mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-        if err != 0:
-            raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
-        if log.verbose >= logger.DEBUG1:
-            msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
-            t1, t1p = log.timer_debug1(msg, *t1), t1
-            timing_counter[llll] += t1[1] - t1p[1]
-            kern_counts += 1
+        for i, j, k, l in task_list:
+            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
+                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
+            tile_ij_mapping = tile_mappings[i,j]
+            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+            kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
+                        l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
+            tile_kl_mapping = tile_mappings[k,l]
+            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            err = kern(
+                ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao),
+                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*ij_shls, *kl_shls),
+                ctypes.c_int(tile_ij_mapping.size),
+                ctypes.c_int(tile_kl_mapping.size),
+                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
+                tile_q_ptr, q_ptr, s_ptr,
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(info.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(workers),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
+            if log.verbose >= logger.DEBUG1:
+                msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
+                t1, t1p = log.timer_debug1(msg, *t1), t1
+                timing_counter[llll] += t1[1] - t1p[1]
+                kern_counts += 1
     return ejk, kern_counts, timing_counter
 
 def _jk_energy_per_atom(mol, dm, vhfopt=None,
@@ -163,7 +144,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     if vhfopt is None:
         # Small group size for load balance
         group_size = None
-        if num_devices > 1:
+        if num_devices > 1: 
             group_size = jk.GROUP_SIZE
         vhfopt = _VHFOpt(mol).build(group_size=group_size)
 
@@ -193,12 +174,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     for device_id in range(num_devices):
         task_list.append(tasks[device_id::num_devices])
 
-    if not has_dpctl:
-        cp.cuda.get_current_stream().synchronize()
-    else:
-        dev = get_default_cached_device()
-        get_device_cached_queue(dev).wait()
-
+    cp.cuda.get_current_stream().synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
@@ -265,7 +241,7 @@ def get_hcore(mf, mol, exclude_ecp=False):
         NotImplementedError('Nuclear gradients for GTH PP')
     else:
         h += mol.intor('int1e_ipnuc', comp=3)
-    h = cp.asarray(h)
+    h = cupy.asarray(h)
     if not exclude_ecp and mol.has_ecp():
         h += get_ecp_ip(mol).sum(axis=0)
     return -h
@@ -288,15 +264,15 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     log = logger.Logger(mf_grad.stdout, mf_grad.verbose)
     t0 = t3 = log.init_timer()
 
-    mo_energy = gpunp.asarray(mo_energy)
-    mo_occ = gpunp.asarray(mo_occ)
-    mo_coeff = gpunp.asarray(mo_coeff)
+    mo_energy = cupy.asarray(mo_energy)
+    mo_occ = cupy.asarray(mo_occ)
+    mo_coeff = cupy.asarray(mo_coeff)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
     # (\nabla i | hcore | j) - (\nabla i | j)
-    h1 = cp.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
-    s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    h1 = cupy.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
+    s1 = cupy.asarray(mf_grad.get_ovlp(mol))
 
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0)
@@ -317,7 +293,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
     dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-    extra_force = gpunp.zeros((len(atmlst),3))
+    extra_force = cupy.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
 
@@ -327,7 +303,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     ds = contract('xij,ij->xi', s1, dme0)
     delec = 2.0*(dh - ds)
 
-    delec = gpunp.asarray([gpunp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
+    delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
     de = 2.0 * dvhf + dh1e + delec + extra_force
 
     # for backforward compatiability
@@ -347,16 +323,16 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     mol = mf.mol
     natm = mol.natm
     nao = mol.nao
-    if mo_coeff is None: mo_coeff = gpunp.asarray(mf.mo_coeff)
+    if mo_coeff is None: mo_coeff = cupy.asarray(mf.mo_coeff)
     if mo_occ is None: mo_occ = mf.mo_occ
 
     orbo = mo_coeff[:,mo_occ>0]
     nocc = orbo.shape[1]
 
     # derivative w.r.t nuclie position
-    dh1e = gpunp.zeros([natm,3,nao,nocc])
+    dh1e = cupy.zeros([natm,3,nao,nocc])
     coords = mol.atom_coords()
-    charges = gpunp.asarray(mol.atom_charges(), dtype=np.float64)
+    charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
     fakemol = gto.fakemol_for_charges(coords)
     intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
     intopt.build(1e-14, diag_block_with_triu=True, aosym=False,
@@ -370,7 +346,7 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     dh1e = contract('kxjo,jp->kxpo', dh1e, mo_coeff_sorted)
 
     # derivative w.r.t. atomic orbitals
-    h1 = cp.asarray(mf_grad.get_hcore(mol))
+    h1 = cupy.asarray(mf_grad.get_hcore(mol))
     aoslices = mol.aoslice_by_atom()
     
     for atm_id in range(natm):

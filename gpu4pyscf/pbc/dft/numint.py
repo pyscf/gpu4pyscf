@@ -13,14 +13,7 @@
 # limitations under the License.
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import transpose_sum, contract, get_avail_mem
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import transpose_sum, contract, get_avail_mem
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import numint as numint_cpu
 from pyscf.pbc.df.fft_jk import _format_kpts_band
@@ -28,6 +21,7 @@ from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.dft import numint
+from gpu4pyscf.lib.cupy_helper import transpose_sum, contract, get_avail_mem
 from gpu4pyscf.lib import utils
 
 MIN_BLK_SIZE = numint.MIN_BLK_SIZE

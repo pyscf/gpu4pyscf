@@ -17,28 +17,19 @@ import itertools
 import ctypes
 from dataclasses import dataclass
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import (
-        load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
-        dist_matrix)
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import (
-        load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
-        dist_matrix)
+import cupy as cp
 from pyscf import lib
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib.cupy_helper import (
+    load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
+    dist_matrix)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
-#from gpu4pyscf.pbc.df.int3c2e import libpbc
 from gpu4pyscf.pbc.df.fft import get_SI, _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
@@ -52,6 +43,8 @@ libmgrid.MG_eval_rho_orth.restype = ctypes.c_int
 libmgrid.MG_eval_mat_lda_orth.restype = ctypes.c_int
 libmgrid.MG_eval_mat_gga_orth.restype = ctypes.c_int
 libmgrid.MG_init_constant.restype = ctypes.c_int
+libmgrid.ovlp_mask_estimation.restype = ctypes.c_int
+libmgrid.filter_supmol_bas.restype = ctypes.c_int
 
 PRIMBAS_ANG = 0
 PRIMBAS_EXP = 1
@@ -61,6 +54,8 @@ LMAX = 4
 SHM_SIZE = shm_size - 1024
 del shm_size
 WARP_SIZE = 32
+
+DEBUG = False
 
 def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -95,7 +90,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     vj_kpts = _get_j_pass2(ni, vG, hermi, kpts_band)
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None):
+def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -131,7 +126,7 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks(xctype)
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     nf3 = nf2*(lmax*2+3)//3
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
@@ -208,7 +203,7 @@ def _eval_tauG(ni, dm_kpts, hermi=1, kpts=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('MGGA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     nf3 = nf2*(lmax*2+3)
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
@@ -271,7 +266,7 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('LDA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+1)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+1)) * WARP_SIZE
@@ -346,7 +341,7 @@ def _get_gga_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('GGA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+2)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+2)) * WARP_SIZE
@@ -421,7 +416,7 @@ def _get_tau_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
         supmol_env.data.ptr, ao_loc_in_cell0.data.ptr, lattice_params.data.ptr)
     mg_envs._env_ref_holder = (supmol_bas, supmol_env, ao_loc_in_cell0, lattice_params)
     workers = gpu_specs['multiProcessorCount']
-    tasks = ni.tasks
+    tasks = ni.create_tasks('MGGA')
     nf2 = (lmax*2+1)*(lmax*2+2)//2
     ngrid_span = max(task.n_radius*2 for task in itertools.chain(*tasks))
     cache_size = ((lmax*2+3)*ngrid_span*3 + nf2*ngrid_span + 3 + nf2*(lmax*2+3)) * WARP_SIZE
@@ -506,7 +501,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    assert nset == 1
 
     xctype = ni._xc_type(xc_code)
     if xctype == 'LDA':
@@ -518,55 +513,49 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     vol = cell.vol
     mesh = ni.mesh
-    rhoG = _eval_rhoG(ni, dms, hermi, kpts)
-    if xctype == 'LDA':
-        rhoG = rhoG[:,None]
-    else:
-        Gv = cp.asarray(cell.get_Gv(mesh))
-        rhoG = cp.repeat(rhoG[:,None], nvar, axis=1)
-        rhoG[:,1:4] *= 1j
-        rhoG[:,1:4] *= Gv.T
-        if xctype == 'MGGA':
-            rhoG[:,4] = _eval_tauG(ni, dms, hermi, kpts)
-
     ngrids = np.prod(mesh)
+    rhoG = _eval_rhoG(ni, dms, hermi, kpts, xctype)
+    rhoG = rhoG.reshape(1,ngrids)
+    if xctype != 'LDA':
+        Gv = cp.asarray(cell.get_Gv(mesh))
+        rhoG = cp.repeat(rhoG, nvar, axis=0)
+        rhoG[1:4] *= 1j
+        rhoG[1:4] *= Gv.T
+        if xctype == 'MGGA':
+            rhoG[4] = _eval_tauG(ni, dms, hermi, kpts)
+
     coulG = tools.get_coulG(cell, mesh=mesh)
-    vG = rhoG[:,0] * coulG
-    ecoul = .5 * float(rhoG[0,0].conj().dot(vG[0]).real) / vol
+    vG = rhoG[0] * coulG
+    ecoul = .5 * float(rhoG[0].conj().dot(vG).real) / vol
     log.debug('Multigrid Coulomb energy %s', ecoul)
 
     weight = vol / ngrids
     # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
-    rhoR = cp.asarray(rhoR.reshape(nset,-1,ngrids), order='C')
-    nelec = float(rhoR[0,0].sum()) * weight
+    rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
+    nelec = float(rhoR[0].sum()) * weight
 
-    wv_freq = cp.empty((nset,nvar,ngrids), dtype=np.complex128)
     excsum = 0
-    for i in range(nset):
-        if xctype == 'LDA':
-            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i,0], deriv=1, xctype=xctype)[:2]
-        else:
-            exc, vxc = ni.eval_xc_eff(xc_code, rhoR[i], deriv=1, xctype=xctype)[:2]
-        if i == 0:
-            excsum += float(rhoR[0,0].dot(exc[:,0])) * weight
-        wv = weight * vxc
-        wv_freq[i] = tools.fft(wv, mesh)
-    rhoR = rhoG = None
+    if xctype == 'LDA':
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
+    else:
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
+    excsum += float(rhoR[0].dot(exc[:,0])) * weight
+    wv = weight * vxc
+    wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
+    rhoR = rhoG = exc = vxc = wv = None
     log.debug('Multigrid exc %s  nelec %s', excsum, nelec)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    if with_j:
+        wv_freq[0] += vG
     if xctype == 'LDA':
-        if with_j:
-            wv_freq[:,0] += vG
-            veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
+        veff = _get_j_pass2(ni, wv_freq[None,0], hermi, kpts_band, verbose=log)
     else:
-        if with_j:
-            wv_freq[:,0] += vG
-        veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
+        veff = _get_gga_pass2(ni, wv_freq[None,:4], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
-            veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
+            veff += _get_tau_pass2(ni, wv_freq[None,4], hermi, kpts_band, verbose=log)
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
 
     shape = list(dm_kpts.shape)
@@ -580,7 +569,101 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 # each call (nr_rks supports multiple sets of KRKS density matrices)
 def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, with_j=False, verbose=None):
-    raise NotImplementedError
+    '''Compute the XC energy and UKS XC matrix at sampled k-points.
+    multigrid version of function pbc.dft.numint.nr_rks.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+            Density matrix at each k-point.
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+        with_j : bool
+            Whether to add the Coulomb matrix into the XC matrix.
+
+    Returns:
+        exc : XC energy
+        nelec : number of electrons obtained from the numerical integration
+        veff : (nkpts, nao, nao) ndarray
+            or list of veff if the input dm_kpts is a list of DMs
+    '''
+    assert kpts is None or all(kpts == 0)
+    kpts = np.zeros((1, 3))
+
+    cell = ni.cell
+    log = logger.new_logger(cell, verbose)
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+    nset //= 2
+    # Disable GKS
+    assert nset == 1
+
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'LDA':
+        nvar = 1
+    elif xctype == 'GGA':
+        nvar = 4
+    elif xctype == 'MGGA':
+        nvar = 5
+
+    vol = cell.vol
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+    rhoG = _eval_rhoG(ni, dms, hermi, kpts, xctype)
+    rhoG = rhoG.reshape(2,1,ngrids)
+    if xctype != 'LDA':
+        Gv = cp.asarray(cell.get_Gv(mesh))
+        rhoG = cp.repeat(rhoG, nvar, axis=1)
+        rhoG[:,1:4] *= 1j
+        rhoG[:,1:4] *= Gv.T
+        if xctype == 'MGGA':
+            rhoG[:,4] = _eval_tauG(ni, dms, hermi, kpts)
+
+    coulG = tools.get_coulG(cell, mesh=mesh)
+    rho_tot = rhoG[0,0] + rhoG[1,0]
+    vG = rho_tot * coulG
+    ecoul = .5 * float(rho_tot.conj().dot(vG).real) / vol
+    log.debug('Multigrid Coulomb energy %s', ecoul)
+
+    weight = vol / ngrids
+    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+    # computing rhoR with IFFT, the weight factor is not needed.
+    rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
+    rhoR = cp.asarray(rhoR.reshape(2,nvar,ngrids), order='C')
+    nelec = rhoR[:,0].sum(axis=-1).get() * weight
+
+    excsum = 0
+    if xctype == 'LDA':
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
+    else:
+        exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
+    den = rhoR[:,0].sum(axis=0)
+    excsum += float(den.dot(exc[:,0])) * weight
+    wv = (weight * vxc).reshape(2*nvar,ngrids)
+    wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
+    rhoR = rhoG = den = exc = vxc = wv = None
+    log.debug('Multigrid exc %s  nelec %s', excsum, nelec)
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    if with_j:
+        wv_freq[:,0] += vG
+    if xctype == 'LDA':
+        veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
+    else:
+        veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
+        if xctype == 'MGGA':
+            veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
+    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+
+    shape = list(dm_kpts.shape) # [spin,nkpts,nao,nao]
+    if len(shape) == 4 and shape[1] != kpts_band.shape[1]:
+        shape[1] = kpts_band.shape[1]
+    veff = veff.reshape(shape)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    return nelec, excsum, veff
 
 def get_rho(ni, dm, kpts=None):
     '''Density in real space
@@ -794,49 +877,101 @@ def to_primitive_bas(cell):
     prim_bas = np.asarray(np.vstack(prim_bas), dtype=np.int32)
     ao_loc_in_cell0 = np.asarray(np.hstack(ao_loc_in_cell0), dtype=np.int32)
 
-    # Transform to super-mole
-    Ls = cell.get_lattice_Ls()
-    Ls = Ls[np.linalg.norm(Ls+0.5, axis=1).argsort()]
-    nimgs = len(Ls)
-    ptr_coords = prim_bas[:,PRIMBAS_COORD]
-    bas_coords = cell._env[ptr_coords[:,None] + np.arange(3)]
+    if DEBUG:
+        # Transform to super-mole
+        Ls = cell.get_lattice_Ls()
+        Ls = Ls[np.linalg.norm(Ls-0.5, axis=1).argsort()]
+        nimgs = len(Ls)
+        ptr_coords = prim_bas[:,PRIMBAS_COORD]
+        bas_coords = cell._env[ptr_coords[:,None] + np.arange(3)]
 
-    es = prim_env[prim_bas[:,PRIMBAS_EXP]]
-    es_min = es.min()
-    theta = es * es_min / (es + es_min)
-    # rcut for each basis
-    raw_rcut = (np.log(1e6/cell.precision) / theta)**.5
-    raw_rcut[raw_rcut > cell.rcut] = cell.rcut
+        es = prim_env[prim_bas[:,PRIMBAS_EXP]]
+        es_min = es.min()
+        theta = es * es_min / (es + es_min)
+        # rcut for each basis
+        raw_rcut = (np.log(1e6/cell.precision) / theta)**.5
+        raw_rcut[raw_rcut > cell.rcut] = cell.rcut
 
-    # Keep the unit cell at the beginning
-    basLr = bas_coords + Ls[1:,None]
+        # Keep the unit cell at the beginning
+        basLr = bas_coords + Ls[1:,None]
 
-    # Filter very remote basis
-    #:atom_coords = cell.atom_coords()
-    #:dr = np.linalg.norm(atom_coords[:,None,None,:] - basLr, axis=3)
-    #:mask = (dr.min(axis=0) < raw_rcut).ravel()
-    # This code is slow, approximate dr.min() below by shifting the basis one
-    # image in the left and right.
-    # TODO: optimize this slow basis filtering code
-    atom_coords = cell.atom_coords()
-    shift = bas_coords[:,None] - atom_coords
-    shift_left = shift.min(axis=1)
-    shift_zero = abs(bas_coords[:,None] - atom_coords).min(axis=1)
-    shift_right = shift.max(axis=1)
+        # Filter very remote basis
+        #:atom_coords = cell.atom_coords()
+        #:dr = np.linalg.norm(atom_coords[:,None,None,:] - basLr, axis=3)
+        #:mask = (dr.min(axis=0) < raw_rcut).ravel()
+        # This code is slow, approximate dr.min() below by shifting the basis one
+        # image in the left and right.
+        atom_coords = cell.atom_coords()
+        shift = bas_coords[:,None] - atom_coords
+        shift_left = shift.min(axis=1)
+        shift_zero = abs(bas_coords[:,None] - atom_coords).min(axis=1)
+        shift_right = shift.max(axis=1)
 
-    r2 = np.min([(shift_left + Ls[1:,None])**2,
-                 (shift_zero + Ls[1:,None])**2,
-                 (shift_right + Ls[1:,None])**2], axis=0).sum(axis=2)
-    mask = (r2 < raw_rcut**2).ravel()
-    basLr = basLr.reshape(-1, 3)[mask]
-    _env = np.hstack([prim_env, basLr.ravel()])
-    extended_bas = _repeat(prim_bas, nimgs-1)[mask]
-    extended_bas[:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr)) * 3
-    supmol_bas = np.vstack([prim_bas, extended_bas])
+        r2 = np.min([(shift_left + Ls[1:,None])**2,
+                     (shift_zero + Ls[1:,None])**2,
+                     (shift_right + Ls[1:,None])**2], axis=0).sum(axis=2)
+        mask = (r2 < raw_rcut**2).ravel()
+        basLr = basLr.reshape(-1, 3)[mask]
+        _env = np.hstack([prim_env, basLr.ravel()])
+        extended_bas = _repeat(prim_bas, nimgs-1)[mask]
+        extended_bas[:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr)) * 3
+        supmol_bas = np.vstack([prim_bas, extended_bas])
 
-    ao_loc_in_cell0 = np.append(
-        ao_loc_in_cell0, _repeat(ao_loc_in_cell0, nimgs-1)[mask])
-    ao_loc_in_cell0 = np.asarray(ao_loc_in_cell0, dtype=np.int32)
+        ao_loc_in_cell0 = np.append(
+            ao_loc_in_cell0, _repeat(ao_loc_in_cell0, nimgs-1)[mask])
+        ao_loc_in_cell0 = np.asarray(ao_loc_in_cell0, dtype=np.int32)
+
+    else:
+        Ls = cp.asarray(cell.get_lattice_Ls())
+        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+        nimgs = len(Ls)
+        nbas_p = len(prim_bas)
+
+        # A quick estimation of diffuseness for each primitive GTO
+        es = prim_env[prim_bas[:,PRIMBAS_EXP]]
+        cs = prim_env[prim_bas[:,PRIMBAS_COEFF]]
+        ls = prim_env[prim_bas[:,ANG_OF]]
+        diffuseness = np.log(cs**2/cell.precision*10**ls + 1e-200) / es
+        # Find the diffused functions on each atom
+        diffuseness_order = np.argsort(-diffuseness)
+        _, uniq_atm_idx = np.unique(prim_bas[diffuseness_order,PRIMBAS_COORD], return_index=True)
+        uniq_Dbasis_idx = cp.asarray(diffuseness_order[uniq_atm_idx], dtype=np.int32)
+
+        vol = cell.vol
+        rad = vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = surface
+        log_cutoff = np.log(cell.precision / lattice_sum_factor)
+        prim_bas_gpu = cp.asarray(prim_bas)
+        prim_env_gpu = cp.asarray(prim_env)
+        mask = cp.empty(nbas_p*nimgs, dtype=np.int8)
+        mask[:nbas_p] = 1 # keep all basis in cell0
+        err = libmgrid.filter_supmol_bas(
+            ctypes.cast(mask.data.ptr, ctypes.c_void_p),
+            ctypes.cast(Ls.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nimgs),
+            ctypes.cast(uniq_Dbasis_idx.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(uniq_Dbasis_idx)),
+            ctypes.cast(prim_bas_gpu.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nbas_p),
+            ctypes.cast(prim_env_gpu.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('filter_supmol_bas kernel failed')
+
+        mask = mask.astype(dtype=bool, copy=False)
+        prim_bas_idx = (cp.where(mask)[0] % nbas_p).get()
+        supmol_bas = prim_bas[prim_bas_idx]
+        # Exclude the unit cell, as it is always placed at the beginning
+        ptr_coords = prim_bas_gpu[:,PRIMBAS_COORD]
+        bas_coords = prim_env_gpu[ptr_coords[:,None] + cp.arange(3)]
+        basLr = bas_coords + Ls[1:,None]
+        basLr = basLr.reshape(-1, 3)[mask[nbas_p:]]
+        _env = cp.hstack([prim_env_gpu, basLr.ravel()]).get()
+        supmol_bas[nbas_p:,PRIMBAS_COORD] = len(prim_env) + np.arange(len(basLr))*3
+        ao_loc_in_cell0 = ao_loc_in_cell0[prim_bas_idx]
+        assert nbas_p * len(supmol_bas) < 2**31, 'int32 overflow in CUDA kernel'
+
     return supmol_bas, _env, ao_loc_in_cell0
 
 def _repeat(a, repeats):
@@ -851,76 +986,143 @@ class Task:
     l: int
     shl_pair_idx: np.ndarray
 
-def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
+def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
+                          ao_loc_in_cell0, precision, xctype, hermi=1):
+    ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG], dtype=np.int32)
+    es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]], dtype=np.float32)
+    cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]), dtype=np.float32)
+    if xctype == 'MGGA' or xctype == 'GGA':
+        cs *= es*2
+    ptr_coords = supmol_bas[:,PRIMBAS_COORD]
+    bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
+
+    if DEBUG:
+        # Estimate <cell0|supmol> overlap
+        li = ls[:cell0_nprims,None]
+        lj = ls[None,:]
+        lij = li + lj
+        aij = es[:cell0_nprims,None] + es
+        fi = es[:cell0_nprims,None] / aij
+        fj = es[None,:] / aij
+        theta = es[:cell0_nprims,None] * fj
+        #:rirj = bas_coords[:cell0_nprims,None,:] - bas_coords
+        #:dr = cp.linalg.norm(rirj, axis=2)
+        dr = dist_matrix(bas_coords[:cell0_nprims], bas_coords)
+        dri = fj * dr
+        drj = fi * dr
+        fac_dri = (li*.5) * cp.log(li * .5/aij + dri**2 + 1e-9)
+        fac_drj = (lj*.5) * cp.log(lj * .5/aij + drj**2 + 1e-9)
+        fac_norm = cp.log(cs[:cell0_nprims,None]*cs) + 1.5*cp.log(np.pi/aij)
+        log_ovlp = fac_norm - theta*dr**2 + fac_dri + fac_drj
+
+        rad = cell.vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        log_ovlp += np.log(surface)
+
+        # The hermitian symmetry in Coulomb matrix.
+        if hermi == 1:
+            # hermitian symmetry might not be available in methods like TDDFT
+            log_ovlp[ao_loc_in_cell0[:cell0_nprims,None] < ao_loc_in_cell0] = -1000
+        log_ovlp[log_ovlp > 0] = 0
+
+        # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
+        # Factors for Ecut estimation should be
+        #     fac = cs[:,None]*cs * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
+        # where
+        #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
+        #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
+        #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
+        #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
+        # Here, this fac is approximately derived from the overlap integral
+        #fac = fac_norm * fac_dri * fac_drj * fl / precision
+        #fac = ovlp / precision
+        #Ecut = cp.log(fac + 1.) * 2*aij
+        log_fac = log_ovlp - np.log(precision)
+        Ecut = log_fac * (2*aij)
+
+        # Estimate radius:
+        # rho[r-Rp] = fl*cs[:cell0_nprims,None]*cs * exp(-theta*dr**2)
+        #             * r**lij * exp(-aij*r**2)
+        radius = 2.
+        if xctype == 'MGGA':
+            # lij+2 for MGGA as it raises anuglar momentum on both bra and ket
+            l_inc = 2
+        elif xctype == 'GGA':
+            l_inc = 1
+        else:
+            l_inc = 0
+        #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
+        #radius = (cp.log(ovlp/precision * radius**(lij+l_inc) + 1.) / aij)**.5
+        radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
+        radius[radius < 0] = 1e-300
+        radius = cp.sqrt(radius)
+        radius = (log_fac + (lij+l_inc)*cp.log(radius)) / aij
+        radius[radius < 0] = 1e-300
+        radius = cp.sqrt(radius)
+        ovlp_mask = log_fac >= 0
+    else:
+        bas_coords = cp.asarray(bas_coords.T, dtype=np.float32, order='C')
+        ao_loc_in_cell0 = cp.asarray(ao_loc_in_cell0, dtype=np.int32)
+        log_cs = cp.asarray(cp.log(cs), dtype=np.float32)
+        supmol_nbas = len(supmol_bas)
+        Ecut = cp.empty((cell0_nprims, supmol_nbas), dtype=np.float32)
+        radius = cp.empty_like(Ecut)
+        ovlp_mask = cp.empty(Ecut.shape, dtype=np.int8)
+        # Estimate radius:
+        # rho[r-Rp] = fl*cs[:cell0_nprims,None]*cs * exp(-theta*dr**2)
+        #             * r**lij * exp(-aij*r**2)
+        if xctype == 'MGGA':
+            # lij+2 for MGGA as it raises anuglar momentum on both bra and ket
+            l_inc = 2
+        elif xctype == 'GGA':
+            l_inc = 1
+        else:
+            l_inc = 0
+        vol = cell.vol
+        rad = vol**(-1./3) * cell.rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = surface
+        log_cutoff = np.log(precision / lattice_sum_factor)
+        err = libmgrid.ovlp_mask_estimation(
+            ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
+            ctypes.cast(Ecut.data.ptr, ctypes.c_void_p),
+            ctypes.cast(radius.data.ptr, ctypes.c_void_p),
+            ctypes.cast(es.data.ptr, ctypes.c_void_p),
+            ctypes.cast(log_cs.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ao_loc_in_cell0.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ls.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(cell0_nprims),
+            ctypes.c_int(supmol_nbas),
+            ctypes.c_int(l_inc), ctypes.c_int(hermi),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('ovlp_mask_estimation kernel failed')
+        ovlp_mask = ovlp_mask.astype(dtype=bool, copy=False)
+    return ovlp_mask, Ecut, radius
+
+def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
+                 xctype='LDA', hermi=1):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     a = cell.lattice_vectors()
     assert abs(a - np.diag(a.diagonal())).max() < 1e-5, 'Must be orthogonal lattice'
 
+    cell0_nprims = len(prim_bas)
     vol = cell.vol
     weight_penalty = vol
     precision = cell.precision / max(weight_penalty, 1)
-
-    cell0_nprims = len(prim_bas)
-    ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG])
-    es = cp.asarray(supmol_env[supmol_bas[:,PRIMBAS_EXP]])
-    cs = cp.asarray(abs(supmol_env[supmol_bas[:,PRIMBAS_COEFF]]))
-    norm = cs * ((2*ls+1)/(4*np.pi))**.5
-    #TODO: create different task plans for LDA, GGA and MGGA
-    norm *= es*2
-    ptr_coords = supmol_bas[:,PRIMBAS_COORD]
-    bas_coords = cp.asarray(supmol_env[ptr_coords[:,None] + np.arange(3)])
     log.debug1('%d primitive shells in cell0, %d shells in supmol',
                cell0_nprims, len(supmol_bas))
+    ovlp_mask, Ecut, radius = _ovlp_mask_estimation(
+        cell, cell0_nprims, supmol_bas, supmol_env, ao_loc_in_cell0, precision,
+        xctype, hermi)
+    log.timer_debug1('Ecut and radius estimation in create_tasks', *t0)
 
-    # Estimate <cell0|supmol> overlap
+    ls = cp.asarray(supmol_bas[:,PRIMBAS_ANG], dtype=np.int32)
     li = ls[:cell0_nprims,None]
     lj = ls[None,:]
     lij = li + lj
-    aij = es[:cell0_nprims,None] + es
-    fi = es[:cell0_nprims,None] / aij
-    fj = es[None,:] / aij
-    theta = es[:cell0_nprims,None] * fj
-    #:rirj = bas_coords[:cell0_nprims,None,:] - bas_coords
-    #:dr = cp.linalg.norm(rirj, axis=2)
-    dr = dist_matrix(bas_coords[:cell0_nprims], bas_coords)
-    dri = fj * dr
-    drj = fi * dr
-    fac_dri = (li * .5/aij + dri**2) ** (li*.5)
-    fac_drj = (lj * .5/aij + drj**2) ** (lj*.5)
-    rad = cell.vol**(-1./3) * dr + 1
-    surface = 4*np.pi * rad**2
-    fl = cp.where(surface > 1, surface, 1)
-    fac_norm = norm[:cell0_nprims,None]*norm * (np.pi/aij)**1.5
-    ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
-    # The hermitian symmetry in Coulomb matrix.
-    # FIXME: hermitian symmetry might not be available in methods like TDDFT
-    ovlp[ao_loc_in_cell0[:cell0_nprims,None] < ao_loc_in_cell0] = 0.
-    ovlp[ovlp > 1.] = 1.
-
-    # Ecut estimation based on pyscf.pbc.gto.cell.estimate_ke_cutoff
-    # Factors for Ecut estimation should be
-    #     fac = norm[:,None]*norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj * fl
-    # where
-    #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
-    #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
-    #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
-    #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
-    # Here, this fac is approximately derived from the overlap integral
-    #fac = fac_norm * fac_dri * fac_drj * fl / precision
-    fac = ovlp / precision
-    Ecut = cp.log(fac + 1.) * 2*aij
-
-    # Estimate radius:
-    # rho[r-Rp] = fl*norm[:cell0_nprims,None]*norm * exp(-theta*dr**2)
-    #             * r**lij * exp(-aij*r**2)
-    radius = 2.
-    #TODO: create different task plans for LDA, GGA and MGGA
-    # lij+2 may be required for MGGA as it raises anuglar momentum on both bra and ket
-    radius = (cp.log(ovlp/precision * radius**(lij+1) + 1.) / aij)**.5
-    radius = (cp.log(ovlp/precision * radius**(lij+1) + 1.) / aij)**.5
-    log.timer_debug1('Ecut and radius estimation in create_tasks', *t0)
-
     lmax = cell._bas[:,ANG_OF].max()
     assert lmax <= LMAX
     cell_len = a.diagonal()
@@ -940,7 +1142,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0):
                               mesh, n_radius, rcut_threshold, l, n_pairs)
         return sub_tasks
 
-    remaining_mask = ovlp >= precision
+    remaining_mask, ovlp_mask = ovlp_mask, None
     Gbase = 2*np.pi / cell_len
     ngrid_min = 512
     mesh = np.asarray(cell.mesh)
@@ -1080,17 +1282,24 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         self.ao_loc_in_cell0 = ao_loc_in_cell0
         # Number of primitive shells
         self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
-        # A list of integral meshgrids for each task
-        #self.tasks = multigrid_tasks(cell)
-        prim_bas = supmol_bas[:self.primitive_nbas]
-        self.tasks = create_tasks(cell, prim_bas, supmol_bas, supmol_env,
-                                  ao_loc_in_cell0)
-        logger.debug(cell, 'Multigrid ntasks %s', len(self.tasks))
+        self._tasks = {}
+
+    def create_tasks(self, xctype, hermi=1):
+        xctype = xctype.upper()
+        if (xctype, hermi) in self._tasks:
+            tasks = self._tasks[xctype, hermi]
+        else:
+            prim_bas = self.supmol_bas[:self.primitive_nbas]
+            self._tasks[xctype, hermi] = tasks = create_tasks(
+                self.cell, prim_bas, self.supmol_bas, self.supmol_env,
+                self.ao_loc_in_cell0, xctype, hermi)
+            logger.debug(self.cell, 'Multigrid ntasks for %s: %s', xctype, len(tasks))
+        return tasks
 
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
-        self.tasks = None
+        self._tasks = {}
         return self
 
     def sort_orbitals(self, mat):

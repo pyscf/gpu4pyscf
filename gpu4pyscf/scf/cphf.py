@@ -21,15 +21,9 @@ Restricted coupled pertubed Hartree-Fock solver
 
 
 import numpy
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import krylov
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import krylov
+import cupy
 from pyscf import lib
+from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,

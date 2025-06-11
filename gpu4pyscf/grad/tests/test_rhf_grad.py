@@ -13,12 +13,7 @@
 # limitations under the License.
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-else:
-    import dpnp as cp
+import cupy as cp
 import unittest
 import pytest
 import pyscf

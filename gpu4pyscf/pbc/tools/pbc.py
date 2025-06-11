@@ -13,17 +13,11 @@
 # limitations under the License.
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import return_gpunp_array
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import return_gpunp_array
+import cupy as cp
+from gpu4pyscf.lib.cupy_helper import return_cupy_array
 from pyscf.pbc.tools.pbc import get_coulG
 
-get_coulG = return_gpunp_array(get_coulG)
+get_coulG = return_cupy_array(get_coulG)
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.

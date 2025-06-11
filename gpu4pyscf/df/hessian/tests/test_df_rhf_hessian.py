@@ -15,12 +15,7 @@
 
 import unittest
 import numpy
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 from pyscf import gto, scf
 from pyscf.df.hessian import rhf as df_rhf_cpu
 from pyscf.hessian import rhf as rhf_cpu
@@ -64,7 +59,7 @@ class KnownValues(unittest.TestCase):
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
         fx_gpu = hessobj.gen_vind(mo_coeff, mo_occ)
-        mo1 = gpunp.asarray(mo1)
+        mo1 = cupy.asarray(mo1)
         v1vo_gpu = fx_gpu(mo1)
         assert numpy.linalg.norm(v1vo_cpu - v1vo_gpu.get()) < 1e-8
 
@@ -106,11 +101,11 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_cpscf = 1e-8
         hobj = mf.Hessian()
         hobj.auxbasis_response = 1
-        mo_occ = gpunp.asarray(mo_occ)
+        mo_occ = cupy.asarray(mo_occ)
         h1_gpu = df_rhf_gpu.make_h1(hobj, mo_coeff, mo_occ)
-        h1_gpu = gpunp.asarray(h1_gpu)
-        mo_energy = gpunp.asarray(mo_energy)
-        mo_coeff = gpunp.asarray(mo_coeff)
+        h1_gpu = cupy.asarray(h1_gpu)
+        mo_energy = cupy.asarray(mo_energy)
+        mo_coeff = cupy.asarray(mo_coeff)
         fx = hobj.gen_vind(mo_coeff, mo_occ)
         mo1_gpu, mo_e1_gpu = hobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1_gpu, fx, verbose=1)
         assert numpy.linalg.norm(h1_cpu - h1_gpu.get()) < 1e-5

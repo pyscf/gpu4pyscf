@@ -183,8 +183,8 @@ def test_gamma_point_compressed():
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
         ''',
-        basis={'C1': [[0, [1.1, 1.]],
-                      [1, [2., 1.]]],
+        basis={'C1': [[2, [1.1, 1.]],
+                      [3, [2., 1.]]],
                'C2': 'ccpvdz'},
         a=np.diag([2.5, 1.9, 2.2])*3)
 
@@ -219,3 +219,69 @@ C    D
 
     ref = build_cderi(cell, auxcell, omega=omega)[0]
     assert abs(ref[0,0] - out).max() < 1e-14
+
+def _get_2c2e_slow(auxcell, uniq_kpts, omega, with_long_range=True):
+    from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
+    from pyscf.pbc.lib.kpts_helper import is_zero
+    from gpu4pyscf.gto.mole import extract_pgto_params
+    from gpu4pyscf.pbc.df import ft_ao
+    from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
+    # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
+    precision = auxcell.precision ** 1.5
+    aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
+    aux_exp = aux_exps.min()
+    theta = 1./(2./aux_exp + omega**-2)
+    rad = auxcell.vol**(-1./3) * auxcell.rcut + 1
+    surface = 4*np.pi * rad**2
+    lattice_sum_factor = 2*np.pi*auxcell.rcut/(auxcell.vol*theta) + surface
+    rcut_sr = (np.log(lattice_sum_factor / precision + 1.) / theta)**.5
+    auxcell_sr = auxcell.copy()
+    auxcell_sr.rcut = rcut_sr
+    with auxcell_sr.with_short_range_coulomb(omega):
+        j2c = auxcell_sr.pbc_intor('int2c2e', hermi=1, kpts=uniq_kpts)
+
+    if not with_long_range:
+        return j2c
+
+    ke = estimate_ke_cutoff_for_omega(auxcell, omega, precision)
+    mesh = auxcell.cutoff_to_mesh(ke)
+    mesh = auxcell.symmetrize_mesh(mesh)
+
+    Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
+
+    if uniq_kpts is None:
+        j2c = cp.asarray(j2c)
+        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        auxG = ft_ao.ft_ao(auxcell, Gv).T
+        j2c += (auxG.conj() * coulG_LR).dot(auxG.T).real
+        j2c = [j2c.real.get()]
+    else:
+        for k, kpt in enumerate(uniq_kpts):
+            j2c_k = cp.asarray(j2c[k])
+            coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
+            gamma_point = is_zero(kpt)
+
+            auxG = ft_ao.ft_ao(auxcell, Gv, kpt=kpt).T
+            if gamma_point:
+                j2c_k += (auxG.conj() * coulG_LR).dot(auxG.T).real
+            else:
+                j2c_k += (auxG.conj() * coulG_LR).dot(auxG.T)
+            auxG = None
+            j2c[k] = j2c_k.get()
+    return j2c
+
+def test_2c2e():
+    cell = pyscf.M(
+        atom='''C  1.3    .2       .3
+                C  .19   .1      1.1
+                C  0.  0.  0.
+        ''',
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3,
+        basis='def2-universal-jkfit')
+    omega = 0.2
+    kmesh = [6, 1, 1]
+    kpts = cell.make_kpts(kmesh)
+    dat = rsdf_builder._get_2c2e(cell, kpts, omega, with_long_range=True)
+    ref = _get_2c2e_slow(cell, kpts, omega, with_long_range=True)
+    assert abs(dat - cp.asarray(ref)).max() < 1e-10

@@ -17,18 +17,20 @@ import ctypes
 import copy
 import numpy as np
 import scipy.linalg
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy
+print("cupy.einsum =", getattr(cupy, 'einsum', 'NOT FOUND'))
+print("CUPY LOADED FROM:", getattr(cupy, "__file__", "NO __file__"))
+import sys
+print("sys.path:")
+for p in sys.path:
+    print("  ", p)
+print("cupy module:", cupy)
+print("cupy module file:", getattr(cupy, '__file__', 'No __file__ attribute'))
+print("cupy attributes:", dir(cupy))
+
 from pyscf import gto
 from pyscf.scf import _vhf
+from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
 
@@ -38,7 +40,7 @@ BINSIZE = 128   # TODO bug for 256
 libgvhf = load_library('libgvhf')
 libgint = load_library('libgint')
 
-_einsum = gpunp.einsum
+_einsum = cupy.einsum
 """
 def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     '''
@@ -56,7 +58,7 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
     if ip_type == 'ipip2':  order = 2
 
     if omega is None: omega = 0.0
-    if stream is None: stream = gpunp.cuda.get_current_stream()
+    if stream is None: stream = cupy.cuda.get_current_stream()
 
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
@@ -88,7 +90,7 @@ def loop_int3c2e_general(intopt, ip_type='', omega=None, stream=None):
             ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
 
-            int3c_blk = gpunp.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
+            int3c_blk = cupy.zeros([comp, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
@@ -124,7 +126,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     '''
     fn = getattr(libgint, 'GINTfill_int3c2e_' + ip_type)
     if omega is None: omega = 0.0
-    if stream is None: stream = gpunp.cuda.get_current_stream()
+    if stream is None: stream = cupy.cuda.get_current_stream()
     if auxmol is None:
         from pyscf.df.addons import make_auxmol
         auxmol = make_auxmol(mol, auxbasis)
@@ -139,7 +141,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
     naux = intopt.auxmol.nao
     norb = nao + naux + 1
 
-    int3c = gpunp.zeros([3, naux_sph, nao_sph, nao_sph], order='C')
+    int3c = cupy.zeros([3, naux_sph, nao_sph, nao_sph], order='C')
     nbins = 1
     for cp_ij_id, log_q_ij in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[cp_ij_id]
@@ -163,7 +165,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
             ao_offsets = np.array([i0,j0,nao+1+k0,nao], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
 
-            int3c_blk = gpunp.zeros([3, nk, nj, ni], order='C', dtype=np.float64)
+            int3c_blk = cupy.zeros([3, nk, nj, ni], order='C', dtype=np.float64)
             err = fn(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
@@ -191,7 +193,7 @@ def get_int3c2e_ip(mol, auxmol=None, ip_type=1, auxbasis='weigend+etb', direct_s
             int3c[:, k0:k1, j0:j1, i0:i1] = int3c_blk
     ao_idx = np.argsort(intopt.sph_ao_idx)
     aux_idx = np.argsort(intopt.sph_aux_idx)
-    int3c = int3c[gpunp.ix_(np.arange(3), aux_idx, ao_idx, ao_idx)]
+    int3c = int3c[cupy.ix_(np.arange(3), aux_idx, ao_idx, ao_idx)]
 
     return int3c.transpose([0,3,2,1])
 """
@@ -203,17 +205,12 @@ def get_int4c2e(mol, vhfopt=None, direct_scf_tol=1e-13, aosym=True, omega=None, 
 
     if omega is None: omega = 0.0
     if vhfopt is None: vhfopt = _VHFOpt(mol, 'int2e').build(direct_scf_tol)
-    if stream is None:
-        if not has_dpctl:
-            stream = gpunp.cuda.get_current_stream()
-        else:
-            dev = get_default_cached_device()
-            stream = get_device_cached_queue(dev)
+    if stream is None: stream = cupy.cuda.get_current_stream()
 
     nao = vhfopt.mol.nao
     norb = nao
 
-    int4c = gpunp.zeros([nao, nao, nao, nao], order='F')
+    int4c = cupy.zeros([nao, nao, nao, nao], order='F')
     ao_offsets = np.array([0, 0, 0, 0], dtype=np.int32)
     strides = np.array([1, nao, nao*nao, nao*nao*nao], dtype=np.int32)
     for cp_ij_id, log_q_ij in enumerate(vhfopt.log_qs):
@@ -247,10 +244,10 @@ def get_int4c2e(mol, vhfopt=None, direct_scf_tol=1e-13, aosym=True, omega=None, 
                 raise RuntimeError("int2c2e failed\n")
 
     coeff = vhfopt.coeff
-    int4c = gpunp.einsum('ijkl,ip->pjkl', int4c, coeff)
-    int4c = gpunp.einsum('pjkl,jq->pqkl', int4c, coeff)
-    int4c = gpunp.einsum('pqkl,kr->pqrl', int4c, coeff)
-    int4c = gpunp.einsum('pqrl,ls->pqrs', int4c, coeff)
+    int4c = cupy.einsum('ijkl,ip->pjkl', int4c, coeff)
+    int4c = cupy.einsum('pjkl,jq->pqkl', int4c, coeff)
+    int4c = cupy.einsum('pqkl,kr->pqrl', int4c, coeff)
+    int4c = cupy.einsum('pqrl,ls->pqrs', int4c, coeff)
 
     return int4c
 
@@ -258,15 +255,10 @@ def get_int4c2e_jk(mol, dm, vhfopt=None, direct_scf_tol=1e-13, with_k=True, omeg
 
     if omega is None: omega = 0.0
     if vhfopt is None: vhfopt = _VHFOpt(mol, 'int2e').build(direct_scf_tol)
-    if stream is None:
-        if not has_dpctl:
-            stream = gpunp.cuda.get_current_stream()
-        else:
-            dev = get_default_cached_device()
-            stream = get_device_cached_queue(dev)
+    if stream is None: stream = cupy.cuda.get_current_stream()
 
-    coeff = gpunp.asarray(vhfopt.coeff)
-    dm_sorted = gpunp.einsum('pi,ij,qj->pq', coeff, dm, coeff)
+    coeff = cupy.asarray(vhfopt.coeff)
+    dm_sorted = cupy.einsum('pi,ij,qj->pq', coeff, dm, coeff)
 
     log_qs = vhfopt.log_qs
     ncptype = len(log_qs)
@@ -276,8 +268,8 @@ def get_int4c2e_jk(mol, dm, vhfopt=None, direct_scf_tol=1e-13, with_k=True, omeg
 
     nao = vhfopt.mol.nao
     norb = nao
-    vj = gpunp.zeros([nao, nao])
-    vk = gpunp.zeros([nao, nao])
+    vj = cupy.zeros([nao, nao])
+    vk = cupy.zeros([nao, nao])
     for cp_ij_id, log_q_ij in enumerate(vhfopt.log_qs):
         for cp_kl_id, log_q_kl in enumerate(vhfopt.log_qs[:cp_ij_id+1]):
             cpi = cp_idx[cp_ij_id]
@@ -298,7 +290,7 @@ def get_int4c2e_jk(mol, dm, vhfopt=None, direct_scf_tol=1e-13, with_k=True, omeg
             nbins_locs_kl = len(bins_locs_kl) - 1
             bins_floor_ij = vhfopt.bins_floor[cp_ij_id]
             bins_floor_kl = vhfopt.bins_floor[cp_kl_id]
-            int4c = gpunp.zeros([nl, nk, nj, ni], order='C')
+            int4c = cupy.zeros([nl, nk, nj, ni], order='C')
             ao_offsets = np.array([i0, j0, k0, l0], dtype=np.int32)
             strides = np.array([1, ni, ni*nj, ni*nj*nk], dtype=np.int32)
             log_cutoff = np.log(direct_scf_tol)
@@ -333,8 +325,8 @@ def get_int4c2e_jk(mol, dm, vhfopt=None, direct_scf_tol=1e-13, with_k=True, omeg
             contract('lkji,il->jk', int4c, dm_sorted[i0:i1,l0:l1], alpha=1.0, beta=1.0, out=vk[j0:j1,k0:k1])
             contract('lkji,ik->jl', int4c, dm_sorted[i0:i1,k0:k1], alpha=1.0, beta=1.0, out=vk[j0:j1,l0:l1])
 
-    vj = gpunp.einsum('ip,ij,jq->pq', coeff, vj, coeff)
-    vk = gpunp.einsum('ip,ij,jq->pq', coeff, vk, coeff)
+    vj = cupy.einsum('ip,ij,jq->pq', coeff, vj, coeff)
+    vk = cupy.einsum('ip,ij,jq->pq', coeff, vk, coeff)
     vj = vj + vj.T
     vj *= 2.0
     vk = vk + vk.T
@@ -347,15 +339,10 @@ def get_int4c2e_ovov(mol, orbo, orbv, vhfopt=None, direct_scf_tol=1e-13, stream=
 
     if omega is None: omega = 0.0
     if vhfopt is None: vhfopt = _VHFOpt(mol, 'int2e').build(direct_scf_tol)
-    if stream is None:
-        if not has_dpctl:
-            stream = gpunp.cuda.get_current_stream()
-        else:
-            dev = get_default_cached_device()
-            stream = get_device_cached_queue(dev)
+    if stream is None: stream = cupy.cuda.get_current_stream()
 
-    orbo = gpunp.asarray(orbo)
-    orbv = gpunp.asarray(orbv)
+    orbo = cupy.asarray(orbo)
+    orbv = cupy.asarray(orbv)
     coeff = vhfopt.coeff
 
     orbo = coeff @ orbo
@@ -363,7 +350,7 @@ def get_int4c2e_ovov(mol, orbo, orbv, vhfopt=None, direct_scf_tol=1e-13, stream=
 
     nao, nocc = orbo.shape
     nvir = orbv.shape[1]
-    ovov = gpunp.zeros([nocc, nvir, nocc, nvir], order='C')
+    ovov = cupy.zeros([nocc, nvir, nocc, nvir], order='C')
     for i0,i1,j0,j1,k0,k1,l0,l1,int4c in loop_int4c2e_general(vhfopt):
         int4c_oaaa = _einsum('lkji,io->ojkl', int4c[0], orbo[i0:i1])
 
@@ -407,12 +394,7 @@ def loop_int4c2e_general(intopt, ip_type='', direct_scf_tol=1e-13, omega=None, s
     if ip_type == 'ipip2':  order = 2
 
     if omega is None: omega = 0.0
-    if stream is None:
-        if not has_dpctl:
-            stream = gpunp.cuda.get_current_stream()
-        else:
-            dev = get_default_cached_device()
-            stream = get_device_cached_queue(dev)
+    if stream is None: stream = cupy.cuda.get_current_stream()
 
     comp = 3**order
     nao = intopt.mol.nao
@@ -447,7 +429,7 @@ def loop_int4c2e_general(intopt, ip_type='', direct_scf_tol=1e-13, omega=None, s
             ao_offsets = np.array([i0,j0,k0,l0], dtype=np.int32)
             strides = np.array([1,ni,ni*nj,ni*nj*nk], dtype=np.int32)
 
-            int4c = gpunp.zeros([comp,nl,nk,nj,ni], order='C', dtype=np.float64)
+            int4c = cupy.zeros([comp,nl,nk,nj,ni], order='C', dtype=np.float64)
             err = fn(
                 ctypes.cast(stream.ptr, ctypes.c_void_p),
                 intopt.bpcache,
@@ -478,7 +460,7 @@ class _VHFOpt:
     def __init__(self, mol, intor, prescreen='CVHFnoscreen',
                  qcondname='CVHFsetnr_direct_scf', dmcondname=None):
         self.mol, self.coeff = basis_seg_contraction(mol)
-        self.coeff = gpunp.asarray(self.coeff)
+        self.coeff = cupy.asarray(self.coeff)
         # Note mol._bas will be sorted in .build() method. VHFOpt should be
         # initialized after mol._bas updated.
         self._intor = intor
@@ -570,7 +552,7 @@ class _VHFOpt:
                 pair2ket.append(jshs)
                 bins.append(_make_bins(s_index, nbins=nbins))
                 bins_floor.append(bin_floor)
-                log_qs.append(gpunp.asarray(log_q[idx]))
+                log_qs.append(cupy.asarray(log_q[idx]))
 
             q_sub = q_cond[p0:p1,p0:p1]
             idx = np.argwhere(q_sub > cutoff)
@@ -597,7 +579,7 @@ class _VHFOpt:
             pair2ket.append(jshs)
             bins.append(_make_bins(s_index, nbins=nbins))
             bins_floor.append(bin_floor)
-            log_qs.append(gpunp.asarray(log_q[idx]))
+            log_qs.append(cupy.asarray(log_q[idx]))
 
         # TODO
         self.pair2bra = pair2bra

@@ -216,7 +216,7 @@ static int GINTfill_int3c2e_ipip1_tasks(ERITensor *eri, BasisProdOffsets *offset
             const int li_ceil = li + 2;
             const int gsize = 3*nrys_roots*(li_ceil+1)*(lj+1)*(lk+1);
 	    stream.submit([&](sycl::handler &cgh) {
-		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize), cgh);
+		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize+16), cgh);
 		cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
                   GINTfill_int3c2e_ipip1_general_kernel(*envs, *eri, *offsets, item,
 			GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));

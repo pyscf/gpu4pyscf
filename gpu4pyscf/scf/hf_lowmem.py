@@ -18,18 +18,12 @@ at the cost of efficiency.
 '''
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, get_avail_mem
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import asarray, pack_tril, unpack_tril, get_avail_mem
+import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
+from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, get_avail_mem
 from gpu4pyscf import lib
-from gpu4pyscf.scf import diis, jk, hf
+from gpu4pyscf.scf import diis, jk, j_engine, hf
 from gpu4pyscf.lib import logger
 
 __all__ = [
@@ -209,20 +203,27 @@ class RHF(hf.RHF):
         cput0 = log.init_timer()
 
         omega = mol.omega
-        vhfopt = self._opt_gpu.get(omega)
-        if vhfopt is None:
-            vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
+        if omega in self._opt_gpu:
+            vhfopt, jopt = self._opt_gpu[omega]
+        else:
+            vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
+            self._opt_gpu[omega] = (vhfopt, jopt)
 
-        dm = self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
         #:vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
-        vj = vhfopt.get_j(dm, log)
+        dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, jopt)
+        vj = jopt.get_j(dm, log)
         assert vj.ndim == 3
+        vj = jopt.apply_coeff_CT_mat_C(vj)
+        vhf, vj = vj, None
+
+        dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
         vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
-        dm = None
+        assert vk.ndim == 3
+        vk = vhfopt.apply_coeff_CT_mat_C(vk)
         vk *= -.5
-        vj += vk
-        vhf = vhfopt.apply_coeff_CT_mat_C(vj)
-        vj = vk = None
+
+        vhf += vk
         vhf = pack_tril(vhf[0])
         if vhf_last is not None:
             vhf += asarray(vhf_last)
@@ -324,10 +325,13 @@ class RHF(hf.RHF):
         dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
         e_coul = float(vhf.dot(dm_tril))
+        vtmp = h1e * 2
+        vtmp += vhf
+        e_tot = float(vtmp.dot(dm_tril))
         self.scf_summary['e1'] = e1
         self.scf_summary['e2'] = e_coul
         logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-        return e1+e_coul, e_coul
+        return e_tot, e_coul
 
     def to_cpu(self):
         raise NotImplementedError

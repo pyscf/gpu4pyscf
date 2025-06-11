@@ -16,10 +16,6 @@
 
 #pragma once
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#endif
-
 typedef struct {
     int natm;
     int nbas;
@@ -48,9 +44,3 @@ typedef struct {
 #define C_COEFF         2
 #define C_BAS_SLOTS     3
 #define NBAS_MAX        6000
-
-#ifdef USE_SYCL
-extern SYCL_EXTERNAL sycl_device_global<GTOValEnvVars> s_envs;
-#else
-__constant__ GTOValEnvVars c_envs;
-#endif

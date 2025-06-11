@@ -1,8 +1,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
 #include <cuda.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
@@ -13,14 +17,29 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[16] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[16]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[16];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
@@ -34,9 +53,7 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[16];
 
     int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
@@ -144,14 +161,29 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[16] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[16]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[16];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
@@ -165,9 +197,7 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[16];
 
     int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
@@ -286,14 +316,29 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -307,9 +352,7 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -460,14 +503,29 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[16] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[16]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[16];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
@@ -481,9 +539,7 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[16];
 
     int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
@@ -615,14 +671,29 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -636,9 +707,7 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -818,14 +887,29 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -839,9 +923,7 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -1094,14 +1176,29 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[16] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[16]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[16];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
@@ -1115,9 +1212,7 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[16];
 
     int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
@@ -1236,14 +1331,29 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -1257,9 +1367,7 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -1407,14 +1515,29 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -1428,9 +1551,7 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -1651,14 +1772,29 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -1672,9 +1808,7 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -1856,14 +1990,29 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -1877,9 +2026,7 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -2193,15 +2340,32 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int gout_id = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = (item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1)) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[WARPS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[WARPS]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int gout_id = threadIdx.y;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[WARPS];
+#endif
+
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 2 * SPTAKS_PER_BLOCK;
@@ -2215,14 +2379,12 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     double *gx = rw + 768;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
     double *rjri = gz + 1152;
     double *Rpq = rjri + 192;
-    __shared__ int img_counts_in_warp[WARPS];
 
     int ntasks = nksh * 2 * SPTAKS_PER_BLOCK;
     for (int task0 = 0; task0 < ntasks; task0 += 64) {
@@ -2700,14 +2862,29 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[16] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[16]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[16];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
@@ -2721,9 +2898,7 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[16];
 
     int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
@@ -2855,14 +3030,29 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int thread_id = threadIdx.z * blockDim.x + threadIdx.x;    
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
     int ksp_id = 32 * sp_id + ksh_id;
-    int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -2876,9 +3066,7 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -3060,14 +3248,29 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int thread_id = threadIdx.z * blockDim.x + threadIdx.x;    
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
     int ksp_id = 32 * sp_id + ksh_id;
-    int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -3081,9 +3284,7 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -3401,14 +3602,29 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(0) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[8] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[8]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int thread_id = threadIdx.z * blockDim.x + threadIdx.x;    
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[8];
+#endif
     int ksp_id = 32 * sp_id + ksh_id;
-    int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
@@ -3422,9 +3638,7 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    __shared__ int img_counts_in_warp[8];
 
     int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
@@ -3670,15 +3884,31 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds
+                 #ifdef USE_SYCL
+                 , sycl::nd_item<3> &item, double *rw_cache
+                 #endif
+                 )
 {
+#ifdef USE_SYCL
+    int ksh_id = item.get_local_id(2);
+    int gout_id = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(2);
+    int ksh_block_id = item.get_group(1);
+    int thread_id = (item.get_local_id(0) * item.get_local_range(1) + item.get_local_id(1)) * item.get_local_range(2) + item.get_local_id(2);
+    int (&img_counts_in_warp)[WARPS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[WARPS]>(item.get_group());
+#else
     int ksh_id = threadIdx.x;
     int gout_id = threadIdx.y;
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
+    extern __shared__ double rw_cache[];
+    __shared__ int img_counts_in_warp[WARPS];
+#endif
+    int ksp_id = 32 * sp_id + ksh_id;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * 2 * SPTAKS_PER_BLOCK;
@@ -3692,14 +3922,12 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int *img_idx = bounds.img_idx;
     int *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     double *gx = rw + 768;
     double *gy = gx + 1152;
     double *gz = gy + 1152;
     double *rjri = gz + 1152;
     double *Rpq = rjri + 192;
-    __shared__ int img_counts_in_warp[WARPS];
 
     int ntasks = nksh * 2 * SPTAKS_PER_BLOCK;
     for (int task0 = 0; task0 < ntasks; task0 += 64) {
@@ -4197,12 +4425,57 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
     }
 #endif
 
-    dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
     int sp_blocks = (n_prim_pairs + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
         (SPTAKS_PER_BLOCK*nsp_per_block);
     int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
-    dim3 blocks(sp_blocks, ksh_blocks);
     int buflen = nroots*2 * nksh_per_block * nsp_per_block;
+
+#ifdef USE_SYCL
+    sycl::queue& stream = *sycl_get_queue();
+    sycl::range<3> threads(nsp_per_block, gout_stride, nksh_per_block);
+    sycl::range<3> blocks(1, ksh_blocks, sp_blocks);
+    switch (kij) {
+    case 0:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_000(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 5:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_100(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 6:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_110(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 10:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_200(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 11:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_210(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 12:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_220(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 25:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_001(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 30:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_101(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 31:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_111(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 35:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_201(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 36:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_211(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 37:
+        buflen += 3904;
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_221(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 50:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_002(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 55:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_102(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 56:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_112(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 60:
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_202(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 61:
+        buflen += 3904;
+        stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh); cgh.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) { int3c2e_212(out, *envs, *bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    default: return 0;
+    }
+#else // USE_SYCL
+    dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
+    dim3 blocks(sp_blocks, ksh_blocks);
     switch (kij) {
     case 0:
         int3c2e_000<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
@@ -4242,5 +4515,6 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
         int3c2e_212<<<blocks, threads, buflen*sizeof(double)>>>(out, *envs, *bounds); break;
     default: return 0;
     }
+#endif // USE_SYCL
     return 1;
 }

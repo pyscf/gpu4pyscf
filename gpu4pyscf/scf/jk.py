@@ -429,17 +429,18 @@ class _VHFOpt:
         Build JK for the sorted_mol. Density matrices dms and the return JK
         matrices are all corresponding to the sorted_mol
         '''
-        assert dms.ndim == 3
+        if callable(dms):
+            dms = dms()
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        nao = ao_loc[-1]
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = self.l_ctr_offsets
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
+        assert dms.ndim == 3 and dms.shape[-1] == ao_loc[-1]
         dm_cond = condense('absmax', dms, ao_loc)
         if hermi == 0:
             # Wrap the triu contribution to tril
@@ -466,7 +467,7 @@ class _VHFOpt:
             if hermi == 0:
                 # Contract the tril and triu parts separately
                 dms = cp.vstack([dms, dms.transpose(0,2,1)])
-            n_dm = dms.shape[0]
+            n_dm, nao = dms.shape[:2]
             tile_q_cond = self.tile_q_cond
             tile_q_ptr = ctypes.cast(tile_q_cond.data.ptr, ctypes.c_void_p)
             q_ptr = ctypes.cast(self.q_cond.data.ptr, ctypes.c_void_p)
@@ -506,6 +507,8 @@ class _VHFOpt:
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 tile_ij_mapping = tile_mappings[i,j]
                 tile_kl_mapping = tile_mappings[k,l]
+                if len(tile_ij_mapping) == 0 or len(tile_kl_mapping) == 0:
+                    continue
                 scheme = schemes[task]
                 err = kern(
                     vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
@@ -606,12 +609,13 @@ class _VHFOpt:
         return vj, vk
 
     def get_j(self, dms, verbose):
-        assert dms.ndim == 3
+        if callable(dms):
+            dms = dms()
         mol = self.sorted_mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        nao = ao_loc[-1]
-        n_dm = len(dms)
+        n_dm, nao = dms.shape[:2]
+        assert dms.ndim == 3 and nao == ao_loc[-1]
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
@@ -680,6 +684,8 @@ class _VHFOpt:
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 tile_ij_mapping = tile_mappings[i,j]
                 tile_kl_mapping = tile_mappings[k,l]
+                if len(tile_ij_mapping) == 0 or len(tile_kl_mapping) == 0:
+                    continue
                 scheme = schemes[task]
                 err = kern(
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
@@ -822,44 +828,6 @@ def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile=TILE):
             idx = cp.argsort(sub_tile_q[mask])[::-1]
             tile_mappings[i,j] = t_ij[mask][idx]
     return tile_mappings
-
-def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
-    n_groups = len(l_ctr_bas_loc) - 1
-    pair_mappings = {}
-    nbas = mol.nbas
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            sub_q = q_cond[ish0:ish1,jsh0:jsh1]
-            mask = sub_q > cutoff
-            if i == j:
-                mask = cp.tril(mask)
-            t_ij = (cp.arange(ish0, ish1, dtype=np.int32)[:,None] * nbas +
-                    cp.arange(jsh0, jsh1, dtype=np.int32))
-            sub_q = sub_q[mask]
-            idx = cp.argsort(sub_q)[::-1]
-
-            # qd_tile_max is the product of q_cond and dm_cond within each batch
-            sub_q += dm_cond[ish0:ish1,jsh0:jsh1][mask]
-            qd_tile_max = cp.zeros((sub_q.size+31) & 0xffffffe0, # 32-element aligned
-                                   dtype=np.float32)
-            qd_tile_max[:sub_q.size] = sub_q[idx]
-            qd_tile2_max = qd_tile_max.reshape(-1,2).max(axis=1)
-            qd_tile4_max = qd_tile2_max.reshape(-1,2).max(axis=1)
-            qd_tile8_max = qd_tile4_max.reshape(-1,2).max(axis=1)
-            qd_tile16_max = qd_tile8_max.reshape(-1,2).max(axis=1)
-            qd_tile32_max = qd_tile16_max.reshape(-1,2).max(axis=1)
-            qd_tile_addrs = (ctypes.cast(qd_tile_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile2_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile4_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile8_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile16_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile32_max.data.ptr, ctypes.c_void_p))
-            qd_batch_max = (qd_tile_max, qd_tile2_max, qd_tile4_max, qd_tile8_max,
-                            qd_tile16_max, qd_tile32_max)
-            pair_mappings[i,j] = (t_ij[mask][idx], qd_tile_addrs, qd_batch_max)
-    return pair_mappings
 
 def _make_j_engine_pair_locs(mol):
     ls = mol._bas[:,ANG_OF]

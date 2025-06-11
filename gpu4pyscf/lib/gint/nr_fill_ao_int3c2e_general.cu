@@ -361,7 +361,7 @@ int GINTfill_int3c2e_ip(cudaStream_t stream, BasisProdCache *bpcache, double *er
     //checkCudaErrors(cudaMemcpyToSymbol(envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     #ifdef USE_SYCL
-    stream.memcpy(c_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
     #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
     #endif
@@ -463,7 +463,7 @@ int GINTfill_int3c2e_general(cudaStream_t stream, BasisProdCache *bpcache, doubl
     //checkCudaErrors(cudaMemcpyToSymbol(c_envs, &envs, sizeof(GINTEnvVars)));
     // move bpcache to constant memory
     #ifdef USE_SYCL
-    stream.memcpy(c_bpcache, bpcache, sizeof(BasisProdCache)).wait();
+    stream.memcpy(s_bpcache, bpcache, sizeof(BasisProdCache)).wait();
     #else
     checkCudaErrors(cudaMemcpyToSymbol(c_bpcache, bpcache, sizeof(BasisProdCache)));
     #endif

@@ -12,20 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import contract, tag_array    
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import contract, tag_array
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy
 from pyscf import lib
 from gpu4pyscf.grad import uks as uks_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.df.grad.uhf import get_jk
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
 
 

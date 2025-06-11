@@ -48,9 +48,9 @@ static void GINTkernel_direct_getjk(GINTEnvVars envs, JKMatrix jk, double* __res
     double *vk = jk.vk;
     double* __restrict__ dm = jk.dm;
 
-    int *idx = c_idx;
-    int *idy = c_idx + TOT_NF;
-    int *idz = c_idx + TOT_NF * 2;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
     
     const int li = envs.i_l;
     const int lj = envs.j_l;

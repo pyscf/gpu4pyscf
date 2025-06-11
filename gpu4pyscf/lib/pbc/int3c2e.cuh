@@ -60,9 +60,20 @@ typedef struct {
     int *img_idx; // indices of img_coords in each shell-pair
 } PBCInt3c2eBounds;
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+
+extern SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx;
+extern SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
+extern SYCL_EXTERNAL sycl_device_global<int[252]> s_g_cart_idx;
+
+#else // USE_SYCL
+
 #ifdef __CUDACC__
 extern __constant__ int c_g_pair_idx[];
 extern __constant__ int c_g_pair_offsets[];
 extern __constant__ int c_g_cart_idx[];
-#endif
-#endif
+#endif // __CUDACC__
+#endif // USE_SYCL
+
+#endif // HAVE_DEFINED_PBCINT3CENVVAS_H

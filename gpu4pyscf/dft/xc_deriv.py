@@ -16,15 +16,9 @@
 Transform XC functional derivatives between different representations
 '''
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import contract
+import cupy
 from pyscf.dft.xc_deriv import _stack_fg, _stack_frr, _stack_fgg
+from gpu4pyscf.lib.cupy_helper import contract
 
 def transform_vxc(rho, vxc, xctype, spin=0):
     r'''
@@ -38,7 +32,7 @@ def transform_vxc(rho, vxc, xctype, spin=0):
             GGA : [4,N]
             MGGA: [5,N]
     '''
-    rho = gpunp.asarray(rho, order='C')
+    rho = cupy.asarray(rho, order='C')
     if xctype == 'GGA':
         order = 1
         nvar = 4
@@ -60,7 +54,7 @@ def transform_vxc(rho, vxc, xctype, spin=0):
         if order == 0:
             vp = fr.reshape(2, nvar, ngrids)
         else:
-            vp = gpunp.empty((2, nvar, ngrids))
+            vp = cupy.empty((2, nvar, ngrids))
             vp[:,0] = fr
             #vp[:,1:4] = _stack_fg(fg, rho=rho)
             vp[:,1:4] = contract('abg,bxg->axg', _stack_fg(fg), rho[:,1:4])
@@ -70,7 +64,7 @@ def transform_vxc(rho, vxc, xctype, spin=0):
         if order == 0:
             vp = fr.reshape(nvar, ngrids)
         else:
-            vp = gpunp.empty((nvar, ngrids))
+            vp = cupy.empty((nvar, ngrids))
             vp[0] = fr
             vp[1:4] = 2 * fg * rho[1:4]
         if order > 1:
@@ -86,7 +80,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0):
             MGGA: [2,5,2,5,N]
         * spin unpolarized is not implemented
     '''
-    rho = gpunp.asarray(rho, order='C')
+    rho = cupy.asarray(rho, order='C')
     if xctype == 'GGA':
         order = 1
         nvar = 4
@@ -109,19 +103,19 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0):
         if order == 0:
             vp = _stack_frr(frr).reshape(2,nvar, 2,nvar, ngrids).transpose(1,3,0,2,4)
         else:
-            vp = gpunp.empty((2,nvar, 2,nvar, ngrids)).transpose(1,3,0,2,4)
+            vp = cupy.empty((2,nvar, 2,nvar, ngrids)).transpose(1,3,0,2,4)
             vp[0,0] = _stack_frr(frr)
             i3 = np.arange(3)
             qgg = _stack_fgg(fgg)
-            qgg = gpunp.einsum('abcdg,axg->xbcdg', qgg, rho[:,1:4])
-            qgg = gpunp.einsum('xbcdg,cyg->xybdg', qgg, rho[:,1:4])
+            qgg = cupy.einsum('abcdg,axg->xbcdg', qgg, rho[:,1:4])
+            qgg = cupy.einsum('xbcdg,cyg->xybdg', qgg, rho[:,1:4])
             #qgg = _stack_fgg(fgg, rho=rho).transpose(1,3,0,2,4)
             qgg[i3,i3] += _stack_fg(fg)
             vp[1:4,1:4] = qgg
 
             frg = frg.reshape(2,3,ngrids)
             qrg = _stack_fg(frg, axis=1)
-            qrg = gpunp.einsum('rabg,axg->xrbg', qrg, rho[:,1:4])
+            qrg = cupy.einsum('rabg,axg->xrbg', qrg, rho[:,1:4])
             #qrg = _stack_fg(frg, axis=1, rho=rho).transpose(2,0,1,3)
             vp[0,1:4] = qrg
             vp[1:4,0] = qrg.transpose(0,2,1,3)
@@ -129,7 +123,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0):
         if order > 1:
             fgt = fgt.reshape(3,2,ngrids)
             qgt = _stack_fg(fgt, axis=0)
-            qgt = gpunp.einsum('abrg,axg->xbrg', qgt, rho[:,1:4])
+            qgt = cupy.einsum('abrg,axg->xbrg', qgt, rho[:,1:4])
             # qgt = _stack_fg(fgt, axis=0, rho=rho).transpose(1,0,2,3)
             vp[1:4,4] = qgt
             vp[4,1:4] = qgt.transpose(0,2,1,3)
@@ -146,7 +140,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0):
         if order == 0:
             vp = frr.reshape(nvar, nvar, ngrids)
         else:
-            vp = gpunp.empty((nvar, nvar, ngrids))
+            vp = cupy.empty((nvar, nvar, ngrids))
             vp[0,0] = frr
             i3 = np.arange(3)
             qgg = 4 * fgg * rho[1:4] * rho[1:4,None]
@@ -172,7 +166,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
             GGA : [4,4,4,N]
             MGGA: [5,5,5,N]
     '''
-    rho = gpunp.asarray(rho, order='C')
+    rho = cupy.asarray(rho, order='C')
     if xctype == 'GGA':
         order = 1
         nvar = 4
@@ -286,7 +280,7 @@ def transform_kxc(rho, fxc, kxc, xctype, spin=0):
         if order == 0:
             vp = frrr.reshape(nvar, nvar, nvar, ngrids)
         else:
-            vp = gpunp.empty((nvar, nvar, nvar, ngrids))
+            vp = cupy.empty((nvar, nvar, nvar, ngrids))
             vp[0,0,0] = frrr
             i3 = np.arange(3)
             qggg = 8 * fggg * rho[1:4] * rho[1:4,None] * rho[1:4,None,None]

@@ -72,7 +72,7 @@ class CMakeBuildPy(build_py):
         self.announce('Configuring extensions', level=3)
         src_dir = os.path.abspath(os.path.join(__file__, '..', 'gpu4pyscf', 'lib'))
         dest_dir = os.path.join(self.build_temp, 'gpu4pyscf')
-        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=OFF']
+        cmd = ['cmake', f'-S{src_dir}', f'-B{dest_dir}', '-DBUILD_LIBXC=ON']
         # cmd.append('-DBUILD_LIBXC=OFF')
         # cmd.append('-DUSE_SYCL=ON')
         configure_args = os.getenv('CMAKE_CONFIGURE_ARGS')
@@ -81,7 +81,7 @@ class CMakeBuildPy(build_py):
         self.spawn(cmd)
 
         self.announce('Building binaries', level=3)
-        cmd = ['cmake', '--build', dest_dir, '-j', '1', '-v' ]
+        cmd = ['cmake', '--build', dest_dir, '-j', '16', '-v' ]
         build_args = os.getenv('CMAKE_BUILD_ARGS')
         if build_args:
             cmd.extend(build_args.split(' '))

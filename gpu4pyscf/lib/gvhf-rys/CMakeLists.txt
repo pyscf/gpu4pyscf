@@ -1,4 +1,3 @@
-
 set(GPU_SRCS
   rys_contract_jk.cu rys_jk_driver.cu rys_roots_dat.cu
   unrolled_os.cu unrolled_rys.cu

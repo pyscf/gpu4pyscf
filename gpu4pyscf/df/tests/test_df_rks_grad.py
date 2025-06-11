@@ -13,12 +13,7 @@
 # limitations under the License.
 
 import pyscf
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 import numpy as np
 import unittest
 from gpu4pyscf.dft import rks
@@ -99,8 +94,8 @@ def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
     grad_fd = np.array(grad_fd).reshape(-1,3)
     print('finite difference gradient:')
     print(grad_fd)
-    print('difference between analytical and finite difference gradient:', gpunp.linalg.norm(g_analy - grad_fd))
-    assert(gpunp.linalg.norm(g_analy - grad_fd) < tol)
+    print('difference between analytical and finite difference gradient:', cupy.linalg.norm(g_analy - grad_fd))
+    assert(cupy.linalg.norm(g_analy - grad_fd) < tol)
 
 def _vs_cpu(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-9):
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)

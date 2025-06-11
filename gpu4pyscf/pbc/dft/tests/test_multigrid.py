@@ -15,18 +15,23 @@
 
 import unittest
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-else:
-    import dpnp as cp
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc import gto
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.dft import multigrid as multigrid_cpu
 from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
+
+diamond = '''
+C     0.      0.      0.
+C     0.8917  0.8917  0.8917
+C     1.7834  1.7834  0.
+C     2.6751  2.6751  0.8917
+C     1.7834  0.      1.7834
+C     2.6751  0.8917  2.6751
+C     0.      1.7834  1.7834
+C     0.8917  2.6751  2.6751'''
 
 def setUpModule():
     global cell_orth
@@ -195,14 +200,7 @@ class KnownValues(unittest.TestCase):
     def test_rks_lda(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
-            atom = '''C     0.      0.      0.
-                      C     0.8917  0.8917  0.8917
-                      C     1.7834  1.7834  0.
-                      C     2.6751  2.6751  0.8917
-                      C     1.7834  0.      1.7834
-                      C     2.6751  0.8917  2.6751
-                      C     0.      1.7834  1.7834
-                      C     0.8917  2.6751  2.6751''',
+            atom = diamond,
             basis = 'gth-dzv',
             pseudo = 'gth-pbe',
             precision = 1e-9,
@@ -212,21 +210,23 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.777337612, 8)
 
-    @unittest.skip('MultiGrid for UKS not implemented')
     def test_uks_lda(self):
-        pass
+        cell = gto.M(
+            a = np.eye(3)*3.5668,
+            atom = diamond,
+            basis = 'gth-dzv',
+            pseudo = 'gth-pbe',
+            precision = 1e-9,
+        )
+        mf = cell.UKS(xc='svwn').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -44.777337612, 8)
 
     def test_rks_gga(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
-            atom = '''C     0.      0.      0.
-                      C     0.8917  0.8917  0.8917
-                      C     1.7834  1.7834  0.
-                      C     2.6751  2.6751  0.8917
-                      C     1.7834  0.      1.7834
-                      C     2.6751  0.8917  2.6751
-                      C     0.      1.7834  1.7834
-                      C     0.8917  2.6751  2.6751''',
+            atom = diamond,
             basis = 'gth-dzv',
             pseudo = 'gth-pbe',
             precision = 1e-9,
@@ -236,17 +236,23 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.87059063524272, 8)
 
+    def test_uks_gga(self):
+        cell = gto.M(
+            a = np.eye(3)*3.5668,
+            atom = diamond,
+            basis = 'gth-dzv',
+            pseudo = 'gth-pbe',
+            precision = 1e-9,
+        )
+        mf = cell.UKS(xc='pbe').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -44.87059063524272, 8)
+
     def test_rks_mgga(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
-            atom = '''C     0.      0.      0.
-                      C     0.8917  0.8917  0.8917
-                      C     1.7834  1.7834  0.
-                      C     2.6751  2.6751  0.8917
-                      C     1.7834  0.      1.7834
-                      C     2.6751  0.8917  2.6751
-                      C     0.      1.7834  1.7834
-                      C     0.8917  2.6751  2.6751''',
+            atom = diamond,
             basis = 'gth-dzv',
             pseudo = 'gth-pbe',
             precision = 1e-9,
@@ -256,9 +262,18 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.7542917283246, 8)
 
-    @unittest.skip('MultiGrid for GGA not implemented')
-    def test_uks_gga(self):
-        pass
+    def test_uks_mgga(self):
+        cell = gto.M(
+            a = np.eye(3)*3.5668,
+            atom = diamond,
+            basis = 'gth-szv',
+            pseudo = 'gth-pbe',
+            precision = 1e-9,
+        )
+        mf = cell.UKS(xc='tpss').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -44.6180709444, 8)
 
     @unittest.skip('MultiGrid for KRKS not implemented')
     def test_krks_lda(self):

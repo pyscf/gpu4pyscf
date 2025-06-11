@@ -18,15 +18,7 @@ Hessian of PCM family solvent model
 # pylint: disable=C0103
 
 import numpy
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as gpunp
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
-    from gpu4pyscf.lib.dpnp_helper import contract
+import cupy
 import ctypes
 from pyscf import lib, gto
 from gpu4pyscf import scf
@@ -40,7 +32,7 @@ from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ipip1, int1e_grids_ipvip1, in
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from pyscf import lib as pyscf_lib
-
+from gpu4pyscf.lib.cupy_helper import contract
 
 def gradgrad_switch_h(x):
     ''' 2nd derivative of h(x) '''
@@ -63,14 +55,14 @@ def get_d2F_d2A(surface):
 
     ngrids = grid_coords.shape[0]
     natom = atom_coords.shape[0]
-    d2F = gpunp.zeros([ngrids, natom, natom, 3, 3])
-    d2A = gpunp.zeros([ngrids, natom, natom, 3, 3])
+    d2F = cupy.zeros([ngrids, natom, natom, 3, 3])
+    d2A = cupy.zeros([ngrids, natom, natom, 3, 3])
 
     for i_grid_atom in range(natom):
         p0,p1 = surface['gslice_by_atom'][i_grid_atom]
         coords = grid_coords[p0:p1]
-        si_rJ = gpunp.expand_dims(coords, axis=1) - atom_coords
-        norm_si_rJ = gpunp.linalg.norm(si_rJ, axis=-1)
+        si_rJ = cupy.expand_dims(coords, axis=1) - atom_coords
+        norm_si_rJ = cupy.linalg.norm(si_rJ, axis=-1)
         diJ = (norm_si_rJ - R_in_J) / R_sw_J
         diJ[:,i_grid_atom] = 1.0
         diJ[diJ < 1e-8] = 0.0
@@ -80,20 +72,20 @@ def get_d2F_d2A(surface):
         fiJ = switch_h(diJ)
         dfiJ = grad_switch_h(diJ)
 
-        fiJK = fiJ[:, :, gpunp.newaxis] * fiJ[:, gpunp.newaxis, :]
-        dfiJK = dfiJ[:, :, gpunp.newaxis] * dfiJ[:, gpunp.newaxis, :]
-        R_sw_JK = R_sw_J[:, gpunp.newaxis] * R_sw_J[gpunp.newaxis, :]
-        norm_si_rJK = norm_si_rJ[:, :, gpunp.newaxis] * norm_si_rJ[:, gpunp.newaxis, :]
+        fiJK = fiJ[:, :, cupy.newaxis] * fiJ[:, cupy.newaxis, :]
+        dfiJK = dfiJ[:, :, cupy.newaxis] * dfiJ[:, cupy.newaxis, :]
+        R_sw_JK = R_sw_J[:, cupy.newaxis] * R_sw_J[cupy.newaxis, :]
+        norm_si_rJK = norm_si_rJ[:, :, cupy.newaxis] * norm_si_rJ[:, cupy.newaxis, :]
         terms_size_ngrids_natm_natm = dfiJK / (fiJK * norm_si_rJK * R_sw_JK)
-        si_rJK = si_rJ[:, :, gpunp.newaxis, :, gpunp.newaxis] * si_rJ[:, gpunp.newaxis, :, gpunp.newaxis, :]
-        d2fiJK_offdiagonal = terms_size_ngrids_natm_natm[:, :, :, gpunp.newaxis, gpunp.newaxis] * si_rJK
+        si_rJK = si_rJ[:, :, cupy.newaxis, :, cupy.newaxis] * si_rJ[:, cupy.newaxis, :, cupy.newaxis, :]
+        d2fiJK_offdiagonal = terms_size_ngrids_natm_natm[:, :, :, cupy.newaxis, cupy.newaxis] * si_rJK
 
         d2fiJ = gradgrad_switch_h(diJ)
         terms_size_ngrids_natm = d2fiJ / (norm_si_rJ**2 * R_sw_J) - dfiJ / (norm_si_rJ**3)
-        si_rJJ = si_rJ[:, :, :, gpunp.newaxis] * si_rJ[:, :, gpunp.newaxis, :]
+        si_rJJ = si_rJ[:, :, :, cupy.newaxis] * si_rJ[:, :, cupy.newaxis, :]
         d2fiJK_diagonal = contract('qA,qAdD->qAdD', terms_size_ngrids_natm, si_rJJ)
-        d2fiJK_diagonal += contract('qA,dD->qAdD', dfiJ / norm_si_rJ, gpunp.eye(3))
-        d2fiJK_diagonal /= (fiJ * R_sw_J)[:, :, gpunp.newaxis, gpunp.newaxis]
+        d2fiJK_diagonal += contract('qA,dD->qAdD', dfiJ / norm_si_rJ, cupy.eye(3))
+        d2fiJK_diagonal /= (fiJ * R_sw_J)[:, :, cupy.newaxis, cupy.newaxis]
 
         d2fiJK = d2fiJK_offdiagonal
         for i_atom in range(natom):
@@ -105,13 +97,13 @@ def get_d2F_d2A(surface):
         d2F[p0:p1, :, :, :, :] += contract('q,qABdD->qABdD', Fi, d2fiJK)
         d2A[p0:p1, :, :, :, :] += contract('q,qABdD->qABdD', Ai, d2fiJK)
 
-        d2fiJK_grid_atom_offdiagonal = -gpunp.einsum('qABdD->qAdD', d2fiJK)
+        d2fiJK_grid_atom_offdiagonal = -cupy.einsum('qABdD->qAdD', d2fiJK)
         d2F[p0:p1, i_grid_atom, :, :, :] = contract('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
         d2F[p0:p1, :, i_grid_atom, :, :] = contract('q,qAdD->qAdD', Fi, d2fiJK_grid_atom_offdiagonal)
         d2A[p0:p1, i_grid_atom, :, :, :] = contract('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal.transpose(0,1,3,2))
         d2A[p0:p1, :, i_grid_atom, :, :] = contract('q,qAdD->qAdD', Ai, d2fiJK_grid_atom_offdiagonal)
 
-        d2fiJK_grid_atom_diagonal = -gpunp.einsum('qAdD->qdD', d2fiJK_grid_atom_offdiagonal)
+        d2fiJK_grid_atom_diagonal = -cupy.einsum('qAdD->qdD', d2fiJK_grid_atom_offdiagonal)
         d2F[p0:p1, i_grid_atom, i_grid_atom, :, :] = contract('q,qdD->qdD', Fi, d2fiJK_grid_atom_diagonal)
         d2A[p0:p1, i_grid_atom, i_grid_atom, :, :] = contract('q,qdD->qdD', Ai, d2fiJK_grid_atom_diagonal)
 
@@ -129,7 +121,7 @@ def get_d2Sii(surface, dF, d2F, stream=None):
     natm = dF.shape[0]
     assert dF.shape == (natm, 3, ngrids)
 
-    # dF_dF = dF[:, gpunp.newaxis, :, gpunp.newaxis, :] * dF[gpunp.newaxis, :, gpunp.newaxis, :, :]
+    # dF_dF = dF[:, cupy.newaxis, :, cupy.newaxis, :] * dF[cupy.newaxis, :, cupy.newaxis, :, :]
     # dF_dF_over_F3 = dF_dF * (1.0/(switch_fun**3))
     # d2F_over_F2 = d2F * (1.0/(switch_fun**2))
     # d2Sii = 2 * dF_dF_over_F3 - d2F_over_F2
@@ -137,10 +129,9 @@ def get_d2Sii(surface, dF, d2F, stream=None):
 
     dF = dF.flatten()   # Make sure the underlying data order is the same as shape shows
     d2F = d2F.flatten() # Make sure the underlying data order is the same as shape shows
-    d2Sii = gpunp.empty((natm, natm, 3, 3, ngrids), dtype=gpunp.float64)
+    d2Sii = cupy.empty((natm, natm, 3, 3, ngrids), dtype=cupy.float64)
     if stream is None:
-        dev = get_default_cached_device()
-        stream = get_device_cached_queue(dev)
+        stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_d2f_to_d2sii(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
@@ -162,16 +153,15 @@ def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
     grid_coords = surface['grid_coords']
     norm_vec    = surface['norm_vec']
     n = charge_exp.shape[0]
-    d2S = gpunp.empty([3,3,n,n])
+    d2S = cupy.empty([3,3,n,n])
     d2D = None
     d2S_ptr = ctypes.cast(d2S.data.ptr, ctypes.c_void_p)
     d2D_ptr = pyscf_lib.c_null_ptr()
     if with_D:
-        d2D = gpunp.empty([3,3,n,n])
+        d2D = cupy.empty([3,3,n,n])
         d2D_ptr = ctypes.cast(d2D.data.ptr, ctypes.c_void_p)
     if stream is None:
-        dev = get_default_cached_device()
-        stream = get_device_cached_queue(dev)
+        stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_d2d_d2s(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         d2D_ptr, d2S_ptr,
@@ -188,7 +178,7 @@ def analytical_hess_nuc(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and gpunp.linalg.norm(dm_cache - dm) < 1e-10:
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
     else:
         pcmobj._get_vind(dm)
@@ -258,7 +248,7 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and gpunp.linalg.norm(dm_cache - dm) < 1e-10:
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
     else:
         pcmobj._get_vind(dm)
@@ -281,10 +271,10 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     # intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
     # intopt.build(1e-14, diag_block_with_triu=True, aosym=False)
 
-    d2e_from_d2I = gpunp.zeros([mol.natm, mol.natm, 3, 3])
+    d2e_from_d2I = cupy.zeros([mol.natm, mol.natm, 3, 3])
 
     # d2I_dA2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip1', direct_scf_tol=1e-14)
-    # d2I_dA2 = gpunp.einsum('dijq,q->dij', d2I_dA2, q_sym)
+    # d2I_dA2 = cupy.einsum('dijq,q->dij', d2I_dA2, q_sym)
     # d2I_dA2 = d2I_dA2.reshape([3, 3, nao, nao])
     d2I_dA2 = int1e_grids_ipip1(mol, grid_coords, charges = q_sym, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
@@ -294,7 +284,7 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     d2I_dA2 = None
 
     # d2I_dAdB = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipvip1', direct_scf_tol=1e-14)
-    # d2I_dAdB = gpunp.einsum('dijq,q->dij', d2I_dAdB, q_sym)
+    # d2I_dAdB = cupy.einsum('dijq,q->dij', d2I_dAdB, q_sym)
     # d2I_dAdB = d2I_dAdB.reshape([3, 3, nao, nao])
     d2I_dAdB = int1e_grids_ipvip1(mol, grid_coords, charges = q_sym, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
@@ -308,7 +298,7 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     for j_atom in range(mol.natm):
         g0,g1 = gridslice[j_atom]
         # d2I_dAdC = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ip1ip2', direct_scf_tol=1e-14)
-        # d2I_dAdC = gpunp.einsum('dijq,q->dij', d2I_dAdC[:, :, :, g0:g1], q_sym[g0:g1])
+        # d2I_dAdC = cupy.einsum('dijq,q->dij', d2I_dAdC[:, :, :, g0:g1], q_sym[g0:g1])
         # d2I_dAdC = d2I_dAdC.reshape([3, 3, nao, nao])
         d2I_dAdC = int1e_grids_ip1ip2(mol, grid_coords[g0:g1, :], charges = q_sym[g0:g1], intopt = intopt_derivative, charge_exponents = charge_exp[g0:g1]**2)
 
@@ -322,7 +312,7 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     d2I_dAdC = None
 
     # d2I_dC2 = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ipip2', direct_scf_tol=1e-14)
-    # d2I_dC2 = gpunp.einsum('dijq,ij->dq', d2I_dC2, dm)
+    # d2I_dC2 = cupy.einsum('dijq,ij->dq', d2I_dC2, dm)
     # d2I_dC2 = d2I_dC2.reshape([3, 3, ngrids])
     d2I_dC2 = int1e_grids_ipip2(mol, grid_coords, dm = dm, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
@@ -368,7 +358,7 @@ def get_dA_dot_q(dA, q, atmlst):
     return contract('diA,i->Adi', dA[:,:,atmlst], q)
 
 def get_dD_dot_q(dD, q, atmlst, gridslice, ngrids):
-    output = gpunp.zeros([len(atmlst), 3, ngrids])
+    output = cupy.zeros([len(atmlst), 3, ngrids])
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
         output[i_atom, :, g0:g1] += dD[:,g0:g1,:] @ q
@@ -397,7 +387,7 @@ def get_v_dot_d2A_dot_q(d2A, v_left, q_right):
     return d2A @ (v_left * q_right)
 
 def get_v_dot_d2D_dot_q(d2D, v_left, q_right, natom, gridslice):
-    output = gpunp.zeros([natom, natom, 3, 3])
+    output = cupy.zeros([natom, natom, 3, 3])
     for i_atom in range(natom):
         gi0,gi1 = gridslice[i_atom]
         for j_atom in range(natom):
@@ -415,7 +405,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and gpunp.linalg.norm(dm_cache - dm) < 1e-10:
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
     else:
         pcmobj._get_vind(dm)
@@ -569,7 +559,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
 
         DA = D*A
-        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
         dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, pcmobj) @ R + VK_1_dot_dRdx
 
     elif pcmobj.method.upper() in ['SS(V)PE']:
@@ -692,7 +682,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         VK_1_dot_dRdx = f_eps_over_2pi * (VK_1D_dot_dAdx + VK_1_dot_dDdx * A)
 
         DA = D*A
-        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
         dvK_1R = -einsum_Adi_ij_Adj_inverseK(vK_1_dot_dKdx, pcmobj) @ R + VK_1_dot_dRdx
 
     else:
@@ -787,7 +777,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dKdxT_dot_invKT_V -= f_eps_over_2pi * dSdxT_dot_AT_DT_invKT_V
         invKT_dKdxT_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdxT_dot_invKT_V, K_transpose = True)
 
-        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
         dqdx_fix_Vq += -contract('ij,Adj->Adi', R.T, invKT_dKdxT_dot_invKT_V)
 
         dqdx_fix_Vq *= -0.5
@@ -847,7 +837,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dKdx_dot_invKT_V = dK_dot_q(invKT_V)
         invKT_dKdx_dot_invKT_V = einsum_ij_Adj_Adi_inverseK(pcmobj, dKdx_dot_invKT_V, K_transpose = True)
 
-        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
         dqdx_fix_Vq += -contract('ij,Adj->Adi', R.T, invKT_dKdx_dot_invKT_V)
 
         dqdx_fix_Vq *= -0.5
@@ -873,11 +863,11 @@ def get_dvgrids(pcmobj, dm, atmlst, intopt_derivative):
     fakemol = gto.fakemol_for_charges(grid_coords.get(), expnt=charge_exp.get()**2)
     int2c2e_ip1 = mol._add_suffix('int2c2e_ip1')
     v_ng_ip1 = gto.mole.intor_cross(int2c2e_ip1, fakemol_nuc, fakemol)
-    v_ng_ip1 = gpunp.array(v_ng_ip1)
+    v_ng_ip1 = cupy.array(v_ng_ip1)
     dV_on_charge_dx = contract('dAq,A->Adq', v_ng_ip1, atom_charges)
 
     v_ng_ip2 = gto.mole.intor_cross(int2c2e_ip1, fakemol, fakemol_nuc)
-    v_ng_ip2 = gpunp.array(v_ng_ip2)
+    v_ng_ip2 = cupy.array(v_ng_ip2)
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
         dV_on_charge_dx[i_atom,:,g0:g1] += contract('dqA,A->dq', v_ng_ip2[:,g0:g1,:], atom_charges)
@@ -903,7 +893,7 @@ def get_dqsym_dx_fix_K_R(pcmobj, dm, atmlst, intopt_derivative):
         A = pcmobj._intermediates['A']
         D = pcmobj._intermediates['D']
         DA = D * A
-        R = -f_epsilon * (gpunp.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
+        R = -f_epsilon * (cupy.eye(DA.shape[0]) - 1.0/(2.0*PI)*DA)
         R_dVdx = contract('ij,Adj->Adi', R, dV_on_charge_dx)
 
     K_1_R_dVdx = einsum_ij_Adj_Adi_inverseK(pcmobj, R_dVdx)
@@ -928,7 +918,7 @@ def analytical_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and gpunp.linalg.norm(dm_cache - dm) < 1e-10:
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
     else:
         pcmobj._get_vind(dm)
@@ -956,7 +946,7 @@ def analytical_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None
     intopt_derivative = int3c1e.VHFOpt(mol)
     intopt_derivative.build(cutoff = 1e-14, aosym = False)
 
-    dIdx_mo = gpunp.empty([len(atmlst), 3, nmo, nocc])
+    dIdx_mo = cupy.empty([len(atmlst), 3, nmo, nocc])
 
     dIdA = int1e_grids_ip1(mol, grid_coords, charges = q_sym, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in atmlst:
@@ -1089,3 +1079,5 @@ class WithSolventHess:
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.
         pass
+
+

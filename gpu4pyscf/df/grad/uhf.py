@@ -13,19 +13,12 @@
 # limitations under the License.
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from cupyx.scipy.linalg import solve_triangular
-else:
-    import dpnp as gpunp
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy
 import copy
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import scf, gto
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.gpunp.helper import tag_array, contract
+from gpu4pyscf.lib.cupy_helper import tag_array, contract
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf import __config__
 from gpu4pyscf.lib import logger
@@ -34,7 +27,7 @@ from gpu4pyscf.df.grad.jk import get_rhojk, get_grad_vjk
 FREE_CUPY_CACHE = True
 BINSIZE = 128
 
-def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
+def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, 
            omega=None, mo_coeff=None, mo_occ=None, dm2 = None):
     '''
     Computes the first-order derivatives of the energy contributions from
@@ -72,9 +65,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     if isinstance(mf_grad.base, scf.rohf.ROHF):
         raise NotImplementedError()
     if mo_coeff is None:
-        mo_coeff = gpunp.asarray(mf_grad.base.mo_coeff)
+        mo_coeff = cupy.asarray(mf_grad.base.mo_coeff)
     if mo_occ is None:
-        mo_occ = gpunp.asarray(mf_grad.base.mo_occ)
+        mo_occ = cupy.asarray(mf_grad.base.mo_occ)
 
     dm = intopt.sort_orbitals(dm0, axis=[0,1])
     if dm2 is not None:
@@ -98,7 +91,7 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     else:
         int2c_e1 = auxmol.intor('int2c2e_ip1')
 
-    int2c_e1 = gpunp.asarray(int2c_e1)
+    int2c_e1 = cupy.asarray(int2c_e1)
     rhoj_cart = rhok_cart = None
     auxslices = auxmol.aoslice_by_atom()
     aux_cart2sph = intopt.aux_cart2sph
@@ -106,9 +99,9 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
     ejaux = ekaux = None
     if with_j:
         if low.tag == 'eig':
-            rhoj = gpunp.dot(low_t.T, rhoj)
+            rhoj = cupy.dot(low_t.T, rhoj)
             if dm2 is not None:
-                rhoj2 = gpunp.dot(low_t.T, rhoj2)
+                rhoj2 = cupy.dot(low_t.T, rhoj2)
         elif low.tag == 'cd':
             rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
             if dm2 is not None:
@@ -151,11 +144,11 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True,
 
     nao_cart = intopt._sorted_mol.nao
     block_size = with_df.get_blksize(nao=nao_cart)
-
+    
     intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
     intopt.build(mf.direct_scf_tol, diag_block_with_triu=True, aosym=False,
                  group_size_aux=block_size)#, group_size=block_size)
-
+    
     if not mol.cart:
         # sph2cart for ao
         cart2sph = intopt.cart2sph

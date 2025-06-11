@@ -13,12 +13,7 @@
 # limitations under the License.
 
 import pyscf
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 import unittest
 import pytest
 from pyscf.dft import rks as cpu_rks
@@ -64,8 +59,8 @@ def _check_grad(mol, grid_response=False, xc='B3LYP', disp=None, tol=1e-9):
 
     cpu_gradient = gpu_gradient.to_cpu()
     g_cpu = cpu_gradient.kernel()
-    print('|| CPU - GPU ||:', gpunp.linalg.norm(g_cpu - g_gpu))
-    assert(gpunp.linalg.norm(g_cpu - g_gpu) < tol)
+    print('|| CPU - GPU ||:', cupy.linalg.norm(g_cpu - g_gpu))
+    assert(cupy.linalg.norm(g_cpu - g_gpu) < tol)
 
 class KnownValues(unittest.TestCase):
 

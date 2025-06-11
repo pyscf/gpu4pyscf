@@ -14,18 +14,12 @@
 
 import unittest
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import contract
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
+from gpu4pyscf.lib.cupy_helper import contract
 
 
 def setUpModule():

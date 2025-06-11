@@ -44,9 +44,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     double* __restrict__ rhok = jk.rhok;
     double* __restrict__ dm = jk.dm;
 
-    int *idx = c_idx;
-    int *idy = c_idx + TOT_NF;
-    int *idz = c_idx + TOT_NF * 2;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     if (rhoj == NULL){
         for (int kp = 0; kp < nfk; ++kp) {
@@ -345,9 +345,9 @@ static void GINTkernel_int3c2e_ip2_getjk_direct(GINTEnvVars envs, JKMatrix jk,
     const int k_l = envs.k_l;
     const int nrys_roots = envs.nrys_roots;
 
-    int *idx = c_idx;
-    int *idy = c_idx + TOT_NF;
-    int *idz = c_idx + TOT_NF * 2;
+    const int *idx = c_idx;
+    const int *idy = c_idx + TOT_NF;
+    const int *idz = c_idx + TOT_NF * 2;
 
     if (rhoj == NULL){
         for (int tx = threadIdx_x; tx < (k1-k0)*(j1-j0)*(i1-i0); tx += blockDim_x) {

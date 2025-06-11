@@ -35,17 +35,24 @@ set(GPU_SRCS
   cart2sph.cu
   )
 
-add_library(gint SHARED ${GPU_SRCS})
-
 if (USE_SYCL)
-  file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-  file(GLOB ALL_GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
+  #file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
+  #file(GLOB ALL_GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
 
-  set_source_files_properties(${ALL_GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # Add sycl_api.cpp here
+  list(APPEND GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/sycl_api_python.cpp")
+
+  # This ensures all the files are added to $GPU_SRCS
+  # before target is generated
+  add_library(gint SHARED ${GPU_SRCS})
+
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   set_target_properties(gint PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
 else()
+  add_library(gint SHARED ${GPU_SRCS})
+  
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
 
   set_target_properties(gint PROPERTIES

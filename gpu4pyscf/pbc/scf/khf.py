@@ -21,19 +21,12 @@ __all__ = [
 ]
 
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import (
-        return_gpunp_array, contract, tag_array, sandwich_dot)
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import (
-        return_gpunp_array, contract, tag_array, sandwich_dot)
+import cupy as cp
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf import lib
 from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import (
+    return_cupy_array, contract, tag_array, sandwich_dot)
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc import df
@@ -333,7 +326,7 @@ class KSCF(pbchf.SCF):
     make_rdm2 = NotImplemented
 
     init_direct_scf = NotImplemented
-    get_ovlp = return_gpunp_array(khf_cpu.get_ovlp)
+    get_ovlp = return_cupy_array(khf_cpu.get_ovlp)
     get_fock = get_fock
     get_fermi = get_fermi
     get_occ = get_occ
@@ -348,9 +341,9 @@ class KSCF(pbchf.SCF):
     get_init_guess = NotImplemented
     init_guess_by_minao = _cast_mol_init_guess(pbchf.SCF.init_guess_by_minao)
     init_guess_by_atom = _cast_mol_init_guess(pbchf.SCF.init_guess_by_atom)
-    init_guess_by_1e = return_gpunp_array(khf_cpu.KSCF.init_guess_by_1e)
-    init_guess_by_chkfile = return_gpunp_array(khf_cpu.KSCF.init_guess_by_chkfile)
-    from_chk = return_gpunp_array(khf_cpu.KSCF.from_chk)
+    init_guess_by_1e = return_cupy_array(khf_cpu.KSCF.init_guess_by_1e)
+    init_guess_by_chkfile = return_cupy_array(khf_cpu.KSCF.init_guess_by_chkfile)
+    from_chk = return_cupy_array(khf_cpu.KSCF.from_chk)
 
     analyze = NotImplemented
     mulliken_pop = NotImplemented

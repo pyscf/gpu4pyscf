@@ -18,24 +18,16 @@ Gradient of PCM family solvent model
 # pylint: disable=C0103
 
 import numpy
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from cupyx import scipy
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as gpunp
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
-    from gpu4pyscf.lib.dpnp_helper import contract
-
+import cupy
 import ctypes
+from cupyx import scipy
 from pyscf import lib
 from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from pyscf import lib as pyscf_lib
 
@@ -59,17 +51,17 @@ def get_dF_dA(surface, with_dA = True):
 
     ngrids = grid_coords.shape[0]
     natom = atom_coords.shape[0]
-    dF = gpunp.zeros([ngrids, natom, 3])
+    dF = cupy.zeros([ngrids, natom, 3])
     if with_dA:
-        dA = gpunp.zeros([ngrids, natom, 3])
+        dA = cupy.zeros([ngrids, natom, 3])
     else:
         dA = None
 
     for ia in range(natom):
         p0,p1 = surface['gslice_by_atom'][ia]
         coords = grid_coords[p0:p1]
-        ri_rJ = gpunp.expand_dims(coords, axis=1) - atom_coords
-        riJ = gpunp.linalg.norm(ri_rJ, axis=-1)
+        ri_rJ = cupy.expand_dims(coords, axis=1) - atom_coords
+        riJ = cupy.linalg.norm(ri_rJ, axis=-1)
         diJ = (riJ - R_in_J) / R_sw_J
         diJ[:,ia] = 1.0
         diJ[diJ < 1e-8] = 0.0
@@ -78,15 +70,15 @@ def get_dF_dA(surface, with_dA = True):
 
         fiJ = switch_h(diJ)
         dfiJ = grad_switch_h(diJ) / (fiJ * riJ * R_sw_J)
-        dfiJ = gpunp.expand_dims(dfiJ, axis=-1) * ri_rJ
+        dfiJ = cupy.expand_dims(dfiJ, axis=-1) * ri_rJ
 
         Fi = switch_fun[p0:p1]
         if with_dA:
             Ai = area[p0:p1]
 
         # grids response
-        Fi = gpunp.expand_dims(Fi, axis=-1)
-        dFi_grid = gpunp.sum(dfiJ, axis=1)
+        Fi = cupy.expand_dims(Fi, axis=-1)
+        dFi_grid = cupy.sum(dfiJ, axis=1)
 
         dF[p0:p1,ia,:] += Fi * dFi_grid
         if with_dA:
@@ -94,7 +86,7 @@ def get_dF_dA(surface, with_dA = True):
             dA[p0:p1,ia,:] += Ai * dFi_grid
 
         # atom response
-        Fi = gpunp.expand_dims(Fi, axis=-2)
+        Fi = cupy.expand_dims(Fi, axis=-2)
         dF[p0:p1,:,:] -= Fi * dfiJ
         if with_dA:
             Ai = cupy.expand_dims(Ai, axis=-2)
@@ -113,35 +105,31 @@ def get_dD_dS_slow(surface, with_S=True, with_D=False):
     exponents   = surface['charge_exp']
     norm_vec    = surface['norm_vec']
 
-    xi_i, xi_j = gpunp.meshgrid(exponents, exponents, indexing='ij')
+    xi_i, xi_j = cupy.meshgrid(exponents, exponents, indexing='ij')
     xi_ij = xi_i * xi_j / (xi_i**2 + xi_j**2)**0.5
-    ri_rj = gpunp.expand_dims(grid_coords, axis=1) - grid_coords
-    rij = gpunp.linalg.norm(ri_rj, axis=-1)
+    ri_rj = cupy.expand_dims(grid_coords, axis=1) - grid_coords
+    rij = cupy.linalg.norm(ri_rj, axis=-1)
     xi_r_ij = xi_ij * rij
-    gpunp.fill_diagonal(rij, 1)
+    cupy.fill_diagonal(rij, 1)
     xi_i = xi_j = None
 
-    if not has_dpctl:
-        dS_dr = -(scipy.special.erf(xi_r_ij) - 2.0*xi_r_ij/PI**0.5*gpunp.exp(-xi_r_ij**2))/rij**2
-    else:
-        dS_dr = -(gpunp.erf(xi_r_ij) - 2.0*xi_r_ij/PI**0.5*gpunp.exp(-xi_r_ij**2))/rij**2
+    dS_dr = -(scipy.special.erf(xi_r_ij) - 2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2))/rij**2
+    cupy.fill_diagonal(dS_dr, 0)
 
-    gpunp.fill_diagonal(dS_dr, 0)
-
-    dS_dr= gpunp.expand_dims(dS_dr, axis=-1)
-    drij = ri_rj/gpunp.expand_dims(rij, axis=-1)
+    dS_dr= cupy.expand_dims(dS_dr, axis=-1)
+    drij = ri_rj/cupy.expand_dims(rij, axis=-1)
     dS = dS_dr * drij
 
     dD = None
     if with_D:
-        nj_rij = gpunp.sum(ri_rj * norm_vec, axis=-1)
-        dD_dri = 4.0*xi_r_ij**2 * xi_ij / PI**0.5 * gpunp.exp(-xi_r_ij**2) * nj_rij / rij**3
-        gpunp.fill_diagonal(dD_dri, 0.0)
+        nj_rij = cupy.sum(ri_rj * norm_vec, axis=-1)
+        dD_dri = 4.0*xi_r_ij**2 * xi_ij / PI**0.5 * cupy.exp(-xi_r_ij**2) * nj_rij / rij**3
+        cupy.fill_diagonal(dD_dri, 0.0)
 
-        rij = gpunp.expand_dims(rij, axis=-1)
-        nj_rij = gpunp.expand_dims(nj_rij, axis=-1)
-        nj = gpunp.expand_dims(norm_vec, axis=0)
-        dD_dri = gpunp.expand_dims(dD_dri, axis=-1)
+        rij = cupy.expand_dims(rij, axis=-1)
+        nj_rij = cupy.expand_dims(nj_rij, axis=-1)
+        nj = cupy.expand_dims(norm_vec, axis=0)
+        dD_dri = cupy.expand_dims(dD_dri, axis=-1)
 
         dD = dD_dri * drij + dS_dr * (-nj/rij + 3.0*nj_rij/rij**2 * drij)
         dD_dri = None
@@ -156,16 +144,15 @@ def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
     grid_coords = surface['grid_coords']
     norm_vec    = surface['norm_vec']
     n = charge_exp.shape[0]
-    dS = gpunp.empty([3,n,n])
+    dS = cupy.empty([3,n,n])
     dD = None
     dS_ptr = ctypes.cast(dS.data.ptr, ctypes.c_void_p)
     dD_ptr = pyscf_lib.c_null_ptr()
     if with_D:
-        dD = gpunp.empty([3,n,n])
+        dD = cupy.empty([3,n,n])
         dD_ptr = ctypes.cast(dD.data.ptr, ctypes.c_void_p)
     if stream is None:
-        dev = get_default_cached_device()
-        stream = get_device_cached_queue()
+        stream = cupy.cuda.get_current_stream()
     err = libsolvent.pcm_dd_ds(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         dD_ptr, dS_ptr,
@@ -217,7 +204,7 @@ def grad_nuc(pcmobj, dm, q_sym = None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and gpunp.linalg.norm(dm_cache - dm) < 1e-10:
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
     else:
         pcmobj._get_vind(dm)
@@ -257,7 +244,7 @@ def grad_qv(pcmobj, dm, q_sym = None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and gpunp.linalg.norm(dm_cache - dm) < 1e-10:
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
     else:
         pcmobj._get_vind(dm)
@@ -280,8 +267,8 @@ def grad_qv(pcmobj, dm, q_sym = None):
                           intopt=intopt)
 
     aoslice = mol.aoslice_by_atom()
-    dvj = 2.0 * gpunp.asarray([gpunp.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
-    dq = gpunp.asarray([gpunp.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
+    dvj = 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
+    dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
     de = dq + dvj
     t1 = log.timer_debug1('grad qv', *t1)
     return de.get()
@@ -297,7 +284,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
     if not pcmobj._intermediates:
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
-    if dm_cache is not None and gpunp.linalg.norm(dm_cache - dm) < 1e-10:
+    if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
         pass
     else:
         pcmobj._get_vind(dm)
@@ -327,16 +314,16 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         tmp = B.dot(c)
         return (a*tmp).T
 
-    de = gpunp.zeros([pcmobj.mol.natm,3])
+    de = cupy.zeros([pcmobj.mol.natm,3])
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         # dR = 0, dK = dS
         de_dS  = 0.5 * vK_1.reshape(-1, 1) * left_multiply_dS(pcmobj.surface, q, stream=None)
         de_dS -= 0.5 * q.reshape(-1, 1) * right_multiply_dS(pcmobj.surface, vK_1, stream=None)
-        de -= gpunp.asarray([gpunp.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
+        de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
 
         dF, _ = get_dF_dA(pcmobj.surface, with_dA = False)
         dSii = get_dSii(pcmobj.surface, dF)
-        de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*gpunp.einsum('i,xij,i->jx', vK_1, dSii, q)
+        de -= 0.5*contract('i,xij->jx', vK_1*q, dSii) # 0.5*cupy.einsum('i,xij,i->jx', vK_1, dSii, q)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dF, dA = get_dF_dA(pcmobj.surface)
@@ -352,7 +339,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         Av = A*v_grids
         de_dR  = 0.5*fac * contract_ket(vK_1, dD, Av)
         de_dR -= 0.5*fac * contract_bra(vK_1, dD, Av)
-        de_dR  = gpunp.asarray([gpunp.sum(de_dR[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dR  = cupy.asarray([cupy.sum(de_dR[p0:p1], axis=0) for p0,p1 in gridslice])
 
         vK_1_D = vK_1.dot(D)
         vK_1_Dv = vK_1_D * v_grids
@@ -360,7 +347,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
 
         de_dS0  = 0.5*contract_ket(vK_1, dS, q)
         de_dS0 -= 0.5*contract_bra(vK_1, dS, q)
-        de_dS0  = gpunp.asarray([gpunp.sum(de_dS0[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dS0  = cupy.asarray([cupy.sum(de_dS0[p0:p1], axis=0) for p0,p1 in gridslice])
 
         vK_1_q = vK_1 * q
         de_dS0 += 0.5*contract('i,xin->nx', vK_1_q, dSii)
@@ -368,18 +355,18 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         vK_1_DA = vK_1_D*A
         de_dS1  = 0.5*contract_ket(vK_1_DA, dS, q)
         de_dS1 -= 0.5*contract_bra(vK_1_DA, dS, q)
-        de_dS1  = gpunp.asarray([gpunp.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dS1  = cupy.asarray([cupy.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
 
         vK_1_DAq = vK_1_DA*q
         de_dS1 += 0.5*contract('j,xjn->nx', vK_1_DAq, dSii)
 
-        Sq = gpunp.dot(S,q)
+        Sq = cupy.dot(S,q)
         ASq = A*Sq
         de_dD  = 0.5*contract_ket(vK_1, dD, ASq)
         de_dD -= 0.5*contract_bra(vK_1, dD, ASq)
-        de_dD  = gpunp.asarray([gpunp.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dD  = cupy.asarray([cupy.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
 
-        de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*gpunp.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
+        de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*cupy.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
 
         de_dK = de_dS0 - fac * (de_dD + de_dA + de_dS1)
         de += de_dR - de_dK
@@ -398,7 +385,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         Av = A*v_grids
         de_dR  = 0.5*fac * contract_ket(vK_1, dD, Av)
         de_dR -= 0.5*fac * contract_bra(vK_1, dD, Av)
-        de_dR  = gpunp.asarray([gpunp.sum(de_dR[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dR  = cupy.asarray([cupy.sum(de_dR[p0:p1], axis=0) for p0,p1 in gridslice])
 
         vK_1_D = vK_1.dot(D)
         vK_1_Dv = vK_1_D * v_grids
@@ -406,7 +393,7 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
 
         de_dS0  = 0.5*contract_ket(vK_1, dS, q)
         de_dS0 -= 0.5*contract_bra(vK_1, dS, q)
-        de_dS0  = gpunp.asarray([gpunp.sum(de_dS0[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dS0  = cupy.asarray([cupy.sum(de_dS0[p0:p1], axis=0) for p0,p1 in gridslice])
 
         vK_1_q = vK_1 * q
         de_dS0 += 0.5*contract('i,xin->nx', vK_1_q, dSii)
@@ -414,31 +401,31 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         vK_1_DA = vK_1_D*A
         de_dS1  = 0.5*contract_ket(vK_1_DA, dS, q)
         de_dS1 -= 0.5*contract_bra(vK_1_DA, dS, q)
-        de_dS1  = gpunp.asarray([gpunp.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dS1  = cupy.asarray([cupy.sum(de_dS1[p0:p1], axis=0) for p0,p1 in gridslice])
         vK_1_DAq = vK_1_DA*q
         de_dS1 += 0.5*contract('j,xjn->nx', vK_1_DAq, dSii)
 
-        DT_q = gpunp.dot(D.T, q)
+        DT_q = cupy.dot(D.T, q)
         ADT_q = A * DT_q
         de_dS1_T  = 0.5*contract_ket(vK_1, dS, ADT_q)
         de_dS1_T -= 0.5*contract_bra(vK_1, dS, ADT_q)
-        de_dS1_T  = gpunp.asarray([gpunp.sum(de_dS1_T[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dS1_T  = cupy.asarray([cupy.sum(de_dS1_T[p0:p1], axis=0) for p0,p1 in gridslice])
         vK_1_ADT_q = vK_1 * ADT_q
         de_dS1_T += 0.5*contract('j,xjn->nx', vK_1_ADT_q, dSii)
 
-        Sq = gpunp.dot(S,q)
+        Sq = cupy.dot(S,q)
         ASq = A*Sq
         de_dD  = 0.5*contract_ket(vK_1, dD, ASq)
         de_dD -= 0.5*contract_bra(vK_1, dD, ASq)
-        de_dD  = gpunp.asarray([gpunp.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dD  = cupy.asarray([cupy.sum(de_dD[p0:p1], axis=0) for p0,p1 in gridslice])
 
-        vK_1_S = gpunp.dot(vK_1, S)
+        vK_1_S = cupy.dot(vK_1, S)
         vK_1_SA = vK_1_S * A
         de_dD_T  = 0.5*contract_ket(vK_1_SA, -dD.transpose(0,2,1), q)
         de_dD_T -= 0.5*contract_bra(vK_1_SA, -dD.transpose(0,2,1), q)
-        de_dD_T  = gpunp.asarray([gpunp.sum(de_dD_T[p0:p1], axis=0) for p0,p1 in gridslice])
+        de_dD_T  = cupy.asarray([cupy.sum(de_dD_T[p0:p1], axis=0) for p0,p1 in gridslice])
 
-        de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*gpunp.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
+        de_dA = 0.5*contract('j,xjn->nx', vK_1_D*Sq, dA)   # 0.5*cupy.einsum('j,xjn,j->nx', vK_1_D, dA, Sq)
 
         de_dA_T = 0.5*contract('j,xjn->nx', vK_1_S*DT_q, dA)
 

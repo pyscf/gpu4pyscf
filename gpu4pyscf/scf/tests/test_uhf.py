@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+import tempfile
 import numpy as np
 import cupy
 import pyscf
@@ -269,13 +270,28 @@ class KnownValues(unittest.TestCase):
         print('pyscf - qchem ', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
     '''
+
+    def test_chkfile(self):
+        ftmp = tempfile.NamedTemporaryFile(dir = pyscf.lib.param.TMPDIR)
+        mf = scf.UHF(mol)
+        mf.chkfile = ftmp.name
+        mf.kernel()
+        dma_stored, dmb_stored = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
+        dma_stored, dmb_stored = cupy.asnumpy(dma_stored), cupy.asnumpy(dmb_stored)
+
+        mf_copy = scf.UHF(mol)
+        mf_copy.chkfile = ftmp.name
+        dma_loaded, dmb_loaded = mf_copy.init_guess_by_chkfile()
+        assert np.allclose(dma_stored, dma_loaded, atol = 1e-14) # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
+        assert np.allclose(dmb_stored, dmb_loaded, atol = 1e-14)
+        assert not np.allclose(dma_stored, dmb_loaded, atol = 1e-1) # Just to make sure alpha and beta electron are different in the test system
+
     # TODO:
     #test analyze
     #test mulliken_pop
     #test mulliken_spin_pop
     #test mulliken_meta
     #test mulliken_meta_spin
-    #test chkfile
     #test stability
     #test newton
     #test x2c

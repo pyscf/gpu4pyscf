@@ -7,12 +7,12 @@ def test_contract_2e():
     norb = 12
     nelec = 12
     npair = norb * (norb + 1) // 2
-    np.random.seed(12)
+    np.random.seed(np.asarray(12, np.uint64))
     g2e = np.random.rand(npair,npair)
     g2e = g2e + g2e.T
     link = cistring.gen_linkstr_index(range(norb), nelec//2, tril=True)
     na = link.shape[0]
-    cp.random.seed(11)
+    cp.random.seed(np.asarray(11, np.uint64))
     ci0 = cp.random.rand(na)
     ci0 = cp.einsum('i,j->ij', ci0, ci0)
     ci0 *= 1/cp.linalg.norm(ci0)

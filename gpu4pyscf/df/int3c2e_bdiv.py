@@ -19,20 +19,13 @@
 import ctypes
 import math
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import load_library, contract, dist_matrix
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import load_library, contract, dist_matrix
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy as cp
 from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import (
+    load_library, contract, dist_matrix, asarray)
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
@@ -61,7 +54,7 @@ def aux_e2(mol, auxmol):
     naux = int3c2e_opt.aux_coeff.shape[0]
     out = cp.zeros((nao*nao, naux))
     p0 = p1 = 0
-    for ij_shls, eri3c in int3c2e_opt.int3c2e_kernel():
+    for ij_shls, eri3c in int3c2e_opt.int3c2e_generator():
         p0, p1 = p1, p1 + eri3c.shape[0]
         addr = ao_pair_mapping[p0:p1]
         out[addr] = eri3c
@@ -77,6 +70,26 @@ def aux_e2(mol, auxmol):
     out = contract('pjk,pi->ijk', out, coeff)
     t1 = log.timer_debug1('aux_e2: transform basis ordering', *t1)
     return out
+
+def compressed_aux_e2(mol, auxmol):
+    r'''
+    Returns compressed_int3c, rows, cols. The compressed_int3c stores the
+    3-center integrals (ij|k) compressed on the orbital-pair dimensions.
+    The addresses of the non-zero pairs are stored in the rows and cols indices.
+    The 3-center integral tensor can be restored by:
+        int3c[rows,cols] = compressed_int3c 
+    '''
+    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
+    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
+    eri3c = eri3c.dot(aux_coeff)
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    rows, cols = divmod(cp.asarray(ao_pair_mapping), mol.nao)
+    # compressed = int3c[ao_idx[:,None],ao_idx][rows,cols]
+    #            = int3c[ao_idx[rows],ao_idx[cols]]
+    ao_idx = cp.asarray(int3c2e_opt.ao_idx)
+    return eri3c, ao_idx[rows], ao_idx[cols]
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
@@ -195,7 +208,14 @@ class Int3c2eOpt:
             log.timer_debug1('initialize int3c2e_kernel', *t0)
         return self
 
-    def int3c2e_kernel(self, cutoff=1e-14, verbose=None):
+    def int3c2e_generator(self, cutoff=1e-14, verbose=None):
+        '''Generator that yields the 3c2e integral tensor in multiple batches.
+
+        Each batch is a two-dimensional tensor. The first dimension corresponds
+        to compressed orbital pairs, which can be indexed using the row and cols
+        returned by the .orbital_pair_nonzero_indices() method. The second
+        dimension is a slice along the auxiliary basis dimension.
+        '''
         if self.sorted_mol is None:
             self.build(cutoff)
         log = logger.new_logger(self.mol, verbose)
@@ -264,18 +284,16 @@ class Int3c2eOpt:
             yield ij_shls, eri3c
 
         if log.verbose >= logger.DEBUG1:
-            if not has_dpctl:
-                cp.cuda.Stream.null.synchronize()
-            else:
-                dev = get_default_cached_device()
-                get_device_cached_queue(dev).wait()
+            cp.cuda.Stream.null.synchronize()
             log.timer('int3c2e', *t0)
             log.debug1('kernel launches %d', kern_counts)
             for lll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', lll, t)
 
-    def int3c2e_bdiv_kernel(self, cutoff=1e-14, verbose=None):
-        '''Construct the entire block using the block-divergent parallelism'''
+    def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
+        '''An iterator to generate eri3c blocks using the block-divergent
+        integral parallelism
+        '''
         if self.sorted_mol is None:
             self.build(cutoff)
         log = logger.new_logger(self.mol, verbose)
@@ -284,54 +302,66 @@ class Int3c2eOpt:
         _atm_cpu = self._atm
         _bas_cpu = self._bas
         _env_cpu = self._env
-        mol = self.sorted_mol
+        sorted_mol = self.sorted_mol
         aux_loc = self.sorted_auxmol.ao_loc
-        naux = aux_loc[-1]
         nao_pair = self.ao_pair_loc[-1]
 
         # nst_lookup stores the nst_per_block for each (li,lj,lk) pattern
-        nst_lookup = cp.asarray(create_nst_lookup_table(), dtype=np.int32)
+        nst_lookup = asarray(create_nst_lookup_table(), dtype=np.int32)
 
-        shl_pair_idx = cp.asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
-        shl_pair_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
-        ksh_offsets = cp.asarray(self.ksh_offsets, dtype=np.int32)
+        shl_pair_idx = asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
+        shl_pair_offsets = asarray(self.shl_pair_offsets, dtype=np.int32)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
-        nbatches_ksh = len(ksh_offsets) - 1
-        ao_pair_loc = cp.asarray(self.ao_pair_loc, dtype=np.int32)
-        log.debug1('sp_blocks = %d, ksh_blocks = %d', nbatches_shl_pair, nbatches_ksh)
+        ksh_offsets = self.ksh_offsets
+        ksh_offsets_gpu = asarray(ksh_offsets, dtype=np.int32)
+        ksh_blocks = len(ksh_offsets) - 1
+        ao_pair_loc = asarray(self.ao_pair_loc, dtype=np.int32)
+        log.debug1('sp_blocks = %d, ksh_blocks = %d', nbatches_shl_pair, ksh_blocks)
 
-        init_constant(mol)
+        # Group ksh_blocks into batches. Use ksh_block_partitions to index the
+        # first ksh_block for each batch.
+        aux_loc_by_block = aux_loc[ksh_offsets - sorted_mol.nbas]
+        if batch_size is None:
+            ksh_block_partitions = [0, ksh_blocks]
+        else:
+            ksh_block_partitions = group_blocks(aux_loc_by_block, batch_size)
+
+        init_constant(sorted_mol)
         kern = libgint_rys.fill_int3c2e_bdiv
-        eri3c = cp.empty((nao_pair, naux))
-        err = kern(
-            ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int3c2e_envs),
-            ctypes.c_int(SHM_SIZE), ctypes.c_int(naux),
-            ctypes.c_int(nbatches_shl_pair), ctypes.c_int(nbatches_ksh),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(nst_lookup.data.ptr, ctypes.c_void_p),
-            _atm_cpu.ctypes, ctypes.c_int(mol.natm),
-            _bas_cpu.ctypes, ctypes.c_int(mol.nbas), _env_cpu.ctypes)
-        if err != 0:
-            raise RuntimeError('fill_int3c2e_bdiv kernel failed')
-        if log.verbose >= logger.DEBUG1:
-            if not has_dpctl:
+        for start, stop in zip(ksh_block_partitions[:-1], ksh_block_partitions[1:]):
+            nblocks = stop - start
+            ksh_offsets_batch = ksh_offsets_gpu[start:]
+            k0 = aux_loc_by_block[start]
+            k1 = aux_loc_by_block[stop]
+            naux_batch = k1 - k0
+            eri3c = cp.empty((nao_pair, naux_batch))
+            err = kern(
+                ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
+                ctypes.byref(int3c2e_envs),
+                ctypes.c_int(SHM_SIZE), ctypes.c_int(naux_batch),
+                ctypes.c_int(nbatches_shl_pair), ctypes.c_int(nblocks),
+                ctypes.c_int(ksh_offsets[start]),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ksh_offsets_batch.data.ptr, ctypes.c_void_p),
+                ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(nst_lookup.data.ptr, ctypes.c_void_p),
+                _atm_cpu.ctypes, ctypes.c_int(sorted_mol.natm),
+                _bas_cpu.ctypes, ctypes.c_int(sorted_mol.nbas), _env_cpu.ctypes)
+            if err != 0:
+                raise RuntimeError('fill_int3c2e_bdiv kernel failed')
+            if log.verbose >= logger.DEBUG1:
                 cp.cuda.Stream.null.synchronize()
-            else:
-                dev = get_default_cached_device()
-                get_device_cached_queue(dev).wait()
-            log.timer_debug1('processing int3c2e_bdiv_kernel', *t0)
-        return eri3c
+                log.timer_debug1('processing int3c2e_bdiv_kernel[:,{start}:{stop}]', *t0)
+            yield eri3c
+            eri3c = None
 
     def create_ao_pair_mapping(self, cart=True):
         '''ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
-        which allows the decompression for the CUDA/SYCL kernel generated compressed_eri3c:
+        which allows the decompression for the CUDA kernel generated compressed_eri3c:
         sparse_eri3c[ao_pair_mapping] = compressed_eri3c
 
-        int3c2e CUDA/SYCL kernel stores intgrals as [ij_shl,j,i,k,ksh].
+        int3c2e CUDA kernel stores intgrals as [ij_shl,j,i,k,ksh].
         ao_pair_mapping indicates the ij addresses in eri3c[k,i,j];
         '''
         mol = self.sorted_mol
@@ -421,6 +451,44 @@ class Int3c2eOpt:
         mat[tuple(fancy_index)] = sorted_mat
         return mat
 
+    def orbital_pair_nonzero_indices(self):
+        '''Returns rows, cols and diags, which are non-zero indices for orbital pairs.
+
+        rows and cols are indices to address the elements in the (N,N) matrix for
+        orbitals: ovlp[rows,cols] => non-zero. diags are the addresses in the
+        compressed orbital pairs: ovlp[rows,cols][diag] => diagonal non-zero.
+        diags contain the addresses of some of the off-diagonal elements
+        '''
+        mol = self.mol
+        ao_pair_mapping = self.create_ao_pair_mapping(cart=mol.cart)
+        rows, cols = divmod(asarray(ao_pair_mapping), mol.nao)
+
+        # diag stores the indices for cderi_row that corresponds to
+        # the diagonal blocks. Note this index array can contain some of the
+        # off-diagonal elements which happen to be the off-diagonal elements
+        # while within the diagonal blocks.
+        uniq_l = self.uniq_l_ctr[:,0]
+        if mol.cart:
+            nf = (uniq_l + 1) * (uniq_l + 2) // 2
+        else:
+            nf = uniq_l * 2 + 1
+        n_groups = len(uniq_l)
+        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
+        nbas = self.sorted_mol.nbas
+        offset = 0
+        diag = []
+        for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
+            nfi = nf[i]
+            nfj = nf[j]
+            if i == j: # the diagonal blocks
+                ish, jsh = divmod(bas_ij_idx, nbas)
+                idx = np.where(ish == jsh)[0]
+                addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
+                diag.append(addr.ravel())
+            offset += bas_ij_idx.size * nfi * nfj
+        diag = asarray(np.hstack(diag))
+        return rows, cols, diag
+
 def _conc_locs(ao_loc1, ao_loc2):
     return np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
 
@@ -441,7 +509,7 @@ def init_constant(mol):
         g_idx.ctypes, offsets.ctypes, mol._env.ctypes, ctypes.c_int(mol._env.size),
         ctypes.c_int(SHM_SIZE))
     if err != 0:
-        raise RuntimeError('CUDA/SYCL kernel initialization')
+        raise RuntimeError('CUDA kernel initialization')
 
 def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     order = li + lj + lk
@@ -487,7 +555,6 @@ def estimate_shl_ovlp(mol):
     ls = cp.asarray(mol._bas[:,ANG_OF])
     bas_coords = cp.asarray(mol.atom_coords()[mol._bas[:,ATOM_OF]])
 
-    norm = cs * ((2*ls+1)/(4*np.pi))**.5
     aij = exps[:,None] + exps
     fi = exps[:,None] / aij
     fj = exps[None,:] / aij
@@ -500,6 +567,24 @@ def estimate_shl_ovlp(mol):
     lj = ls[None,:]
     fac_dri = (li * .5/aij + dri**2) ** (li*.5)
     fac_drj = (lj * .5/aij + drj**2) ** (lj*.5)
-    fac_norm = norm[:,None]*norm * (np.pi/aij)**1.5
+    fac_norm = cs[:,None]*cs * (np.pi/aij)**1.5
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj
     return ovlp
+
+def group_blocks(offsets, block_size):
+    '''Partition shells into groups. num functions in each group <= block_size'''
+    offsets = np.asarray(offsets)
+    nbas = len(offsets) - 1
+    partitions = []
+    i = 0
+    while i < nbas:
+        partitions.append(i)
+        upper_lim = offsets[i] + block_size
+        next_i = np.searchsorted(offsets[i:], upper_lim, 'right')
+        if next_i == 1:
+            dim_max = (offsets[1:] - offsets[:-1]).max()
+            raise RuntimeError(f'block_size {block_size} is too small. '
+                               f'block_size should be at least {dim_max}.')
+        i += next_i - 1
+    partitions.append(min(i, nbas))
+    return partitions

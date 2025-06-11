@@ -14,20 +14,14 @@
 
 from functools import reduce
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array
-else:
-    import dpnp as cupy
-    from gpu4pyscf.lib.dpnp_helper import tag_array
+import cupy
 from pyscf.scf import uhf as uhf_cpu
 from pyscf import __config__
 
 from gpu4pyscf.scf.hf import eigh, damping, level_shift
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import tag_array
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''One-particle density matrix in AO representation
@@ -225,7 +219,7 @@ class UHF(hf.SCF):
     energy_elec              = energy_elec
     canonicalize             = canonicalize
     
-    get_init_guess           = hf.return_gpunp_array(uhf_cpu.UHF.get_init_guess)
+    get_init_guess           = hf.return_cupy_array(uhf_cpu.UHF.get_init_guess)
     init_guess_by_minao      = uhf_cpu.UHF.init_guess_by_minao
     init_guess_by_atom       = uhf_cpu.UHF.init_guess_by_atom
     init_guess_by_huckel     = uhf_cpu.UHF.init_guess_by_huckel

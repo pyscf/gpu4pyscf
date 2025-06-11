@@ -19,22 +19,15 @@
 from concurrent.futures import ThreadPoolExecutor
 import ctypes
 import numpy
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy
-    from gpu4pyscf.lib.cupy_helper import (
-        contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device)
-else:
-    import dpnp as cupy
-    from gpu4pyscf.lib.dpnp_helper import (
-        contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device)
+import cupy
 from pyscf import lib, gto
 from pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.dft import numint, xc_deriv
 from gpu4pyscf.dft import radi
 from gpu4pyscf.dft import gen_grid
+from gpu4pyscf.lib.cupy_helper import (
+    contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
@@ -418,72 +411,72 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     excsum = cupy.zeros((natm, 3))
     vmat = cupy.zeros((3,nao,nao))
-    with opt.gdft_envs_cache():
-        if xctype == 'LDA':
-            ao_deriv = 1
-        else:
-            ao_deriv = 2
 
-        mem_avail = get_avail_mem()
-        comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
-        block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
-        block_size = min(block_size, MIN_BLK_SIZE)
-        log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
+    if xctype == 'LDA':
+        ao_deriv = 1
+    else:
+        ao_deriv = 2
 
-        if block_size < ALIGNED:
-            raise RuntimeError('Not enough GPU memory')
+    mem_avail = get_avail_mem()
+    comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
+    block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
+    block_size = min(block_size, MIN_BLK_SIZE)
+    log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
 
-        for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
-            ngrids = weight.size
-            for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
+    if block_size < ALIGNED:
+        raise RuntimeError('Not enough GPU memory')
 
-                if xctype == 'LDA':
-                    rho = numint.eval_rho(_sorted_mol, ao[0], dms,
-                                          xctype=xctype, hermi=1, with_lapl=False)
-                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                    exc = exc[:,0]
-                    wv = weight[p0:p1] * vxc[0]
-                    aow = numint._scale_ao(ao[0], wv)
-                    vtmp = _d1_dot_(ao[1:4], aow.T)
-                    vmat += vtmp
-                    # response of weights
-                    excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
-                    # response of grids coordinates
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
-                    rho = vxc = aow = None
+    for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
+        ngrids = weight.size
+        for p0, p1 in lib.prange(0,ngrids,block_size):
+            ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
 
-                elif xctype == 'GGA':
-                    rho = numint.eval_rho(_sorted_mol, ao[:4], dms,
-                                          xctype=xctype, hermi=1, with_lapl=False)
-                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                    exc = exc[:,0]
-                    wv = weight[p0:p1] * vxc
-                    wv[0] *= .5
-                    vtmp = _gga_grad_sum_(ao, wv)
-                    vmat += vtmp
-                    excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
-                    rho = vxc = None
+            if xctype == 'LDA':
+                rho = numint.eval_rho(_sorted_mol, ao[0], dms,
+                                        xctype=xctype, hermi=1, with_lapl=False)
+                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                exc = exc[:,0]
+                wv = weight[p0:p1] * vxc[0]
+                aow = numint._scale_ao(ao[0], wv)
+                vtmp = _d1_dot_(ao[1:4], aow.T)
+                vmat += vtmp
+                # response of weights
+                excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
+                # response of grids coordinates
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                rho = vxc = aow = None
 
-                elif xctype == 'NLC':
-                    raise NotImplementedError
+            elif xctype == 'GGA':
+                rho = numint.eval_rho(_sorted_mol, ao[:4], dms,
+                                        xctype=xctype, hermi=1, with_lapl=False)
+                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                exc = exc[:,0]
+                wv = weight[p0:p1] * vxc
+                wv[0] *= .5
+                vtmp = _gga_grad_sum_(ao, wv)
+                vmat += vtmp
+                excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                rho = vxc = None
 
-                elif xctype == 'MGGA':
-                    rho = numint.eval_rho(_sorted_mol, ao, dms,
-                                          xctype=xctype, hermi=1, with_lapl=False)
-                    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                    exc = exc[:,0]
-                    wv = weight[p0:p1] * vxc
-                    wv[0] *= .5
-                    wv[4] *= .5  # for the factor 1/2 in tau
+            elif xctype == 'NLC':
+                raise NotImplementedError
 
-                    vtmp  = _gga_grad_sum_(ao, wv)
-                    vtmp += _tau_grad_dot_(ao, wv[4])
-                    vmat += vtmp
-                    excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
-                    excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
-                    rho = vxc = None
+            elif xctype == 'MGGA':
+                rho = numint.eval_rho(_sorted_mol, ao, dms,
+                                        xctype=xctype, hermi=1, with_lapl=False)
+                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+                exc = exc[:,0]
+                wv = weight[p0:p1] * vxc
+                wv[0] *= .5
+                wv[4] *= .5  # for the factor 1/2 in tau
+
+                vtmp  = _gga_grad_sum_(ao, wv)
+                vtmp += _tau_grad_dot_(ao, wv[4])
+                vmat += vtmp
+                excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
+                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+                rho = vxc = None
 
     exc1 = contract('nij,ij->ni', vmat, dms)
     exc1 = opt.unsort_orbitals(exc1, axis=[1])
@@ -581,58 +574,57 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     excsum = cupy.zeros((mol.natm, 3))
     vmat = cupy.zeros((3,nao,nao))
 
-    with opt.gdft_envs_cache():
-        vvrho = []
-        vvcoords = []
-        vvweights = []
-        for atm_id, (coords, weight) in enumerate(grids_noresponse_cc(grids)):
-            ao = ni.eval_ao(_sorted_mol, coords, ao_deriv, gdftopt=opt, transpose=False)
+    vvrho = []
+    vvcoords = []
+    vvweights = []
+    for atm_id, (coords, weight) in enumerate(grids_noresponse_cc(grids)):
+        ao = ni.eval_ao(_sorted_mol, coords, ao_deriv, gdftopt=opt, transpose=False)
+        rho = numint.eval_rho(_sorted_mol, ao[:4], dms, xctype=xctype, hermi=1, with_lapl=False)
+        vvrho.append(rho)
+        vvcoords.append(coords)
+        vvweights.append(weight)
+    vvcoords_flat = cupy.vstack(vvcoords)
+    vvweights_flat = cupy.concatenate(vvweights)
+    vvrho_flat = cupy.hstack(vvrho)
+
+    mem_avail = get_avail_mem()
+    comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
+    block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
+    block_size = min(block_size, MIN_BLK_SIZE)
+    log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
+
+    for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
+        ngrids = weight.size
+        for p0, p1 in lib.prange(0,ngrids,block_size):
+            ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
+
             rho = numint.eval_rho(_sorted_mol, ao[:4], dms, xctype=xctype, hermi=1, with_lapl=False)
-            vvrho.append(rho)
-            vvcoords.append(coords)
-            vvweights.append(weight)
-        vvcoords_flat = cupy.vstack(vvcoords)
-        vvweights_flat = cupy.concatenate(vvweights)
-        vvrho_flat = cupy.hstack(vvrho)
 
-        mem_avail = get_avail_mem()
-        comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
-        block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
-        block_size = min(block_size, MIN_BLK_SIZE)
-        log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
+            exc, vxc = numint._vv10nlc(rho, coords[p0:p1, :], vvrho_flat, vvweights_flat,
+                                        vvcoords_flat, nlc_pars)
+            vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
 
-        for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
-            ngrids = weight.size
-            for p0, p1 in lib.prange(0,ngrids,block_size):
-                ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
+            wv = weight[p0:p1] * vv_vxc
+            wv[0] *= .5
+            vtmp = _gga_grad_sum_(ao, wv)
+            vmat += vtmp
 
-                rho = numint.eval_rho(_sorted_mol, ao[:4], dms, xctype=xctype, hermi=1, with_lapl=False)
+            vvrho_sub = cupy.hstack(
+                [r for i, r in enumerate(vvrho) if i != atm_id])
+            vvcoords_sub = cupy.vstack(
+                [r for i, r in enumerate(vvcoords) if i != atm_id])
+            vvweights_sub = cupy.concatenate(
+                [r for i, r in enumerate(vvweights) if i != atm_id])
+            egrad, Beta = _vv10nlc_grad(rho, coords[p0:p1, :], vvrho_sub,
+                                        vvweights_sub, vvcoords_sub, nlc_pars)
 
-                exc, vxc = numint._vv10nlc(rho, coords[p0:p1, :], vvrho_flat, vvweights_flat,
-                                           vvcoords_flat, nlc_pars)
-                vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
-
-                wv = weight[p0:p1] * vv_vxc
-                wv[0] *= .5
-                vtmp = _gga_grad_sum_(ao, wv)
-                vmat += vtmp
-
-                vvrho_sub = cupy.hstack(
-                    [r for i, r in enumerate(vvrho) if i != atm_id])
-                vvcoords_sub = cupy.vstack(
-                    [r for i, r in enumerate(vvcoords) if i != atm_id])
-                vvweights_sub = cupy.concatenate(
-                    [r for i, r in enumerate(vvweights) if i != atm_id])
-                egrad, Beta = _vv10nlc_grad(rho, coords[p0:p1, :], vvrho_sub,
-                                            vvweights_sub, vvcoords_sub, nlc_pars)
-
-                # account for factor of 2 in double integration
-                exc -= 0.5 * Beta
-                # response of weights
-                excsum += 2 * cupy.einsum('r,nxr->nx', exc * rho[0], weight1[:,:,p0:p1])
-                # response of grids coordinates
-                excsum[atm_id] += 2 * cupy.einsum('xij,ji->x', vtmp, dms)
-                excsum[atm_id] += cupy.einsum('r,rx->x', rho[0]*weight[p0:p1], egrad)
+            # account for factor of 2 in double integration
+            exc -= 0.5 * Beta
+            # response of weights
+            excsum += 2 * cupy.einsum('r,nxr->nx', exc * rho[0], weight1[:,:,p0:p1])
+            # response of grids coordinates
+            excsum[atm_id] += 2 * cupy.einsum('xij,ji->x', vtmp, dms)
+            excsum[atm_id] += cupy.einsum('r,rx->x', rho[0]*weight[p0:p1], egrad)
 
     exc1 = contract('nij,ij->ni', vmat, dms)
     exc1 = opt.unsort_orbitals(exc1, axis=[1])

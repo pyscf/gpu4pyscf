@@ -104,41 +104,81 @@ def device(obj):
 #@patch_cpu_kernel(lib.misc.format_sys_info)
 def format_sys_info():
     '''Format a list of system information for printing.'''
-    from cupyx._runtime import get_runtime_info
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 
     pyscf_info = lib.repo_info(pyscf.__file__)
     gpu4pyscf_info = lib.repo_info(os.path.join(__file__, '..', '..'))
-    cuda_version = cupy.cuda.runtime.runtimeGetVersion()
-    cuda_version = f"{cuda_version // 1000}.{(cuda_version % 1000) // 10}"
 
-    runtime_info = get_runtime_info()
-    result = [
-        f'System: {platform.uname()}  Threads {lib.num_threads()}',
-        f'Python {sys.version}',
-        f'numpy {numpy.__version__}  scipy {scipy.__version__}  '
-        f'h5py {h5py.__version__}',
-        f'Date: {time.ctime()}',
-        f'PySCF version {pyscf.__version__}',
-        f'PySCF path  {pyscf_info["path"]}',
-        'CUDA Environment',
-        f'    CuPy {runtime_info.cupy_version}',
-        f'    CUDA Path {runtime_info.cuda_path}',
-        f'    CUDA Build Version {runtime_info.cuda_build_version}',
-        f'    CUDA Driver Version {runtime_info.cuda_driver_version}',
-        f'    CUDA Runtime Version {runtime_info.cuda_runtime_version}',
-        'CUDA toolkit',
-        f'    cuSolver {runtime_info.cusolver_version}',
-        f'    cuBLAS {runtime_info.cublas_version}',
-        f'    cuTENSOR {runtime_info.cutensor_version}',
-        'Device info',
-        f'    Device name {device_props["name"]}',
-        f'    Device global memory {device_props["totalGlobalMem"] / 1024**3:.2f} GB',
-        f'    CuPy memory fraction {mem_fraction}',
-        f'    Num. Devices {num_devices}',
-        f'GPU4PySCF {gpu4pyscf.__version__}',
-        f'GPU4PySCF path  {gpu4pyscf_info["path"]}'
-    ]
+   
+    from importlib.util import find_spec
+    has_dpctl = find_spec("dpctl")
+    if not has_dpctl:
+        from cupyx._runtime import get_runtime_info        
+        cuda_version = cupy.cuda.runtime.runtimeGetVersion()
+        cuda_version = f"{cuda_version // 1000}.{(cuda_version % 1000) // 10}"
+
+        runtime_info = get_runtime_info()
+        result = [
+            f'System: {platform.uname()}  Threads {lib.num_threads()}',
+            f'Python {sys.version}',
+            f'numpy {numpy.__version__}  scipy {scipy.__version__}  '
+            f'h5py {h5py.__version__}',
+            f'Date: {time.ctime()}',
+            f'PySCF version {pyscf.__version__}',
+            f'PySCF path  {pyscf_info["path"]}',
+            'CUDA Environment',
+            f'    CuPy {runtime_info.cupy_version}',
+            f'    CUDA Path {runtime_info.cuda_path}',
+            f'    CUDA Build Version {runtime_info.cuda_build_version}',
+            f'    CUDA Driver Version {runtime_info.cuda_driver_version}',
+            f'    CUDA Runtime Version {runtime_info.cuda_runtime_version}',
+            'CUDA toolkit',
+            f'    cuSolver {runtime_info.cusolver_version}',
+            f'    cuBLAS {runtime_info.cublas_version}',
+            f'    cuTENSOR {runtime_info.cutensor_version}',
+            'Device info',
+            f'    Device name {device_props["name"]}',
+            f'    Device global memory {device_props["totalGlobalMem"] / 1024**3:.2f} GB',
+            f'    CuPy memory fraction {mem_fraction}',
+            f'    Num. Devices {num_devices}',
+            f'GPU4PySCF {gpu4pyscf.__version__}',
+            f'GPU4PySCF path  {gpu4pyscf_info["path"]}'
+        ]
+    else:
+        import dpnp, dpctl
+        # DPCTL device info: pick default device or first GPU device
+        try:
+            device = dpctl.get_devices(device_type='gpu')[0]
+        except IndexError:
+            device = dpctl.get_default_device()  # fallback to any device
+        
+        # Get device properties
+        dev_name = device.name
+        dev_driver_version = device.driver_version if hasattr(device, 'driver_version') else 'Unknown'
+#        dev_platform_version = device.platform.version if hasattr(device.platform, 'version') else 'Unknown'
+        dev_global_mem_bytes = device.global_mem_size
+
+        result = [
+            f'System: {platform.uname()}  Threads {lib.num_threads()}',
+            f'Python {sys.version}',
+            f'numpy {numpy.__version__}  scipy {scipy.__version__}  '
+            f'h5py {h5py.__version__}',
+            f'Date: {time.ctime()}',
+            f'PySCF version {pyscf.__version__}',
+            f'PySCF path  {pyscf_info["path"]}',
+            'SYCL / DPNP / DPCTL Environment',
+            f'    Device name {dev_name}',
+#            f'    Device platform version {dev_platform_version}',
+            f'    Device driver version {dev_driver_version}',
+            f'    Device max alloc size {dev_global_mem_bytes / 1024**3:.2f} GB',
+            f'    DPNP version {dpnp.__version__}',
+            f'    DPCTL version {dpctl.__version__}',
+            f'    DPNP memory fraction {mem_fraction}',
+            f'    Num. Devices {num_devices}',
+            f'GPU4PySCF {gpu4pyscf.__version__}',
+            f'GPU4PySCF path  {gpu4pyscf_info["path"]}'
+        ]
+    
     if 'git' in pyscf_info:
         result.append(pyscf_info['git'])
     return result

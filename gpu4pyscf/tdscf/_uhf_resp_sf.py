@@ -38,9 +38,8 @@ def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0,
 
     if isinstance(mf, hf.KohnShamDFT):
         if mf.do_nlc():
-            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
-                        'deriviative is not available. Its contribution is '
-                        'not included in the response function.')
+            logger.warn(mf, 'NLC functional found in DFT object. Its contribution is '
+                        'not included in the TDDFT response function.')
 
         ni = mf._numint
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)

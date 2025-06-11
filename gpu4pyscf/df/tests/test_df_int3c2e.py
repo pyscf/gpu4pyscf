@@ -1,14 +1,9 @@
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import contract
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import contract
+import pytest
+import cupy as cp
 import pyscf
 from pyscf.df import incore
 from gpu4pyscf.df import int3c2e_bdiv
+from gpu4pyscf.lib.cupy_helper import contract
 
 def test_int3c2e():
     mol = pyscf.M(
@@ -75,7 +70,7 @@ C    D
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
     out = cp.zeros((nao*nao, naux))
-    eri3c = int3c2e_opt.int3c2e_bdiv_kernel()
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
     out[ao_pair_mapping] = eri3c
     i, j = divmod(ao_pair_mapping, nao)
@@ -100,6 +95,12 @@ C    D
     out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
     assert abs(out.get()-ref).max() < 1e-10
 
+    eri3c, rows, cols = int3c2e_bdiv.compressed_aux_e2(mol, auxmol)
+    out = cp.zeros((nao_orig, nao_orig, auxmol.nao))
+    out[rows,cols] = eri3c
+    out[cols,rows] = eri3c
+    assert abs(out.get()-ref).max() < 1e-10
+
 def test_int3c2e_sparse():
     mol = pyscf.M(
         atom='''
@@ -120,7 +121,7 @@ H       4.224    0.640    0.837
     ref = incore.aux_e2(mol, auxmol)
     assert abs(dat.get()-ref).max() < 1e-10
 
-    eri3c = int3c2e_opt.int3c2e_bdiv_kernel()
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
     eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
     nao, nao_orig = int3c2e_opt.coeff.shape
@@ -134,3 +135,15 @@ H       4.224    0.640    0.837
     out = contract('pqr,rk->pqk', out, aux_coeff)
     out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
     assert abs(out.get()-ref).max() < 1e-10
+
+    eri3c, rows, cols = int3c2e_bdiv.compressed_aux_e2(mol, auxmol)
+    out = cp.zeros((nao_orig, nao_orig, auxmol.nao))
+    out[rows,cols] = eri3c
+    out[cols,rows] = eri3c
+    assert abs(out.get()-ref).max() < 1e-10
+
+def test_group_blocks():
+    assert int3c2e_bdiv.group_blocks([0, 1, 3, 6], 3) == [0, 2, 3]
+    assert int3c2e_bdiv.group_blocks([0, 1, 3, 4], 3) == [0, 2, 3]
+    with pytest.raises(RuntimeError):
+        int3c2e_bdiv.group_blocks([0, 4, 9, 14], 3)

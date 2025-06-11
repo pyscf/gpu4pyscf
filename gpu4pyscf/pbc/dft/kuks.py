@@ -25,7 +25,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import kuks as kuks_cpu
 from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.lib.cupy_helper import return_gpunp_array, tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.pbc.scf import khf, kuhf
 from gpu4pyscf.pbc.dft import rks, krks
 from gpu4pyscf.pbc.dft import multigrid
@@ -37,6 +37,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if kpts is None: kpts = ks.kpts
     log = logger.new_logger(ks)
     t0 = log.init_timer()
+    mem_avail = get_avail_mem()
+    log.debug1('available GPU memory for kuks.get_veff: %.3f GB', mem_avail/1e9)
 
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)

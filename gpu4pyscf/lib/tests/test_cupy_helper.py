@@ -14,7 +14,14 @@
 
 import unittest
 import numpy
-import cupy
+
+# import sys
+# from gpu4pyscf.lib import dpnp_helper
+# sys.modules['gpu4pyscf.lib.cupy_helper'] = dpnp_helper    
+# import dpnp
+# sys.modules['cupy'] = dpnp
+    
+import dpnp
 from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,

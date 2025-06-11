@@ -21,6 +21,8 @@ from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 from cupy.cuda import device
 
+
+
 libcusolver = find_library('cusolver')
 libcusolver = ctypes.CDLL(libcusolver)
 
@@ -187,7 +189,5 @@ def cholesky(A):
     potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
         workspace.data.ptr, buffersize, dev_info.data.ptr)
 
-    if dev_info[0] != 0:
-        raise RuntimeError('failed to perform Cholesky Decomposition')
     cupy.linalg._util._tril(x,k=0)
     return x

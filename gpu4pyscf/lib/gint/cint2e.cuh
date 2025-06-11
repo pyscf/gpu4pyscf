@@ -22,8 +22,23 @@
 #include "sycl_device.hpp"
 
 extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
-extern SYCL_EXTERNAL sycl_device_global<int[TOT_NF*3]> c_idx;
-extern SYCL_EXTERNAL sycl_device_global<int[GPU_LMAX+2]> c_l_locs;
+
+// Generated with GINTinit_index1d_xyz
+inline constexpr int c_idx[TOT_NF*3] = {
+  0, 1, 0, 0, 2, 1, 1, 0, 0, 0, 3, 2, 2, 1, 1, 1, 0, 0, 0, 0, 4, 3, 3,
+  2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 5, 4, 4, 3, 3, 3, 2, 2, 2, 2, 1,
+  1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 6, 5, 5, 4, 4, 4, 3, 3, 3, 3, 2, 2, 2,
+  2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 2,
+  1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4,
+  3, 2, 1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2,
+  1, 0, 0, 1, 0, 2, 1, 0, 3, 2, 1, 0, 4, 3, 2, 1, 0, 5, 4, 3, 2, 1, 0,
+  6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 2, 0, 0, 1, 0, 1, 2,
+  0, 1, 2, 3, 0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 0, 1, 0,
+  1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 0, 1, 0, 1, 2,
+  0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6};
+
+inline constexpr int c_l_locs[GPU_LMAX+2] = {0, 1, 4, 10, 20, 35, 56, 84};
+
 #else // USE_SYCL
 //extern __constant__ GINTEnvVars c_envs;
 extern __constant__ BasisProdCache c_bpcache;

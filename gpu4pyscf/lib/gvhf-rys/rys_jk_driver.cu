@@ -21,7 +21,12 @@
 
 #include "vhf.cuh"
 
-#ifndef USE_SYCL
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx;
+SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
+SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
+SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+#else // USE_SYCL
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -34,7 +39,7 @@ __constant__ int c_g_pair_offsets[LMAX1*LMAX1];
 // TODO: reuse memory of c_g_pair_idx for c_i_in_fold2idx and c_i_in_fold2idx
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
-#endif // ifndef USE_SYCL
+#endif // ifdef USE_SYCL
 
 
 

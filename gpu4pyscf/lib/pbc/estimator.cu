@@ -17,8 +17,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <cuda.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#include <cuda.h>
+#endif
 
 #include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
@@ -31,7 +35,12 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
                                PBCInt3c2eEnvVars envs, float *exps,
                                float *log_coeff, float log_cutoff)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int bas_ij = item.get_global_id(0);
+#else
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     int bvk_nish = envs.bvk_ncells * nish;
     int bvk_njsh = envs.bvk_ncells * njsh;
     if (bas_ij >= bvk_nish*bvk_njsh) {
@@ -109,7 +118,12 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
                             PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
                             float log_cutoff)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int pair_id = item.get_global_id(0);
+#else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (pair_id >= npairs) {
         return;
     }
@@ -187,16 +201,26 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
                                   int *ovlp_img_idx, int *ovlp_img_offsets,
                                   int npairs, int ish0, int jsh0, int nish, int njsh,
                                   PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
-                                  float *atom_aux_exps, float log_cutoff)
+                                  float *atom_aux_exps, float log_cutoff
+                                  #ifdef USE_SYCL
+                                  , sycl::nd_item<1> &item, float *xyz_cache
+                                  #endif
+                                  )
 {
+#ifdef USE_SYCL
+    int pair_id = item.get_global_id(0);
+    int thread_id = item.get_local_id(0);
+    int threads = item.get_local_range(0);;  
+#else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_id = threadIdx.x;
     int threads = blockDim.x;
+    extern __shared__ float xyz_cache[];
+#endif
     int cell0_natm = envs.cell0_natm;
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
-    extern __shared__ float xyz_cache[];
     for (int k = thread_id; k < cell0_natm; k += threads) {
         double *rk = env + atm[k*ATM_SLOTS+PTR_COORD];
         xyz_cache[k*3+0] = rk[0];
@@ -309,12 +333,17 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
     img_counts[pair_id] = counts;
 }
 
-// Concatenate dis-continuous 
+// Concatenate dis-continuous
 __global__ static
 void conc_img_idx_kernel(int *output, int *offsets, int *idx_sparse,
                          int *where, int rows, int strides)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int row_id = item.get_global_id(0);
+#else
     int row_id = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (row_id >= rows) {
         return;
     }
@@ -340,6 +369,12 @@ int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
     constexpr int threads = 512;
     int ncells = envs->bvk_ncells;
     int blocks = (ncells*nish*ncells*njsh + threads-1)/threads;
+    #ifdef USE_SYCL
+    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      overlap_img_counts_kernel(img_counts, p2c_mapping, ish0, jsh0, nish, njsh,
+                                *envs, exps, log_coeff, log_cutoff);
+    });    
+    #else
     overlap_img_counts_kernel<<<blocks, threads>>>(
         img_counts, p2c_mapping, ish0, jsh0, nish, njsh,
         *envs, exps, log_coeff, log_cutoff);
@@ -348,6 +383,7 @@ int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
         fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -363,6 +399,13 @@ int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     int njsh = jsh1 - jsh0;
     constexpr int threads = 512;
     int blocks = (npairs + threads-1)/threads;
+    #ifdef USE_SYCL
+    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      overlap_img_idx_kernel(
+        img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
+        *envs, exps, log_coeff, log_cutoff);
+    });
+    #else    
     overlap_img_idx_kernel<<<blocks, threads>>>(
         img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
         *envs, exps, log_coeff, log_cutoff);
@@ -371,6 +414,7 @@ int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -390,6 +434,16 @@ int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping
     int blocks = (npairs + threads-1) / threads;
     int cell0_natm = envs->cell0_natm;
     int buflen = cell0_natm * 3 * sizeof(float);
+    #ifdef USE_SYCL
+    sycl_get_queue()->submit([&](sycl::handler &cgh) {
+      sycl::local_accessor<float, 1> local_acc(sycl::range<1>(cell0_natm * 3), cgh);
+      cgh.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+        sr_int3c2e_img_sparse_kernel(img_idx, img_counts, bas_ij_mapping, ovlp_img_idx, ovlp_img_offsets,
+                                     npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
+                                     log_cutoff,
+                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      }); });
+    #else
     sr_int3c2e_img_sparse_kernel<<<blocks, threads, buflen>>>(
         img_idx, img_counts, bas_ij_mapping, ovlp_img_idx, ovlp_img_offsets,
         npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
@@ -399,6 +453,7 @@ int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping
         fprintf(stderr, "CUDA Error in sr_int3c2e_img_idx_sparse: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -410,6 +465,11 @@ int conc_img_idx(int *output, int *offsets, int *idx_sparse,
     }
     constexpr int threads = 512;
     int blocks = (rows + threads-1) / threads;
+    #ifdef USE_SYCL
+    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      conc_img_idx_kernel(output, offsets, idx_sparse, where, rows, strides);
+    });
+    #else
     conc_img_idx_kernel<<<blocks, threads>>>(
         output, offsets, idx_sparse, where, rows, strides);
     cudaError_t err = cudaGetLastError();
@@ -417,6 +477,7 @@ int conc_img_idx(int *output, int *offsets, int *idx_sparse,
         fprintf(stderr, "CUDA Error in conc_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

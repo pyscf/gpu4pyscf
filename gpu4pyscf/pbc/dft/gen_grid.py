@@ -14,12 +14,7 @@
 
 import ctypes
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-else:
-    import dpnp as cp
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
 from pyscf.pbc.gto.cell import get_uniform_grids

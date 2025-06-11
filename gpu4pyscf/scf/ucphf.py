@@ -18,15 +18,9 @@ Unrestricted coupled pertubed Hartree-Fock solver
 '''
 
 import numpy
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy
-    from gpu4pyscf.lib.cupy_helper import krylov
-else:
-    import dpnp as cupy
-    from gpu4pyscf.lib.dpnp_helper import krylov
-
+import cupy
 from pyscf import lib
+from gpu4pyscf.lib.cupy_helper import krylov
 from gpu4pyscf.lib import logger
 
 def solve(fvind, mo_energy, mo_occ, h1, s1=None,
@@ -63,7 +57,7 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
          (mo_eb[viridxb,None]+level_shift - mo_eb[occidxb]).ravel()))
     e_ai = 1 / e_ai
     mo1base = cupy.hstack((h1[0].reshape(-1,nvira*nocca),
-                           h1[1].reshape(-1,nvirb*noccb)))
+                            h1[1].reshape(-1,nvirb*noccb)))
     mo1base *= -e_ai
     nov = e_ai.size
 
@@ -139,7 +133,7 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     mo1base_a[:,occidxa] = -s1_a[:,occidxa] * .5
     mo1base_b[:,occidxb] = -s1_b[:,occidxb] * .5
     mo1base = cupy.hstack((mo1base_a.reshape(nset,-1), mo1base_b.reshape(nset,-1)))
-
+    
     def vind_vo(mo1):
         mo1 = mo1.reshape(-1,nmoa*nocca+nmob*noccb)
         v = fvind(mo1).reshape(-1,nmoa*nocca+nmob*noccb)

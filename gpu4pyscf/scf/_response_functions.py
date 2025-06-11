@@ -12,18 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, uhf, rohf
+from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
 
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
-                      singlet=None, hermi=0, grids=None, max_memory=None):
+                      singlet=None, hermi=0, grids=None, max_memory=None, with_nlc=True):
     '''Generate a function to compute the product of RHF response function and
     RHF density matrices.
 
@@ -43,10 +39,6 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
             grids.build(mol=mol, with_non0tab=False, sort_grids=True)
         ni = mf._numint
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-        if mf.do_nlc():
-            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
-                        'deriviative is not available. Its contribution is '
-                        'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
@@ -64,10 +56,15 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
             def vind(dm1):
                 # The singlet hessian
                 if hermi == 2:
-                    v1 = gpunp.zeros_like(dm1)
+                    v1 = cupy.zeros_like(dm1)
                 else:
                     v1 = ni.nr_rks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                        rho0, vxc, fxc, max_memory=max_memory)
+                    if mf.do_nlc():
+                        if with_nlc:
+                            v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
+                        else:
+                            logger.warn(mf, "NLC contribution in gen_response is NOT included")
                 if hybrid:
                     if hermi != 2:
                         vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
@@ -85,11 +82,16 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
             fxc *= .5
             def vind(dm1):
                 if hermi == 2:
-                    v1 = gpunp.zeros_like(dm1)
+                    v1 = cupy.zeros_like(dm1)
                 else:
                     # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
                     v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, True,
                                           rho0, vxc, fxc, max_memory=max_memory)
+                    if mf.do_nlc():
+                        if with_nlc:
+                            raise NotImplementedError("NLC not supported")
+                        else:
+                            logger.warn(mf, "NLC contribution in gen_response is NOT included")
                 if hybrid:
                     if hermi != 2:
                         vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
@@ -107,11 +109,16 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
             fxc *= .5
             def vind(dm1):
                 if hermi == 2:
-                    v1 = gpunp.zeros_like(dm1)
+                    v1 = cupy.zeros_like(dm1)
                 else:
                     # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
                     v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, False,
                                           rho0, vxc, fxc, max_memory=max_memory)
+                    if mf.do_nlc():
+                        if with_nlc:
+                            raise NotImplementedError("NLC not supported")
+                        else:
+                            logger.warn(mf, "NLC contribution in gen_response is NOT included")
                 if hybrid:
                     vk = mf.get_k(mol, dm1, hermi=hermi)
                     vk *= hyb
@@ -133,7 +140,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
 
 
 def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
-                      with_j=True, hermi=0, grids=None, max_memory=None):
+                      with_j=True, hermi=0, grids=None, max_memory=None, with_nlc=True):
     '''Generate a function to compute the product of UHF response function and
     UHF density matrices.
     '''
@@ -161,10 +168,15 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
 
         def vind(dm1):
             if hermi == 2:
-                v1 = gpunp.zeros_like(dm1)
+                v1 = cupy.zeros_like(dm1)
             else:
                 v1 = ni.nr_uks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                    rho0, vxc, fxc, max_memory=max_memory)
+                if mf.do_nlc():
+                    if with_nlc:
+                        raise NotImplementedError("NLC not supported")
+                    else:
+                        logger.warn(mf, "NLC contribution in gen_response is NOT included")
             if not hybrid:
                 if with_j:
                     vj = mf.get_j(mol, dm1, hermi=hermi)

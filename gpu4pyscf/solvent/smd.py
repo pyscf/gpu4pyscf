@@ -17,11 +17,7 @@ SMD solvent model
 '''
 
 import numpy as np
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy
-else:
-    import dpnp as cupy
+import cupy
 from pyscf import lib, gto
 from pyscf.data import radii
 from pyscf.dft import gen_grid
@@ -256,8 +252,12 @@ def smd_radii(alpha):
     return radii_table/radii.BOHR
 
 import ctypes
-from gpu4pyscf.lib.dpnp_helper import load_library
-libsolvent = load_library('libsolvent')
+from gpu4pyscf.lib.cupy_helper import load_library
+try:
+    libsolvent = load_library('libsolvent')
+except OSError:
+    libsolvent = None
+
 def get_cds_legacy(smdobj):
     mol = smdobj.mol
     natm = mol.natm

@@ -29,7 +29,9 @@ namespace syclex = sycl::ext::oneapi;
 #define rnorm3d(d1,d2,d3) (1 / sycl::length(sycl::double3(d1, d2, d3)))
 #define norm3d(d1,d2,d3) (sycl::length(sycl::double3(d1, d2, d3)))
 #define __syncthreads() (item.barrier(sycl::access::fence_space::local_space))
+#define __shfl_down_sync(mask, val, delta) sycl::shift_group_right(item.get_sub_group(), val, delta)
 
+template <typename T> inline auto sqrtf(T x) { return sycl::sqrt(x); }
 template <typename T> inline auto sqrt(T x) { return sycl::sqrt(x); }
 template <typename T> inline auto min(T x, T y) { return sycl::min(x, y); }
 template <typename T> inline auto max(T x, T y) { return sycl::max(x, y); }
@@ -38,6 +40,8 @@ template <typename T> inline auto fabs(T x) { return sycl::fabs(x); }
 template <typename T> inline auto erf(T x) { return sycl::erf(x); }
 template <typename T> inline auto floor(T x) { return sycl::floor(x); }
 template <typename T> inline auto pow(T x, int n) { return sycl::pown(x, n); }
+template <typename T> inline auto logf(T x) { return sycl::log(x); }
+template <typename T> inline void sincos(T x, T* sptr, T* cptr) { *sptr = sycl::sincos(x, cptr); }
 #define NAN std::numeric_limits<float>::quiet_NaN()
 
 namespace constants {
@@ -66,23 +70,31 @@ namespace compat {
 }
 using double3 = compat::double3;
 
-template <typename T>
-static inline T
-atomicAdd(T* addr, const T val) {
-    sycl::atomic_ref<T,
+template <typename T1, typename T2>
+static inline T1
+atomicAdd(T1* addr, const T2 val) {
+    sycl::atomic_ref<T1,
         sycl::memory_order::relaxed,
         sycl::memory_scope::device,
         sycl::access::address_space::global_space> atom(*addr);
-    return atom.fetch_add(val);
+    return atom.fetch_add(static_cast<T1>(val));
 }
-
+template <typename T1, typename T2>
+static inline T1
+atomicMax(T1* addr, const T2 val) {
+    sycl::atomic_ref<T1,
+        sycl::memory_order::relaxed,
+        sycl::memory_scope::device,
+        sycl::access::address_space::global_space> atom(*addr);
+    return atom.fetch_max(static_cast<T1>(val));
+}
 template <typename T>
 static inline typename std::enable_if<std::is_integral<T>::value, T>::type
 atomicOr(T* addr, const T val) {
     sycl::atomic_ref<T,
         sycl::memory_order::relaxed,
         sycl::memory_scope::device,
-        sycl::access::address_space::global_space> atom(*addr);
+        sycl::access::address_space::global_space> atom(addr[0]);
     return atom.fetch_or(val);
 }
 
@@ -135,18 +147,24 @@ class dev_mgr {
 public:
   int current_device() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    auto                        it = _thread2dev_map.find(get_tid());
+    auto tid = get_tid();
+    auto it = _thread2dev_map.find(tid);
     if(it != _thread2dev_map.end()) {
-      check_id(it->second);
-      return it->second;
+        check_id(it->second);
+        return it->second;
     }
-    printf("WARNING: no SYCL device found in the map, returning DEFAULT_DEVICE_ID\n");
+    // Insert default device if not present
+    _thread2dev_map[tid] = DEFAULT_DEVICE_ID;
     return DEFAULT_DEVICE_ID;
   }
   sycl::queue* current_queue() {
     return _queues[current_device()];
   }
-
+  sycl::queue* select_queue(int id) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    check_id(id);
+    return _queues[id];
+  }
   void select_device(int id) {
     std::lock_guard<std::mutex> lock(m_mutex);
     check_id(id);
@@ -168,12 +186,21 @@ private:
   mutable std::mutex m_mutex;
 
   dev_mgr() {
-    sycl::device dev{sycl::gpu_selector_v};
-    _queues.push_back(new sycl::queue(dev, asyncHandler, sycl::property_list{sycl::property::queue::in_order{}}));
+    auto devices = sycl::device::get_devices(sycl::info::device_type::gpu);
+    if (devices.empty()) {
+      throw std::runtime_error("No SYCL GPU devices found.");
+    }
+
+    for (const auto& dev : devices) {
+      auto* q = new sycl::queue(dev, asyncHandler, sycl::property_list{sycl::property::queue::in_order{}});
+      _queues.push_back(q);
+    }
+    // sycl::device dev{sycl::gpu_selector_v};
+    // _queues.push_back(new sycl::queue(dev, asyncHandler, sycl::property_list{sycl::property::queue::in_order{}}));
   }
 
   void check_id(int id) const {
-    if(id >= _queues.size()) { throw std::runtime_error("invalid device id"); }
+    if(id >= _queues.size()) { throw std::runtime_error("Invalid device id"); }
   }
 
   std::vector<sycl::queue*> _queues;
@@ -193,6 +220,11 @@ static inline void syclGetDevice(int* id) { *id = dev_mgr::instance().current_de
 static inline sycl::queue* sycl_get_queue() {
   return dev_mgr::instance().current_queue();
 }
+/// Util function to get queue from device`id`
+static inline sycl::queue* sycl_get_queue_nth(int device_id) {
+  return dev_mgr::instance().select_queue(device_id);
+}
+
 
 /// Util function to set a device by id. (to _thread2dev_map)
 static inline void syclSetDevice(int id) { dev_mgr::instance().select_device(id); }
@@ -201,7 +233,7 @@ static inline void syclSetDevice(int id) { dev_mgr::instance().select_device(id)
 static inline void syclGetDeviceCount(int* id) { *id = dev_mgr::instance().device_count(); }
 
 static inline void cudaMemset(void* ptr, int val, size_t size) {
-  sycl_get_queue()->memset(ptr, val, size).wait();
+  sycl_get_queue()->memset(ptr, static_cast<unsigned char>(val), size).wait();
 }
 // static inline void cudaMemcpyToSymbol(const char* symbol, const void* src, size_t count) {
 //   sycl_get_queue()->memcpy(symbol, src, count).wait();

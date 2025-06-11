@@ -15,50 +15,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
+add_library(dpnp_helper SHARED onemkl_lapack.cpp)
 
-if (USE_SYCL)
-  add_library(dpnp_helper SHARED
-    transpose.cpp
-    block_diag.cpp
-    unpack.cpp
-    take_last2d.cpp
-    async_d2h_2d.cpp
-    add_sparse.cpp
-    dist_matrix.cpp
-    grouped_gemm.cpp
-    grouped_dot.cpp  
-    cart2sph.cpp
-  )
+set_target_properties(dpnp_helper PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED YES
+)
 
-  set_target_properties(dpnp_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-else()
-  set(cupy_helper_src
-    transpose.cu
-    block_diag.cu
-    unpack.cu
-    take_last2d.cu
-    async_d2h_2d.cu
-    add_sparse.cu
-    dist_matrix.cu
-    cart2sph.cu
-  )
+# Find Intel oneMKL
+find_package(MKL REQUIRED CONFIG PATHS "$ENV{MKLROOT}")
 
-  if(BUILD_CUTLASS)
-    set(cupy_helper_src ${cupy_helper_src}
-      grouped_gemm.cu
-      grouped_dot.cu
-    )
-  endif()
+#target_compile_options(dpnp_helper PRIVATE -qmkl)
 
-  add_library(cupy_helper SHARED ${cupy_helper_src})
-
-  if(BUILD_CUTLASS)
-    add_dependencies(cupy_helper cutlass)
-    target_include_directories(cupy_helper PRIVATE ${cutlass_SOURCE_DIR}/tools/util/include ${cutlass_SOURCE_DIR}/include)
-  endif()
-
-  set_target_properties(cupy_helper PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-  set_target_properties(cupy_helper PROPERTIES CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
-endif()
-
+# Link MKL SYCL interface
+target_link_libraries(dpnp_helper PRIVATE MKL::MKL_SYCL)

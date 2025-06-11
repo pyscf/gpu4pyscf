@@ -16,20 +16,12 @@ import os
 import numpy as np
 import ctypes
 import ctypes.util
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import load_library
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.cupy_helper import load_library
-    from dpctl._sycl_device_factory import _cached_default_device as get_default_cached_device
-    from dpctl._sycl_queue_manager import get_device_cached_queue
+import cupy
 import copy
 from ctypes import POINTER
 from pyscf import dft
 from gpu4pyscf.dft.libxc_structs import xc_func_type, xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
+from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.dft import libxc_structs
 
 import site
@@ -146,7 +138,7 @@ def _check_arrays(current_arrays, fields, sizes, factor, required):
 
     for label in fields:
         size = sizes[label]
-        current_arrays[label] = gpunp.empty((factor, size), dtype=np.float64)
+        current_arrays[label] = cupy.empty((factor, size), dtype=np.float64)
 
     return current_arrays
 
@@ -193,10 +185,10 @@ class XCfun:
     def compute(self, inp, output=None, do_exc=True, do_vxc=True, do_fxc=False, do_kxc=False, do_lxc=False):
         # TODO: turn to dft.libxc.eval_xc for do_kxc and do_lxc
         assert not do_lxc
-        if isinstance(inp, gpunp.ndarray):
-            inp = {"rho": gpunp.asarray(inp, dtype=gpunp.double)}
+        if isinstance(inp, cupy.ndarray):
+            inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}
         elif isinstance(inp, dict):
-            inp = {k: gpunp.asarray(v, dtype=gpunp.double) for k, v in inp.items()}
+            inp = {k: cupy.asarray(v, dtype=cupy.double) for k, v in inp.items()}
         else:
             raise KeyError("Input must have a 'rho' variable or a single array.")
 
@@ -230,9 +222,7 @@ class XCfun:
                 if output[label] is not None:
                     setattr(buf_params, label, buf[label].data.ptr)
                     setattr(out_params, label, output[label].data.ptr)
-            #stream = gpunp.cuda.get_current_stream()
-            dev = get_default_cached_device()
-            stream = get_device_cached_queue(dev)
+            stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_lda(
                 stream.ptr,
                 self.xc_func,
@@ -260,15 +250,17 @@ class XCfun:
 
             out_params = xc_gga_out_params()
             buf_params = xc_gga_out_params()
-            buf = copy.deepcopy(output)
+            print("hello from libxc.py: ", type(output))
+            for key, value in output.items():
+                print(f"Key: {key}, Type: {type(value)}")
+            #buf = copy.deepcopy(output)
+            buf = output.copy()
             for i, label in enumerate(output_labels):
                 if output[label] is not None:
                     setattr(buf_params, label, buf[label].data.ptr)
                     setattr(out_params, label, output[label].data.ptr)
 
-            #stream = gpunp.cuda.get_current_stream()
-            dev = get_default_cached_device()
-            stream = get_device_cached_queue(dev)
+            stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_gga(
                 stream.ptr,
                 self.xc_func,
@@ -299,8 +291,8 @@ class XCfun:
 
             args.extend([   inp[x] for x in  input_labels])
             if not self.needs_laplacian():
-                args.insert(-1, gpunp.empty((1)))  # Add none ptr to laplacian
-            #args.insert(-1, gpunp.zeros_like(inp['rho']))
+                args.insert(-1, cupy.empty((1)))  # Add none ptr to laplacian
+            #args.insert(-1, cupy.zeros_like(inp['rho']))
             args.extend([output[x] for x in output_labels])
 
             out_params = xc_mgga_out_params()
@@ -310,10 +302,8 @@ class XCfun:
                 if output[label] is not None:
                     setattr(buf_params, label, buf[label].data.ptr)
                     setattr(out_params, label, output[label].data.ptr)
-            #stream = gpunp.cuda.get_current_stream()
-            dev = get_default_cached_device()
-            stream = get_device_cached_queue(dev)
-            lapl = gpunp.empty(1)
+            stream = cupy.cuda.get_current_stream()
+            lapl = cupy.empty(1)
             err = libgdft.GDFT_xc_mgga(
                 stream.ptr,
                 self.xc_func,
@@ -331,3 +321,4 @@ class XCfun:
             raise KeyError("Functional kind not recognized!")
 
         return {k: v for k, v in zip(output_labels, args[2+input_num_args:]) if v is not None}
+

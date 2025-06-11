@@ -12,11 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpnp as gpunp
+import cupy
 import numpy as np
 import scipy
 from gpu4pyscf.gto.int3c1e import int1e_grids
@@ -42,7 +38,7 @@ def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified
     t1 = log.init_timer()
 
     atomcoords = mf.mol.atom_coords(unit='B')
-    dm = gpunp.array(mf.make_rdm1())
+    dm = cupy.array(mf.make_rdm1())
 
     Roff = Rhead/radii.BOHR
     Deltar = 0.1
@@ -102,23 +98,23 @@ def eval_chelpg_layer_gpu(mf, deltaR=0.3, Rhead=2.8, ifqchem=True, Rvdw=modified
     r_pX = np.delete(r_pX, idx, axis=1)
     gridcoords = np.delete(gridcoords, idx, axis=0)
 
-    r_pX = gpunp.array(r_pX)
+    r_pX = cupy.array(r_pX)
     r_pX_potential = 1/r_pX
-    potential_real = gpunp.dot(gpunp.array(mf.mol.atom_charges()), r_pX_potential)
+    potential_real = cupy.dot(cupy.array(mf.mol.atom_charges()), r_pX_potential)
 
     if dm.ndim == 3: # Unrestricted
         assert dm.shape[0] == 2
         dm = dm[0] + dm[1]
     potential_real -= int1e_grids(mf.mol, gridcoords, dm=dm, direct_scf_tol=1e-14)
 
-    w = gpunp.array(w)
+    w = cupy.array(w)
     r_pX_potential_omega = r_pX_potential*w
     GXA = r_pX_potential_omega@r_pX_potential.T
     eX = r_pX_potential_omega@potential_real
-    GXA_inv = gpunp.linalg.inv(GXA)
+    GXA_inv = cupy.linalg.inv(GXA)
     g = GXA_inv@eX
     alpha = (g.sum() - mf.mol.charge)/(GXA_inv.sum())
-    q = g - alpha*GXA_inv@gpunp.ones((mf.mol.natm))
+    q = g - alpha*GXA_inv@cupy.ones((mf.mol.natm))
     t1 = log.timer_debug1('compute ChElPG charge', *t1)
     return q
 

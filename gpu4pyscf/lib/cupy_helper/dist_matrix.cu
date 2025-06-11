@@ -14,15 +14,25 @@
  * limitations under the License.
  */
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 #include <stdio.h>
 #define THREADS        32
 
 __global__
 static void _calc_distances(double *dist, const double *x, const double *y, int m, int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int i = item.get_global_id(1);
+    int j = item.get_global_id(0);
+#else
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i >= m || j >= n){
         return;
     }
@@ -38,6 +48,13 @@ int dist_matrix(cudaStream_t stream, double *dist, const double *x, const double
 {
     int ntilex = (m + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
+#ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(ntiley, ntilex);
+    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _calc_distances(dist, x, y, m, n);
+    });
+#else //USE_SYCL
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntilex, ntiley);
     _calc_distances<<<blocks, threads, 0, stream>>>(dist, x, y, m, n);
@@ -45,6 +62,7 @@ int dist_matrix(cudaStream_t stream, double *dist, const double *x, const double
     if (err != cudaSuccess) {
         return 1;
     }
+#endif
     return 0;
 }
 }

@@ -85,7 +85,7 @@ class xc_dimensions(ctypes.Structure):
          ("vrho", ctypes.c_int),
          ("vsigma", ctypes.c_int),
          ("vlapl", ctypes.c_int),
-         ("vtau", ctypes.c_int),
+         ("vtau", ctypes.c_int), 
 
          ("v2rho2", ctypes.c_int),
          ("v2rhosigma", ctypes.c_int),
@@ -182,7 +182,7 @@ class xc_func_type(ctypes.Structure):
         # parameters
         ("ext_params", ctypes.POINTER(ctypes.c_double)),
         ("params", ctypes.c_void_p),  # void *params;
-
+        
         ("dens_threshold", ctypes.c_double),
         ("zeta_threshold", ctypes.c_double),
         ("sigma_threshold", ctypes.c_double),

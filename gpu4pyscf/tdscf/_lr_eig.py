@@ -935,6 +935,16 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, nroots):
     GGT = cp.dot(U_inv.T, cp.dot(d_amb_d, U_inv))
 
     G = cp.linalg.cholesky(GGT)
+    if cp.any(cp.isnan(G)):
+        eig, eigv = cp.linalg.eigh(GGT)
+        if eig[0] < -1e-4:
+            error_msg = (
+                "GGT matrix is not positive definite.\n"
+                "SCF not correctly converged is likely to cause this error.\n"
+                "For example, scf converged to the wrong state.\n"
+            )
+            raise RuntimeError(error_msg)
+
     G_inv = cp.linalg.inv(G)
 
     ''' M = G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G '''

@@ -15,10 +15,17 @@
  */
 
 #include <stdint.h>
+#ifndef USE_SYCL
 #include <cuda_runtime.h>
 #include <cuda.h>
+#endif
 
-__device__ int Rt2_idx_offsets[] = {
+#ifdef USE_SYCL
+inline constexpr int Rt2_idx_offsets[] =
+#else
+__device__ int Rt2_idx_offsets[] =
+#endif
+  {
 0,1,5,15,35,70,126,210,330,
 495,499,515,555,635,775,999,1335,1815,
 2475,2485,2525,2625,2825,3175,3735,4575,5775,
@@ -30,7 +37,12 @@ __device__ int Rt2_idx_offsets[] = {
 163350,163515,164175,165825,169125,174900,184140,198000,217800,
 245025,
 };
-__device__ uint16_t Rt2_ij_kl[] = {
+#ifdef USE_SYCL
+inline constexpr uint16_t Rt2_ij_kl[] =
+#else
+__device__ uint16_t Rt2_ij_kl[] =
+#endif
+  {
 0,0,1,2,3,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,
 5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,0,1,2,3,4,
 5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,
@@ -12284,7 +12296,12 @@ __device__ uint16_t Rt2_ij_kl[] = {
 944,945,946,947,948,949,950,951,952,953,954,955,956,957,958,959,960,961,962,963,
 964,965,966,967,968,
 };
-__device__ uint16_t Rt2_kl_ij[] = {
+#ifdef USE_SYCL
+inline constexpr uint16_t Rt2_kl_ij[] =
+#else
+__device__ uint16_t Rt2_kl_ij[] =
+#endif
+  {
 0,0,1,2,3,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,
 5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,0,1,2,3,4,
 5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,
@@ -24539,7 +24556,12 @@ __device__ uint16_t Rt2_kl_ij[] = {
 964,965,966,967,968,
 };
 
-__constant__ int8_t c_Rt2_efg_phase[] = {
+#ifdef USE_SYCL
+inline constexpr int8_t c_Rt2_efg_phase[] =
+#else
+__constant__ int8_t c_Rt2_efg_phase[] =
+#endif
+  {
 // l = 0
 1,
 // l = 1
@@ -24581,7 +24603,12 @@ __constant__ int8_t c_Rt2_efg_phase[] = {
 };
 
 // offsets = l*(l+1)*(l+2)*(l+3)//24 - l
-__constant__ int8_t c_Rt_tuv_fac[] = {
+#ifdef USE_SYCL
+inline constexpr int8_t c_Rt_tuv_fac[] = 
+#else
+__constant__ int8_t c_Rt_tuv_fac[] =
+#endif
+  {
 // l = 1
 0,0,0,
 // l = 2
@@ -24847,7 +24874,12 @@ __constant__ int8_t c_Rt_tuv_fac[] = {
 11,11,11,11,11,11,11,11,12,12,12,12,12,12,12,12,12,12,13,13,
 13,13,13,13,14,14,14,15,
 };
-__constant__ uint16_t c_Rt_idx[] = {
+#ifdef USE_SYCL
+inline constexpr uint16_t c_Rt_idx[] = 
+#else
+__constant__ uint16_t c_Rt_idx[] =
+#endif
+  {
 // l = 1
 0,0,0,
 // l = 2

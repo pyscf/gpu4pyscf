@@ -1,7 +1,10 @@
 #include <stdio.h>
 #include <stdint.h>
-#include <cuda.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "ft_ao.cuh"
 #define OVERLAP_FAC     5.56832799683170787
@@ -16,12 +19,23 @@ __global__ static
 void ft_ao_unrolled_00(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
+
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -126,12 +140,22 @@ __global__ static
 void ft_ao_unrolled_01(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -276,12 +300,22 @@ __global__ static
 void ft_ao_unrolled_02(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -477,12 +511,22 @@ __global__ static
 void ft_ao_unrolled_10(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -621,12 +665,22 @@ __global__ static
 void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -845,12 +899,22 @@ __global__ static
 void ft_ao_unrolled_12(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -1196,12 +1260,22 @@ __global__ static
 void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -1375,12 +1449,22 @@ __global__ static
 void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -1710,12 +1794,22 @@ __global__ static
 void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int sp_block_id = item.get_group(1);
+    int Gv_block_id = item.get_group(0);
+    int nGv_per_block = item.get_local_range(1);
+    int nsp_per_block = item.get_local_range(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int sp_id = item.get_local_id(0);
+#else
     int sp_block_id = blockIdx.x;
     int Gv_block_id = blockIdx.y;
     int nGv_per_block = blockDim.x;
     int nsp_per_block = blockDim.y;
     int Gv_id_in_block = threadIdx.x;
     int sp_id = threadIdx.y;
+#endif
     int npairs_ij = bounds.npairs_ij;
     int pair_ij = sp_block_id * nsp_per_block + sp_id;
     if (pair_ij >= npairs_ij) {
@@ -2290,6 +2384,23 @@ int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
     int ngrids = bounds->ngrids;
     int sp_blocks = (npairs_ij + nsp_per_block - 1) / nsp_per_block;
     int Gv_batches = (ngrids + nGv_per_block - 1) / nGv_per_block;
+    #ifdef USE_SYCL
+    sycl::queue& stream = *sycl_get_queue();
+    sycl::range<2> threads(nsp_per_block, nGv_per_block);
+    sycl::range<2> blocks(Gv_batches, sp_blocks);
+    switch (li*5 + lj) {
+    case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_00(out, *envs, *bounds, compressing); }); break;
+    case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_01(out, *envs, *bounds, compressing); }); break;
+    case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_02(out, *envs, *bounds, compressing); }); break;
+    case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_10(out, *envs, *bounds, compressing); }); break;
+    case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_11(out, *envs, *bounds, compressing); }); break;
+    case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_12(out, *envs, *bounds, compressing); }); break;
+    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_20(out, *envs, *bounds, compressing); }); break;
+    case 11: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_21(out, *envs, *bounds, compressing); }); break;
+    case 12: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_22(out, *envs, *bounds, compressing); }); break;
+    default: return 0;
+    }
+    #else
     dim3 threads(nGv_per_block, nsp_per_block);
     dim3 blocks(sp_blocks, Gv_batches);
     switch (li*5 + lj) {
@@ -2304,5 +2415,6 @@ int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
     case 12: ft_ao_unrolled_22<<<blocks, threads>>>(out, *envs, *bounds, compressing); break;
     default: return 0;
     }
+    #endif
     return 1;
 }

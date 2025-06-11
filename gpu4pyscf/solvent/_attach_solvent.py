@@ -12,16 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import numpy
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array, pack_tril
+import numpy, cupy
 from pyscf import lib
 from pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import tag_array, pack_tril
 from gpu4pyscf import scf
 from gpu4pyscf.scf.hf_lowmem import WaveFunction
 
@@ -119,7 +113,7 @@ class SCFWithSolvent(_Solvation):
             vhf = self.get_veff(self.mol, dm_or_wfn)
         e_tot, e_coul = super().energy_elec(dm_or_wfn, h1e, vhf)
         e_solvent = vhf.e_solvent
-        if isinstance(e_solvent, gpunp.ndarray):
+        if isinstance(e_solvent, cupy.ndarray):
             e_solvent = e_solvent.get()[()]
         e_tot += e_solvent
         self.scf_summary['e_solvent'] = e_solvent
@@ -130,7 +124,7 @@ class SCFWithSolvent(_Solvation):
                 self.with_solvent.e_cds = e_cds
             else:
                 e_cds = self.with_solvent.e_cds
-            if isinstance(e_cds, gpunp.ndarray):
+            if isinstance(e_cds, cupy.ndarray):
                 e_cds = e_cds.get()[()]
             e_tot += e_cds
             self.scf_summary['e_cds'] = e_cds
@@ -156,14 +150,14 @@ class SCFWithSolvent(_Solvation):
         td = super().TDDFT()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-
+    
     def TDHF(self, equilibrium_solvation=None, eps_optical=1.78):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')
         td = super().TDHF()
         from gpu4pyscf.solvent.tdscf import pcm as pcm_td
         return pcm_td.make_tdscf_object(td, equilibrium_solvation, eps_optical)
-
+    
     def CasidaTDDFT(self, equilibrium_solvation=None, eps_optical=1.78):
         if equilibrium_solvation is None:
             raise ValueError('equilibrium_solvation must be specified')

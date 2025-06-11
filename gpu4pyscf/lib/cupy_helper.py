@@ -210,7 +210,7 @@ def to_cupy(a):
         return cupy.asarray(a)
     return a
 
-def return_gpunp_array(fn):
+def return_cupy_array(fn):
     '''Ensure that arrays in returns are cupy objects'''
     @functools.wraps(fn)
     def filter_ret(*args, **kwargs):

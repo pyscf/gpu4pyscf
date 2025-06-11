@@ -99,7 +99,6 @@ def qmmm_for_scf(method, mm_mol):
             method.mm_ewald_pot = None
             method.qm_ewald_hess = None
             method.e_nuc = None
-            method.h1_on_cpu = False
             return method
 
         cls = QMMMSCF
@@ -128,7 +127,6 @@ class QMMMSCF(QMMM):
         self.mm_ewald_pot = None
         self.qm_ewald_hess = None
         self.e_nuc = None
-        self.h1_on_cpu = False
 
     def dump_flags(self, verbose=None):
         super().dump_flags(verbose)
@@ -540,7 +538,6 @@ def qmmm_grad_for_scf(scf_grad):
 
     scf_grad.de_ewald_mm = None
     scf_grad.de_nuc_mm = None
-    scf_grad.h1_on_cpu = False
     return scf_grad.view(lib.make_class((QMMMGrad, scf_grad.__class__)))
 
 class QMMMGrad:

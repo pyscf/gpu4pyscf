@@ -17,16 +17,10 @@ from pyscf import df, gto
 from pyscf.gto.moleintor import getints, make_cintopt
 from pyscf.df.grad.rhf import _int3c_wrapper
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import load_library
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import load_library
+import cupy as cp
 import unittest
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.lib.cupy_helper import load_library
 
 libgint = load_library('libgint')
 
@@ -191,8 +185,6 @@ class KnownValues(unittest.TestCase):
         coeff = intopt.coeff
         dm_cart = coeff @ dm @ coeff.T
         dq_gpu, _ = int3c2e.get_int3c2e_ip_jk(intopt, 0, 'ip2', charges, None, dm_cart)
-        #ABB 03/20/25: here cupy is used for assert. numpy has this but not dpnp need to
-        # figure out ??
         cp.testing.assert_allclose(dq_cpu, dq_gpu, atol = 1e-10)
 
 if __name__ == "__main__":

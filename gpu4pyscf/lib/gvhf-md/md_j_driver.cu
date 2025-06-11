@@ -18,17 +18,34 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/md_j.cuh"
 
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
+SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+#else
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
+#endif
 
+#ifdef USE_SYCL
+SYCL_EXTERNAL __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                                   int threadsx, int threadsy, int tilex, int tiley, sycl::nd_item<2> &item, double *shm_mem);
+SYCL_EXTERNAL __global__ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                                   int threadsx, int threadsy, int tilex, int tiley, sycl::nd_item<2> &item, double *shm_mem);
+#else
 extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
 extern __global__ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
+#endif
+
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds);
 
 extern "C" {
@@ -86,12 +103,10 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         int bsizex = threads_ij * tilex;
         int bsizey = threads_kl * tiley;
         int nsq_per_block = threads_ij * threads_kl;
-        dim3 threads(threads_ij*threads_kl, gout_stride);
         int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
         int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
         int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
-        dim3 blocks(blocks_ij, blocks_kl);
 //        if (li == lk && lj == ll) {
 //            int buflen = (order+1) * nsq_per_block
 //                + threads_ij * 4 + bsizey * 4
@@ -106,15 +121,33 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
                 + nf3ij * threads_ij * 2 + nf3kl * threads_kl * 2
                 + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
             buflen += max(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
+
+            #ifdef USE_SYCL
+            sycl::range<2> threads(gout_stride, threads_ij*threads_kl);
+            sycl::range<2> blocks(blocks_kl, blocks_ij);
+            sycl_get_queue()->submit([&](sycl::handler &cgh) {
+              sycl::local_accessor<double, 1> local_acc(buflen, cgh);
+              cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                md_j_kernel(envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
+                            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              });
+            });
+            #else
+            dim3 threads(threads_ij*threads_kl, gout_stride);
+            dim3 blocks(blocks_ij, blocks_kl);
             md_j_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
+            #endif
         }
 //    }
+
+#ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in MD_build_j: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -138,6 +171,10 @@ int init_mdj_constant(int shm_size)
             }
         } }
     }
+    #ifdef USE_SYCL
+    sycl_get_queue()->memcpy(s_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index)).wait();
+    sycl_get_queue()->memcpy(s_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index)).wait();
+    #else
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(md_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -148,6 +185,7 @@ int init_mdj_constant(int shm_size)
                 cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

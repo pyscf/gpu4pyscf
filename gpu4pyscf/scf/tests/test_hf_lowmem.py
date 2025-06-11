@@ -15,12 +15,7 @@
 import unittest
 import tempfile
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy
-else:
-    import dpnp as cupy
+import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf.scf import hf_lowmem

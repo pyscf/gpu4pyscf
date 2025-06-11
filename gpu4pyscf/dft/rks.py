@@ -14,18 +14,12 @@
 
 # modified by Xiaojie Wu (wxj6000@gmail.com)
 
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-    from gpu4pyscf.lib.cupy_helper import tag_array, asarray
-else:
-    import dpnp as gpunp
-    from gpu4pyscf.lib.dpnp_helper import tag_array, asarray
+import cupy
 from pyscf.dft import rks
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid
 from gpu4pyscf.scf import hf
+from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 from pyscf import __config__
 
 __all__ = [
@@ -126,7 +120,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vk = None
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vj', None) is not None):
-            ddm = gpunp.asarray(dm) - gpunp.asarray(dm_last)
+            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
             vj = ks.get_j(mol, ddm, hermi)
             vj += vhf_last.vj
         else:
@@ -137,7 +131,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vk', None) is not None):
-            ddm = gpunp.asarray(dm) - gpunp.asarray(dm_last)
+            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
             vj, vk = ks.get_jk(mol, ddm, hermi)
             vk *= hyb
             if abs(omega) > 1e-10:  # For range separated Coulomb operator
@@ -155,10 +149,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                 vk += vklr
         vxc += vj - vk * .5
         if ground_state:
-            exc -= gpunp.einsum('ij,ji', dm, vk).real * .5 * .5
+            exc -= cupy.einsum('ij,ji', dm, vk).real * .5 * .5
     
     if ground_state:
-        ecoul = gpunp.einsum('ij,ji', dm, vj).real * .5
+        ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
     else:
         ecoul = None
     t0 = logger.timer_debug1(ks, 'jk total', *t0)
@@ -184,14 +178,14 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     if dm is None: dm = ks.make_rdm1()
     if h1e is None: h1e = ks.get_hcore()
     if vhf is None: vhf = ks.get_veff(ks.mol, dm)
-    e1 = gpunp.einsum('ij,ji->', h1e, dm).real
+    e1 = cupy.einsum('ij,ji->', h1e, dm).real
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
-    if isinstance(ecoul, gpunp.ndarray):
+    if isinstance(ecoul, cupy.ndarray):
         ecoul = ecoul.get()[()]
-    if isinstance(exc, gpunp.ndarray):
+    if isinstance(exc, cupy.ndarray):
         exc = exc.get()[()]
-    if isinstance(e1, gpunp.ndarray):
+    if isinstance(e1, cupy.ndarray):
         e1 = e1.get()[()]
     e2 = ecoul + exc
     ks.scf_summary['e1'] = e1

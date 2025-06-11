@@ -15,7 +15,7 @@
 
 import numpy as np
 import cupy as cp
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
@@ -154,8 +154,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         grids = mf.grids
         ni = mf._numint
         if mf.do_nlc():
-            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
-                        'derivative is not available. Its contribution is '
+            logger.warn(mf, 'NLC functional found in DFT object. Its contribution is '
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
 
@@ -247,7 +246,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
             pass
 
         elif xctype == 'NLC':
-            raise NotImplementedError('NLC')
+            pass # Processed later
 
         elif xctype == 'MGGA':
             ao_deriv = 1
@@ -274,6 +273,11 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
                 iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
                 a += iajb
                 b += iajb
+
+        if mf.do_nlc():
+            raise NotImplementedError('vv10 nlc not implemented in get_ab(). '
+                                      'However the nlc contribution is small in TDDFT, '
+                                      'so feel free to take the risk and comment out this line.')
 
     else:
         add_hf_(a, b)
@@ -315,6 +319,35 @@ def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     return vind, hdiag
 
 
+def as_scanner(td):
+    if isinstance(td, lib.SinglePointScanner):
+        return td
+
+    logger.info(td, 'Set %s as a scanner', td.__class__)
+    name = td.__class__.__name__ + TD_Scanner.__name_mixin__
+    return lib.set_class(TD_Scanner(td), (TD_Scanner, td.__class__), name)
+
+
+class TD_Scanner(lib.SinglePointScanner):
+    def __init__(self, td):
+        self.__dict__.update(td.__dict__)
+        self._scf = td._scf.as_scanner()
+
+    def __call__(self, mol_or_geom, **kwargs):
+        assert self.device == 'gpu'
+        if isinstance(mol_or_geom, gto.MoleBase):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+
+        mf_scanner = self._scf
+        mf_e = mf_scanner(mol)
+        self.kernel(**kwargs)
+        return mf_e + self.e
+
+
 class TDBase(lib.StreamObject):
     to_gpu = utils.to_gpu
     device = utils.device
@@ -326,8 +359,12 @@ class TDBase(lib.StreamObject):
     lindep                = tdhf_cpu.TDBase.lindep
     level_shift           = tdhf_cpu.TDBase.level_shift
     max_cycle             = tdhf_cpu.TDBase.max_cycle
+    # threshold to filter positive eigenvalues
     positive_eig_threshold = tdhf_cpu.TDBase.positive_eig_threshold
+    # threshold to determine when states are considered degenerate
     deg_eia_thresh        = tdhf_cpu.TDBase.deg_eia_thresh
+    # Avoid computing NLC response in TDDFT
+    exclude_nlc = True
 
     _keys = tdhf_cpu.TDBase._keys
 
@@ -344,8 +381,13 @@ class TDBase(lib.StreamObject):
 
     def gen_response(self, singlet=True, hermi=0):
         '''Generate function to compute A x'''
-        return self._scf.gen_response(singlet=singlet, hermi=hermi)
-    
+        if (self.exclude_nlc and
+            isinstance(self._scf, scf.hf.KohnShamDFT) and self._scf.do_nlc()):
+            logger.warn(self, 'NLC functional found in the DFT object. Its contribution is '
+                        'not included in the TDDFT response function.')
+        return self._scf.gen_response(singlet=singlet, hermi=hermi,
+                                      with_nlc=not self.exclude_nlc)
+
     def get_ab(self, mf=None):
         if mf is None:
             mf = self._scf
@@ -372,7 +414,7 @@ class TDBase(lib.StreamObject):
             from gpu4pyscf.grad import tdrhf
             return tdrhf.Gradients(self)
 
-    as_scanner = tdhf_cpu.as_scanner
+    as_scanner = as_scanner
 
     oscillator_strength = tdhf_cpu.oscillator_strength
     transition_dipole              = tdhf_cpu.transition_dipole

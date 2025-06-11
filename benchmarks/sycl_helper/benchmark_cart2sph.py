@@ -14,15 +14,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from importlib.util import find_spec
-
 has_dpctl = find_spec("dpctl")
-
 if has_dpctl:
     try:
         import dpctl
-
     except ImportError as e:
-        raise ImportError("DpCTL is installed, but could not be imported!") from e
+        raise ImportError("DPCTL is installed, but could not be imported!") from e
     
 import numpy as np
 import dpctl.memory as dpm

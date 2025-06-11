@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
 #include <cuda_runtime.h>
+#endif
 
 #define THREADS        32
 #define BLOCK_DIM   32
@@ -22,37 +26,55 @@
 __global__
 void _transpose_sum(double *a, int n)
 {
-    if(blockIdx.x > blockIdx.y){
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<3>();
+    sycl::group thread_block = item.get_group();
+    int blockIdx_x = item.get_group(2);
+    int blockIdx_y = item.get_group(1);
+    int blockIdx_z = item.get_group(0);
+    int threadIdx_x = item.get_local_id(2);
+    int threadIdx_y = item.get_local_id(1);
+    using tile_t = double[BLOCK_DIM][BLOCK_DIM+1];
+    tile_t& block = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+#else
+    int blockIdx_x = blockIdx.x;
+    int blockIdx_y = blockIdx.y;
+    int blockIdx_z = blockIdx.z;
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    __shared__ double block[BLOCK_DIM][BLOCK_DIM+1];
+#endif
+
+    if(blockIdx_x > blockIdx_y){
         return;
     }
-	__shared__ double block[BLOCK_DIM][BLOCK_DIM+1];
 
-    unsigned int blockx_off = blockIdx.x * BLOCK_DIM;
-    unsigned int blocky_off = blockIdx.y * BLOCK_DIM;
-	unsigned int x0 = blockx_off + threadIdx.x;
-	unsigned int y0 = blocky_off + threadIdx.y;
-    unsigned int x1 = blocky_off + threadIdx.x;
-	unsigned int y1 = blockx_off + threadIdx.y;
-    unsigned int z = blockIdx.z;
+    unsigned int blockx_off = blockIdx_x * BLOCK_DIM;
+    unsigned int blocky_off = blockIdx_y * BLOCK_DIM;
+	unsigned int x0 = blockx_off + threadIdx_x;
+	unsigned int y0 = blocky_off + threadIdx_y;
+    unsigned int x1 = blocky_off + threadIdx_x;
+	unsigned int y1 = blockx_off + threadIdx_y;
+    unsigned int z = blockIdx_z;
 
     size_t off = n * n * z;
     size_t xy0 = y0 * n + x0 + off;
     size_t xy1 = y1 * n + x1 + off;
 
     if (x0 < n && y0 < n){
-        block[threadIdx.y][threadIdx.x] = a[xy0];
+        block[threadIdx_y][threadIdx_x] = a[xy0];
     }
     __syncthreads();
     if (x1 < n && y1 < n){
-        block[threadIdx.x][threadIdx.y] += a[xy1];
+        block[threadIdx_x][threadIdx_y] += a[xy1];
     }
     __syncthreads();
 
     if(x0 < n && y0 < n){
-        a[xy0] = block[threadIdx.y][threadIdx.x];
+        a[xy0] = block[threadIdx_y][threadIdx_x];
     }
     if(x1 < n && y1 < n){
-        a[xy1] = block[threadIdx.x][threadIdx.y];
+        a[xy1] = block[threadIdx_x][threadIdx_y];
     }
 }
 
@@ -60,6 +82,13 @@ extern "C" {
 __host__
 int transpose_sum(cudaStream_t stream, double *a, int n, int counts){
     int ntile = (n + THREADS - 1) / THREADS;
+#ifdef USE_SYCL
+    sycl::range<3> threads(1, THREADS, THREADS);
+    sycl::range<3> blocks(counts, ntile, ntile);
+    stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+      _transpose_sum(a, n);    
+    });
+#else //USE_SYCL
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile, counts);
     _transpose_sum<<<blocks, threads, 0, stream>>>(a, n);
@@ -67,6 +96,7 @@ int transpose_sum(cudaStream_t stream, double *a, int n, int counts){
     if (err != cudaSuccess) {
         return 1;
     }
+#endif //USE_SYCL
     return 0;
 }
 }

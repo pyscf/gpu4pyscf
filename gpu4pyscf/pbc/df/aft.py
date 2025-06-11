@@ -20,16 +20,7 @@ __all__ = [
 
 import contextlib
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as cp
-    from gpu4pyscf.lib.cupy_helper import (return_gpunp_array, contract, unpack_tril,
-                                           get_avail_mem)
-else:
-    import dpnp as cp
-    from gpu4pyscf.lib.dpnp_helper import (return_gpunp_array, contract, unpack_tril,
-                                           get_avail_mem)
+import cupy as cp
 from pyscf import lib
 from pyscf import gto
 from pyscf.pbc.df import aft as aft_cpu
@@ -41,6 +32,8 @@ from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.lib import logger, utils
+from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
+                                       get_avail_mem)
 
 KE_SCALING = aft_cpu.KE_SCALING
 
@@ -114,7 +107,7 @@ def get_nuc(mydf, kpts=None):
 
 class AFTDFMixin:
 
-    weighted_coulG = return_gpunp_array(aft_cpu.weighted_coulG)
+    weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
     pw_loop = NotImplemented
 
     def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvk_kmesh=None,

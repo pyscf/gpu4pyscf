@@ -18,7 +18,7 @@ Gradient of SMD solvent model
 # pylint: disable=C0103
 
 import numpy as np
-#import cupy
+import cupy
 #from cupyx import scipy, jit
 from pyscf import lib
 from pyscf.grad import rhf as rhf_grad
@@ -88,3 +88,5 @@ class WithSolventGrad:
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.
         pass
+
+

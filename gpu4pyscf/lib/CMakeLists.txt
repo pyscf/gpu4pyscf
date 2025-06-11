@@ -26,12 +26,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (USE_SYCL)
+  set(CMAKE_BUILT_TYPE Debug)
   set(DPCTL_CMAKE_MODULES_PATH "${PROJECT_SOURCE_DIR}/cmake")
   set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${DPCTL_CMAKE_MODULES_PATH})
   #find_package(IntelSYCL REQUIRED PATHS ${DPCTL_CMAKE_MODULES_PATH} NO_DEFAULT_PATH)
 
   add_definitions(-DUSE_SYCL=1)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register")
   # add_definitions(-DSYCL_EXT_ONEAPI_DEVICE_GLOBAL=1)
 endif(USE_SYCL)
 
@@ -120,21 +121,40 @@ link_directories(${PROJECT_SOURCE_DIR}/deps/lib)
 set(C_LINK_TEMPLATE "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_C_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 
-option(BUILD_CUTLASS "Using cutlass" ON)
-if(BUILD_CUTLASS)
-  include(ExternalProject)
-  ExternalProject_Add(cutlass
-    GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
-    GIT_TAG        v3.4.0
-    CONFIGURE_COMMAND ""  # No configure step
-    BUILD_COMMAND ""      # No build step
-    INSTALL_COMMAND ""    # No install step
-    TEST_COMMAND ""       # No test step
-  )
+if(USE_SYCL)
+  option(BUILD_CUTLASS "Using cutlass-SYCL" OFF)
+  if(BUILD_CUTLASS)
+    include(ExternalProject)
+    ExternalProject_Add(cutlass
+      GIT_REPOSITORY https://github.com/codeplaysoftware/cutlass-sycl.git
+      GIT_TAG        sycl-develop
+      CONFIGURE_COMMAND ""  # No configure step
+      BUILD_COMMAND ""      # No build step
+      INSTALL_COMMAND ""    # No install step
+      TEST_COMMAND ""       # No test step
+    )
 
-  # ExternalProject_Add automatically populates this variable
-  ExternalProject_Get_Property(cutlass SOURCE_DIR)
-  set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+    # ExternalProject_Add automatically populates this variable
+    ExternalProject_Get_Property(cutlass SOURCE_DIR)
+    set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+  endif()
+else()
+  option(BUILD_CUTLASS "Using cutlass" ON)
+  if(BUILD_CUTLASS)
+    include(ExternalProject)
+    ExternalProject_Add(cutlass
+      GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+      GIT_TAG        v3.4.0
+      CONFIGURE_COMMAND ""  # No configure step
+      BUILD_COMMAND ""      # No build step
+      INSTALL_COMMAND ""    # No install step
+      TEST_COMMAND ""       # No test step
+    )
+
+    # ExternalProject_Add automatically populates this variable
+    ExternalProject_Get_Property(cutlass SOURCE_DIR)
+    set(cutlass_SOURCE_DIR ${SOURCE_DIR})
+  endif()
 endif()
 
 option(BUILD_GINT "Using gint" ON)
@@ -152,17 +172,17 @@ if(BUILD_GDFT)
   add_subdirectory(gdft)
 endif()
 
-if (USE_SYCL)
+option(BUILD_CUPY_HELPER "Using cupy_helper" ON)
+if(BUILD_CUPY_HELPER)
+  add_subdirectory(cupy_helper)
+endif()
+
+if(DEFINED USE_SYCL)
   option(BUILD_DPNP_HELPER "Using dpnp_helper" ON)
   if(BUILD_DPNP_HELPER)
     add_subdirectory(dpnp_helper)
   endif()
-else ()
-  option(BUILD_CUPY_HELPER "Using cupy_helper" ON)
-  if(BUILD_CUPY_HELPER)
-    add_subdirectory(cupy_helper)
-  endif()
-endif ()
+endif()
 
 option(BUILD_SOLVENT "Using SMD solvent" OFF)
 if(BUILD_SOLVENT)
@@ -175,17 +195,17 @@ if(BUILD_GINT_RYS)
   add_subdirectory(gint-rys)
 endif()
 
-option(BUILD_GVHF_RYS "Using gvhf-rys" OFF)
+option(BUILD_GVHF_RYS "Using gvhf-rys" ON)
 if(BUILD_GVHF_RYS)
   add_subdirectory(gvhf-rys)
 endif()
 
-option(BUILD_GVHF_MD "Using gvhf-md" OFF)
+option(BUILD_GVHF_MD "Using gvhf-md" ON)
 if(BUILD_GVHF_MD)
   add_subdirectory(gvhf-md)
 endif()
 
-option(BUILD_PBC "Using pbc" OFF)
+option(BUILD_PBC "Using pbc" ON)
 if(BUILD_PBC)
   add_subdirectory(pbc)
 endif()
@@ -196,7 +216,23 @@ add_subdirectory(ecp)
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   if (USE_SYCL)
-    # ABB: need some logic here for libxc for SYCL
+    include(ExternalProject)
+    ExternalProject_Add(libxc
+      GIT_REPOSITORY https://gitlab.com/abhi58/libxc.git
+      GIT_TAG sycl
+      PREFIX ${PROJECT_BINARY_DIR}/deps
+      INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+      CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DENABLE_SYCL=ON
+      -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
+      -DCMAKE_CXX_COMPILER=icpx
+      "-DCMAKE_CXX_FLAGS=-march=sapphirerapids -mtune=sapphirerapids -mlong-double-64 -fsycl -fsycl-device-code-split=per_kernel -fsycl-targets=intel_gpu_pvc -sycl-std=2020 -fsycl-enable-function-pointers"
+      -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+      -DCMAKE_INSTALL_LIBDIR:PATH=lib
+      -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+      -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
+      CMAKE_CACHE_ARGS
+    )
   else (USE_SYCL)
     include(ExternalProject)
     ExternalProject_Add(libxc
