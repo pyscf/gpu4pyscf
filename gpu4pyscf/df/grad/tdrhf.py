@@ -174,9 +174,7 @@ def get_jk_ris(mf, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=
     In the CPU version, get_jk returns the first order derivatives of J/K matrices.
     '''
     if mol is None: mol = mf.mol
-
-    if(dm0 is None): 
-        raise Not
+    assert dm0 is not None
     if omega is None:
         with_df = mf.with_df
     else:
