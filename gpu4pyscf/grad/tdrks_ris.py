@@ -18,22 +18,20 @@ import cupy as cp
 import numpy as np
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse
+from gpu4pyscf.lib.cupy_helper import contract, add_sparse, tag_array
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.dft import numint
+from gpu4pyscf.df.grad import tdrhf as tdrhf_df
+from gpu4pyscf.dft import numint,rks
 from pyscf.dft.numint import NumInt as numint_cpu
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
+from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
 from gpu4pyscf.tdscf.ris import get_auxmol
 
-
-#
-# Given Y = 0, TDDFT gradients (XAX+XBY+YBX+YAY)^1 turn to TDA gradients (XAX)^1
-#
-def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, atmlst=None, verbose=logger.INFO):
     """
     Electronic part of TDA, TDDFT nuclear gradients
 
@@ -44,9 +42,15 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    if J_fit is None:
+        J_fit = td_grad.base.J_fit
+    if K_fit is None:
+        K_fit = td_grad.base.K_fit
     if singlet is None:
         singlet = True
     log = logger.new_logger(td_grad, verbose)
+    if not singlet:
+        raise ValueError('TDDFT ris only supports singlet state')
     time0 = logger.init_timer(td_grad)
 
     mol = td_grad.mol
@@ -82,13 +86,18 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
     else:
         log.info('K uese different basis as J')
         auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+    mf_J = rks.RKS(mol).density_fit()
+    mf_J.with_df.auxmol = auxmol_J
+    mf_K = rks.RKS(mol).density_fit()
+    mf_K.with_df.auxmol = auxmol_K
     
-    f1vo, f1oo, vxc1, k1ao = _contract_xc_kernel(td_grad, mf.xc, dmxpy, dmzoo, True, True, singlet)
+    f1vo, f1oo, vxc1, k1ao = tdrks._contract_xc_kernel(td_grad, mf.xc, dmxpy, dmzoo, True, True, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if with_k:
         vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
-        vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
-        vj2, vk2 = mf.get_jk(mol, dmxmy - dmxmy.T, hermi=0)
+        vj1 = mf_J.get_j(mol, dmxpy + dmxpy.T, hermi=0)
+        vk1 = mf_K.get_k(mol, dmxpy + dmxpy.T, hermi=0)
+        vk2 = mf_K.get_k(mol, dmxmy - dmxmy.T, hermi=0)
         if not isinstance(vj0, cp.ndarray):
             vj0 = cp.asarray(vj0)
         if not isinstance(vk0, cp.ndarray):
@@ -97,11 +106,9 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
             vj1 = cp.asarray(vj1)
         if not isinstance(vk1, cp.ndarray):
             vk1 = cp.asarray(vk1)
-        if not isinstance(vj2, cp.ndarray):
-            vj2 = cp.asarray(vj2)
         if not isinstance(vk2, cp.ndarray):
             vk2 = cp.asarray(vk2)
-        vj = cp.stack((vj0, vj1, vj2))
+        vj = cp.stack((vj0, vj1))
         vk = cp.stack((vk0, vk1, vk2))
         vk *= hyb
         if omega != 0:
@@ -115,13 +122,13 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
             if not isinstance(vk2, cp.ndarray):
                 vk2 = cp.asarray(vk2)
             vk += cp.stack((vk0, vk1, vk2)) * (alpha - hyb)
-        veff0doo = vj[0] * 2 - vk[0] + f1oo[0] + k1ao[0] * 2
+        veff0doo = vj[0] * 2 - vk[0] + f1oo[0]
         veff0doo += td_grad.solvent_response(dmzoo)
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
-            veff = vj[1] * 2 - vk[1] + f1vo[0] * 2
+            veff = vj[1] * 2 - vk[1]
         else:
-            veff = f1vo[0] - vk[1]
+            veff = - vk[1]
         veff += td_grad.solvent_response(dmxpy + dmxpy.T)
         veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
@@ -139,19 +146,19 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
             vj1 = cp.asarray(vj1)
         vj = cp.stack((vj0, vj1))
 
-        veff0doo = vj[0] * 2 + f1oo[0] + k1ao[0] * 2
+        veff0doo = vj[0] * 2 + f1oo[0] 
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
-            veff = vj[1] * 2 + f1vo[0] * 2
+            veff = vj[1] * 2
         else:
-            veff = f1vo[0]
+            veff = 0
         veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
         wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
         veff0mom = cp.zeros((nmo, nmo))
 
     # set singlet=None, generate function for CPHF type response kernel
-    vresp = td_grad.base.gen_response(singlet=None, hermi=1)
+    vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
@@ -235,11 +242,11 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
         j_factor=1.0
     else:
         j_factor=0.0
-    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor)
+    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
     dvhf_all += dvhf * 2
-    dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
+    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
     dvhf_all += dvhf * 2
@@ -258,25 +265,21 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
-        dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, 
+        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
         dvhf_all += dvhf * 2
-        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 
+        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
         dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
-    fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
+    fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
 
     veff1_0 = vxc1[1:]
-    veff1_1 = (f1oo[1:] + fxcz1[1:] + k1ao[1:] * 2) * 2  # *2 for dmz1doo+dmz1oo.T
-    if singlet:
-        veff1_2 = f1vo[1:] * 2
-    else:
-        veff1_2 = f1vo[1:]
+    veff1_1 = (f1oo[1:] + fxcz1[1:]) * 2  # *2 for dmz1doo+dmz1oo.T
 
     delec = 2.0 * (dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
@@ -287,237 +290,74 @@ def grad_elec(td_grad, x_y, theta, J_fit, K_fit, singlet=True, atmlst=None, verb
             contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), oo0[:, p0:p1] * 2 + dmz1doo[:, p0:p1],)
             for p0, p1 in aoslices[:, 2:]])
     dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 = cp.asarray([contract("xpq,pq->x", veff1_2[:, p0:p1], dmxpy[p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 += cp.asarray(
-        [contract("xqp,pq->x", veff1_2[:, p0:p1], dmxpy[:, p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
+    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1
 
     return de.get()
 
 
-# dmvo, dmoo in AO-representation
-# Note spin-trace is applied for fxc, kxc
-def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_kxc=True, singlet=True):
-    mol = td_grad.mol
-    mf = td_grad.base._scf
-    grids = mf.grids
-
-    ni = mf._numint
-    xctype = ni._xc_type(xc_code)
-
-    mo_coeff = mf.mo_coeff
-    mo_occ = mf.mo_occ
-    nao, nmo = mo_coeff.shape
-    shls_slice = (0, mol.nbas)
-    ao_loc = mol.ao_loc_nr()
-
-    opt = getattr(ni, "gdftopt", None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-    _sorted_mol = opt._sorted_mol
-    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
-
-    # dmvo ~ reduce(cp.dot, (orbv, Xai, orbo.T))
-    dmvo = (dmvo + dmvo.T) * 0.5  # because K_{ia,jb} == K_{ia,bj}
-    dmvo = opt.sort_orbitals(dmvo, axis=[0, 1])
-
-    f1vo = cp.zeros((4, nao, nao))  # 0th-order, d/dx, d/dy, d/dz
-    deriv = 2
-    if dmoo is not None:
-        f1oo = cp.zeros((4, nao, nao))
-        dmoo = opt.sort_orbitals(dmoo, axis=[0, 1])
+def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+    
+    if omega != 0.0:
+        vj, _, vjaux, _ = tdrhf_df.get_jk_ris(mf_J, mol, dm, omega=omega, hermi=hermi)
+        _, vk, _, vkaux = tdrhf_df.get_jk_ris(mf_K, mol, dm, omega=omega, hermi=hermi)
     else:
-        f1oo = None
-    if with_vxc:
-        v1ao = cp.zeros((4, nao, nao))
-    else:
-        v1ao = None
-    if with_kxc:
-        k1ao = cp.zeros((4, nao, nao))
-        deriv = 3
-    else:
-        k1ao = None
-
-    if xctype == "HF":
-        return f1vo, f1oo, v1ao, k1ao
-    elif xctype == "LDA":
-        fmat_, ao_deriv = _lda_eval_mat_, 1
-    elif xctype == "GGA":
-        fmat_, ao_deriv = _gga_eval_mat_, 2
-    elif xctype == "MGGA":
-        fmat_, ao_deriv = _mgga_eval_mat_, 2
-        logger.warn(td_grad, "TDRKS-MGGA Gradients may be inaccurate due to grids response")
-    else:
-        raise NotImplementedError(f"td-rks for functional {xc_code}")
-
-    if (not td_grad.base.exclude_nlc) and mf.do_nlc():
-        raise NotImplementedError("TDDFT gradient with NLC contribution is not supported yet. "
-                                  "Please set exclude_nlc field of tdscf object to True, "
-                                  "which will turn off NLC contribution in the whole TDDFT calculation.")
-
-    if singlet:
-        for ao, mask, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
-            if xctype == "LDA":
-                ao0 = ao[0]
-            else:
-                ao0 = ao
-            mo_coeff_mask = mo_coeff[mask, :]
-            rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
-            # quick fix
-            if deriv > 2:
-                ni_cpu = numint_cpu()
-                # TODO: If the libxc is stablized, this should be gpulized
-                # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
-                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
-                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
-            else:
-                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-            dmvo_mask = dmvo[mask[:, None], mask]
-            rho1 = (
-                ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False) * 2
-            )  # *2 for alpha + beta
-            if xctype == "LDA":
-                rho1 = rho1[cp.newaxis].copy()
-            tmp = contract("yg,xyg->xg", rho1, fxc)
-            wv = contract("xg,g->xg", tmp, weight)
-            tmp = None
-            fmat_(_sorted_mol, f1vo, ao, wv, mask, shls_slice, ao_loc)
-
-            if dmoo is not None:
-                dmoo_mask = dmoo[mask[:, None], mask]
-                rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo_mask, mask, xctype, hermi=1, with_lapl=False) * 2
-                if xctype == "LDA":
-                    rho2 = rho2[cp.newaxis].copy()
-                tmp = contract("yg,xyg->xg", rho2, fxc)
-                wv = contract("xg,g->xg", tmp, weight)
-                tmp = None
-                fmat_(_sorted_mol, f1oo, ao, wv, mask, shls_slice, ao_loc)
-            if with_vxc:
-                fmat_(_sorted_mol, v1ao, ao, vxc * weight, mask, shls_slice, ao_loc)
-            if with_kxc:
-                tmp = contract("yg,xyzg->xzg", rho1, kxc)
-                tmp = contract("zg,xzg->xg", rho1, tmp)
-                wv = contract("xg,g->xg", tmp, weight)
-                tmp = None
-                fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
-    else:
-        for ao, mask, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
-            if xctype == "LDA":
-                ao0 = ao[0]
-            else:
-                ao0 = ao
-            mo_coeff_mask = mo_coeff[mask, :]
-            rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
-            rho *= 0.5
-            rho = cp.repeat(rho[cp.newaxis], 2, axis=0)
-            # quick fix
-            if deriv > 2:
-                ni_cpu = numint_cpu()
-                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
-                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
-                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
-            else:
-                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-            # fxc_t couples triplet excitation amplitudes
-            # 1/2 int (tia - tIA) fxc (tjb - tJB) = tia fxc_t tjb
-            fxc_t = fxc[:, :, 0] - fxc[:, :, 1]
-            fxc_t = fxc_t[0] - fxc_t[1]
-            dmvo_mask = dmvo[mask[:, None], mask]
-            rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False)
-            if xctype == "LDA":
-                rho1 = rho1[cp.newaxis].copy()
-            tmp = contract("yg,xyg->xg", rho1, fxc_t)
-            wv = contract("xg,g->xg", tmp, weight)
-            tmp = None
-            fmat_(_sorted_mol, f1vo, ao, wv, mask, shls_slice, ao_loc)
-
-            if dmoo is not None:
-                # fxc_s == 2 * fxc of spin restricted xc kernel
-                # provides f1oo to couple the interaction between first order MO
-                # and density response of tddft amplitudes, which is described by dmoo
-                fxc_s = fxc[0, :, 0] + fxc[0, :, 1]
-                dmoo_mask = dmoo[mask[:, None], mask]
-                rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo_mask, mask, xctype, hermi=1, with_lapl=False)
-                if xctype == "LDA":
-                    rho2 = rho2[cp.newaxis].copy()
-                tmp = contract("yg,xyg->xg", rho2, fxc_s)
-                wv = contract("xg,g->xg", tmp, weight)
-                tmp = None
-                fmat_(_sorted_mol, f1oo, ao, wv, mask, shls_slice, ao_loc)
-            if with_vxc:
-                vxc = vxc[0]
-                fmat_(_sorted_mol, v1ao, ao, vxc * weight, mask, shls_slice, ao_loc)
-            if with_kxc:
-                # kxc in terms of the triplet coupling
-                # 1/2 int (tia - tIA) kxc (tjb - tJB) = tia kxc_t tjb
-                kxc = kxc[0, :, 0] - kxc[0, :, 1]
-                kxc = kxc[:, :, 0] - kxc[:, :, 1]
-                tmp = contract("yg,xyzg->xzg", rho1, kxc)
-                tmp = contract("zg,xzg->xg", rho1, tmp)
-                wv = contract("xg,g->xg", tmp, weight)
-                tmp = None
-                fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
-
-    f1vo[1:] *= -1
-    f1vo = opt.unsort_orbitals(f1vo, axis=[1, 2])
-    if f1oo is not None:
-        f1oo[1:] *= -1
-        f1oo = opt.unsort_orbitals(f1oo, axis=[1, 2])
-    if v1ao is not None:
-        v1ao[1:] *= -1
-        v1ao = opt.unsort_orbitals(v1ao, axis=[1, 2])
-    if k1ao is not None:
-        k1ao[1:] *= -1
-        k1ao = opt.unsort_orbitals(k1ao, axis=[1, 2])
-
-    return f1vo, f1oo, v1ao, k1ao
-
-
-def _lda_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
-    aow = numint._scale_ao(ao[0], wv[0])
-    for k in range(4):
-        vtmp = numint._dot_ao_ao(mol, ao[k], aow, mask, shls_slice, ao_loc)
-        add_sparse(vmat[k], vtmp, mask)
-    return vmat
-
-
-def _gga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
-    wv[0] *= 0.5  # *.5 because vmat + vmat.T at the end
-    aow = numint._scale_ao(ao[:4], wv[:4])
-    tmp = numint._dot_ao_ao(mol, ao[0], aow, mask, shls_slice, ao_loc)
-    vtmp = tmp + tmp.T
-    add_sparse(vmat[0], vtmp, mask)
-    wv = cp.asarray(wv, order="C")
-    vtmp = rks_grad._gga_grad_sum_(ao, wv)
-    add_sparse(vmat[1:], vtmp, mask)
-    return vmat
-
-
-def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
-    wv[0] *= 0.5  # *.5 because vmat + vmat.T at the end
-    aow = numint._scale_ao(ao[:4], wv[:4])
-    tmp = numint._dot_ao_ao(mol, ao[0], aow, mask, shls_slice, ao_loc)
-    vtmp = tmp + tmp.T
-    add_sparse(vmat[0], vtmp, mask)
-    vtmp = numint._tau_dot(ao, ao, wv[4])
-    add_sparse(vmat[0], vtmp, mask)
-    # ! The following line should only be here, because the tau is *0.5 in the _tau_dot function
-    wv[4] *= 0.5  # *.5 for 1/2 in tau
-    wv = cp.asarray(wv, order="C")
-    vtmp = rks_grad._gga_grad_sum_(ao, wv[:4])
-    vtmp += rks_grad._tau_grad_dot_(ao, wv[4])
-    add_sparse(vmat[1:], vtmp, mask)
-    return vmat
+        vj, _, vjaux, _ = tdrhf_df.get_jk_ris(mf_J, mol, dm, hermi=hermi)
+        _, vk, _, vkaux = tdrhf_df.get_jk_ris(mf_K, mol, dm, hermi=hermi)
+    vhf = vj * j_factor - vk * .5 * k_factor
+    e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
+    vhf = tag_array(vhf, aux=e1_aux)
+    
+    return vhf
 
 
 class Gradients(tdrhf.Gradients):
+    _keys = {
+        "auxbasis_response",
+    }
+    def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
+        """
+        Args:
+            state : int
+                Excited state ID.  state = 1 means the first excited state.
+        """
+        if xy is None:
+            if state is None:
+                state = self.state
+            else:
+                self.state = state
+
+            if state == 0:
+                logger.warn(
+                    self,
+                    "state=0 found in the input. Gradients of ground state is computed.",
+                )
+                return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
+            if self.base.xy is not None:
+                xy = (self.base.xy[0][state-1], self.base.xy[1][state-1])
+            else:
+                xy = (self.base.X[state-1], self.base.X[state-1]*0.0)
+
+        if singlet is None:
+            singlet = self.base.singlet
+        if atmlst is None:
+            atmlst = self.atmlst
+        else:
+            self.atmlst = atmlst
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        if self.verbose >= logger.INFO:
+            self.dump_flags()
+        theta = self.base.theta
+        de = self.grad_elec(xy, theta, singlet, atmlst, verbose=self.verbose)
+        self.de = de = de + self.grad_nuc(atmlst=atmlst)
+        if self.mol.symmetry:
+            self.de = self.symmetrize(self.de, atmlst)
+        self._finalize()
+        return self.de
     @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.info):
-        return grad_elec(self, xy, singlet, atmlst, self.verbose)
+    def grad_elec(self, xy, theta, singlet, atmlst=None, verbose=logger.info):
+        return grad_elec(self, xy, theta, singlet=singlet, atmlst=atmlst, verbose=self.verbose)
 
 
 Grad = Gradients

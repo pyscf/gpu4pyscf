@@ -812,6 +812,10 @@ class RisBase(lib.StreamObject):
             mdpol = cp.vstack((mdpol_alpha, mdpol_beta))
         return mdpol
 
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import tdrks_ris
+        return tdrks_ris.Gradients(self)
+
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
         super().__init__(mf, **kwargs)
