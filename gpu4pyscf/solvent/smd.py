@@ -298,12 +298,20 @@ def get_cds_legacy(smdobj):
                     ctypes.byref(gcds), ctypes.byref(areacds), dcds)
     return gcds.value / hartree2kcal, dcds
 
-class SMD(pcm.PCM):
+class SMD(lib.StreamObject):
+    from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
+
     _keys = {
-        'intopt', 'method', 'e_cds', 'solvent_descriptors', 'r_probe', 'sasa_ng'
+        'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
+        'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
+        'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'frozen_dm0_for_finite_difference_without_response',
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n',
+        'e_cds', 'solvent_descriptors', 'sasa_ng'
     }
+
     def __init__(self, mol, solvent=''):
-        super().__init__(mol)
+        pcm.PCM.__init__(self, mol)
         self.vdw_scale = 1.0
         self.sasa_ng = 590 # quadrature grids for calculating SASA
         self.r_probe = 0.4/radii.BOHR
@@ -409,6 +417,17 @@ class SMD(pcm.PCM):
         v_ng = gto.mole.intor_cross(int2c2e, fakemol_nuc, fakemol_charge)
         v_grids_n = np.dot(atom_charges, v_ng)
         self.v_grids_n = cupy.asarray(v_grids_n)
+
+    kernel = pcm.PCM.kernel
+    _get_vind = pcm.PCM._get_vind
+    _get_qsym = pcm.PCM._get_qsym
+    _get_vgrids = pcm.PCM._get_vgrids
+    _get_v = pcm.PCM._get_v
+    _get_vmat = pcm.PCM._get_vmat
+    _B_dot_x = pcm.PCM._B_dot_x
+    left_multiply_R = pcm.PCM.left_multiply_R
+    left_solve_K = pcm.PCM.left_solve_K
+    if_method_in_CPCM_category = pcm.PCM.if_method_in_CPCM_category
 
     def get_cds(self):
         return get_cds_legacy(self)[0]

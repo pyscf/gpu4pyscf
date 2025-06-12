@@ -24,6 +24,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.solvent import smd
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
 from gpu4pyscf.hessian.jk import _ao2mo
+from gpu4pyscf.hessian.rhf import HessianBase
 
 def get_cds(smdobj):
     mol = smdobj.mol
@@ -58,20 +59,30 @@ def get_cds(smdobj):
     t1 = log.timer_debug1('solvent energy', *t1)
     return hess_cds # hartree
 
-def make_hess_object(hess_method):
-    '''For hess_method in vacuum, add nuclear Hessian of solvent smdobj'''
-    if hess_method.base.with_solvent.frozen:
-        raise RuntimeError('Frozen solvent model is not avialbe for energy hessian')
+def make_hess_object(base_method):
+    '''Create nuclear hessian object with solvent contributions for the given
+    solvent-attached method based on its hessian method in vaccum
+    '''
+    if isinstance(base_method, HessianBase):
+        # For backward compatibility. In gpu4pyscf-1.4 and older, the input
+        # argument is a hessian object.
+        base_method = base_method.base
 
-    name = (hess_method.base.with_solvent.__class__.__name__
-            + hess_method.__class__.__name__)
-    return lib.set_class(WithSolventHess(hess_method),
-                         (WithSolventHess, hess_method.__class__), name)
+    # Must be a solvent-attached method
+    with_solvent = base_method.with_solvent
+    if with_solvent.frozen:
+        raise RuntimeError('Frozen solvent model is not avialbe for Hessian')
+
+    vac_hess = base_method.undo_solvent().Hessian()
+    vac_hess.base = base_method
+    name = with_solvent.__class__.__name__ + vac_hess.__class__.__name__
+    return lib.set_class(WithSolventHess(vac_hess),
+                         (WithSolventHess, vac_hess.__class__), name)
 
 class WithSolventHess:
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'de_solvent', 'de_solute'}
+    _keys = {'de_solvent', 'de_solute', 'de_cds'}
 
     def __init__(self, hess_method):
         self.__dict__.update(hess_method.__dict__)
@@ -97,10 +108,10 @@ class WithSolventHess:
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         with lib.temporary_env(self.base.with_solvent, equilibrium_solvation=True):
-            logger.debug(self, 'Compute hessian from solvents')
-            self.de_solvent = self.base.with_solvent.hess(dm)
-        logger.debug(self, 'Compute hessian from solutes')
-        self.de_solute = super().kernel(*args, **kwargs)
+            logger.debug(self, 'Compute hessian from solutes')
+            self.de_solute = super().kernel(*args, **kwargs)
+        logger.debug(self, 'Compute hessian from solvents')
+        self.de_solvent = self.base.with_solvent.hess(dm)
         self.de_cds = get_cds(self.base.with_solvent)
         self.de = self.de_solute + self.de_solvent + self.de_cds
         return self.de

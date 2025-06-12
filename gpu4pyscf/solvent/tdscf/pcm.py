@@ -42,22 +42,24 @@ def make_tdscf_object(tda_method, equilibrium_solvation=False):
                          (WithSolventTDSCF, tda_method.__class__), name)
 
 
-def make_tdscf_gradient_object(tda_grad_method):
+def make_tdscf_gradient_object(td_base_method):
     '''For td_method in vacuum, add td of solvent pcmobj'''
     # The nuclear gradients of stable exited states should correspond to a
     # fully relaxed solvent. Strictly, the TDDFT exited states should be
     # solved using state-specific solvent model. Even if running LR-PCM for
     # the zeroth order TDDFT, the wavefunction should be comptued using the
     # same dielectric constant as the ground state (the zero-frequency eps).
-    if not tda_grad_method.base.with_solvent.equilibrium_solvation:
+    with_solvent = td_base_method.with_solvent
+    if not with_solvent.equilibrium_solvation:
         raise RuntimeError(
             'When computing gradients of PCM-TDDFT, equilibrium solvation should '
             'be employed. The PCM TDDFT should be initialized as\n'
             '    mf.TDDFT(equilibrium_solvation=True)')
-    name = (tda_grad_method.base._scf.with_solvent.__class__.__name__
-            + tda_grad_method.__class__.__name__)
-    return lib.set_class(WithSolventTDSCFGradient(tda_grad_method),
-                         (WithSolventTDSCFGradient, tda_grad_method.__class__), name)
+    td_grad = td_base_method.undo_solvent().Gradients()
+    td_grad.base = td_base_method
+    name = with_solvent.__class__.__name__ + td_grad.__class__.__name__
+    return lib.set_class(WithSolventTDSCFGradient(td_grad),
+                         (WithSolventTDSCFGradient, td_grad.__class__), name)
 
 
 class WithSolventTDSCF:
@@ -126,14 +128,11 @@ class WithSolventTDSCF:
 
     def undo_solvent(self):
         cls = self.__class__
-        name_mixin = self.base.with_solvent.__class__.__name__
+        name_mixin = self.with_solvent.__class__.__name__
         obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCF, name_mixin))
         return obj
 
-    def nuc_grad_method(self):
-        grad_method = super().nuc_grad_method()
-        return make_tdscf_gradient_object(grad_method)
-
+    nuc_grad_method = make_tdscf_gradient_object
     Gradients = nuc_grad_method
 
 
@@ -143,6 +142,12 @@ class WithSolventTDSCFGradient:
     def __init__(self, tda_grad_method):
         self.__dict__.update(tda_grad_method.__dict__)
 
+    def undo_solvent(self):
+        cls = self.__class__
+        name_mixin = self.base.with_solvent.__class__.__name__
+        obj = lib.view(self, lib.drop_class(cls, WithSolventTDSCFGradient, name_mixin))
+        del obj.with_solvent
+        return obj
 
     def solvent_response(self, dm):
         return self.base.with_solvent._B_dot_x(dm)*2.0 

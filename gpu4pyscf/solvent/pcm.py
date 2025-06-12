@@ -250,6 +250,8 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
     return D, S
 
 class PCM(lib.StreamObject):
+    from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
+
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
@@ -257,7 +259,6 @@ class PCM(lib.StreamObject):
         'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n'
     }
-    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mol):
         self.mol = mol
@@ -298,11 +299,6 @@ class PCM(lib.StreamObject):
         if self.atom_radii:
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         return self
-
-    def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        obj = to_cpu(self)
-        return obj.reset()
 
     def build(self, ng=None):
         if self.radii_table is None:

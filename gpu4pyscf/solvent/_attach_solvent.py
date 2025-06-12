@@ -140,17 +140,17 @@ class SCFWithSolvent(_Solvation):
             from gpu4pyscf.solvent.grad.pcm import make_grad_object
         else:
             from gpu4pyscf.solvent.grad.smd import make_grad_object
-        return make_grad_object(super().Gradients())
+        return make_grad_object(self)
 
     Gradients = nuc_grad_method
 
-    def Hessian(self, hess_method):
+    def Hessian(self):
         from gpu4pyscf.solvent.pcm import PCM
         if isinstance(self.with_solvent, PCM):
             from gpu4pyscf.solvent.hessian.pcm import make_hess_object
         else:
             from gpu4pyscf.solvent.hessian.smd import make_hess_object
-        return make_hess_object(super().Hessian())
+        return make_hess_object(self)
 
     def TDA(self, equilibrium_solvation=False, **kwargs):
         td = super().TDA()
