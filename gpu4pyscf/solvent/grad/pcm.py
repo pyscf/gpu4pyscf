@@ -489,8 +489,8 @@ def make_grad_object(base_method):
         raise RuntimeError('Frozen solvent model is not avialbe for energy gradients')
 
     # create the Gradients in vacuum. Cannot call super().Gradients() here
-    # because other dynamic corrections might be applied to the base_method. The
-    # super() class might discard these corrections .
+    # because other dynamic corrections might be applied to the base_method.
+    # Calling super().Gradients might discard these corrections.
     vac_grad = base_method.undo_solvent().Gradients()
     # The base method for vac_grad discards the with_solvent. Change its base to
     # the solvent-attached base method

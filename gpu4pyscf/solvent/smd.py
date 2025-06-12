@@ -454,6 +454,6 @@ class SMD(lib.StreamObject):
         return de_solvent
 
     def reset(self, mol=None):
-        super().reset(mol)
+        pcm.PCM.reset(self, mol)
         self.e_cds = None
         return self
