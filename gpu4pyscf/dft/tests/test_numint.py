@@ -17,8 +17,8 @@ import numpy as np
 import pyscf
 import cupy
 from pyscf import lib, scf
-from pyscf.dft import Grids
 from pyscf.dft.numint import NumInt as pyscf_numint
+from gpu4pyscf.dft import Grids
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
 from gpu4pyscf.dft import numint, gen_grid
@@ -44,16 +44,13 @@ H        0.000000   -0.755453   -0.471161''',
     mo_occ = mf.mo_occ
     dm0 = (mo_coeff[0]*mo_occ[0]).dot(mo_coeff[0].T)
 
-    grids_cpu = Grids(mol)
-    grids_cpu.level = 1
-    grids_cpu.build()
-
-    grids_gpu = grids_cpu.to_gpu()
+    grids_gpu = Grids(mol)
     grids_gpu.level = 1
     grids_gpu.build()
 
-    grids_gpu.weights = cupy.asarray(grids_gpu.weights)
-    grids_gpu.coords = cupy.asarray(grids_gpu.coords)
+    grids_cpu = grids_gpu.to_cpu()
+    grids_cpu.weights = cupy.asnumpy(grids_gpu.weights)
+    grids_cpu.coords = cupy.asnumpy(grids_gpu.coords)
 
 def tearDownModule():
     global mol, grids_cpu, grids_gpu
@@ -229,11 +226,11 @@ class KnownValues(unittest.TestCase):
             
             rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
             ref = ni_cpu.eval_rho(mol, ao_cpu, dm, xctype=xctype, hermi=0, with_lapl=False)
-            self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 10)
+            self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
 
             rho = ni_gpu.eval_rho(mol, ao_gpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
             ref = ni_cpu.eval_rho(mol, ao_cpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
-            self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 10)
+            self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
 
     def test_sparse_index(self):
         mol = pyscf.M(atom='''
