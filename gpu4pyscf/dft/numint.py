@@ -421,8 +421,11 @@ def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     '''
     ngrids_per_device = (ngrids + num_devices - 1) // num_devices
     ngrids_per_device = (ngrids_per_device + blksize - 1) // blksize * blksize
-    grid_start = min(device_id * ngrids_per_device, ngrids)
-    grid_end = min((device_id + 1) * ngrids_per_device, ngrids)
+    grid_start = device_id * ngrids_per_device
+    if grid_start >= ngrids:
+        grid_end = grid_start
+    else:
+        grid_end = min(grid_start + ngrids_per_device, ngrids)
     return grid_start, grid_end
 
 def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
@@ -452,6 +455,8 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
         grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug1(f"{ngrids_local} grids on Device {device_id}")
+        if ngrids_local <= 0:
+            return cupy.zeros((nao, nao)), 0, 0
 
         weights = cupy.empty([ngrids_local])
         if xctype == 'LDA':
@@ -864,6 +869,8 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         grid_start, grid_end = gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
+        if ngrids_local <= 0:
+            return 0, 0, cupy.zeros((2, nset, nao, nao))
 
         for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                      max_memory=None,
@@ -1071,6 +1078,8 @@ def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
+        if ngrids_local <= 0:
+            return cupy.zeros((nset, nao, nao))
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
@@ -1223,6 +1232,8 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         grid_end = min((device_id + 1) * ngrids_per_device, ngrids_glob)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
+        if ngrids_local <= 0:
+            return cupy.zeros((2, nao, nao))
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
