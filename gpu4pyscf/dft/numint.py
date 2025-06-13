@@ -422,10 +422,10 @@ def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     ngrids_per_device = (ngrids + num_devices - 1) // num_devices
     ngrids_per_device = (ngrids_per_device + blksize - 1) // blksize * blksize
     grid_start = device_id * ngrids_per_device
-    if grid_start >= ngrids:
-        grid_end = grid_start
-    else:
+    if grid_start < ngrids:
         grid_end = min(grid_start + ngrids_per_device, ngrids)
+    else:
+        grid_end = grid_start
     return grid_start, grid_end
 
 def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
@@ -1719,6 +1719,9 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         grid_start, grid_end = 0, ngrids
     else:
         grid_start, grid_end = grid_range
+    if grid_start >= grid_end:
+        return
+
     assert grid_start % MIN_BLK_SIZE == 0
     block_start = grid_start // MIN_BLK_SIZE
     block_end = (grid_end + MIN_BLK_SIZE - 1) // MIN_BLK_SIZE
