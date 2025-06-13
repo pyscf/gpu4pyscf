@@ -42,7 +42,7 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -53,9 +53,8 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -173,7 +172,7 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -184,9 +183,8 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -315,7 +313,7 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -326,9 +324,8 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -489,7 +486,7 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -500,9 +497,8 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -644,7 +640,7 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -655,9 +651,8 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -847,7 +842,7 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -858,9 +853,8 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -1123,7 +1117,7 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -1134,9 +1128,8 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -1265,7 +1258,7 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -1276,9 +1269,8 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -1436,7 +1428,7 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -1447,9 +1439,8 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -1680,7 +1671,7 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -1691,9 +1682,8 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -1885,7 +1875,7 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -1896,9 +1886,8 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -2229,7 +2218,7 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int ijk_idx = task0 + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -2238,13 +2227,15 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
         int img0 = sp_img_offsets[pair_ij];
+        __syncthreads();
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
-        gy[0] = 1.;
+        if (gout_id == 0) {
+            gy[0] = 1.;
+        }
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
@@ -2729,7 +2720,7 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -2740,9 +2731,8 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -2884,7 +2874,7 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -2895,9 +2885,8 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -3089,7 +3078,7 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -3100,9 +3089,8 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -3430,7 +3418,7 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -3441,9 +3429,8 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -3706,7 +3693,7 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         int ijk_idx = task0 + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -3715,13 +3702,15 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
         int img0 = sp_img_offsets[pair_ij];
+        __syncthreads();
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
-        gy[0] = 1.;
+        if (gout_id == 0) {
+            gy[0] = 1.;
+        }
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
@@ -4186,16 +4175,6 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
         gout_stride = 4;
         break;
     }
-
-#if CUDA_VERSION >= 12040
-    switch (kij) {
-    case 0: nsp_per_block *= 2; break;
-    case 5: nsp_per_block *= 2; break;
-    case 10: nsp_per_block *= 2; break;
-    case 25: nsp_per_block *= 2; break;
-    case 50: nsp_per_block *= 2; break;
-    }
-#endif
 
     dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
     int sp_blocks = (n_prim_pairs + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
