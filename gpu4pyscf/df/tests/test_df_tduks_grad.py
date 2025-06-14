@@ -174,7 +174,7 @@ def cal_mf(mol, xc):
         mf = scf.UHF(mol).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
     else:
         mf = dft.UKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
-        mf.grids.level=9
+        mf.grids.level=6
         mf.grids.prune = None
     mf.run()
     return mf

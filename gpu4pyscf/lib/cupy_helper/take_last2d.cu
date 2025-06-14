@@ -20,19 +20,20 @@
 #define COUNT_BLOCK     80
 
 __global__
-static void _take_last2d(double *a, const double *b, int *indices, int n)
+static void _take_last2d(double *a, const double *b, int *indices, int na, int nb)
 {
     size_t i = blockIdx.z;
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int k = blockIdx.y * blockDim.y + threadIdx.y;
-    if (j >= n || k >= n) {
+    if (j >= na || k >= na) {
         return;
     }
 
     int j_b = indices[j];
     int k_b = indices[k];
-    size_t off = i * n * n;
-    a[off + j * n + k] = b[off + j_b * n + k_b];
+    size_t offa = i * na * na;
+    size_t offb = i * nb * nb;
+    a[offa + j * na + k] = b[offb + j_b * nb + k_b];
 }
 
 __global__
@@ -57,13 +58,14 @@ static void _takebak(double *out, double *a, int *indices,
 }
 
 extern "C" {
-int take_last2d(cudaStream_t stream, double *a, const double *b, int *indices, int blk_size, int n)
+int take_last2d(cudaStream_t stream, double *a, const double *b, int *indices,
+                int blk_size, int na, int nb)
 {
     // reorder j and k in a[i,j,k] with indicies
-    int ntile = (n + THREADS - 1) / THREADS;
+    int ntile = (na + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile, blk_size);
-    _take_last2d<<<blocks, threads, 0, stream>>>(a, b, indices, n);
+    _take_last2d<<<blocks, threads, 0, stream>>>(a, b, indices, na, nb);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

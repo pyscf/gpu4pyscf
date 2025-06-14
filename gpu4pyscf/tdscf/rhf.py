@@ -198,7 +198,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
         if xctype == 'LDA':
             ao_deriv = 0
             for ao, mask, weight, coords \
-                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, blksize=67200):
+                    in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
                 mo_coeff_mask = mo_coeff[mask]
                 rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
                                     mo_occ, mask, xctype, with_lapl=False)
