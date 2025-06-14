@@ -108,6 +108,9 @@ class KnownValues(unittest.TestCase):
         print('------hybrid GGA Cart testing--------')
         _check_grad(mol_cart, xc='B3LYP', disp=None)
     
+    def test_grad_hf(self):
+        print('------HF testing--------')
+        _check_grad(mol_sph, xc='hf', disp=None)
 if __name__ == "__main__":
     print("Full Tests for RKS Gradient")
     unittest.main()

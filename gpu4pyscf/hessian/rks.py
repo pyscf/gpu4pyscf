@@ -1972,7 +1972,7 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
         nset = mo1.shape[0]
         vmat = cupy.zeros((nset, nao, nao))
 
-        if xctype == 'LDA':
+        if xctype in ['LDA', 'HF']:
             ao_deriv = 0
         else:
             ao_deriv = 1
@@ -1992,7 +1992,8 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
             rho1 = numint.eval_rho4(_sorted_mol, ao, 2.0*occ_coeff_mask, mo1[:,mask],
                                     xctype=xctype, hermi=hermi)
             t1 = log.timer_debug2('eval rho', *t1)
-
+            if xctype == 'HF':
+                continue
             # precompute fxc_w
             if xctype == 'LDA':
                 fxc_w = fxc[0,0,p0:p1] * weights

@@ -114,6 +114,11 @@ class KnownValues(unittest.TestCase):
         print('-----testing wb97 Hessian----')
         mf = mol.RKS(xc='wb97').run()
         _vs_cpu(mf)
+    
+    def test_hessian_hf(self):
+        print('-----testing hf Hessian----')
+        mf = mol.RKS(xc='hf').run()
+        _vs_cpu(mf)
 
 if __name__ == "__main__":
     print("Full Tests for RKS Hessian")
