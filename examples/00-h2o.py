@@ -41,7 +41,7 @@ mol = pyscf.M(
 
 mf_GPU = rks.RKS(                      # restricted Kohn-Sham DFT
     mol,                               # pyscf.gto.object
-    xc='b3lyp'                         # xc funtionals, such as pbe0, wb97m-v, tpss,
+    xc='hf'                         # xc funtionals, such as pbe0, wb97m-v, tpss,
     ).density_fit()                    # density fitting
 
 mf_GPU.grids.atom_grid = (99,590)      # (99,590) lebedev grids, (75,302) is often enough
