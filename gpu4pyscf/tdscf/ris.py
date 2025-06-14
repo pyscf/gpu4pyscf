@@ -20,7 +20,7 @@ import cupyx.scipy.linalg as cpx_linalg
 from pyscf import gto, lib
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
 from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
-from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig
+from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, _krylov_family
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 
@@ -41,7 +41,7 @@ Please cite the TDDFT-ris method:
         20, no. 15 (2024): 6738-6746.
         (for efficient orbital truncation technique)
 
-    2.  Giannone, Giulia, and Fabio Della Sala.
+    3.  Giannone, Giulia, and Fabio Della Sala.
         Minimal auxiliary basis set for time-dependent density functional theory and
         comparison with tight-binding approximations: Application to silver nanoparticles.
         The Journal of Chemical Physics 153, no. 8 (2020).
@@ -151,15 +151,10 @@ def get_Ppq_to_Tpq(Ppq: cp.ndarray, lower_inv_eri2c: cp.ndarray):
         lower_inv_eri2c  (nauxao, nauxao)
         >> Ppq (nauxao, n_p*n_q) -> (nauxao, n_p, n_q)'''
 
-    if isinstance(Ppq, np.ndarray):
-        xp = np
-    else:
-        xp = cp
-
     n_P, n_p, n_q = Ppq.shape
     Ppq = Ppq.reshape(n_P, n_p*n_q)
 
-    T_pq = xp.dot(lower_inv_eri2c.T, Ppq)
+    T_pq = lower_inv_eri2c.T.dot(Ppq)
     T_pq = T_pq.reshape(-1, n_p, n_q)
 
     return T_pq
@@ -242,8 +237,8 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(aosym=True, group_size=group_size, group_size_aux=group_size_aux,verbose=mol.verbose)
 
-    C_p = C_p[intopt._ao_idx,:].copy()
-    C_q = C_q[intopt._ao_idx,:].copy()
+    C_p = C_p[intopt._ao_idx,:]
+    C_q = C_q[intopt._ao_idx,:]
 
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
@@ -541,7 +536,6 @@ def gen_ibja_MVP(T_ia):
         '''
         nauxao, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
-        # assert n_occ == n_occ_v and n_vir == n_vir_v, "Shapes of V and T_ia must match"
 
         # Initialize result tensor
         ibja_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ia.dtype)
@@ -577,19 +571,56 @@ class RisBase(lib.StreamObject):
                 Ktrunc: float = 40.0, a_x: float = None, omega: float = None, 
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
                 nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
-                out_name: str = '', print_threshold: float = 0.05, GS: bool = False, 
+                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = False, 
                 single: bool = True, group_size: int = 256, group_size_aux: int = 256, 
                 in_ram: bool = True, verbose=None):
-
+        """
+        Args:
+            mf (object): Mean field object, typically obtained from a ground - state calculation.
+            theta (float, optional): Global scaling factor for the fitting basis exponent. 
+                                The relationship is defined as `alpha = theta/R_A^2`, where `alpha` is the Gaussian exponent 
+                                and `R_A` is tabulated semi-empirical radii for element A. Defaults to 0.2.
+            J_fit (str, optional): Fitting basis for the J matrix (`iajb` integrals). 
+                                   's' means only one s orbital per atom, 'sp' means adding one extra p orbital per atom. 
+                                   Defaults to 'sp', becasue more accurate than s.
+            K_fit (str, optional): Fitting basis for the K matrix (`ijab` and `ibja` integrals). 
+                                  's' means only one s orbital per atom, 
+                                  'sp' means adding one extra p orbital per atom. 
+                                   Defaults to 's', becasue 'sp' has no accuracy improvement.
+            Ktrunc (float, optional): Truncation threshold for the K matrix. Orbitals are discarded if:
+                                    - Occupied orbitals with energies < e_LUMO - Ktrunc
+                                    - Virtual orbitals with energies > e_HOMO + Ktrunc. Defaults to 40.0.
+            a_x (float, optional): Hartree-Fock component. By default, it will be assigned according 
+                                    to the `mf.xc` attribute. 
+                                    Will override the default value if provided.
+            omega (float, optional): Range-separated hybrid functional parameter. By default, it will be 
+                                    assigned according to the `mf.xc` attribute. 
+                                    Will override the default value if provided.
+            alpha (float, optional): Range-separated hybrid functional parameter. By default, it will be 
+                                    assigned according to the `mf.xc` attribute.
+                                    Will override the default value if provided.
+            beta (float, optional): Range-separated hybrid functional parameter. By default, it will be 
+                                    assigned according to the `mf.xc` attribute.
+            conv_tol (float, optional): Convergence tolerance for the Davidson iteration. Defaults to 1e-3.
+            nstates (int, optional): Number of excited states to be calculated. Defaults to 5.
+            max_iter (int, optional): Maximum number of iterations for the Davidson iteration. Defaults to 25.
+            spectra (bool, optional): Whether to calculate and dump the excitation spectra in G16 & Multiwfn style. 
+                                     Defaults to False.
+            out_name (str, optional): Output file name for the excitation spectra. Defaults to ''.
+            print_threshold (float, optional): Threshold for printing the transition coefficients. Defaults to 0.05.
+            gram_schmidt (bool, optional): Whether to calculate the ground state. Defaults to False.
+            single (bool, optional): Whether to use single precision. Defaults to True.
+            group_size (int, optional): Group size for the integral calculation. Defaults to 256.
+            group_size_aux (int, optional): Group size for the auxiliary integral calculation. Defaults to 256.
+            in_ram (bool, optional): Whether to perform calculations in RAM. Defaults to True.
+            verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
+        """
+        self.mf = mf
         self.single = single
 
         if single:
-            self.mf = mf.copy()
-            self.mf.mo_coeff = cp.asarray(mf.mo_coeff, dtype=cp.float32)
             self.dtype = cp.dtype(cp.float32)
-
         else:
-            self.mf = mf
             self.dtype = cp.dtype(cp.float64)
 
         self.theta = theta
@@ -605,10 +636,11 @@ class RisBase(lib.StreamObject):
         self.nstates = nstates
         self.max_iter = max_iter
         self.mol = mf.mol
+        self.mo_coeff = cp.asarray(mf.mo_coeff, dtype=self.dtype)
         self.spectra = spectra
         self.out_name = out_name
         self.print_threshold = print_threshold
-        self.GS = GS
+        self.gram_schmidt = gram_schmidt
         self.group_size = group_size
         self.group_size_aux = group_size_aux
 
@@ -622,6 +654,30 @@ class RisBase(lib.StreamObject):
         self.log = logger.new_logger(self)
         self.log.info(f'group_size {group_size}, group_size_aux {group_size_aux}')
     
+        ''' following attributes will be initialized in self.build() '''
+        self.n_occ = None
+        self.n_vir = None
+        self.rest_occ = None
+        self.rest_vir = None
+
+        self.C_occ_notrunc = None
+        self.C_vir_notrunc = None
+        self.C_occ_Ktrunc = None
+        self.C_vir_Ktrunc = None
+
+        self.delta_hdiag = None
+        self.hdiag = None
+        self.eri_tag = None
+
+        self.auxmol_J = None
+        self.auxmol_K = None
+        self.lower_inv_eri2c_J = None
+        self.lower_inv_eri2c_K = None
+
+        self.RKS = True
+        self.UKS = False
+
+
     def transition_dipole(self):
         '''
         transition dipole u
@@ -707,7 +763,7 @@ class RisBase(lib.StreamObject):
         log.info(f'alpha: {self.alpha}')
         log.info(f'beta: {self.beta}')
         log.info(f'a_x: {self.a_x}')
-        log.info(f'GS: {self.GS}')
+        log.info(f'gram_schmidt: {self.gram_schmidt}')
         log.info(f'single: {self.single}')
         log.info(f'group_size: {self.group_size}')
 
@@ -722,7 +778,7 @@ class RisBase(lib.StreamObject):
             self.eri_tag = '_sph'
         log.info(f'cartesian or spherical electron integral: {self.eri_tag}')
 
-        if self.mf.mo_coeff.ndim == 2:
+        if self.mo_coeff.ndim == 2:
             self.RKS = True
             self.UKS = False
             n_occ = int(sum(self.mf.mo_occ>0))
@@ -730,8 +786,8 @@ class RisBase(lib.StreamObject):
             self.n_occ = n_occ
             self.n_vir = n_vir
 
-            self.C_occ_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,:n_occ])
-            self.C_vir_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:])
+            self.C_occ_notrunc = cp.asfortranarray(self.mo_coeff[:,:n_occ])
+            self.C_vir_notrunc = cp.asfortranarray(self.mo_coeff[:,n_occ:])
             mo_energy = self.mf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
             vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
@@ -765,13 +821,14 @@ class RisBase(lib.StreamObject):
             log.info(f'rest_occ = {rest_occ}')
             log.info(f'rest_vir = {rest_vir}')
 
-            self.C_occ_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ-rest_occ:n_occ])
-            self.C_vir_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:n_occ+rest_vir])
+            self.C_occ_Ktrunc = cp.asfortranarray(self.mo_coeff[:,n_occ-rest_occ:n_occ])
+            self.C_vir_Ktrunc = cp.asfortranarray(self.mo_coeff[:,n_occ:n_occ+rest_vir])
 
             self.rest_occ = rest_occ
             self.rest_vir = rest_vir
 
-        elif self.mf.mo_coeff.ndim == 3:
+        elif self.mo_coeff.ndim == 3:
+            raise ValueError('TDA-ris does not support UKS method yet')
             ''' TODO UKS method '''
             self.RKS = False
             self.UKS = True
@@ -825,18 +882,9 @@ class RisBase(lib.StreamObject):
              
         self.log = log
 
-class TDA(RisBase):
-    def __init__(self, mf, **kwargs):
-        super().__init__(mf, **kwargs)
-        log = self.log
-        log.warn("TDA-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
-        log.info('TDA-ris initialized')
 
-    ''' ===========  RKS hybrid =========== '''
-    def get_RKS_TDA_hybrid_MVP(self):
-        ''' TDA RKS hybrid '''
+    def get_T_J(self):
         log = self.log
-
         log.info('==================== RIJ ====================')
         cpu0 = log.init_timer()
         
@@ -846,8 +894,11 @@ class TDA(RisBase):
                         in_ram=self._in_ram, single=self.single, log=log)
         
         log.timer('build T_ia_J', *cpu0)
-        log.info(get_memory_info('after RIJ'))
-        # release_memory()
+        log.info(get_memory_info('after T_ia_J'))
+        return T_ia_J
+    
+    def get_2T_K(self):
+        log = self.log
         log.info('==================== RIK ====================')
         cpu1 = log.init_timer()
 
@@ -859,13 +910,44 @@ class TDA(RisBase):
                                 in_ram=self._in_ram, single=self.single,log=log)
 
         log.timer('T_ij_K T_ab_K', *cpu1)
-        log.info(get_memory_info('after RIK'))
-        # release_memory()
+        log.info(get_memory_info('after T_ij_K T_ab_K'))
+        return T_ij_K, T_ab_K
+    
+    def get_3T_K(self):
+        log = self.log
+        log.info('==================== RIK ====================')
+        cpu1 = log.init_timer()
+        T_ia_K, T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K, 
+                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='JK', 
+                                omega=self.omega, alpha=self.alpha,beta=self.beta,
+                                group_size = self.group_size, group_size_aux =self.group_size_aux,
+                                in_ram=self._in_ram, single=self.single,log=log)
+
+        log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
+        log.info(get_memory_info('after T_ia_K T_ij_K T_ab_K'))
+        return T_ia_K, T_ij_K, T_ab_K
+    
+class TDA(RisBase):
+    def __init__(self, mf, **kwargs):
+        super().__init__(mf, **kwargs)
+        log = self.log
+        log.warn("TDA-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
+        log.info('TDA-ris initialized')
+
+
+    ''' ===========  RKS hybrid =========== '''
+    def get_RKS_TDA_hybrid_MVP(self):
+        ''' TDA RKS hybrid '''
+        log = self.log
+
+        T_ia_J = self.get_T_J()
+        
+        T_ij_K, T_ab_K = self.get_2T_K()
+
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
         iajb_MVP = gen_iajb_MVP(T_ia=T_ia_J)
         ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K, T_ab=T_ab_K)
-
 
         def RKS_TDA_hybrid_MVP(X):
             ''' hybrid or range-sparated hybrid, a_x > 0
@@ -899,14 +981,7 @@ class TDA(RisBase):
         '''hybrid RKS TDA'''
         log = self.log  
 
-        log.info('==================== RIJ ====================')
-        tt = time.time()
-        T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
-                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
-                        group_size = self.group_size, group_size_aux =self.group_size_aux,
-                        in_ram=self._in_ram, single=self.single, log=log)
-        
-        log.info(f'T_ia_J time {time.time() - tt:.1f} seconds')
+        T_ia_J = self.get_T_J()
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
         iajb_MVP = gen_iajb_MVP(T_ia=T_ia_J)
@@ -926,29 +1001,38 @@ class TDA(RisBase):
        
     #  TODO: UKS case
 
-    def kernel(self):
-
-        '''for TDA, pure and hybrid share the same form of
-                     AX = Xw
-            always use the Davidson solver
-            pure TDA is not using MZ=Zw^2 form
-        '''
-        self.build()
-        log = self.log
+    def gen_vind(self):
         if self.RKS:
-
+            self.build()
             if self.a_x != 0:
                 TDA_MVP, hdiag = self.get_RKS_TDA_hybrid_MVP()
 
             elif self.a_x == 0:
                 TDA_MVP, hdiag = self.get_RKS_TDA_pure_MVP()
+        else:
+            raise ValueError('TDA-ris does not support UKS method yet')
+        return TDA_MVP, hdiag
 
 
-        #  TODO: UKS case
+    def kernel(self):
 
-        energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP, hdiag=hdiag, N_states=self.nstates,
-                                    conv_tol=self.conv_tol, max_iter=self.max_iter, GS=self.GS,
-                                    single=self.single, verbose=log)
+        '''for TDA, pure and hybrid share the same form of
+                     AX = Xw
+            always use the Davidson solver
+            Unlike pure TDDFT, pure TDA is not using MZ=Zw^2 form
+        '''
+        log = self.log
+
+        TDA_MVP, hdiag = self.gen_vind()
+        solver = _krylov_family.Krylov(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
+                                              conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
+                                              single=self.single, verbose=log)
+        energies, X = solver.run()
+        # print(energies)
+        # energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP, hdiag=hdiag, N_states=self.nstates,
+        #                             conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
+        #                             single=self.single, verbose=log)
+        # print(energies)
 
         log.debug(f'check orthonormality of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
@@ -969,7 +1053,7 @@ class TDA(RisBase):
 
         return energies, X, oscillator_strength, rotatory_strength
 
-
+    
 class TDDFT(RisBase):
     def __init__(self, mf, **kwargs):
         super().__init__(mf, **kwargs)
@@ -984,29 +1068,9 @@ class TDDFT(RisBase):
 
         log.info(get_memory_info('before T_ia_J'))
 
-        log.info('==================== RIJ ====================')
-        cpu0 = log.init_timer()
+        T_ia_J = self.get_T_J()
 
-
-        T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
-                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
-                        group_size = self.group_size, group_size_aux =self.group_size_aux,
-                        in_ram=self._in_ram, single=self.single, log=log)
-
-        log.timer('T_ia_J', *cpu0)
-
-        log.info(get_memory_info('after T_ia_J'))
-
-        log.info('==================== RIK ====================')
-        cpu1 = log.init_timer()
-        T_ia_K, T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K, 
-                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='JK', 
-                                omega=self.omega, alpha=self.alpha,beta=self.beta,
-                                group_size = self.group_size, group_size_aux =self.group_size_aux,
-                                in_ram=self._in_ram, single=self.single,log=log)
-
-        log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
-        log.info(get_memory_info('after T_ia_K T_ij_K T_ab_K'))
+        T_ia_K, T_ij_K, T_ab_K = self.get_3T_K()
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
@@ -1117,7 +1181,7 @@ class TDDFT(RisBase):
 
             energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP, hdiag=hdiag,
                                                     N_states=self.nstates, conv_tol=self.conv_tol,
-                                                    max_iter=self.max_iter, GS=self.GS,
+                                                    max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                                     single=self.single, verbose=self.verbose)
 
         elif self.a_x == 0:
@@ -1129,7 +1193,7 @@ class TDDFT(RisBase):
                 TDDFT_pure_MVP, hdiag_sq = self.get_UKS_TDDFT_pure_MVP()
             energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP, hdiag=hdiag_sq,
                                             N_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
-                                            GS=self.GS, single=self.single, verbose=self.verbose)
+                                            gram_schmidt=self.gram_schmidt, single=self.single, verbose=self.verbose)
 
             energies = energies_sq**0.5
             Z = (energies**0.5).reshape(-1,1) * Z
@@ -1155,4 +1219,91 @@ class TDDFT(RisBase):
         self.rotatory_strength = rotatory_strength
 
         return energies, X, Y, oscillator_strength, rotatory_strength
+
+
+class StaticPolarizability(RisBase):
+    def __init__(self, mf, **kwargs):
+        super().__init__(mf, **kwargs)
+        log = self.log
+        log.warn("Static Polarizability-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
+        log.info('Static Polarizability-ris initialized')
+
+    ''' ===========  RKS hybrid =========== '''
+    def get_ApB_hybrid_MVP(self):
+        ''' RKS hybrid '''
+        log = self.log
+
+        T_ia_J = self.get_T_J()
+        
+        T_ia_K, T_ij_K, T_ab_K = self.get_3T_K()
+
+        hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
+
+        iajb_MVP = gen_iajb_MVP(T_ia=T_ia_J)
+        ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K, T_ab=T_ab_K)
+        ibja_MVP = gen_ibja_MVP(T_ia=T_ia_K)
+
+        def RKS_ApB_hybrid_MVP(X):
+            ''' hybrid or range-sparated hybrid, a_x > 0
+                return AX
+                (A+B)X = hdiag_MVP(X) + 4*iajb_MVP(X) - a_x*[ijab_MVP(X) + ibja_MVP(X)]
+                for RSH, a_x = 1
+  
+                if not MO truncation, then n_occ-rest_occ=0 and rest_vir=n_vir
+            '''
+            nstates = X.shape[0]
+            X = X.reshape(nstates, self.n_occ, self.n_vir)
+            cpu0 = log.init_timer()
+            ApBX = hdiag_MVP(X) 
+            ApBX += 4 * iajb_MVP(X) 
+            # log.timer('--iajb_MVP', *cpu0)
+
+            cpu1 = log.init_timer()
+            exchange =  ijab_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
+            exchange += ibja_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
+            # log.timer('--ijab_MVP', *cpu1)
+
+            ApBX[:,self.n_occ-self.rest_occ:,:self.rest_vir] -= self.a_x * exchange
+            ApBX = ApBX.reshape(nstates, self.n_occ*self.n_vir)
+
+            return ApBX
+
+        return RKS_ApB_hybrid_MVP, self.hdiag
+
+    def gen_vind(self):
+        self.build()
+        if self.RKS:
+            if self.a_x != 0:
+                TDA_MVP, hdiag = self.get_ApB_hybrid_MVP()
+
+            elif self.a_x == 0:
+                TDA_MVP, hdiag = self.get_ApB_pure_MVP()
+        else:
+            raise ValueError('ris does not support UKS method yet')
+        return TDA_MVP, hdiag
+
+
+    def kernel(self):
+        '''for static polarizability, the problem is to solve
+            (A+B)X = -(P+Q)
+            Q=P
+        '''
+        
+        log = self.log
+
+        TDA_MVP, hdiag = self.gen_vind()
+        transition_dipole = self.transition_dipole()
+
+        solver = _krylov_family.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, problem_type='linear',
+                                        rhs=-transition_dipole, conv_tol=self.conv_tol, max_iter=self.max_iter, 
+                                        gram_schmidt=self.gram_schmidt, single=self.single, verbose=log)
+        X = solver.run()
+
+        alpha = cp.dot(X, transition_dipole.T)*4
+
+        self.X = X
+        self.alpha = alpha
+
+        log.info(CITATION_INFO)
+        return X
 
