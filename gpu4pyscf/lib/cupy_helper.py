@@ -63,7 +63,9 @@ def print_mem_info():
     #stack_size_per_thread = cupy.cuda.runtime.deviceGetLimit(0x00)
     #mem_stack = stack_size_per_thread
     GB = 1024 * 1024 * 1024
-    print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB')
+    msg = f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB'
+    print(msg)
+    return msg
 
 def get_avail_mem():
     mempool = cupy.get_default_memory_pool()

@@ -728,6 +728,11 @@ class RHF(SCF):
 
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
+        if self.istype('_Solvation'):
+            raise RuntimeError(
+                'It is recommended to call density_fit() before applying a solvent model. '
+                'Calling density_fit() after the solvent model may result in '
+                'incorrect nuclear gradients, TDDFT, and other methods.')
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
 
     def newton(self):

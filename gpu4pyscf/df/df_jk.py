@@ -132,6 +132,11 @@ class _DFHF:
         return vj, vk
 
     def nuc_grad_method(self):
+        if self.istype('_Solvation'):
+            raise NotImplementedError(
+                'Gradients of solvent are not computed. '
+                'Solvent must be applied after density fitting method, e.g.\n'
+                'mf = mol.RKS().to_gpu().density_fit().PCM()')
         if isinstance(self, rks.RKS):
             from gpu4pyscf.df.grad import rks as rks_grad
             return rks_grad.Gradients(self)
@@ -149,6 +154,11 @@ class _DFHF:
     Gradients = nuc_grad_method
 
     def Hessian(self):
+        if self.istype('_Solvation'):
+            raise NotImplementedError(
+                'Hessian of solvent are not computed. '
+                'Solvent must be applied after density fitting method, e.g.\n'
+                'mf = mol.RKS().to_gpu().density_fit().PCM()')
         from gpu4pyscf.dft.rks import KohnShamDFT
         if isinstance(self, hf.RHF):
             if isinstance(self, KohnShamDFT):
