@@ -226,15 +226,14 @@ size_new    |------------------------------------------------|
     return sub_A_holder
 
 
-
-def gen_VP(sub_P_holder, V_holder, P, size_old, size_new):
+def gen_VP(sub_rhs_holder, V_holder, rhs, size_old, size_new):
     '''
-    [ V_old.T ] [P] = [P_old    ]
-    [ V_new.T ]       [V_new.T P]
+    [ V_old ] [rhs.T] = [V_old rhs.T]
+    [ V_new ]           [V_new rhs.T]
     '''
-    V_new = V_holder[:,size_old:size_new]
-    sub_P_holder[size_old:size_new,:] = cp.dot(V_new.T, P)
-    return sub_P_holder
+    V_new = V_holder[size_old:size_new:,:]
+    sub_rhs_holder[size_old:size_new,:] = cp.dot(V_new, rhs.T)
+    return sub_rhs_holder
 
 
 def gen_sub_pq(V_holder, W_holder, P, Q, VP_holder, WQ_holder, WP_holder, VQ_holder, size_old, size_new):
@@ -446,18 +445,24 @@ def VW_nKs_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
 def solve_AX_Xla_B(A, omega, Q):
     '''AX - XΩ  = Q
        A, Ω, Q are known, solve X
+       Q is column-wise vectors
+
+       Au = ua -> A = uau.T , u.Tu = uu.T = I,  u is column-wise vectors
+       (u a u.T) X - XΩ  = Q
+       u.T (u a u.T) X - u.T XΩ  = u.T Q
+       a (u.T X) - (u.T X)Ω  = (u.T Q)
+       au
     '''
-    Qnorm = cp.linalg.norm(Q, axis=0, keepdims = True)
+    Qnorm = cp.linalg.norm(Q, axis=0, keepdims=True)
     Q = Q/Qnorm
     N_vectors = len(omega)
     a, u = cp.linalg.eigh(A)
-    ub = cp.dot(u.T, Q)
-    ux = cp.empty_like(Q)
+    uq = cp.dot(u.T, Q)
+    ux = cp.zeros_like(Q)
     for k in range(N_vectors):
-        ux[:, k] = ub[:, k]/(a - omega[k])
+        ux[:, k] = uq[:, k]/(a - omega[k])
     X = cp.dot(u, ux)
     X *= Qnorm
-
     return X
 
 def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, k):

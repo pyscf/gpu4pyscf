@@ -23,7 +23,7 @@ import numpy as np
 import scipy.linalg
 import cupyx.scipy.linalg
 from gpu4pyscf.tdscf import math_helper
-import time
+from functools import partial
 from pyscf.lib.parameters import MAX_MEMORY
 from gpu4pyscf.lib import logger
 from pyscf.lib.linalg_helper import _sort_elast, _outprod_to_subspace
@@ -1198,7 +1198,7 @@ def Davidson(matrix_vector_product,
 
     if GS:
         log.info('Using Gram-Schmidt orthogonalization')
-        fill_holder = math_helper.Gram_Schmidt_fill_holder
+        fill_holder = partial(math_helper.Gram_Schmidt_fill_holder, double=True)
     else:
         log.info('Using non-orthogonalized Krylov subspace (nKs) method.')
 
