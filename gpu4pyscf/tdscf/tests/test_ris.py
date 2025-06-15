@@ -53,7 +53,7 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with PBE functional"""
         mf = self.mf_pbe
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -69,7 +69,7 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with PBE0 functional"""
         mf = self.mf_pbe0
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -84,7 +84,7 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with wB97x functional"""
         mf = self.mf_wb97x
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc = td.oscillator_strength.get()
@@ -100,7 +100,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris method with PBE functional"""
         mf = self.mf_pbe
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -116,7 +116,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris method with PBE0 functional"""
         mf = self.mf_pbe0
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -131,7 +131,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris method with wB97x functional"""
         mf = self.mf_wb97x
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc = td.oscillator_strength.get()
