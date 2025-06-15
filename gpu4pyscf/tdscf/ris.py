@@ -1024,11 +1024,10 @@ class TDA(RisBase):
         log = self.log
 
         TDA_MVP, hdiag = self.gen_vind()
-        solver = _krylov_family.Krylov(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
+        energies, X = _krylov_family.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                               single=self.single, verbose=log)
-        energies, X = solver.run()
-        # print(energies)
+
         # energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP, hdiag=hdiag, N_states=self.nstates,
         #                             conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
         #                             single=self.single, verbose=log)

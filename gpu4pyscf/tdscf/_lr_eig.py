@@ -1119,7 +1119,7 @@ def Davidson(matrix_vector_product,
                     N_states=20,
                     conv_tol=1e-5,
                     max_iter=25,
-                    GS=True,
+                    gram_schmidt=True,
                     single=False,
                     verbose=logger.INFO):
     '''
@@ -1144,7 +1144,7 @@ def Davidson(matrix_vector_product,
              convergence tolerance
         max_iter: int
              maximum iterations
-        GS: bool
+        gram_schmidt: bool
              use Gram-Schmidt orthogonalization
         single: bool
              use single precision
@@ -1196,7 +1196,7 @@ def Davidson(matrix_vector_product,
     '''
     V_holder = math_helper.TDA_diag_initial_guess(V_holder=V_holder, N_states=size_new, hdiag=hdiag)
 
-    if GS:
+    if gram_schmidt:
         log.info('Using Gram-Schmidt orthogonalization')
         fill_holder = partial(math_helper.Gram_Schmidt_fill_holder, double=True)
     else:
@@ -1247,7 +1247,7 @@ def Davidson(matrix_vector_product,
         omega[:N_states] are smallest N_states eigenvalues
         '''
         t0 = log.init_timer()
-        if GS:
+        if gram_schmidt:
             omega, x = cp.linalg.eigh(sub_A)
         else:
             s_holder = math_helper.gen_VW(s_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
@@ -1320,7 +1320,7 @@ def Davidson_Casida(matrix_vector_product,
                         N_states=20,
                         conv_tol=1e-5,
                         max_iter=25,
-                        GS=True,
+                        gram_schmidt=True,
                         single=False,
                         verbose=logger.NOTE):
     '''
@@ -1345,7 +1345,7 @@ def Davidson_Casida(matrix_vector_product,
             convergence tolerance
         max_iter: int
             maximum number of iterations
-        GS: bool
+        gram_schmidt: bool
             use Gram-Schmidt orthogonalization
         single: bool
             use single precision
@@ -1425,7 +1425,7 @@ def Davidson_Casida(matrix_vector_product,
                                                 N_states=size_new,
                                                 hdiag=hdiag)
 
-    if GS:
+    if gram_schmidt:
         log.info('Using Gram-Schmidt orthogonalization')
         fill_holder = math_helper.VW_Gram_Schmidt_fill_holder
     else:
@@ -1527,7 +1527,7 @@ def Davidson_Casida(matrix_vector_product,
                                                             hdiag=hdiag)
 
         '''
-        GS and symmetric orthonormalization
+        gram_schmidt and symmetric orthonormalization
         '''
         t0 = log.init_timer()
         size_old = size_new
