@@ -87,12 +87,10 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     double gout[GOUT_WIDTH];
 
     int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
-    for (int task_id = 0; task_id < ntasks; task_id += nksp_per_block) {
-        // convert task_id to ish, jsh, ksh
-        int ijk_idx = task_id + ksp_id;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 1;
+        int img1 = 0;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
@@ -101,11 +99,11 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
         int img0 = sp_img_offsets[pair_ij];
+        __syncthreads();
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
-            img_counts_in_warp[warp_id] = 0;
+            img_counts_in_warp[warp_id] = img1 - img0;
         }
-        atomicMax(&img_counts_in_warp[warp_id], img1-img0);
         __syncthreads();
 
         int nbas = envs.cell0_nbas * envs.bvk_ncells;
@@ -117,7 +115,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
         double aij = ai + aj;
         double cicj = ci * cj;
-        gy[0] = PI_FAC * cicj;
+        if (gout_id == 0) {
+            gy[0] = PI_FAC * cicj;
+        }
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -270,7 +270,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                         // g(...,k,l+1) = rkrl * g(...,k,l) + g(...,k+1,l)
                         if (lj > 0) {
                             __syncthreads();
-                            if (task_id < ntasks) {
+                            if (pair_ij_idx < bounds.n_prim_pairs) {
                                 int lk3 = (lk+1)*3;
                                 for (int m = gout_id; m < lk3; m += gout_stride) {
                                     int k = m / 3;
