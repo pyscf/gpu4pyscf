@@ -474,13 +474,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     elif problem_type in ['linear', 'shifted_linear']:
         return full_X
 
-def nested_krylov_solver(
-    matrix_vector_product, hdiag, problem_type='eigenvalue',
-    rhs=None, omega_shift=None, n_states=20, conv_tol=1e-5, 
-    max_iter=8, gram_schmidt=True, single=False, verbose=logger.INFO, 
-    init_mvp=None, precond_mvp=None, extra_init=3, extra_init_diag=8,
-    init_conv_tol=1e-3, init_max_iter=10,
-    precond_conv_tol=1e-2, precond_max_iter=10):
+def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
+        rhs=None, omega_shift=None, n_states=20, conv_tol=1e-5, 
+        max_iter=8, gram_schmidt=True, single=False, verbose=logger.INFO, 
+        init_mvp=None, precond_mvp=None, extra_init=3, extra_init_diag=8,
+        init_conv_tol=1e-3, init_max_iter=10,
+        precond_conv_tol=1e-2, precond_max_iter=10):
     """
     Wrapper for Krylov solver to handle preconditioned eigenvalue, linear, or shifted linear problems.
     requires the non-diagonal approximation of A matrix, i.e., ris approximation.
@@ -609,10 +608,12 @@ def test_krylov_solver():
                             problem_type='linear', rhs=rhs,
                             conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
     
-    solution_vectors = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+    solution_vectors_shifted = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
                             problem_type='shifted_linear', rhs=rhs, omega_shift=omega_shift,
                             conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
     
+    return eigenvalues, eigenvecters, solution_vectors, solution_vectors_shifted
+
 if __name__ == '__main__':
     test_krylov_solver()
     

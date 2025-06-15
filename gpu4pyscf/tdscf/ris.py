@@ -993,7 +993,9 @@ class TDA(RisBase):
             nstates = X.shape[0]
             X = X.reshape(nstates, self.n_occ, self.n_vir)
             AX = hdiag_MVP(X) 
+            cpu0 = log.init_timer()
             AX += 2 * iajb_MVP(X) 
+            log.timer('--iajb_MVP', *cpu0)
             AX = AX.reshape(nstates, self.n_occ*self.n_vir)
             return AX
 
@@ -1255,12 +1257,12 @@ class StaticPolarizability(RisBase):
             cpu0 = log.init_timer()
             ApBX = hdiag_MVP(X) 
             ApBX += 4 * iajb_MVP(X) 
-            # log.timer('--iajb_MVP', *cpu0)
+            log.timer('--iajb_MVP', *cpu0)
 
             cpu1 = log.init_timer()
             exchange =  ijab_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             exchange += ibja_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
-            # log.timer('--ijab_MVP', *cpu1)
+            log.timer('--ijab_MVP & ibja_MVP', *cpu1)
 
             ApBX[:,self.n_occ-self.rest_occ:,:self.rest_vir] -= self.a_x * exchange
             ApBX = ApBX.reshape(nstates, self.n_occ*self.n_vir)
