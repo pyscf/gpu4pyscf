@@ -19,11 +19,13 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -38,8 +40,8 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -112,17 +114,17 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(1, theta_rr, rw1, 512, 0, 1);
-                rys_roots(1, theta_fac*theta_rr, rw, 512, 0, 1);
+                double *rw1 = rw + 2*nksp_per_block;
+                rys_roots(1, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(1, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 1; ++irys) {
-                    rw[ irys*2   *512] *= theta_fac;
-                    rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 2; ++irys) {
-                    double wt = rw[(2*irys+1)*512];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
                     gout0 += 1 * 1 * wt;
                 }
             }
@@ -149,11 +151,13 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -168,8 +172,8 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -244,18 +248,18 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(1, theta_rr, rw1, 512, 0, 1);
-                rys_roots(1, theta_fac*theta_rr, rw, 512, 0, 1);
+                double *rw1 = rw + 2*nksp_per_block;
+                rys_roots(1, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(1, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 1; ++irys) {
-                    rw[ irys*2   *512] *= theta_fac;
-                    rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 2; ++irys) {
-                    double wt = rw[(2*irys+1)*512];
-                    double rt = rw[ 2*irys   *512];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_aij = rt_aa * ak;
                     double c0x = xjxi * aj_aij - xpq*rt_aij;
@@ -290,11 +294,13 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -309,8 +315,8 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -391,18 +397,18 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(2, theta_rr, rw1, 256, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_aij = rt_aa * ak;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -463,11 +469,13 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -482,8 +490,8 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -561,18 +569,18 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 2048;
-                rys_roots(2, theta_rr, rw1, 512, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 512, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *512] *= theta_fac;
-                    rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*512];
-                    double rt = rw[ 2*irys   *512];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_aij = rt_aa * ak;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -617,11 +625,13 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -636,8 +646,8 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -727,18 +737,18 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(2, theta_rr, rw1, 256, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_aij = rt_aa * ak;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -819,11 +829,13 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -838,8 +850,8 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -947,18 +959,18 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1536;
-                rys_roots(3, theta_rr, rw1, 256, 0, 1);
-                rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 6*nksp_per_block;
+                rys_roots(3, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(3, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_aij = rt_aa * ak;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -1094,11 +1106,13 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1113,8 +1127,8 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -1189,18 +1203,18 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(1, theta_rr, rw1, 512, 0, 1);
-                rys_roots(1, theta_fac*theta_rr, rw, 512, 0, 1);
+                double *rw1 = rw + 2*nksp_per_block;
+                rys_roots(1, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(1, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 1; ++irys) {
-                    rw[ irys*2   *512] *= theta_fac;
-                    rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 2; ++irys) {
-                    double wt = rw[(2*irys+1)*512];
-                    double rt = rw[ 2*irys   *512];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_ak = rt_aa * aij;
                     double cpx = xpq*rt_ak;
@@ -1235,11 +1249,13 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1254,8 +1270,8 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -1336,18 +1352,18 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(2, theta_rr, rw1, 256, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double b00 = .5 * rt_aa;
                     double rt_ak = rt_aa * aij;
@@ -1405,11 +1421,13 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1424,8 +1442,8 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -1524,18 +1542,18 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(2, theta_rr, rw1, 256, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double b00 = .5 * rt_aa;
                     double rt_ak = rt_aa * aij;
@@ -1648,11 +1666,13 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1667,8 +1687,8 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -1758,18 +1778,18 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(2, theta_rr, rw1, 256, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double b00 = .5 * rt_aa;
                     double rt_ak = rt_aa * aij;
@@ -1852,11 +1872,13 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1871,8 +1893,8 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -1998,18 +2020,18 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1536;
-                rys_roots(3, theta_rr, rw1, 256, 0, 1);
-                rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 6*nksp_per_block;
+                rys_roots(3, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(3, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double b00 = .5 * rt_aa;
                     double rt_ak = rt_aa * aij;
@@ -2189,11 +2211,13 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 2 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -2206,15 +2230,15 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    double *gx = rw + 768;
-    double *gy = gx + 1152;
-    double *gz = gy + 1152;
-    double *rjri = gz + 1152;
-    double *Rpq = rjri + 192;
+    double *gx = rw + 12 * nksp_per_block;
+    double *gy = gx + 18 * nksp_per_block;
+    double *gz = gy + 18 * nksp_per_block;
+    double *rjri = gz + 18 * nksp_per_block;
+    double *Rpq = rjri + nksp_per_block * 3;
     __shared__ int img_counts_in_warp[WARPS];
 
-    int ntasks = nksh * 2 * SPTAKS_PER_BLOCK;
-    for (int task0 = 0; task0 < ntasks; task0 += 64) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int task0 = 0; task0 < ntasks; task0 += nksp_per_block) {
         int ijk_idx = task0 + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
@@ -2315,13 +2339,13 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double ypq = yij - rk[1];
                 double zpq = zij - rk[2];
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rjri[0] = xjxi;
-                rjri[64] = yjyi;
-                rjri[128] = zjzi;
-                Rpq[0] = xpq;
-                Rpq[64] = ypq;
-                Rpq[128] = zpq;
-                Rpq[192] = rr;
+                rjri[0*nksp_per_block] = xjxi;
+                rjri[1*nksp_per_block] = yjyi;
+                rjri[2*nksp_per_block] = zjzi;
+                Rpq[0*nksp_per_block] = xpq;
+                Rpq[1*nksp_per_block] = ypq;
+                Rpq[2*nksp_per_block] = zpq;
+                Rpq[3*nksp_per_block] = rr;
             }
             for (int kp = 0; kp < kprim; ++kp) {
                 double ak = expk[kp];
@@ -2333,20 +2357,20 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
-                double theta_rr = theta * Rpq[192];
-                double *rw1 = rw + 384;
+                double theta_rr = theta * Rpq[3 * nksp_per_block];
+                double *rw1 = rw + 6*nksp_per_block;
                 __syncthreads();
-                rys_roots(3, theta_rr, rw1, 64, gout_id, 4);
-                rys_roots(3, theta_fac*theta_rr, rw, 64, gout_id, 4);
+                rys_roots(3, theta_rr, rw1, nksp_per_block, gout_id, 4);
+                rys_roots(3, theta_fac*theta_rr, rw, nksp_per_block, gout_id, 4);
                 __syncthreads();
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = gout_id; irys < 3; irys += 4) {
-                    rw[ irys*2   *64] *= theta_fac;
-                    rw[(irys*2+1)*64] *= sqrt_theta_fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
                     __syncthreads();
-                    double rt = rw[irys*128];
+                    double rt = rw[irys*2*nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_aij = rt_aa * ak;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -2354,87 +2378,87 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                     double b00 = .5 * rt_aa;
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64];
+                            gz[0] = rw[irys*2*nksp_per_block+nksp_per_block];
                         }
-                        double *_gx = gx + n * 1152;
-                        double xjxi = rjri[n * 64];
+                        double *_gx = gx + n * 18 * nksp_per_block;
+                        double xjxi = rjri[n * nksp_per_block];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n * 64];
+                        double c0x = Rpa - rt_aij * Rpq[n * nksp_per_block];
                         s0 = _gx[0];
                         s1 = c0x * s0;
-                        _gx[64] = s1;
+                        _gx[nksp_per_block] = s1;
                         s2 = c0x * s1 + 1 * b10 * s0;
-                        _gx[128] = s2;
+                        _gx[2*nksp_per_block] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
-                        _gx[192] = s2;
+                        _gx[3*nksp_per_block] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = c0x * s1 + 3 * b10 * s0;
-                        _gx[256] = s2;
-                        double cpx = rt_ak * Rpq[n * 64];
-                        s0 = _gx[0];
+                        _gx[4*nksp_per_block] = s2;
+                        double cpx = rt_ak * Rpq[n * nksp_per_block];
+                        s0 = _gx[0*nksp_per_block];
                         s1 = cpx * s0;
-                        _gx[576] = s1;
-                        s0 = _gx[64];
+                        _gx[9*nksp_per_block] = s1;
+                        s0 = _gx[1*nksp_per_block];
                         s1 = cpx * s0;
-                        s1 += 1 * b00 * _gx[0];
-                        _gx[640] = s1;
-                        s0 = _gx[128];
+                        s1 += 1 * b00 * _gx[0*nksp_per_block];
+                        _gx[10*nksp_per_block] = s1;
+                        s0 = _gx[2*nksp_per_block];
                         s1 = cpx * s0;
-                        s1 += 2 * b00 * _gx[64];
-                        _gx[704] = s1;
-                        s0 = _gx[192];
+                        s1 += 2 * b00 * _gx[1*nksp_per_block];
+                        _gx[11*nksp_per_block] = s1;
+                        s0 = _gx[3*nksp_per_block];
                         s1 = cpx * s0;
-                        s1 += 3 * b00 * _gx[128];
-                        _gx[768] = s1;
-                        s0 = _gx[256];
+                        s1 += 3 * b00 * _gx[2*nksp_per_block];
+                        _gx[12*nksp_per_block] = s1;
+                        s0 = _gx[4*nksp_per_block];
                         s1 = cpx * s0;
-                        s1 += 4 * b00 * _gx[192];
-                        _gx[832] = s1;
-                        s1 = _gx[256];
-                        s0 = _gx[192];
-                        _gx[384] = s1 - xjxi * s0;
+                        s1 += 4 * b00 * _gx[3*nksp_per_block];
+                        _gx[13*nksp_per_block] = s1;
+                        s1 = _gx[0+4*nksp_per_block];
+                        s0 = _gx[0+3*nksp_per_block];
+                        _gx[0+6*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[128];
-                        _gx[320] = s1 - xjxi * s0;
+                        s0 = _gx[0+2*nksp_per_block];
+                        _gx[0+5*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[64];
-                        _gx[256] = s1 - xjxi * s0;
+                        s0 = _gx[0+1*nksp_per_block];
+                        _gx[0+4*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[0];
-                        _gx[192] = s1 - xjxi * s0;
-                        s1 = _gx[384];
-                        s0 = _gx[320];
-                        _gx[512] = s1 - xjxi * s0;
+                        s0 = _gx[0+0*nksp_per_block];
+                        _gx[0+3*nksp_per_block] = s1 - xjxi * s0;
+                        s1 = _gx[0+6*nksp_per_block];
+                        s0 = _gx[0+5*nksp_per_block];
+                        _gx[0+8*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[256];
-                        _gx[448] = s1 - xjxi * s0;
+                        s0 = _gx[0+4*nksp_per_block];
+                        _gx[0+7*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[192];
-                        _gx[384] = s1 - xjxi * s0;
-                        s1 = _gx[832];
-                        s0 = _gx[768];
-                        _gx[960] = s1 - xjxi * s0;
+                        s0 = _gx[0+3*nksp_per_block];
+                        _gx[0+6*nksp_per_block] = s1 - xjxi * s0;
+                        s1 = _gx[576+4*nksp_per_block];
+                        s0 = _gx[576+3*nksp_per_block];
+                        _gx[576+6*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[704];
-                        _gx[896] = s1 - xjxi * s0;
+                        s0 = _gx[576+2*nksp_per_block];
+                        _gx[576+5*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[640];
-                        _gx[832] = s1 - xjxi * s0;
+                        s0 = _gx[576+1*nksp_per_block];
+                        _gx[576+4*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[576];
-                        _gx[768] = s1 - xjxi * s0;
-                        s1 = _gx[960];
-                        s0 = _gx[896];
-                        _gx[1088] = s1 - xjxi * s0;
+                        s0 = _gx[576+0*nksp_per_block];
+                        _gx[576+3*nksp_per_block] = s1 - xjxi * s0;
+                        s1 = _gx[576+6*nksp_per_block];
+                        s0 = _gx[576+5*nksp_per_block];
+                        _gx[576+8*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[832];
-                        _gx[1024] = s1 - xjxi * s0;
+                        s0 = _gx[576+4*nksp_per_block];
+                        _gx[576+7*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[768];
-                        _gx[960] = s1 - xjxi * s0;
+                        s0 = _gx[576+3*nksp_per_block];
+                        _gx[576+6*nksp_per_block] = s1 - xjxi * s0;
                     }
                     __syncthreads();
                     switch (gout_id) {
@@ -2697,11 +2721,13 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 16 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -2716,8 +2742,8 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * 16 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 512) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -2795,18 +2821,18 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 2048;
-                rys_roots(2, theta_rr, rw1, 512, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 512, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *512] *= theta_fac;
-                    rw[(irys*2+1)*512] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*512] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*512];
-                    double rt = rw[ 2*irys   *512];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_ak = rt_aa * aij;
                     double b01 = .5/ak * (1 - rt_ak);
@@ -2851,11 +2877,13 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -2870,8 +2898,8 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -2961,18 +2989,18 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1024;
-                rys_roots(2, theta_rr, rw1, 256, 0, 1);
-                rys_roots(2, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 4*nksp_per_block;
+                rys_roots(2, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(2, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 2; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 4; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double b00 = .5 * rt_aa;
                     double rt_ak = rt_aa * aij;
@@ -3055,11 +3083,13 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -3074,8 +3104,8 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -3201,18 +3231,18 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1536;
-                rys_roots(3, theta_rr, rw1, 256, 0, 1);
-                rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 6*nksp_per_block;
+                rys_roots(3, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(3, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double b00 = .5 * rt_aa;
                     double rt_ak = rt_aa * aij;
@@ -3395,11 +3425,13 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 8 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -3414,8 +3446,8 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * 8 * SPTAKS_PER_BLOCK;
-    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += 256) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
         int img1 = 0;
@@ -3523,18 +3555,18 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
                 double theta_rr = theta * rr;
-                double *rw1 = rw + 1536;
-                rys_roots(3, theta_rr, rw1, 256, 0, 1);
-                rys_roots(3, theta_fac*theta_rr, rw, 256, 0, 1);
+                double *rw1 = rw + 6*nksp_per_block;
+                rys_roots(3, theta_rr, rw1, nksp_per_block, 0, 1);
+                rys_roots(3, theta_fac*theta_rr, rw, nksp_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac) * fac;
                 for (int irys = 0; irys < 3; ++irys) {
-                    rw[ irys*2   *256] *= theta_fac;
-                    rw[(irys*2+1)*256] *= sqrt_theta_fac;
-                    rw1[(irys*2+1)*256] *= fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
+                    rw1[(irys*2+1)*nksp_per_block] *= fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
-                    double wt = rw[(2*irys+1)*256];
-                    double rt = rw[ 2*irys   *256];
+                    double wt = rw[(2*irys+1)*nksp_per_block];
+                    double rt = rw[ 2*irys   *nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double b00 = .5 * rt_aa;
                     double rt_ak = rt_aa * aij;
@@ -3664,11 +3696,13 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int sp_id = threadIdx.z;
     int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
+    int nsp_per_block = blockDim.z;
+    int nksp_per_block = 32 * nsp_per_block;
     int ksp_id = 32 * sp_id + ksh_id;
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * 2 * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -3681,15 +3715,15 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
-    double *gx = rw + 768;
-    double *gy = gx + 1152;
-    double *gz = gy + 1152;
-    double *rjri = gz + 1152;
-    double *Rpq = rjri + 192;
+    double *gx = rw + 12 * nksp_per_block;
+    double *gy = gx + 18 * nksp_per_block;
+    double *gz = gy + 18 * nksp_per_block;
+    double *rjri = gz + 18 * nksp_per_block;
+    double *Rpq = rjri + nksp_per_block * 3;
     __shared__ int img_counts_in_warp[WARPS];
 
-    int ntasks = nksh * 2 * SPTAKS_PER_BLOCK;
-    for (int task0 = 0; task0 < ntasks; task0 += 64) {
+    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    for (int task0 = 0; task0 < ntasks; task0 += nksp_per_block) {
         int ijk_idx = task0 + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
@@ -3790,13 +3824,13 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 double ypq = yij - rk[1];
                 double zpq = zij - rk[2];
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rjri[0] = xjxi;
-                rjri[64] = yjyi;
-                rjri[128] = zjzi;
-                Rpq[0] = xpq;
-                Rpq[64] = ypq;
-                Rpq[128] = zpq;
-                Rpq[192] = rr;
+                rjri[0*nksp_per_block] = xjxi;
+                rjri[1*nksp_per_block] = yjyi;
+                rjri[2*nksp_per_block] = zjzi;
+                Rpq[0*nksp_per_block] = xpq;
+                Rpq[1*nksp_per_block] = ypq;
+                Rpq[2*nksp_per_block] = zpq;
+                Rpq[3*nksp_per_block] = rr;
             }
             for (int kp = 0; kp < kprim; ++kp) {
                 double ak = expk[kp];
@@ -3808,20 +3842,20 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                 }
                 double omega2 = omega * omega;
                 double theta_fac = omega2 / (omega2 + theta);
-                double theta_rr = theta * Rpq[192];
-                double *rw1 = rw + 384;
+                double theta_rr = theta * Rpq[3 * nksp_per_block];
+                double *rw1 = rw + 6*nksp_per_block;
                 __syncthreads();
-                rys_roots(3, theta_rr, rw1, 64, gout_id, 4);
-                rys_roots(3, theta_fac*theta_rr, rw, 64, gout_id, 4);
+                rys_roots(3, theta_rr, rw1, nksp_per_block, gout_id, 4);
+                rys_roots(3, theta_fac*theta_rr, rw, nksp_per_block, gout_id, 4);
                 __syncthreads();
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = gout_id; irys < 3; irys += 4) {
-                    rw[ irys*2   *64] *= theta_fac;
-                    rw[(irys*2+1)*64] *= sqrt_theta_fac;
+                    rw[ irys*2   *nksp_per_block] *= theta_fac;
+                    rw[(irys*2+1)*nksp_per_block] *= sqrt_theta_fac;
                 }
                 for (int irys = 0; irys < 6; ++irys) {
                     __syncthreads();
-                    double rt = rw[irys*128];
+                    double rt = rw[irys*2*nksp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double rt_aij = rt_aa * ak;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -3830,75 +3864,75 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
                     double b01 = .5/ak * (1 - rt_ak);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64];
+                            gz[0] = rw[irys*2*nksp_per_block+nksp_per_block];
                         }
-                        double *_gx = gx + n * 1152;
-                        double xjxi = rjri[n * 64];
+                        double *_gx = gx + n * 18 * nksp_per_block;
+                        double xjxi = rjri[n * nksp_per_block];
                         double Rpa = xjxi * aj_aij;
-                        double c0x = Rpa - rt_aij * Rpq[n * 64];
+                        double c0x = Rpa - rt_aij * Rpq[n * nksp_per_block];
                         s0 = _gx[0];
                         s1 = c0x * s0;
-                        _gx[64] = s1;
+                        _gx[nksp_per_block] = s1;
                         s2 = c0x * s1 + 1 * b10 * s0;
-                        _gx[128] = s2;
+                        _gx[2*nksp_per_block] = s2;
                         s0 = s1;
                         s1 = s2;
                         s2 = c0x * s1 + 2 * b10 * s0;
-                        _gx[192] = s2;
-                        double cpx = rt_ak * Rpq[n * 64];
-                        s0 = _gx[0];
+                        _gx[3*nksp_per_block] = s2;
+                        double cpx = rt_ak * Rpq[n * nksp_per_block];
+                        s0 = _gx[0*nksp_per_block];
                         s1 = cpx * s0;
-                        _gx[384] = s1;
+                        _gx[6*nksp_per_block] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        _gx[768] = s2;
-                        s0 = _gx[64];
+                        _gx[12*nksp_per_block] = s2;
+                        s0 = _gx[1*nksp_per_block];
                         s1 = cpx * s0;
-                        s1 += 1 * b00 * _gx[0];
-                        _gx[448] = s1;
+                        s1 += 1 * b00 * _gx[0*nksp_per_block];
+                        _gx[7*nksp_per_block] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 1 * b00 * _gx[384];
-                        _gx[832] = s2;
-                        s0 = _gx[128];
+                        s2 += 1 * b00 * _gx[6*nksp_per_block];
+                        _gx[13*nksp_per_block] = s2;
+                        s0 = _gx[2*nksp_per_block];
                         s1 = cpx * s0;
-                        s1 += 2 * b00 * _gx[64];
-                        _gx[512] = s1;
+                        s1 += 2 * b00 * _gx[1*nksp_per_block];
+                        _gx[8*nksp_per_block] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 2 * b00 * _gx[448];
-                        _gx[896] = s2;
-                        s0 = _gx[192];
+                        s2 += 2 * b00 * _gx[7*nksp_per_block];
+                        _gx[14*nksp_per_block] = s2;
+                        s0 = _gx[3*nksp_per_block];
                         s1 = cpx * s0;
-                        s1 += 3 * b00 * _gx[128];
-                        _gx[576] = s1;
+                        s1 += 3 * b00 * _gx[2*nksp_per_block];
+                        _gx[9*nksp_per_block] = s1;
                         s2 = cpx*s1 + 1 * b01 *s0;
-                        s2 += 3 * b00 * _gx[512];
-                        _gx[960] = s2;
-                        s1 = _gx[192];
-                        s0 = _gx[128];
-                        _gx[320] = s1 - xjxi * s0;
+                        s2 += 3 * b00 * _gx[8*nksp_per_block];
+                        _gx[15*nksp_per_block] = s2;
+                        s1 = _gx[0+3*nksp_per_block];
+                        s0 = _gx[0+2*nksp_per_block];
+                        _gx[0+5*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[64];
-                        _gx[256] = s1 - xjxi * s0;
+                        s0 = _gx[0+1*nksp_per_block];
+                        _gx[0+4*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[0];
-                        _gx[192] = s1 - xjxi * s0;
-                        s1 = _gx[576];
-                        s0 = _gx[512];
-                        _gx[704] = s1 - xjxi * s0;
+                        s0 = _gx[0+0*nksp_per_block];
+                        _gx[0+3*nksp_per_block] = s1 - xjxi * s0;
+                        s1 = _gx[384+3*nksp_per_block];
+                        s0 = _gx[384+2*nksp_per_block];
+                        _gx[384+5*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[448];
-                        _gx[640] = s1 - xjxi * s0;
+                        s0 = _gx[384+1*nksp_per_block];
+                        _gx[384+4*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[384];
-                        _gx[576] = s1 - xjxi * s0;
-                        s1 = _gx[960];
-                        s0 = _gx[896];
-                        _gx[1088] = s1 - xjxi * s0;
+                        s0 = _gx[384+0*nksp_per_block];
+                        _gx[384+3*nksp_per_block] = s1 - xjxi * s0;
+                        s1 = _gx[768+3*nksp_per_block];
+                        s0 = _gx[768+2*nksp_per_block];
+                        _gx[768+5*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[832];
-                        _gx[1024] = s1 - xjxi * s0;
+                        s0 = _gx[768+1*nksp_per_block];
+                        _gx[768+4*nksp_per_block] = s1 - xjxi * s0;
                         s1 = s0;
-                        s0 = _gx[768];
-                        _gx[960] = s1 - xjxi * s0;
+                        s0 = _gx[768+0*nksp_per_block];
+                        _gx[768+3*nksp_per_block] = s1 - xjxi * s0;
                     }
                     __syncthreads();
                     switch (gout_id) {
@@ -4175,6 +4209,16 @@ int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bou
         gout_stride = 4;
         break;
     }
+
+#if CUDA_VERSION >= 12040
+    switch (kij) {
+    case 0: nsp_per_block *= 2; break;
+    case 5: nsp_per_block *= 2; break;
+    case 10: nsp_per_block *= 2; break;
+    case 25: nsp_per_block *= 2; break;
+    case 50: nsp_per_block *= 2; break;
+    }
+#endif
 
     dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
     int sp_blocks = (n_prim_pairs + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
