@@ -27,8 +27,6 @@ __constant__ Fold3Index c_i_in_fold3idx[495];
 
 extern __global__ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
-extern __global__ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                                   int threadsx, int threadsy, int tilex, int tiley);
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds);
 
 extern "C" {
@@ -59,7 +57,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 
-    if (!md_j_unrolled(&envs, &jk, &bounds)) {
+    if (1){//!md_j_unrolled(&envs, &jk, &bounds)) {
         int lij = li + lj;
         int lkl = lk + ll;
         int threads_ij = scheme[0];
@@ -92,24 +90,14 @@ int MD_build_j(double *vj, double *dm, int n_dm, int nao,
         int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
         int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
         dim3 blocks(blocks_ij, blocks_kl);
-//        if (li == lk && lj == ll) {
-//            int buflen = (order+1) * nsq_per_block
-//                + threads_ij * 4 + bsizey * 4
-//                + nf3ij * threads_ij + nf3kl * threads_kl
-//                + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
-//            buflen += max(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
-//            md_j_s4_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
-//                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
-//        } else {
-            int buflen = (order+1) * nsq_per_block
-                + threads_ij * 4 + bsizey * 4
-                + nf3ij * threads_ij * 2 + nf3kl * threads_kl * 2
-                + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
-            buflen += max(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
-            md_j_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
-                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
-        }
-//    }
+        int buflen = (order+1) * nsq_per_block
+            + threads_ij * 4 + bsizey * 4
+            + nf3ij * threads_ij * 2 + nf3kl * threads_kl * 2
+            + (order+1)*(order+2)*(order+3)/6 * nsq_per_block;
+        buflen += max(order*(order+1)*(order+2)/6, gout_stride) * nsq_per_block;
+        md_j_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
+            envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in MD_build_j: %s\n", cudaGetErrorString(err));
@@ -141,7 +129,6 @@ int init_mdj_constant(int shm_size)
     cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
     cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(md_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(md_j_s4_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

@@ -38,7 +38,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[1];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -85,6 +85,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+1200] = akl;
         }
     }
+
     for (int n = tx; n < 25; n += 16) {
         int i = n / 25;
         int tile = n % 25;
@@ -135,7 +136,9 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 1; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 1; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 25; ++batch_kl) {
             int task_kl0 = blockIdx.y * 400 + batch_kl * 16;
@@ -199,10 +202,13 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+0] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
             __syncthreads();
-            vj_cache[sq_id] = vj_ij;
+        }
+        // The last tile for ij
+#pragma unroll
+        for (int ij = 0; ij < 1; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
             for (int stride = 8; stride > 0; stride /= 2) {
                 __syncthreads();
                 if (ty < stride) {
@@ -211,15 +217,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             __syncthreads();
             if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            __syncthreads();
-        }
-        // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 1; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -263,7 +261,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[4];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -310,6 +308,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+1056] = akl;
         }
     }
+
     for (int n = tx; n < 22; n += 16) {
         int i = n / 22;
         int tile = n % 22;
@@ -360,7 +359,9 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 4; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 4; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 22; ++batch_kl) {
             int task_kl0 = blockIdx.y * 352 + batch_kl * 16;
@@ -423,69 +424,25 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+0] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 4; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 4; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -533,7 +490,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[4];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -580,6 +537,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+432] = akl;
         }
     }
+
     for (int n = tx; n < 36; n += 16) {
         int i = n / 9;
         int tile = n % 9;
@@ -630,7 +588,9 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 4; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 4; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 9; ++batch_kl) {
             int task_kl0 = blockIdx.y * 144 + batch_kl * 16;
@@ -745,81 +705,37 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+432] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_1 * dm_kl_cache[sq_kl+144];
-            vj_ij -= R_0_0_1_0 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_0_0 * dm_kl_cache[sq_kl+432];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_2 * dm_kl_cache[sq_kl+144];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+432];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+144];
-            vj_ij -= R_0_0_2_0 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+432];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+144];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_2_0_0 * dm_kl_cache[sq_kl+432];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[0] -= R_0_0_0_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[0] -= R_0_0_1_0 * dm_kl_cache[sq_kl+288];
+            vj_ij[0] -= R_0_1_0_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[1] -= R_0_0_0_2 * dm_kl_cache[sq_kl+144];
+            vj_ij[1] -= R_0_0_1_1 * dm_kl_cache[sq_kl+288];
+            vj_ij[1] -= R_0_1_0_1 * dm_kl_cache[sq_kl+432];
+            vj_ij[2] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] -= R_0_0_1_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[2] -= R_0_0_2_0 * dm_kl_cache[sq_kl+288];
+            vj_ij[2] -= R_0_1_1_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[3] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] -= R_0_1_0_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[3] -= R_0_1_1_0 * dm_kl_cache[sq_kl+288];
+            vj_ij[3] -= R_0_2_0_0 * dm_kl_cache[sq_kl+432];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 4; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 4; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -863,7 +779,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[10];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -910,6 +826,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+816] = akl;
         }
     }
+
     for (int n = tx; n < 17; n += 16) {
         int i = n / 17;
         int tile = n % 17;
@@ -960,7 +877,9 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 10; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 10; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 17; ++batch_kl) {
             int task_kl0 = blockIdx.y * 272 + batch_kl * 16;
@@ -1038,153 +957,31 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+0] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 10; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 10; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -1228,7 +1025,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[10];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -1275,6 +1072,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+336] = akl;
         }
     }
+
     for (int n = tx; n < 28; n += 16) {
         int i = n / 7;
         int tile = n % 7;
@@ -1325,7 +1123,9 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 10; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 10; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 7; ++batch_kl) {
             int task_kl0 = blockIdx.y * 112 + batch_kl * 16;
@@ -1476,183 +1276,61 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+336] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_1 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_0_1_0 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_1_0_0 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_2 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_3 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_0_2_0 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_0_3_0 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_2_0_0 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+112];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+224];
-            vj_ij -= R_0_3_0_0 * dm_kl_cache[sq_kl+336];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[0] -= R_0_0_0_1 * dm_kl_cache[sq_kl+112];
+            vj_ij[0] -= R_0_0_1_0 * dm_kl_cache[sq_kl+224];
+            vj_ij[0] -= R_0_1_0_0 * dm_kl_cache[sq_kl+336];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[1] -= R_0_0_0_2 * dm_kl_cache[sq_kl+112];
+            vj_ij[1] -= R_0_0_1_1 * dm_kl_cache[sq_kl+224];
+            vj_ij[1] -= R_0_1_0_1 * dm_kl_cache[sq_kl+336];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] -= R_0_0_0_3 * dm_kl_cache[sq_kl+112];
+            vj_ij[2] -= R_0_0_1_2 * dm_kl_cache[sq_kl+224];
+            vj_ij[2] -= R_0_1_0_2 * dm_kl_cache[sq_kl+336];
+            vj_ij[3] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] -= R_0_0_1_1 * dm_kl_cache[sq_kl+112];
+            vj_ij[3] -= R_0_0_2_0 * dm_kl_cache[sq_kl+224];
+            vj_ij[3] -= R_0_1_1_0 * dm_kl_cache[sq_kl+336];
+            vj_ij[4] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] -= R_0_0_1_2 * dm_kl_cache[sq_kl+112];
+            vj_ij[4] -= R_0_0_2_1 * dm_kl_cache[sq_kl+224];
+            vj_ij[4] -= R_0_1_1_1 * dm_kl_cache[sq_kl+336];
+            vj_ij[5] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] -= R_0_0_2_1 * dm_kl_cache[sq_kl+112];
+            vj_ij[5] -= R_0_0_3_0 * dm_kl_cache[sq_kl+224];
+            vj_ij[5] -= R_0_1_2_0 * dm_kl_cache[sq_kl+336];
+            vj_ij[6] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] -= R_0_1_0_1 * dm_kl_cache[sq_kl+112];
+            vj_ij[6] -= R_0_1_1_0 * dm_kl_cache[sq_kl+224];
+            vj_ij[6] -= R_0_2_0_0 * dm_kl_cache[sq_kl+336];
+            vj_ij[7] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] -= R_0_1_0_2 * dm_kl_cache[sq_kl+112];
+            vj_ij[7] -= R_0_1_1_1 * dm_kl_cache[sq_kl+224];
+            vj_ij[7] -= R_0_2_0_1 * dm_kl_cache[sq_kl+336];
+            vj_ij[8] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] -= R_0_1_1_1 * dm_kl_cache[sq_kl+112];
+            vj_ij[8] -= R_0_1_2_0 * dm_kl_cache[sq_kl+224];
+            vj_ij[8] -= R_0_2_1_0 * dm_kl_cache[sq_kl+336];
+            vj_ij[9] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] -= R_0_2_0_1 * dm_kl_cache[sq_kl+112];
+            vj_ij[9] -= R_0_2_1_0 * dm_kl_cache[sq_kl+224];
+            vj_ij[9] -= R_0_3_0_0 * dm_kl_cache[sq_kl+336];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 10; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 10; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -1700,7 +1378,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[10];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -1747,6 +1425,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+528] = akl;
         }
     }
+
     for (int n = tx; n < 110; n += 16) {
         int i = n / 11;
         int tile = n % 11;
@@ -1797,7 +1476,9 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 10; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 10; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 11; ++batch_kl) {
             int task_kl0 = blockIdx.y * 176 + batch_kl * 16;
@@ -2097,243 +1778,121 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+1584] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_1 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_0_1_0 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_1_0_0 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_2 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_3 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_0_0_4 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_0_1_3 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_1_0_3 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_0_2_0 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_0_1_3 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_0_3_1 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_0_3_0 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_0_3_1 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_0_4_0 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_1_3_0 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_2_0_0 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_1_0_3 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_3_0_1 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_1_3_0 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_3_1_0 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+176];
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+352];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+528];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+704];
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+880];
-            vj_ij -= R_0_3_0_0 * dm_kl_cache[sq_kl+1056];
-            vj_ij += R_0_3_0_1 * dm_kl_cache[sq_kl+1232];
-            vj_ij += R_0_3_1_0 * dm_kl_cache[sq_kl+1408];
-            vj_ij += R_0_4_0_0 * dm_kl_cache[sq_kl+1584];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[0] -= R_0_0_0_1 * dm_kl_cache[sq_kl+176];
+            vj_ij[0] += R_0_0_0_2 * dm_kl_cache[sq_kl+352];
+            vj_ij[0] -= R_0_0_1_0 * dm_kl_cache[sq_kl+528];
+            vj_ij[0] += R_0_0_1_1 * dm_kl_cache[sq_kl+704];
+            vj_ij[0] += R_0_0_2_0 * dm_kl_cache[sq_kl+880];
+            vj_ij[0] -= R_0_1_0_0 * dm_kl_cache[sq_kl+1056];
+            vj_ij[0] += R_0_1_0_1 * dm_kl_cache[sq_kl+1232];
+            vj_ij[0] += R_0_1_1_0 * dm_kl_cache[sq_kl+1408];
+            vj_ij[0] += R_0_2_0_0 * dm_kl_cache[sq_kl+1584];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[1] -= R_0_0_0_2 * dm_kl_cache[sq_kl+176];
+            vj_ij[1] += R_0_0_0_3 * dm_kl_cache[sq_kl+352];
+            vj_ij[1] -= R_0_0_1_1 * dm_kl_cache[sq_kl+528];
+            vj_ij[1] += R_0_0_1_2 * dm_kl_cache[sq_kl+704];
+            vj_ij[1] += R_0_0_2_1 * dm_kl_cache[sq_kl+880];
+            vj_ij[1] -= R_0_1_0_1 * dm_kl_cache[sq_kl+1056];
+            vj_ij[1] += R_0_1_0_2 * dm_kl_cache[sq_kl+1232];
+            vj_ij[1] += R_0_1_1_1 * dm_kl_cache[sq_kl+1408];
+            vj_ij[1] += R_0_2_0_1 * dm_kl_cache[sq_kl+1584];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] -= R_0_0_0_3 * dm_kl_cache[sq_kl+176];
+            vj_ij[2] += R_0_0_0_4 * dm_kl_cache[sq_kl+352];
+            vj_ij[2] -= R_0_0_1_2 * dm_kl_cache[sq_kl+528];
+            vj_ij[2] += R_0_0_1_3 * dm_kl_cache[sq_kl+704];
+            vj_ij[2] += R_0_0_2_2 * dm_kl_cache[sq_kl+880];
+            vj_ij[2] -= R_0_1_0_2 * dm_kl_cache[sq_kl+1056];
+            vj_ij[2] += R_0_1_0_3 * dm_kl_cache[sq_kl+1232];
+            vj_ij[2] += R_0_1_1_2 * dm_kl_cache[sq_kl+1408];
+            vj_ij[2] += R_0_2_0_2 * dm_kl_cache[sq_kl+1584];
+            vj_ij[3] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] -= R_0_0_1_1 * dm_kl_cache[sq_kl+176];
+            vj_ij[3] += R_0_0_1_2 * dm_kl_cache[sq_kl+352];
+            vj_ij[3] -= R_0_0_2_0 * dm_kl_cache[sq_kl+528];
+            vj_ij[3] += R_0_0_2_1 * dm_kl_cache[sq_kl+704];
+            vj_ij[3] += R_0_0_3_0 * dm_kl_cache[sq_kl+880];
+            vj_ij[3] -= R_0_1_1_0 * dm_kl_cache[sq_kl+1056];
+            vj_ij[3] += R_0_1_1_1 * dm_kl_cache[sq_kl+1232];
+            vj_ij[3] += R_0_1_2_0 * dm_kl_cache[sq_kl+1408];
+            vj_ij[3] += R_0_2_1_0 * dm_kl_cache[sq_kl+1584];
+            vj_ij[4] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] -= R_0_0_1_2 * dm_kl_cache[sq_kl+176];
+            vj_ij[4] += R_0_0_1_3 * dm_kl_cache[sq_kl+352];
+            vj_ij[4] -= R_0_0_2_1 * dm_kl_cache[sq_kl+528];
+            vj_ij[4] += R_0_0_2_2 * dm_kl_cache[sq_kl+704];
+            vj_ij[4] += R_0_0_3_1 * dm_kl_cache[sq_kl+880];
+            vj_ij[4] -= R_0_1_1_1 * dm_kl_cache[sq_kl+1056];
+            vj_ij[4] += R_0_1_1_2 * dm_kl_cache[sq_kl+1232];
+            vj_ij[4] += R_0_1_2_1 * dm_kl_cache[sq_kl+1408];
+            vj_ij[4] += R_0_2_1_1 * dm_kl_cache[sq_kl+1584];
+            vj_ij[5] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] -= R_0_0_2_1 * dm_kl_cache[sq_kl+176];
+            vj_ij[5] += R_0_0_2_2 * dm_kl_cache[sq_kl+352];
+            vj_ij[5] -= R_0_0_3_0 * dm_kl_cache[sq_kl+528];
+            vj_ij[5] += R_0_0_3_1 * dm_kl_cache[sq_kl+704];
+            vj_ij[5] += R_0_0_4_0 * dm_kl_cache[sq_kl+880];
+            vj_ij[5] -= R_0_1_2_0 * dm_kl_cache[sq_kl+1056];
+            vj_ij[5] += R_0_1_2_1 * dm_kl_cache[sq_kl+1232];
+            vj_ij[5] += R_0_1_3_0 * dm_kl_cache[sq_kl+1408];
+            vj_ij[5] += R_0_2_2_0 * dm_kl_cache[sq_kl+1584];
+            vj_ij[6] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] -= R_0_1_0_1 * dm_kl_cache[sq_kl+176];
+            vj_ij[6] += R_0_1_0_2 * dm_kl_cache[sq_kl+352];
+            vj_ij[6] -= R_0_1_1_0 * dm_kl_cache[sq_kl+528];
+            vj_ij[6] += R_0_1_1_1 * dm_kl_cache[sq_kl+704];
+            vj_ij[6] += R_0_1_2_0 * dm_kl_cache[sq_kl+880];
+            vj_ij[6] -= R_0_2_0_0 * dm_kl_cache[sq_kl+1056];
+            vj_ij[6] += R_0_2_0_1 * dm_kl_cache[sq_kl+1232];
+            vj_ij[6] += R_0_2_1_0 * dm_kl_cache[sq_kl+1408];
+            vj_ij[6] += R_0_3_0_0 * dm_kl_cache[sq_kl+1584];
+            vj_ij[7] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] -= R_0_1_0_2 * dm_kl_cache[sq_kl+176];
+            vj_ij[7] += R_0_1_0_3 * dm_kl_cache[sq_kl+352];
+            vj_ij[7] -= R_0_1_1_1 * dm_kl_cache[sq_kl+528];
+            vj_ij[7] += R_0_1_1_2 * dm_kl_cache[sq_kl+704];
+            vj_ij[7] += R_0_1_2_1 * dm_kl_cache[sq_kl+880];
+            vj_ij[7] -= R_0_2_0_1 * dm_kl_cache[sq_kl+1056];
+            vj_ij[7] += R_0_2_0_2 * dm_kl_cache[sq_kl+1232];
+            vj_ij[7] += R_0_2_1_1 * dm_kl_cache[sq_kl+1408];
+            vj_ij[7] += R_0_3_0_1 * dm_kl_cache[sq_kl+1584];
+            vj_ij[8] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] -= R_0_1_1_1 * dm_kl_cache[sq_kl+176];
+            vj_ij[8] += R_0_1_1_2 * dm_kl_cache[sq_kl+352];
+            vj_ij[8] -= R_0_1_2_0 * dm_kl_cache[sq_kl+528];
+            vj_ij[8] += R_0_1_2_1 * dm_kl_cache[sq_kl+704];
+            vj_ij[8] += R_0_1_3_0 * dm_kl_cache[sq_kl+880];
+            vj_ij[8] -= R_0_2_1_0 * dm_kl_cache[sq_kl+1056];
+            vj_ij[8] += R_0_2_1_1 * dm_kl_cache[sq_kl+1232];
+            vj_ij[8] += R_0_2_2_0 * dm_kl_cache[sq_kl+1408];
+            vj_ij[8] += R_0_3_1_0 * dm_kl_cache[sq_kl+1584];
+            vj_ij[9] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] -= R_0_2_0_1 * dm_kl_cache[sq_kl+176];
+            vj_ij[9] += R_0_2_0_2 * dm_kl_cache[sq_kl+352];
+            vj_ij[9] -= R_0_2_1_0 * dm_kl_cache[sq_kl+528];
+            vj_ij[9] += R_0_2_1_1 * dm_kl_cache[sq_kl+704];
+            vj_ij[9] += R_0_2_2_0 * dm_kl_cache[sq_kl+880];
+            vj_ij[9] -= R_0_3_0_0 * dm_kl_cache[sq_kl+1056];
+            vj_ij[9] += R_0_3_0_1 * dm_kl_cache[sq_kl+1232];
+            vj_ij[9] += R_0_3_1_0 * dm_kl_cache[sq_kl+1408];
+            vj_ij[9] += R_0_4_0_0 * dm_kl_cache[sq_kl+1584];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 10; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 10; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -2377,7 +1936,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[20];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -2424,6 +1983,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+528] = akl;
         }
     }
+
     for (int n = tx; n < 11; n += 16) {
         int i = n / 11;
         int tile = n % 11;
@@ -2474,7 +2034,9 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 20; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 20; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 11; ++batch_kl) {
             int task_kl0 = blockIdx.y * 176 + batch_kl * 16;
@@ -2581,293 +2143,41 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+0] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+160] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+176] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+192] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+208] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+224] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+240] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+256] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+272] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+288] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+304] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[10] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[11] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[12] += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[13] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[14] += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[15] += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[16] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[17] += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[18] += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[19] += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 20; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 20; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -2883,18 +2193,14 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     }
 }
 
-// TILEX=32, TILEY=4
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
+// TILEX=32, TILEY=20
 __global__
-#endif
 void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 512;
-    int task_kl0 = blockIdx.y * 64;
+    int task_kl0 = blockIdx.y * 320;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
@@ -2911,7 +2217,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[20];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -2922,24 +2228,24 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     extern __shared__ double gamma_inc[];
     double *Rp_cache = gamma_inc + 1280;
     double *Rq_cache = Rp_cache + 64;
-    double *vj_cache = Rq_cache + 256;
+    double *vj_cache = Rq_cache + 1280;
     double *vj_ij_cache = vj_cache + 256;
     double *vj_kl_cache = vj_ij_cache + 320;
-    double *dm_ij_cache = vj_kl_cache + 256;
+    double *dm_ij_cache = vj_kl_cache + 1280;
     double *dm_kl_cache = dm_ij_cache + 320;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
     // zero out all cache;
-    for (int n = sq_id; n < 320; n += 256) {
+    for (int n = sq_id; n < 1344; n += 256) {
         Rp_cache[n] = 1.;
     }
-    for (int n = sq_id; n < 256; n += 256) {
+    for (int n = sq_id; n < 1280; n += 256) {
         vj_kl_cache[n] = 0.;
     }
     __syncthreads();
 
-    for (int n = sq_id; n < 64; n += 256) {
-        int task_kl = blockIdx.y * 64 + n;
+    for (int n = sq_id; n < 320; n += 256) {
+        int task_kl = blockIdx.y * 320 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -2953,19 +2259,20 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             double ykl = (ak * rk[1] + al * rl[1]) / akl;
             double zkl = (ak * rk[2] + al * rl[2]) / akl;
             Rq_cache[n+0] = xkl;
-            Rq_cache[n+64] = ykl;
-            Rq_cache[n+128] = zkl;
-            Rq_cache[n+192] = akl;
+            Rq_cache[n+320] = ykl;
+            Rq_cache[n+640] = zkl;
+            Rq_cache[n+960] = akl;
         }
     }
-    for (int n = tx; n < 16; n += 16) {
-        int i = n / 4;
-        int tile = n % 4;
-        int task_kl = blockIdx.y * 64 + tile * 16 + ty;
+
+    for (int n = tx; n < 80; n += 16) {
+        int i = n / 20;
+        int tile = n % 20;
+        int task_kl = blockIdx.y * 320 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
-            dm_kl_cache[sq_kl+i*64] = dm[kl_loc0+i];
+            dm_kl_cache[sq_kl+i*320] = dm[kl_loc0+i];
         }
     }
 
@@ -3008,17 +2315,19 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 20; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
         }
-        for (int batch_kl = 0; batch_kl < 4; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 64 + batch_kl * 16;
+        for (int ij = 0; ij < 20; ++ij) {
+            vj_ij[ij] = 0;
+        }
+        for (int batch_kl = 0; batch_kl < 20; ++batch_kl) {
+            int task_kl0 = blockIdx.y * 320 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
             if (qd_ij_max[batch_ij+blockIdx.x*32] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*4] + q_cond[pair_ij0] < bounds.cutoff) {
+                qd_kl_max[batch_kl+blockIdx.y*20] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -3039,9 +2348,9 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             double zij = Rp_cache[tx+32];
             double aij = Rp_cache[tx+48];
             double xkl = Rq_cache[sq_kl+0];
-            double ykl = Rq_cache[sq_kl+64];
-            double zkl = Rq_cache[sq_kl+128];
-            double akl = Rq_cache[sq_kl+192];
+            double ykl = Rq_cache[sq_kl+320];
+            double zkl = Rq_cache[sq_kl+640];
+            double akl = Rq_cache[sq_kl+960];
             fac = fac / (aij*akl*sqrt(aij+akl));
             double xpq = xij - xkl;
             double ypq = yij - ykl;
@@ -3161,7 +2470,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl += __shfl_down_sync(mask, vj_kl, offset);
             }
             if (tx == 0 && task_kl0+ty < npairs_kl) {
-                vj_kl_cache[sq_kl+64] += vj_kl;
+                vj_kl_cache[sq_kl+320] += vj_kl;
             }
             vj_kl = 0.;
             vj_kl -= R_0_0_1_0 * dm_ij_cache[tx+0];
@@ -3199,7 +2508,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl += __shfl_down_sync(mask, vj_kl, offset);
             }
             if (tx == 0 && task_kl0+ty < npairs_kl) {
-                vj_kl_cache[sq_kl+128] += vj_kl;
+                vj_kl_cache[sq_kl+640] += vj_kl;
             }
             vj_kl = 0.;
             vj_kl -= R_0_1_0_0 * dm_ij_cache[tx+0];
@@ -3231,366 +2540,114 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl += __shfl_down_sync(mask, vj_kl, offset);
             }
             if (tx == 0 && task_kl0+ty < npairs_kl) {
-                vj_kl_cache[sq_kl+192] += vj_kl;
+                vj_kl_cache[sq_kl+960] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_1_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_0_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_2 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_3 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_4 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_1_3 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_0_3 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_2_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_3 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_2_2 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_3_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_2 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_3_1 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_3_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_0_4_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_1_3_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_2_0_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+160] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+176] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_3 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_2_0_2 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+192] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+208] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+224] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_1_3_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_2_2_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+240] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_3_0_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+256] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_2 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_3_0_1 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+272] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_2_2_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_3_1_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+288] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_3_0_1 * dm_kl_cache[sq_kl+64];
-            vj_ij -= R_0_3_1_0 * dm_kl_cache[sq_kl+128];
-            vj_ij -= R_0_4_0_0 * dm_kl_cache[sq_kl+192];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+304] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[0] -= R_0_0_0_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[0] -= R_0_0_1_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[0] -= R_0_1_0_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[1] -= R_0_0_0_2 * dm_kl_cache[sq_kl+320];
+            vj_ij[1] -= R_0_0_1_1 * dm_kl_cache[sq_kl+640];
+            vj_ij[1] -= R_0_1_0_1 * dm_kl_cache[sq_kl+960];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] -= R_0_0_0_3 * dm_kl_cache[sq_kl+320];
+            vj_ij[2] -= R_0_0_1_2 * dm_kl_cache[sq_kl+640];
+            vj_ij[2] -= R_0_1_0_2 * dm_kl_cache[sq_kl+960];
+            vj_ij[3] += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] -= R_0_0_0_4 * dm_kl_cache[sq_kl+320];
+            vj_ij[3] -= R_0_0_1_3 * dm_kl_cache[sq_kl+640];
+            vj_ij[3] -= R_0_1_0_3 * dm_kl_cache[sq_kl+960];
+            vj_ij[4] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] -= R_0_0_1_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[4] -= R_0_0_2_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[4] -= R_0_1_1_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[5] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] -= R_0_0_1_2 * dm_kl_cache[sq_kl+320];
+            vj_ij[5] -= R_0_0_2_1 * dm_kl_cache[sq_kl+640];
+            vj_ij[5] -= R_0_1_1_1 * dm_kl_cache[sq_kl+960];
+            vj_ij[6] += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] -= R_0_0_1_3 * dm_kl_cache[sq_kl+320];
+            vj_ij[6] -= R_0_0_2_2 * dm_kl_cache[sq_kl+640];
+            vj_ij[6] -= R_0_1_1_2 * dm_kl_cache[sq_kl+960];
+            vj_ij[7] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] -= R_0_0_2_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[7] -= R_0_0_3_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[7] -= R_0_1_2_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[8] += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] -= R_0_0_2_2 * dm_kl_cache[sq_kl+320];
+            vj_ij[8] -= R_0_0_3_1 * dm_kl_cache[sq_kl+640];
+            vj_ij[8] -= R_0_1_2_1 * dm_kl_cache[sq_kl+960];
+            vj_ij[9] += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] -= R_0_0_3_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[9] -= R_0_0_4_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[9] -= R_0_1_3_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[10] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[10] -= R_0_1_0_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[10] -= R_0_1_1_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[10] -= R_0_2_0_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[11] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[11] -= R_0_1_0_2 * dm_kl_cache[sq_kl+320];
+            vj_ij[11] -= R_0_1_1_1 * dm_kl_cache[sq_kl+640];
+            vj_ij[11] -= R_0_2_0_1 * dm_kl_cache[sq_kl+960];
+            vj_ij[12] += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[12] -= R_0_1_0_3 * dm_kl_cache[sq_kl+320];
+            vj_ij[12] -= R_0_1_1_2 * dm_kl_cache[sq_kl+640];
+            vj_ij[12] -= R_0_2_0_2 * dm_kl_cache[sq_kl+960];
+            vj_ij[13] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[13] -= R_0_1_1_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[13] -= R_0_1_2_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[13] -= R_0_2_1_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[14] += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[14] -= R_0_1_1_2 * dm_kl_cache[sq_kl+320];
+            vj_ij[14] -= R_0_1_2_1 * dm_kl_cache[sq_kl+640];
+            vj_ij[14] -= R_0_2_1_1 * dm_kl_cache[sq_kl+960];
+            vj_ij[15] += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[15] -= R_0_1_2_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[15] -= R_0_1_3_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[15] -= R_0_2_2_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[16] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[16] -= R_0_2_0_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[16] -= R_0_2_1_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[16] -= R_0_3_0_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[17] += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[17] -= R_0_2_0_2 * dm_kl_cache[sq_kl+320];
+            vj_ij[17] -= R_0_2_1_1 * dm_kl_cache[sq_kl+640];
+            vj_ij[17] -= R_0_3_0_1 * dm_kl_cache[sq_kl+960];
+            vj_ij[18] += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[18] -= R_0_2_1_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[18] -= R_0_2_2_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[18] -= R_0_3_1_0 * dm_kl_cache[sq_kl+960];
+            vj_ij[19] += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[19] -= R_0_3_0_1 * dm_kl_cache[sq_kl+320];
+            vj_ij[19] -= R_0_3_1_0 * dm_kl_cache[sq_kl+640];
+            vj_ij[19] -= R_0_4_0_0 * dm_kl_cache[sq_kl+960];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 20; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 20; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
-    for (int n = tx; n < 16; n += 16) {
-        int i = n / 4;
-        int tile = n % 4;
-        int task_kl = blockIdx.y * 64 + tile * 16 + ty;
+    for (int n = tx; n < 80; n += 16) {
+        int i = n / 20;
+        int tile = n % 20;
+        int task_kl = blockIdx.y * 320 + tile * 16 + ty;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             int sq_kl = ty + tile * 16;
-            atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*64]);
+            atomicAdd(vj+kl_loc0+i, vj_kl_cache[sq_kl+i*320]);
         }
     }
 }
@@ -3619,7 +2676,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[20];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -3666,6 +2723,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+432] = akl;
         }
     }
+
     for (int n = tx; n < 90; n += 16) {
         int i = n / 9;
         int tile = n % 9;
@@ -3716,7 +2774,9 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 20; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 20; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 9; ++batch_kl) {
             int task_kl0 = blockIdx.y * 144 + batch_kl * 16;
@@ -4164,473 +3224,221 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+1296] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_1_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_0_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_2 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_3 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_0_4 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_1_3 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_0_3 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_4 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_0_5 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_1_3 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_1_4 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_2_3 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_0_3 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_0_4 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_1_3 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_0_3 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_2_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_1_3 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_3_1 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_3 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_1_4 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_2_2 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_2_3 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_3_2 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_1_3 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_2_2 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_1_2 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_3_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_3_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_4_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_3_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_2 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_2_3 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_3_1 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_3_2 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_4_1 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_2_2 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_3_1 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_2_1 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_3_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_0_3_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_0_4_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_0_4_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_0_5_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_1_3_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_1_3_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_1_4_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_2_3_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_2_0_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+160] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_1_0_3 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_3_0_1 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+176] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_3 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_1_0_4 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_1_1_3 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_1_2_2 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_2_0_2 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_2_0_3 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_2_1_2 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_3_0_2 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+192] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_1_3_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_3_1_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+208] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_1_1_3 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_1_2_2 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_1_3_1 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_2_1_2 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_2_2_1 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_3_1_1 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+224] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_1_2_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_1_3_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_1_3_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_1_4_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_2_2_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_2_2_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_2_3_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_3_2_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+240] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_3_0_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_3_0_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_3_1_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_4_0_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+256] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_2 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_2_0_3 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_2_1_2 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_2_2_1 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_3_0_1 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_3_0_2 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_3_1_1 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_4_0_1 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+272] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_2_1_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_2_2_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_2_2_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_2_3_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_3_1_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_3_1_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_3_2_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_4_1_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+288] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_3_0_1 * dm_kl_cache[sq_kl+144];
-            vj_ij += R_0_3_0_2 * dm_kl_cache[sq_kl+288];
-            vj_ij -= R_0_3_1_0 * dm_kl_cache[sq_kl+432];
-            vj_ij += R_0_3_1_1 * dm_kl_cache[sq_kl+576];
-            vj_ij += R_0_3_2_0 * dm_kl_cache[sq_kl+720];
-            vj_ij -= R_0_4_0_0 * dm_kl_cache[sq_kl+864];
-            vj_ij += R_0_4_0_1 * dm_kl_cache[sq_kl+1008];
-            vj_ij += R_0_4_1_0 * dm_kl_cache[sq_kl+1152];
-            vj_ij += R_0_5_0_0 * dm_kl_cache[sq_kl+1296];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+304] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[0] -= R_0_0_0_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[0] += R_0_0_0_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[0] -= R_0_0_1_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[0] += R_0_0_1_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[0] += R_0_0_2_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[0] -= R_0_1_0_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[0] += R_0_1_0_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[0] += R_0_1_1_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[0] += R_0_2_0_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[1] -= R_0_0_0_2 * dm_kl_cache[sq_kl+144];
+            vj_ij[1] += R_0_0_0_3 * dm_kl_cache[sq_kl+288];
+            vj_ij[1] -= R_0_0_1_1 * dm_kl_cache[sq_kl+432];
+            vj_ij[1] += R_0_0_1_2 * dm_kl_cache[sq_kl+576];
+            vj_ij[1] += R_0_0_2_1 * dm_kl_cache[sq_kl+720];
+            vj_ij[1] -= R_0_1_0_1 * dm_kl_cache[sq_kl+864];
+            vj_ij[1] += R_0_1_0_2 * dm_kl_cache[sq_kl+1008];
+            vj_ij[1] += R_0_1_1_1 * dm_kl_cache[sq_kl+1152];
+            vj_ij[1] += R_0_2_0_1 * dm_kl_cache[sq_kl+1296];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] -= R_0_0_0_3 * dm_kl_cache[sq_kl+144];
+            vj_ij[2] += R_0_0_0_4 * dm_kl_cache[sq_kl+288];
+            vj_ij[2] -= R_0_0_1_2 * dm_kl_cache[sq_kl+432];
+            vj_ij[2] += R_0_0_1_3 * dm_kl_cache[sq_kl+576];
+            vj_ij[2] += R_0_0_2_2 * dm_kl_cache[sq_kl+720];
+            vj_ij[2] -= R_0_1_0_2 * dm_kl_cache[sq_kl+864];
+            vj_ij[2] += R_0_1_0_3 * dm_kl_cache[sq_kl+1008];
+            vj_ij[2] += R_0_1_1_2 * dm_kl_cache[sq_kl+1152];
+            vj_ij[2] += R_0_2_0_2 * dm_kl_cache[sq_kl+1296];
+            vj_ij[3] += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] -= R_0_0_0_4 * dm_kl_cache[sq_kl+144];
+            vj_ij[3] += R_0_0_0_5 * dm_kl_cache[sq_kl+288];
+            vj_ij[3] -= R_0_0_1_3 * dm_kl_cache[sq_kl+432];
+            vj_ij[3] += R_0_0_1_4 * dm_kl_cache[sq_kl+576];
+            vj_ij[3] += R_0_0_2_3 * dm_kl_cache[sq_kl+720];
+            vj_ij[3] -= R_0_1_0_3 * dm_kl_cache[sq_kl+864];
+            vj_ij[3] += R_0_1_0_4 * dm_kl_cache[sq_kl+1008];
+            vj_ij[3] += R_0_1_1_3 * dm_kl_cache[sq_kl+1152];
+            vj_ij[3] += R_0_2_0_3 * dm_kl_cache[sq_kl+1296];
+            vj_ij[4] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] -= R_0_0_1_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[4] += R_0_0_1_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[4] -= R_0_0_2_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[4] += R_0_0_2_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[4] += R_0_0_3_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[4] -= R_0_1_1_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[4] += R_0_1_1_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[4] += R_0_1_2_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[4] += R_0_2_1_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[5] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] -= R_0_0_1_2 * dm_kl_cache[sq_kl+144];
+            vj_ij[5] += R_0_0_1_3 * dm_kl_cache[sq_kl+288];
+            vj_ij[5] -= R_0_0_2_1 * dm_kl_cache[sq_kl+432];
+            vj_ij[5] += R_0_0_2_2 * dm_kl_cache[sq_kl+576];
+            vj_ij[5] += R_0_0_3_1 * dm_kl_cache[sq_kl+720];
+            vj_ij[5] -= R_0_1_1_1 * dm_kl_cache[sq_kl+864];
+            vj_ij[5] += R_0_1_1_2 * dm_kl_cache[sq_kl+1008];
+            vj_ij[5] += R_0_1_2_1 * dm_kl_cache[sq_kl+1152];
+            vj_ij[5] += R_0_2_1_1 * dm_kl_cache[sq_kl+1296];
+            vj_ij[6] += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] -= R_0_0_1_3 * dm_kl_cache[sq_kl+144];
+            vj_ij[6] += R_0_0_1_4 * dm_kl_cache[sq_kl+288];
+            vj_ij[6] -= R_0_0_2_2 * dm_kl_cache[sq_kl+432];
+            vj_ij[6] += R_0_0_2_3 * dm_kl_cache[sq_kl+576];
+            vj_ij[6] += R_0_0_3_2 * dm_kl_cache[sq_kl+720];
+            vj_ij[6] -= R_0_1_1_2 * dm_kl_cache[sq_kl+864];
+            vj_ij[6] += R_0_1_1_3 * dm_kl_cache[sq_kl+1008];
+            vj_ij[6] += R_0_1_2_2 * dm_kl_cache[sq_kl+1152];
+            vj_ij[6] += R_0_2_1_2 * dm_kl_cache[sq_kl+1296];
+            vj_ij[7] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] -= R_0_0_2_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[7] += R_0_0_2_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[7] -= R_0_0_3_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[7] += R_0_0_3_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[7] += R_0_0_4_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[7] -= R_0_1_2_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[7] += R_0_1_2_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[7] += R_0_1_3_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[7] += R_0_2_2_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[8] += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] -= R_0_0_2_2 * dm_kl_cache[sq_kl+144];
+            vj_ij[8] += R_0_0_2_3 * dm_kl_cache[sq_kl+288];
+            vj_ij[8] -= R_0_0_3_1 * dm_kl_cache[sq_kl+432];
+            vj_ij[8] += R_0_0_3_2 * dm_kl_cache[sq_kl+576];
+            vj_ij[8] += R_0_0_4_1 * dm_kl_cache[sq_kl+720];
+            vj_ij[8] -= R_0_1_2_1 * dm_kl_cache[sq_kl+864];
+            vj_ij[8] += R_0_1_2_2 * dm_kl_cache[sq_kl+1008];
+            vj_ij[8] += R_0_1_3_1 * dm_kl_cache[sq_kl+1152];
+            vj_ij[8] += R_0_2_2_1 * dm_kl_cache[sq_kl+1296];
+            vj_ij[9] += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] -= R_0_0_3_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[9] += R_0_0_3_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[9] -= R_0_0_4_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[9] += R_0_0_4_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[9] += R_0_0_5_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[9] -= R_0_1_3_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[9] += R_0_1_3_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[9] += R_0_1_4_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[9] += R_0_2_3_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[10] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[10] -= R_0_1_0_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[10] += R_0_1_0_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[10] -= R_0_1_1_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[10] += R_0_1_1_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[10] += R_0_1_2_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[10] -= R_0_2_0_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[10] += R_0_2_0_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[10] += R_0_2_1_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[10] += R_0_3_0_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[11] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[11] -= R_0_1_0_2 * dm_kl_cache[sq_kl+144];
+            vj_ij[11] += R_0_1_0_3 * dm_kl_cache[sq_kl+288];
+            vj_ij[11] -= R_0_1_1_1 * dm_kl_cache[sq_kl+432];
+            vj_ij[11] += R_0_1_1_2 * dm_kl_cache[sq_kl+576];
+            vj_ij[11] += R_0_1_2_1 * dm_kl_cache[sq_kl+720];
+            vj_ij[11] -= R_0_2_0_1 * dm_kl_cache[sq_kl+864];
+            vj_ij[11] += R_0_2_0_2 * dm_kl_cache[sq_kl+1008];
+            vj_ij[11] += R_0_2_1_1 * dm_kl_cache[sq_kl+1152];
+            vj_ij[11] += R_0_3_0_1 * dm_kl_cache[sq_kl+1296];
+            vj_ij[12] += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[12] -= R_0_1_0_3 * dm_kl_cache[sq_kl+144];
+            vj_ij[12] += R_0_1_0_4 * dm_kl_cache[sq_kl+288];
+            vj_ij[12] -= R_0_1_1_2 * dm_kl_cache[sq_kl+432];
+            vj_ij[12] += R_0_1_1_3 * dm_kl_cache[sq_kl+576];
+            vj_ij[12] += R_0_1_2_2 * dm_kl_cache[sq_kl+720];
+            vj_ij[12] -= R_0_2_0_2 * dm_kl_cache[sq_kl+864];
+            vj_ij[12] += R_0_2_0_3 * dm_kl_cache[sq_kl+1008];
+            vj_ij[12] += R_0_2_1_2 * dm_kl_cache[sq_kl+1152];
+            vj_ij[12] += R_0_3_0_2 * dm_kl_cache[sq_kl+1296];
+            vj_ij[13] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[13] -= R_0_1_1_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[13] += R_0_1_1_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[13] -= R_0_1_2_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[13] += R_0_1_2_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[13] += R_0_1_3_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[13] -= R_0_2_1_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[13] += R_0_2_1_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[13] += R_0_2_2_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[13] += R_0_3_1_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[14] += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[14] -= R_0_1_1_2 * dm_kl_cache[sq_kl+144];
+            vj_ij[14] += R_0_1_1_3 * dm_kl_cache[sq_kl+288];
+            vj_ij[14] -= R_0_1_2_1 * dm_kl_cache[sq_kl+432];
+            vj_ij[14] += R_0_1_2_2 * dm_kl_cache[sq_kl+576];
+            vj_ij[14] += R_0_1_3_1 * dm_kl_cache[sq_kl+720];
+            vj_ij[14] -= R_0_2_1_1 * dm_kl_cache[sq_kl+864];
+            vj_ij[14] += R_0_2_1_2 * dm_kl_cache[sq_kl+1008];
+            vj_ij[14] += R_0_2_2_1 * dm_kl_cache[sq_kl+1152];
+            vj_ij[14] += R_0_3_1_1 * dm_kl_cache[sq_kl+1296];
+            vj_ij[15] += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[15] -= R_0_1_2_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[15] += R_0_1_2_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[15] -= R_0_1_3_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[15] += R_0_1_3_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[15] += R_0_1_4_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[15] -= R_0_2_2_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[15] += R_0_2_2_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[15] += R_0_2_3_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[15] += R_0_3_2_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[16] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[16] -= R_0_2_0_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[16] += R_0_2_0_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[16] -= R_0_2_1_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[16] += R_0_2_1_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[16] += R_0_2_2_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[16] -= R_0_3_0_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[16] += R_0_3_0_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[16] += R_0_3_1_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[16] += R_0_4_0_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[17] += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[17] -= R_0_2_0_2 * dm_kl_cache[sq_kl+144];
+            vj_ij[17] += R_0_2_0_3 * dm_kl_cache[sq_kl+288];
+            vj_ij[17] -= R_0_2_1_1 * dm_kl_cache[sq_kl+432];
+            vj_ij[17] += R_0_2_1_2 * dm_kl_cache[sq_kl+576];
+            vj_ij[17] += R_0_2_2_1 * dm_kl_cache[sq_kl+720];
+            vj_ij[17] -= R_0_3_0_1 * dm_kl_cache[sq_kl+864];
+            vj_ij[17] += R_0_3_0_2 * dm_kl_cache[sq_kl+1008];
+            vj_ij[17] += R_0_3_1_1 * dm_kl_cache[sq_kl+1152];
+            vj_ij[17] += R_0_4_0_1 * dm_kl_cache[sq_kl+1296];
+            vj_ij[18] += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[18] -= R_0_2_1_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[18] += R_0_2_1_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[18] -= R_0_2_2_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[18] += R_0_2_2_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[18] += R_0_2_3_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[18] -= R_0_3_1_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[18] += R_0_3_1_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[18] += R_0_3_2_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[18] += R_0_4_1_0 * dm_kl_cache[sq_kl+1296];
+            vj_ij[19] += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[19] -= R_0_3_0_1 * dm_kl_cache[sq_kl+144];
+            vj_ij[19] += R_0_3_0_2 * dm_kl_cache[sq_kl+288];
+            vj_ij[19] -= R_0_3_1_0 * dm_kl_cache[sq_kl+432];
+            vj_ij[19] += R_0_3_1_1 * dm_kl_cache[sq_kl+576];
+            vj_ij[19] += R_0_3_2_0 * dm_kl_cache[sq_kl+720];
+            vj_ij[19] -= R_0_4_0_0 * dm_kl_cache[sq_kl+864];
+            vj_ij[19] += R_0_4_0_1 * dm_kl_cache[sq_kl+1008];
+            vj_ij[19] += R_0_4_1_0 * dm_kl_cache[sq_kl+1152];
+            vj_ij[19] += R_0_5_0_0 * dm_kl_cache[sq_kl+1296];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 20; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 20; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -4647,11 +3455,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 }
 
 // TILEX=32, TILEY=32
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
 __global__
-#endif
 void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
@@ -4674,7 +3478,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[35];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -4721,6 +3525,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+1536] = akl;
         }
     }
+
     for (int n = tx; n < 32; n += 16) {
         int i = n / 32;
         int tile = n % 32;
@@ -4771,7 +3576,9 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 35; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 35; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 32; ++batch_kl) {
             int task_kl0 = blockIdx.y * 512 + batch_kl * 16;
@@ -4927,503 +3734,56 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+0] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_4 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+160] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+176] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+192] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+208] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_4_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+224] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+240] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+256] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+272] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+288] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+304] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+320] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+336] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+352] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+368] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_3_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+384] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+400] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+416] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+432] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+448] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+464] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+480] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+496] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+512] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+528] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_4_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+544] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] += R_0_0_0_4 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] += R_0_0_1_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[10] += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[11] += R_0_0_2_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[12] += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[13] += R_0_0_3_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[14] += R_0_0_4_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[15] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[16] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[17] += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[18] += R_0_1_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[19] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[20] += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[21] += R_0_1_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[22] += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[23] += R_0_1_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[24] += R_0_1_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[25] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[26] += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[27] += R_0_2_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[28] += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[29] += R_0_2_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[30] += R_0_2_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[31] += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[32] += R_0_3_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[33] += R_0_3_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[34] += R_0_4_0_0 * dm_kl_cache[sq_kl+0];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 35; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 35; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -5463,7 +3823,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[35];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -5510,6 +3870,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+768] = akl;
         }
     }
+
     for (int n = tx; n < 64; n += 16) {
         int i = n / 16;
         int tile = n % 16;
@@ -5560,7 +3921,9 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 35; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 35; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 16; ++batch_kl) {
             int task_kl0 = blockIdx.y * 256 + batch_kl * 16;
@@ -5900,608 +4263,161 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+768] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_1_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_0_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_3 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_4 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_1_3 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_0_3 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_4 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_0_5 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_1_4 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_0_4 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_2_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_3 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_2_2 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_3 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_1_4 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_2_3 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_1_3 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_3_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_3_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+160] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_2_3 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_3_2 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_2_2 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+176] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_3_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_4_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_3_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+192] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_3_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_4_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_3_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+208] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_4_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_0_4_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_0_5_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_1_4_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+224] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_1_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_0_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+240] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+256] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_3 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_0_2 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+272] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_3 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_0_4 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_1_3 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_0_3 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+288] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_2_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+304] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+320] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_1_3 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_2_2 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_1_2 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+336] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_2_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_3_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_2_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+352] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_2_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_3_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_2_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+368] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_3_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_1_3_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_1_4_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_2_3_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+384] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_2_1_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_3_0_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+400] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_3_0_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+416] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_0_3 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_2_1_2 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_3_0_2 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+432] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_1_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_2_2_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_3_1_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+448] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_1_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_2_2_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_3_1_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+464] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_2_2_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_2_3_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_3_2_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+480] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_3_0_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_3_1_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_4_0_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+496] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_1 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_3_0_2 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_3_1_1 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_4_0_1 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+512] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_1_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_3_1_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_3_2_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_4_1_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+528] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_4_0_0 * dm_kl_cache[sq_kl+0];
-            vj_ij -= R_0_4_0_1 * dm_kl_cache[sq_kl+256];
-            vj_ij -= R_0_4_1_0 * dm_kl_cache[sq_kl+512];
-            vj_ij -= R_0_5_0_0 * dm_kl_cache[sq_kl+768];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+544] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[0] -= R_0_0_0_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[0] -= R_0_0_1_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[0] -= R_0_1_0_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[1] -= R_0_0_0_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[1] -= R_0_0_1_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[1] -= R_0_1_0_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] -= R_0_0_0_3 * dm_kl_cache[sq_kl+256];
+            vj_ij[2] -= R_0_0_1_2 * dm_kl_cache[sq_kl+512];
+            vj_ij[2] -= R_0_1_0_2 * dm_kl_cache[sq_kl+768];
+            vj_ij[3] += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] -= R_0_0_0_4 * dm_kl_cache[sq_kl+256];
+            vj_ij[3] -= R_0_0_1_3 * dm_kl_cache[sq_kl+512];
+            vj_ij[3] -= R_0_1_0_3 * dm_kl_cache[sq_kl+768];
+            vj_ij[4] += R_0_0_0_4 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] -= R_0_0_0_5 * dm_kl_cache[sq_kl+256];
+            vj_ij[4] -= R_0_0_1_4 * dm_kl_cache[sq_kl+512];
+            vj_ij[4] -= R_0_1_0_4 * dm_kl_cache[sq_kl+768];
+            vj_ij[5] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] -= R_0_0_1_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[5] -= R_0_0_2_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[5] -= R_0_1_1_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[6] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] -= R_0_0_1_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[6] -= R_0_0_2_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[6] -= R_0_1_1_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[7] += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] -= R_0_0_1_3 * dm_kl_cache[sq_kl+256];
+            vj_ij[7] -= R_0_0_2_2 * dm_kl_cache[sq_kl+512];
+            vj_ij[7] -= R_0_1_1_2 * dm_kl_cache[sq_kl+768];
+            vj_ij[8] += R_0_0_1_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] -= R_0_0_1_4 * dm_kl_cache[sq_kl+256];
+            vj_ij[8] -= R_0_0_2_3 * dm_kl_cache[sq_kl+512];
+            vj_ij[8] -= R_0_1_1_3 * dm_kl_cache[sq_kl+768];
+            vj_ij[9] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] -= R_0_0_2_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[9] -= R_0_0_3_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[9] -= R_0_1_2_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[10] += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[10] -= R_0_0_2_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[10] -= R_0_0_3_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[10] -= R_0_1_2_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[11] += R_0_0_2_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[11] -= R_0_0_2_3 * dm_kl_cache[sq_kl+256];
+            vj_ij[11] -= R_0_0_3_2 * dm_kl_cache[sq_kl+512];
+            vj_ij[11] -= R_0_1_2_2 * dm_kl_cache[sq_kl+768];
+            vj_ij[12] += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[12] -= R_0_0_3_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[12] -= R_0_0_4_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[12] -= R_0_1_3_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[13] += R_0_0_3_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[13] -= R_0_0_3_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[13] -= R_0_0_4_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[13] -= R_0_1_3_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[14] += R_0_0_4_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[14] -= R_0_0_4_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[14] -= R_0_0_5_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[14] -= R_0_1_4_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[15] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[15] -= R_0_1_0_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[15] -= R_0_1_1_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[15] -= R_0_2_0_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[16] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[16] -= R_0_1_0_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[16] -= R_0_1_1_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[16] -= R_0_2_0_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[17] += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[17] -= R_0_1_0_3 * dm_kl_cache[sq_kl+256];
+            vj_ij[17] -= R_0_1_1_2 * dm_kl_cache[sq_kl+512];
+            vj_ij[17] -= R_0_2_0_2 * dm_kl_cache[sq_kl+768];
+            vj_ij[18] += R_0_1_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[18] -= R_0_1_0_4 * dm_kl_cache[sq_kl+256];
+            vj_ij[18] -= R_0_1_1_3 * dm_kl_cache[sq_kl+512];
+            vj_ij[18] -= R_0_2_0_3 * dm_kl_cache[sq_kl+768];
+            vj_ij[19] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[19] -= R_0_1_1_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[19] -= R_0_1_2_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[19] -= R_0_2_1_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[20] += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[20] -= R_0_1_1_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[20] -= R_0_1_2_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[20] -= R_0_2_1_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[21] += R_0_1_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[21] -= R_0_1_1_3 * dm_kl_cache[sq_kl+256];
+            vj_ij[21] -= R_0_1_2_2 * dm_kl_cache[sq_kl+512];
+            vj_ij[21] -= R_0_2_1_2 * dm_kl_cache[sq_kl+768];
+            vj_ij[22] += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[22] -= R_0_1_2_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[22] -= R_0_1_3_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[22] -= R_0_2_2_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[23] += R_0_1_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[23] -= R_0_1_2_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[23] -= R_0_1_3_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[23] -= R_0_2_2_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[24] += R_0_1_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[24] -= R_0_1_3_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[24] -= R_0_1_4_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[24] -= R_0_2_3_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[25] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[25] -= R_0_2_0_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[25] -= R_0_2_1_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[25] -= R_0_3_0_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[26] += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[26] -= R_0_2_0_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[26] -= R_0_2_1_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[26] -= R_0_3_0_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[27] += R_0_2_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[27] -= R_0_2_0_3 * dm_kl_cache[sq_kl+256];
+            vj_ij[27] -= R_0_2_1_2 * dm_kl_cache[sq_kl+512];
+            vj_ij[27] -= R_0_3_0_2 * dm_kl_cache[sq_kl+768];
+            vj_ij[28] += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[28] -= R_0_2_1_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[28] -= R_0_2_2_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[28] -= R_0_3_1_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[29] += R_0_2_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[29] -= R_0_2_1_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[29] -= R_0_2_2_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[29] -= R_0_3_1_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[30] += R_0_2_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[30] -= R_0_2_2_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[30] -= R_0_2_3_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[30] -= R_0_3_2_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[31] += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[31] -= R_0_3_0_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[31] -= R_0_3_1_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[31] -= R_0_4_0_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[32] += R_0_3_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[32] -= R_0_3_0_2 * dm_kl_cache[sq_kl+256];
+            vj_ij[32] -= R_0_3_1_1 * dm_kl_cache[sq_kl+512];
+            vj_ij[32] -= R_0_4_0_1 * dm_kl_cache[sq_kl+768];
+            vj_ij[33] += R_0_3_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[33] -= R_0_3_1_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[33] -= R_0_3_2_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[33] -= R_0_4_1_0 * dm_kl_cache[sq_kl+768];
+            vj_ij[34] += R_0_4_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[34] -= R_0_4_0_1 * dm_kl_cache[sq_kl+256];
+            vj_ij[34] -= R_0_4_1_0 * dm_kl_cache[sq_kl+512];
+            vj_ij[34] -= R_0_5_0_0 * dm_kl_cache[sq_kl+768];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 35; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 35; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -6541,7 +4457,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    double vj_ij;
+    double vj_ij[56];
     double vj_kl;
     unsigned int lane_id = sq_id % 32;
     unsigned int group_id = lane_id / 16;
@@ -6588,6 +4504,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+1248] = akl;
         }
     }
+
     for (int n = tx; n < 26; n += 16) {
         int i = n / 26;
         int tile = n % 26;
@@ -6638,7 +4555,9 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = ty; n < 56; n += 16) {
             dm_ij_cache[tx+n*16] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*16] = 0;
+        }
+        for (int ij = 0; ij < 56; ++ij) {
+            vj_ij[ij] = 0;
         }
         for (int batch_kl = 0; batch_kl < 26; ++batch_kl) {
             int task_kl0 = blockIdx.y * 416 + batch_kl * 16;
@@ -6870,797 +4789,77 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (tx == 0 && task_kl0+ty < npairs_kl) {
                 vj_kl_cache[sq_kl+0] += vj_kl;
             }
-            vj_ij = 0.;
-            vj_ij += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+0] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+16] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+32] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+48] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_4 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+64] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_0_5 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+80] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+96] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+112] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+128] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+144] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_1_4 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+160] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+176] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+192] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+208] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_2_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+224] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+240] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+256] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_3_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+272] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_4_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+288] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_4_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+304] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_0_5_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+320] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+336] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+352] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+368] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+384] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_0_4 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+400] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+416] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+432] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+448] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_1_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+464] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+480] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+496] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_2_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+512] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_3_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+528] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_3_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+544] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_1_4_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+560] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+576] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+592] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+608] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_0_3 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+624] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+640] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+656] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_1_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+672] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+688] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_2_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+704] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_2_3_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+720] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+736] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+752] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_0_2 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+768] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+784] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_1_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+800] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_3_2_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+816] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_4_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+832] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_4_0_1 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+848] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_4_1_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+864] += vj_cache[sq_id];
-            }
-            vj_ij = 0.;
-            vj_ij += R_0_5_0_0 * dm_kl_cache[sq_kl+0];
-            __syncthreads();
-            vj_cache[sq_id] = vj_ij;
-            for (int stride = 8; stride > 0; stride /= 2) {
-                __syncthreads();
-                if (ty < stride) {
-                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
-                }
-            }
-            __syncthreads();
-            if (ty == 0 && task_ij0+tx < npairs_ij) {
-                vj_ij_cache[tx+880] += vj_cache[sq_id];
-            }
+            vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl_cache[sq_kl+0];
+            vj_ij[1] += R_0_0_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[2] += R_0_0_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[3] += R_0_0_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[4] += R_0_0_0_4 * dm_kl_cache[sq_kl+0];
+            vj_ij[5] += R_0_0_0_5 * dm_kl_cache[sq_kl+0];
+            vj_ij[6] += R_0_0_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[7] += R_0_0_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[8] += R_0_0_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[9] += R_0_0_1_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[10] += R_0_0_1_4 * dm_kl_cache[sq_kl+0];
+            vj_ij[11] += R_0_0_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[12] += R_0_0_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[13] += R_0_0_2_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[14] += R_0_0_2_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[15] += R_0_0_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[16] += R_0_0_3_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[17] += R_0_0_3_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[18] += R_0_0_4_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[19] += R_0_0_4_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[20] += R_0_0_5_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[21] += R_0_1_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[22] += R_0_1_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[23] += R_0_1_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[24] += R_0_1_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[25] += R_0_1_0_4 * dm_kl_cache[sq_kl+0];
+            vj_ij[26] += R_0_1_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[27] += R_0_1_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[28] += R_0_1_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[29] += R_0_1_1_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[30] += R_0_1_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[31] += R_0_1_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[32] += R_0_1_2_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[33] += R_0_1_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[34] += R_0_1_3_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[35] += R_0_1_4_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[36] += R_0_2_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[37] += R_0_2_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[38] += R_0_2_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[39] += R_0_2_0_3 * dm_kl_cache[sq_kl+0];
+            vj_ij[40] += R_0_2_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[41] += R_0_2_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[42] += R_0_2_1_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[43] += R_0_2_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[44] += R_0_2_2_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[45] += R_0_2_3_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[46] += R_0_3_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[47] += R_0_3_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[48] += R_0_3_0_2 * dm_kl_cache[sq_kl+0];
+            vj_ij[49] += R_0_3_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[50] += R_0_3_1_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[51] += R_0_3_2_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[52] += R_0_4_0_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[53] += R_0_4_0_1 * dm_kl_cache[sq_kl+0];
+            vj_ij[54] += R_0_4_1_0 * dm_kl_cache[sq_kl+0];
+            vj_ij[55] += R_0_5_0_0 * dm_kl_cache[sq_kl+0];
             __syncthreads();
         }
         // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = ty; n < 56; n += 16) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*16]);
+#pragma unroll
+        for (int ij = 0; ij < 56; ++ij) {
+            vj_cache[sq_id] = vj_ij[ij];
+            for (int stride = 8; stride > 0; stride /= 2) {
+                __syncthreads();
+                if (ty < stride) {
+                    vj_cache[sq_id] += vj_cache[sq_id + stride*16];
+                }
+            }
+            __syncthreads();
+            if (ty == 0 && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+ij, vj_cache[sq_id]);
             }
         }
     }
@@ -7723,10 +4922,10 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds)
         dim3 blocks((npairs_ij + 511) / 512, (npairs_kl + 175) / 176);
         md_j_3_0<<<blocks, threads, 3040*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 28: { // lij=3, lkl=1, tilex=32, tiley=4
+    case 28: { // lij=3, lkl=1, tilex=32, tiley=20
         dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 511) / 512, (npairs_kl + 63) / 64);
-        md_j_3_1<<<blocks, threads, 3008*sizeof(double)>>>(*envs, *jk, *bounds);
+        dim3 blocks((npairs_ij + 511) / 512, (npairs_kl + 319) / 320);
+        md_j_3_1<<<blocks, threads, 6080*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
     case 29: { // lij=3, lkl=2, tilex=32, tiley=9
         dim3 threads(16, 16);

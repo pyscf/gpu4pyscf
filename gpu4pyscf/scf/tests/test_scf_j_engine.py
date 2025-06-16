@@ -40,6 +40,8 @@ def test_j_engine():
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     ref = get_jk(mol, dm, with_k=False)[0]
+    print(abs(lib.fp(vj1) - -2327.4715195591784))
+    print(abs(vj1 - ref).max())
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
     assert abs(vj1 - ref).max() < 1e-9
 
@@ -81,3 +83,5 @@ H  -5.8042 -1.0067 12.1503
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     assert abs(vj1 - ref).max() < 1e-9
+
+test_j_engine()
