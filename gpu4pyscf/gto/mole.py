@@ -52,6 +52,9 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
     elif allow_replica is False:
         allow_replica = -1
 
+    # Preallocate a buffer in cupy memory pool for small arrays held in bas_templates
+    workspace = cp.empty(30**2*100)
+    workspace = None # noqa: F841
     bas_templates = {}
     _bas = []
     _env = mol._env.copy()
@@ -91,7 +94,7 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
                     # remove normalization from contraction coefficients
                     c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
                     c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
-                    coeff.append(cp.asarray(c.reshape(nf*nctr, nf*nprim).T))
+                    coeff.append(cp.asarray(c.reshape(nf*nctr, nf*nprim).T, order='C'))
 
                     _env[pcoeff:pcoeff+nprim] = norm
                     bs = np.repeat(shell[np.newaxis], nprim, axis=0)
