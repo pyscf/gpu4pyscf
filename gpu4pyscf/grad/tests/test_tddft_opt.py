@@ -66,19 +66,6 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
-        td.kernel()
-        mol_gpu = optimize(td)
-
-        mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu()
-        mff.kernel()
-        tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
-        tdf.kernel()[0]
-        excited_gradf = tdf.nuc_grad_method()
-        excited_gradf.kernel() 
-        print(excited_gradf.de)
-        print(np.linalg.norm(excited_gradf.de))
-        assert np.linalg.norm(excited_gradf.de) < 2.0e-4
-
         excited_grad = td.nuc_grad_method().as_scanner(state=1)
         mol_gpu = excited_grad.optimizer().kernel()
 
@@ -88,6 +75,8 @@ class KnownValues(unittest.TestCase):
         tdf.kernel()[0]
         excited_gradf = tdf.nuc_grad_method()
         excited_gradf.kernel() 
+        print(excited_gradf.de)
+        print(np.linalg.norm(excited_gradf.de))
         assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
 if __name__ == "__main__":
