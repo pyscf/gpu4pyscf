@@ -390,50 +390,43 @@ def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             pair_mappings[i,j] = (t_ij[mask][idx], qd_tile_addrs, qd_batch_max)
     return pair_mappings
 
-def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
+def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
     lij = li + lj
     lkl = lk + ll
     nf3ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3kl = (lkl+1)*(lkl+2)*(lkl+3)//6
-    unit = order+1 + (order+1)*(order+2)*(2*order+3)//6
+    vj_ij_registers = 10
+    gout_stride_min = _nearest_power2(
+        int((nf3ij+vj_ij_registers-1) / vj_ij_registers), False)
+    Rt_size = (order+1)*(order+2)*(2*order+3)//6
+
+    unit = order+1 + Rt_size
+    #counts = shm_size // ((unit+gout_stride_min-1)//gout_stride_min*8)
     counts = shm_size // (unit*8)
     threads = THREADS
-    if counts >= threads:
-        nsq = threads
+    if counts * gout_stride_min >= threads:
+        nsq = threads // gout_stride_min
     else:
         nsq = _nearest_power2(counts)
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = tiley = min(64, 128 // (lkl+1))
-    s4 = False # s4 seems not faster
-    if li == lk and lj == ll:
-        if s4:
-            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
-        else:
-            ij = kl
-            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
-    else:
-        cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
+    tilex = min(32, 128 // (lkl+1))
+    # Guess number of batches for kl indices
+    tiley = (shm_size//8 - nsq*unit - (ij*4+ij*nf3ij)) // (kl*4+kl*nf3kl)
+    tiley = min(tilex, tiley, kl*2)
+    if tiley < 4:
+        tiley = 4
+    cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij + kl*nf3kl*tiley
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2
+        assert nsq >= 2
         kl = _nearest_power2(int(nsq**.5))
         ij = nsq // kl
-        if li == lk and lj == ll:
-            if s4:
-                cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
-            else:
-                ij = kl
-                cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
-        else:
-            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
+        if tiley > kl*2:
+            tiley //= 2
+        cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij + kl*nf3kl*tiley
     gout_stride = threads // nsq
-
-    # Adjust tiley, to effectively utilize the 28 registers per thread as cache
-    _KL_REGISTERS = 28 # see md_contract_j.cu
-    tiley = min(64, tiley, int(ij * gout_stride * _KL_REGISTERS / nf3kl))
-    if li == lk and lj == ll:
-        tilex = tiley
     return ij, kl, gout_stride, tilex, tiley

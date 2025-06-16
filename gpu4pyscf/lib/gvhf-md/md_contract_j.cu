@@ -25,7 +25,7 @@
 #include "gvhf-md/md_j.cuh"
 
 #define RT2_MAX 9
-#define IJ_SIZE 18
+#define IJ_SIZE 10
 #define KL_SIZE 28
 
 extern __constant__ uint16_t c_Rt_idx[];
@@ -93,6 +93,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
     int nsq_per_block = blockDim.x;
+    //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
     int lane_id = t_id % 32;
     int group_id = lane_id / threadsx;
@@ -100,9 +101,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
-    int xslots = gout_stride * threadsx;
     int yslots = gout_stride * threadsy;
-    int xslot_id = gout_id * threadsx + tx;
     int yslot_id = gout_id * threadsy + ty;
     int li = bounds.li;
     int lj = bounds.lj;
@@ -125,18 +124,17 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;
     extern __shared__ double gamma_inc[];
-    double *Rp_cache = gamma_inc + (order+1) * nsq_per_block;
-    double *Rq_cache = Rp_cache + threadsx*4;
-    double *dm_ij_cache = Rq_cache + bsizey*4;
-    double *dm_kl_cache = dm_ij_cache + nf3ij * threadsx;
-    double *vj_kl_cache = dm_kl_cache + nf3kl * threadsy;
-    double *Rt_buf = vj_kl_cache + nf3kl*threadsy;
+    double *vj_kl_cache = gamma_inc + (order+1) * nsq_per_block;
+    double *Rq_cache = vj_kl_cache + nf3kl*bsizey;
+    double *Rp_cache = Rq_cache + bsizey*4;
+    double *dm_ij_cache = Rp_cache + threadsx*4;
+    double *Rt_buf = dm_ij_cache + nf3ij * threadsx;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
 
     // zero out all cache;
-    for (int n = t_id; n < (threadsx+bsizey)*4; n += threads) {
-        Rp_cache[n] = 0.;
+    for (int n = t_id; n < nf3kl*bsizey + (threadsx+bsizey)*4; n += threads) {
+        vj_kl_cache[n] = 0;
     }
     __syncthreads();
     for (int n = t_id; n < bsizey; n += threads) {
@@ -240,15 +238,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
-            {
-                int xslots = gout_stride * threadsx;
-                int xslot_id = gout_id * threadsx + tx;
-                int kl_loc0 = pair_kl_loc[task_kl];
-                for (int n = xslot_id; n < nf3kl; n += xslots) {
-                    dm_kl_cache[ty+n*threadsy] = dm[kl_loc0+n];
-                    vj_kl_cache[ty+n*threadsy] = 0;
-                }
-            }
+            double *vj_kl = vj_kl_cache + batch_kl * nf3kl * threadsy + ty;
             double *Rt, *buf;
             if (order % 2 == 0) {
                 Rt = Rt_buf + sq_id;
@@ -341,6 +331,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             }
 
             Rt = Rt_buf;
+            int kl_loc0 = pair_kl_loc[task_kl];
             uint16_t *p1 = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lkl];
             int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lkl];
             for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
@@ -354,22 +345,12 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                         val += phase * s * dm_ij_cache[tx+i*threadsx];
                     }
                 }
-                //vj_cache[t_id] = val;
-                //for (int stride = threadsx/2; stride > 0; stride /= 2) {
-                //    __syncthreads();
-                //    if (tx < stride) {
-                //        vj_cache[t_id] += vj_cache[t_id + stride];
-                //    }
-                //}
-                //__syncthreads();
-                //if (tx == 0 && k < nf3kl) {
-                //    vj_kl_cache[ty+k*threadsy] += vj_cache[t_id];
-                //}
+                // reduce along ij
                 for (int offset = threadsx/2; offset > 0; offset /= 2) {
                     val += __shfl_down_sync(mask, val, offset);
                 }
                 if (tx == 0 && k < nf3kl) {
-                    vj_kl_cache[ty+k*threadsy] += val;
+                    vj_kl[k*threadsy] += val;
                 }
             }
 
@@ -380,14 +361,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 int off = i * nf3kl;
                 for (int k = 0; k < nf3kl; ++k) {
                     double s = Rt[sq_id+p1[off+k]*nsq_per_block];
-                    vj_ij[n] += efg_phase[k] * s * dm_kl_cache[ty+k*threadsy];
-                }
-            }
-            __syncthreads();
-            if (task_kl0+ty < npairs_kl) {
-                int kl_loc0 = pair_kl_loc[task_kl];
-                for (int n = xslot_id; n < nf3kl; n += xslots) {
-                    atomicAdd(vj+kl_loc0+n, vj_kl_cache[ty+n*threadsy]);
+                    vj_ij[n] += efg_phase[k] * s * dm[kl_loc0+k];
                 }
             }
         }
@@ -409,22 +383,15 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             }
         }
     }
-#if 0
-    {
-        int kl_counts = nf3kl * tiley;
-        for (int k = 0; k <= KL_SIZE; ++k) {
-            int n = k * xslots + xslot_id;
-            if (n >= kl_counts) break;
-            int tile = n / nf3kl;
-            int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
-            if (task_kl < npairs_kl) {
-                int kl_loc0 = pair_kl_loc[task_kl];
-                int kl = n % nf3kl;
-                atomicAdd(vj+kl_loc0+kl, vj_kl[k]);
-            }
+    __syncthreads();
+    for (int n = t_id; n < nf3kl * bsizey; n += threads) {
+        int task_kl = blockIdx.y * bsizey + n / nf3kl;
+        if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            int kl = n % nf3kl;
+            atomicAdd(vj+kl_loc0+kl, vj_kl_cache[n]);
         }
     }
-#endif
 }
 
 //__global__
