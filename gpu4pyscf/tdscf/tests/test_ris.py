@@ -167,7 +167,6 @@ class KnownValues(unittest.TestCase):
                       Ktrunc=0, J_fit='sp', K_fit='s', GS=True, single=False, conv_tol=1e-7)
         td.kernel()  
         energies = td.energies.get()
-        fosc     = td.oscillator_strength.get()
         a,b = td.get_ab()
         e_ab = diagonalize(a, b, self.nstates)[0]*27.21138602
 
@@ -180,7 +179,6 @@ class KnownValues(unittest.TestCase):
                       Ktrunc=0, J_fit='sp', K_fit='s', GS=True, single=False, conv_tol=1e-7)
         td.kernel()  
         energies = td.energies.get()
-        fosc     = td.oscillator_strength.get()
         a,b = td.get_ab()
         e_ab = diagonalize(a, b, self.nstates)[0]*27.21138602
 
