@@ -43,6 +43,44 @@ def test_j_engine():
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
     assert abs(vj1 - ref).max() < 1e-9
 
+def test_j_engine_8fold_symmetry():
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        basis='def2-tzvp',
+        unit='B',)
+
+    np.random.seed(9)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao)
+    dm = dm.dot(dm.T)
+
+    old_scheme = j_engine._md_j_engine_quartets_scheme
+    # break alignment between tilex and tiley to test 8-fold symmetry.
+    def custom_scheme(*args, **kwargs):
+        out = list(old_scheme(*args, **kwargs))
+        out[0] = out[0] // 2
+        out[2] = out[2] * 2
+        out[3] = max(out[3] // 15 * 3 + 1, 5)
+        out[4] = max(out[3] - 3, 2)
+        return tuple(out)
+
+    try:
+        j_engine._md_j_engine_quartets_scheme = custom_scheme
+        vj = j_engine.get_j(mol, dm)
+    finally:
+        j_engine._md_j_engine_quartets_scheme = old_scheme
+    vj1 = vj.get()
+    ref = get_jk(mol, dm, with_k=False)[0]
+    assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
+    assert abs(vj1 - ref).max() < 1e-9
+
 def test_j_engine_integral_screen():
     basis = ([[0,[2**x,1]] for x in range(-1, 5)] +
              [[1,[2**x,1]] for x in range(-1, 3)] +
