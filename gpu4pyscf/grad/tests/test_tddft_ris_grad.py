@@ -202,7 +202,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_b3lyp_tda_singlet_ref(self):
         mol = pyscf.M(atom=atom, basis='ccpvdz')
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
-        mf..kernel()
+        mf.kernel()
 
         td = ris.TDDFT(mf=mf, nstates=5, spectra=True, single=False)
         td.conv_tol = 1.0E-6
