@@ -26,7 +26,6 @@
 
 // TODO: benchmark performance for 32, 38, 40, 45, 54
 #define GOUT_WIDTH      45
-#define REMOTE_THRESHOLD 50
 
 __global__
 void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
@@ -62,13 +61,12 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     int stride_j = bounds.stride_j;
     int stride_k = bounds.stride_k;
     int g_size = bounds.g_size;
-    int *idx_ij = c_g_pair_idx + c_g_pair_offsets[li*LMAX1+lj];
-    int *idy_ij = idx_ij + nfij;
-    int *idz_ij = idy_ij + nfij;
-    int lk_offset = lk * (lk + 1) * (lk + 2) / 2;
-    int *idx_k = c_g_cart_idx + lk_offset;
-    int *idy_k = idx_k + nfk;
-    int *idz_k = idy_k + nfk;
+    int16_t *idx_ij = c_pair_idx + c_pair_offsets[li*L_AUX1+lj];
+    int16_t *idy_ij = idx_ij + nfij;
+    int16_t *idz_ij = idy_ij + nfij;
+    int16_t *idx_k = c_pair_idx + c_pair_offsets[lk];
+    int16_t *idy_k = idx_k + nfk;
+    int16_t *idz_k = idy_k + nfk;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -125,12 +123,6 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double xi = ri[0];
-        double yi = ri[1];
-        double zi = ri[2];
-        double xj = rj[0];
-        double yj = rj[1];
-        double zj = rj[2];
 
         for (int gout_start = 0; gout_start < nfij*nfk;
              gout_start+=gout_stride*GOUT_WIDTH) {
@@ -154,9 +146,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                 double xjL = img_coords[jL*3+0];
                 double yjL = img_coords[jL*3+1];
                 double zjL = img_coords[jL*3+2];
-                double xjxi = xj + xjL - xi;
-                double yjyi = yj + yjL - yi;
-                double zjzi = zj + zjL - zi;
+                double xjxi = rj[0] + xjL - ri[0];
+                double yjyi = rj[1] + yjL - ri[1];
+                double zjzi = rj[2] + zjL - ri[2];
                 double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
@@ -166,9 +158,9 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
                     double xiL = img_coords[iL*3+0];
                     double yiL = img_coords[iL*3+1];
                     double ziL = img_coords[iL*3+2];
-                    double xij = xjxi * aj_aij + xi + xiL;
-                    double yij = yjyi * aj_aij + yi + yiL;
-                    double zij = zjzi * aj_aij + zi + ziL;
+                    double xij = xjxi * aj_aij + ri[0] + xiL;
+                    double yij = yjyi * aj_aij + ri[1] + yiL;
+                    double zij = zjzi * aj_aij + ri[2] + ziL;
                     double xpq = xij - rk[0];
                     double ypq = yij - rk[1];
                     double zpq = zij - rk[2];

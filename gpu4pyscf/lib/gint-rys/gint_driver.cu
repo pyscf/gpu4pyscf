@@ -89,13 +89,13 @@ int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice
 }
 
 int fill_int3c2e_bdiv(double *out, Int3c2eEnvVars *envs, int shm_size, int naux,
-                      int nbatches_shl_pair, int nbatches_ksh,
+                      int nbatches_shl_pair, int nbatches_ksh, int aux_sh_offset,
                       int *shl_pair_offsets, int *ao_pair_loc, int *ksh_offsets,
                       int *bas_ij_idx, int *nst_lookup,
                       int *atm, int natm, int *bas, int nbas, double *env)
 {
-    BDiv3c2eBounds bounds = {naux, bas_ij_idx, shl_pair_offsets, ao_pair_loc,
-        ksh_offsets, nst_lookup};
+    BDiv3c2eBounds bounds = {naux, aux_sh_offset, bas_ij_idx, shl_pair_offsets,
+        ao_pair_loc, ksh_offsets, nst_lookup};
     int threads = 256;
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     int3c2e_bdiv_kernel<<<blocks, threads, shm_size>>>(out, *envs, bounds);
