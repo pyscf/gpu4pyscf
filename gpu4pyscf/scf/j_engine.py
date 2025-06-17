@@ -208,7 +208,8 @@ class _VHFOpt(jk._VHFOpt):
         pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)
         pair_loc = pair_loc.get()
         dms = dms.get()
-        dm_xyz = np.zeros(pair_loc[-1])
+        dm_size = pair_loc[-1]
+        dm_xyz = np.zeros(dm_size)
         # Must use this modified _env to ensure the consistency with GPU kernel
         # In this _env, normalization coefficients for s and p funcitons are scaled.
         _env = _scale_sp_ctr_coeff(prim_mol)
@@ -226,7 +227,7 @@ class _VHFOpt(jk._VHFOpt):
                     for l in range(k+1):
                         if i == k and j < l: continue
                         tasks.append((i,j,k,l))
-        schemes = {t: _md_j_engine_quartets_scheme(t) for t in tasks}
+        schemes = {t: _md_j_engine_quartets_scheme(t, n_dm=n_dm) for t in tasks}
 
         def proc(dm_xyz):
             device_id = cp.cuda.device.get_device_id()
@@ -281,8 +282,8 @@ class _VHFOpt(jk._VHFOpt):
                 err = kern(
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    rys_envs, (ctypes.c_int*5)(*scheme),
+                    ctypes.c_int(n_dm), ctypes.c_int(dm_size),
+                    rys_envs, (ctypes.c_int*6)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(pair_ij_mapping.size),
                     ctypes.c_int(pair_kl_mapping.size),
@@ -390,16 +391,19 @@ def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             pair_mappings[i,j] = (t_ij[mask][idx], qd_tile_addrs, qd_batch_max)
     return pair_mappings
 
+VJ_IJ_REGISTERS = 9
 def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
+    if n_dm > 1:
+        n_dm = 4
+
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
     lij = li + lj
     lkl = lk + ll
     nf3ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3kl = (lkl+1)*(lkl+2)*(lkl+3)//6
-    vj_ij_registers = 10
     gout_stride_min = _nearest_power2(
-        int((nf3ij+vj_ij_registers-1) / vj_ij_registers), False)
+        int((nf3ij+VJ_IJ_REGISTERS-1) / VJ_IJ_REGISTERS), False)
     Rt_size = (order+1)*(order+2)*(2*order+3)//6
 
     unit = order+1 + Rt_size
@@ -415,18 +419,16 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
 
     tilex = min(32, 128 // (lkl+1))
     # Guess number of batches for kl indices
-    tiley = (shm_size//8 - nsq*unit - (ij*4+ij*nf3ij)) // (kl*4+kl*nf3kl)
-    tiley = min(tilex, tiley, kl*2)
-    if tiley < 4:
-        tiley = 4
-    cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij + kl*nf3kl*tiley
+    tiley = (shm_size//8 - nsq*unit - (ij*4+ij*nf3ij*n_dm)) // (kl*4+kl*nf3kl*n_dm)
+    tiley = min(tilex, tiley, kl*4)
+    if tiley < 5:
+        tiley = 5
+    cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2
-        assert nsq >= 2
+        assert nsq >= 1
         kl = _nearest_power2(int(nsq**.5))
         ij = nsq // kl
-        if tiley > kl*2:
-            tiley //= 2
-        cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij + kl*nf3kl*tiley
+        cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
     gout_stride = threads // nsq
-    return ij, kl, gout_stride, tilex, tiley
+    return ij, kl, gout_stride, tilex, tiley, nsq*unit+cache_size
