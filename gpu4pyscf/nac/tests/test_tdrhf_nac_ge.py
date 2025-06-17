@@ -124,8 +124,6 @@ class KnownValues(unittest.TestCase):
         ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
                             [ 0.103969, -0.000000, -0.000000],
                             [-0.103969,  0.000000, -0.000000]])
-        print(np.abs(nac1.de/td.e[1]) - np.abs(ref))
-        print(nac1.de)
         assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
@@ -188,46 +186,6 @@ class KnownValues(unittest.TestCase):
         ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
                             [ 0.105513, -0.000000, -0.000000],
                             [-0.105513,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
-
-    def test_grad_pbe_tda_singlet_qchem(self):
-        mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
-        mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
-        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
-        nac1.states=(1,0)
-        nac1.kernel()
-        ref = np.array([[ 0.038717,  0.000000,  0.000000],
-                        [ 0.101769, -0.000000, -0.000000],
-                        [ 0.101769,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[-0.400124,  0.000000,  0.000000],
-                                   [ 0.200062, -0.000000, -0.000000],
-                                   [ 0.200062,  0.000000, -0.000000]])
-        ref_etf = np.array([[-0.108311,  0.000000,  0.000000],
-                            [ 0.054155, -0.000000, -0.000000],
-                            [ 0.054155,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[0]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
-
-        nac1.states=(2,0)
-        nac1.kernel()
-        ref = np.array([[ 0.000000,  0.000000,  0.000000],
-                        [-0.097345, -0.000000, -0.000000],
-                        [ 0.097345,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[ 0.000000,  0.000000,  0.000000],
-                                   [ 0.257419, -0.000000, -0.000000],
-                                   [-0.257419,  0.000000, -0.000000]])
-        ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
-                            [ 0.103969, -0.000000, -0.000000],
-                            [-0.103969,  0.000000, -0.000000]])
-        print(np.abs(nac1.de/td.e[1]) - np.abs(ref))
-        print(nac1.de)
         assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
