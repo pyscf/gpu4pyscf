@@ -113,8 +113,8 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
         vk *= hyb
         if omega != 0:
             vk0 = mf.get_k(mol, dmzoo, hermi=0, omega=omega)
-            vk1 = mf.get_k(mol, dmxpy + dmxpy.T, hermi=0, omega=omega)
-            vk2 = mf.get_k(mol, dmxmy - dmxmy.T, hermi=0, omega=omega)
+            vk1 = mf_K.get_k(mol, dmxpy + dmxpy.T, hermi=0, omega=omega)
+            vk2 = mf_K.get_k(mol, dmxmy - dmxmy.T, hermi=0, omega=omega)
             if not isinstance(vk0, cp.ndarray):
                 vk0 = cp.asarray(vk0)
             if not isinstance(vk1, cp.ndarray):
@@ -139,7 +139,7 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
         wvo += contract("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
     else:
         vj0 = mf.get_j(mol, dmzoo, hermi=1)
-        vj1 = mf.get_j(mol, dmxpy + dmxpy.T, hermi=1)
+        vj1 = mf_J.get_j(mol, dmxpy + dmxpy.T, hermi=1)
         if not isinstance(vj0, cp.ndarray):
             vj0 = cp.asarray(vj0)
         if not isinstance(vj1, cp.ndarray):
@@ -158,6 +158,7 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
         veff0mom = cp.zeros((nmo, nmo))
 
     # set singlet=None, generate function for CPHF type response kernel
+    # TODO: LR-PCM TDDFT
     vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
@@ -229,12 +230,12 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
     # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor, k_factor)
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor, k_factor)
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
@@ -242,13 +243,13 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
         j_factor=1.0
     else:
         j_factor=0.0
-    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor, k_factor)
+    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        extra_force[k] += get_extra_force(ia, locals()) * 2
     dvhf_all += dvhf * 2
     dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        extra_force[k] += get_extra_force(ia, locals()) * 2
     dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
@@ -268,12 +269,12 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
         dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+            extra_force[k] += get_extra_force(ia, locals()) * 2
         dvhf_all += dvhf * 2
         dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+            extra_force[k] += get_extra_force(ia, locals()) * 2
         dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
@@ -281,7 +282,7 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     veff1_0 = vxc1[1:]
     veff1_1 = (f1oo[1:] + fxcz1[1:]) * 2  # *2 for dmz1doo+dmz1oo.T
 
-    delec = 2.0 * (dh_ground + dh_td - ds)
+    delec = 2.0 * (dh_ground + dh_td - ds) #  - ds
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     dveff1_0 = cp.asarray(
@@ -295,6 +296,9 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     return de.get()
 
 
+def get_extra_force(atom_id, envs):
+    return envs['dvhf'].aux[atom_id]
+
 def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
     
     if omega != 0.0:
@@ -306,14 +310,10 @@ def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omeg
     vhf = vj * j_factor - vk * .5 * k_factor
     e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
     vhf = tag_array(vhf, aux=e1_aux)
-    
     return vhf
 
 
 class Gradients(tdrhf.Gradients):
-    _keys = {
-        "auxbasis_response",
-    }
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
         Args:
@@ -333,9 +333,9 @@ class Gradients(tdrhf.Gradients):
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
             if self.base.xy is not None:
-                xy = (self.base.xy[0][state-1], self.base.xy[1][state-1])
+                xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[1][state-1]*np.sqrt(0.5))
             else:
-                xy = (self.base.X[state-1], self.base.X[state-1]*0.0)
+                xy = (self.base.X[state-1]*np.sqrt(0.5), self.base.X[state-1]*0.0)
 
         if singlet is None:
             singlet = self.base.singlet

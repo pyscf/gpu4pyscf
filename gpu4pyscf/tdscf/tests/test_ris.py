@@ -13,13 +13,31 @@
 # limitations under the License.
 
 import unittest
-# import numpy as np
+import numpy as np
 # import cupy as cp
 from pyscf import gto, lib
 from gpu4pyscf.dft import rks
 import gpu4pyscf.tdscf.ris as ris
 
 PLACES = 4
+
+
+def diagonalize(a, b, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    b = b.reshape(nov, nov)
+    h = np.block([[a        , b       ],
+                     [-b.conj(),-a.conj()]])
+    e, xy = np.linalg.eig(np.asarray(h))
+    sorted_indices = np.argsort(e)
+    
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+    
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 class KnownValues(unittest.TestCase):
     @classmethod
@@ -141,6 +159,44 @@ class KnownValues(unittest.TestCase):
 
         self.assertAlmostEqual(abs(energies[:len(ref_energies)] - ref_energies).max(),0, PLACES)
         self.assertAlmostEqual(abs(fosc[:len(ref_fosc)] - ref_fosc).max(),0, PLACES)
+    
+    def test_tddft_pbe_get_ab(self):
+        """Test TDDFT-ris get_ab method with PBE0 functional"""
+        mf = self.mf_pbe
+        td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
+                      Ktrunc=0, J_fit='sp', K_fit='s', GS=True, single=False, conv_tol=1e-7)
+        td.kernel()  
+        energies = td.energies.get()
+        fosc     = td.oscillator_strength.get()
+        a,b = td.get_ab()
+        e_ab = diagonalize(a, b, self.nstates)[0]*27.21138602
+
+        self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, PLACES)
+
+    def test_tddft_pbe0_get_ab(self):
+        """Test TDDFT-ris get_ab method with PBE0 functional"""
+        mf = self.mf_pbe0
+        td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
+                      Ktrunc=0, J_fit='sp', K_fit='s', GS=True, single=False, conv_tol=1e-7)
+        td.kernel()  
+        energies = td.energies.get()
+        fosc     = td.oscillator_strength.get()
+        a,b = td.get_ab()
+        e_ab = diagonalize(a, b, self.nstates)[0]*27.21138602
+
+        self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, PLACES)
+
+    def test_tddft_wb97x_get_ab(self):
+        """Test TDDFT-ris get_ab method with wb97x functional"""
+        mf = self.mf_wb97x
+        td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
+                      Ktrunc=0, J_fit='sp', K_fit='sp', GS=False, single=False, conv_tol=1e-7)
+        td.kernel()  
+        energies = td.energies.get()
+        a,b = td.get_ab()
+        e_ab = diagonalize(a, b, self.nstates)[0]*27.21138602
+
+        self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, 1) # TODO: change to PLACES
 
 
 if __name__ == "__main__":
