@@ -29,6 +29,7 @@ from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
+from gpu4pyscf.grad.rhf import GradientsBase
 from pyscf import lib as pyscf_lib
 
 def grad_switch_h(x):
@@ -216,6 +217,12 @@ def grad_nuc(pcmobj, dm, q_sym = None):
     grid_coords  = pcmobj.surface['grid_coords'].get()
     exponents    = pcmobj.surface['charge_exp'].get()
 
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        # Note: The q_sym computed above actually use frozen_dm0 as input, so it's actually q_sym_right
+        q_sym_left, _ = pcmobj._get_qsym(dm, with_nuc = True)
+        q_sym_left = q_sym_left.get()
+        q_sym += q_sym_left
+
     atom_coords = mol.atom_coords(unit='B')
     atom_charges = numpy.asarray(mol.atom_charges(), dtype=numpy.float64)
     fakemol_nuc = gto.fakemol_for_charges(atom_coords)
@@ -266,6 +273,17 @@ def grad_qv(pcmobj, dm, q_sym = None):
                           direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
                           intopt=intopt)
 
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        frozen_dm0 = pcmobj.frozen_dm0_for_finite_difference_without_response
+        # Note: The q_sym computed above actually use frozen_dm0 as input, so it's actually q_sym_right
+        q_sym_left, _ = pcmobj._get_qsym(dm, with_nuc = True)
+        dvj += int1e_grids_ip1(mol, grid_coords, dm = frozen_dm0, charges = q_sym_left,
+                              direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                              intopt=intopt)
+        dq  += int1e_grids_ip2(mol, grid_coords, dm = frozen_dm0, charges = q_sym_left,
+                              direct_scf_tol = 1e-14, charge_exponents = charge_exp**2,
+                              intopt=intopt)
+
     aoslice = mol.aoslice_by_atom()
     dvj = 2.0 * cupy.asarray([cupy.sum(dvj[:,p0:p1], axis=1) for p0,p1 in aoslice[:,2:]])
     dq = cupy.asarray([cupy.sum(dq[:,p0:p1], axis=1) for p0,p1 in gridslice])
@@ -301,6 +319,20 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
         A = pcmobj._intermediates['A']
         D = pcmobj._intermediates['D']
         S = pcmobj._intermediates['S']
+
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        # Note: The v_grids computed above actually use frozen_dm0 as input, so it's actually v_grids_right
+        v_grids_l = pcmobj._get_vgrids(dm, with_nuc = True)[0]
+
+        # TODO: In the case where left and right dm are not the same,
+        #       we indeed need to compute the derivative of 0.5 * (K^-1 R + R^T (K^-1)^T).
+        #       This is not the same as the derivative of K^-1 R, if IEFPCM or SSVPE is used.
+        #       However the difference is too small, and in the use case of computing polarizability derivative,
+        #       we are not able to observe the difference.
+        #       If there are other use cases where the error is more significant,
+        #       we probably need to fix this.
+        #       This is the only term affected by this problem in energy and gradient calculation.
+        #       In hessian calculation, similar problems occur in energy 2nd derivative and Fock derivative terms.
 
     vK_1 = pcmobj.left_solve_K(v_grids_l, K_transpose = True)
 
@@ -434,18 +466,38 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
 
     else:
         raise RuntimeError(f"Unknown implicit solvent model: {pcmobj.method}")
+
+    if pcmobj.frozen_dm0_for_finite_difference_without_response is not None:
+        # Refer to the comments in gpu4pyscf/solvent/pcm.py::_get_vind()
+        de *= 2
+
     t1 = log.timer_debug1('grad solver', *t1)
     return de.get()
 
-def make_grad_object(grad_method):
-    '''For grad_method in vacuum, add nuclear gradients of solvent pcmobj'''
-    if grad_method.base.with_solvent.frozen:
+def make_grad_object(base_method):
+    '''Create nuclear gradients object with solvent contributions for the given
+    solvent-attached method based on its gradients method in vaccum
+    '''
+    if isinstance(base_method, GradientsBase):
+        # For backward compatibility. In gpu4pyscf-1.4 and older, the input
+        # argument is a gradient object.
+        base_method = base_method.base
+
+    # Must be a solvent-attached method
+    with_solvent = base_method.with_solvent
+    if with_solvent.frozen:
         raise RuntimeError('Frozen solvent model is not avialbe for energy gradients')
 
-    name = (grad_method.base.with_solvent.__class__.__name__
-            + grad_method.__class__.__name__)
-    return lib.set_class(WithSolventGrad(grad_method),
-                         (WithSolventGrad, grad_method.__class__), name)
+    # create the Gradients in vacuum. Cannot call super().Gradients() here
+    # because other dynamic corrections might be applied to the base_method.
+    # Calling super().Gradients might discard these corrections.
+    vac_grad = base_method.undo_solvent().Gradients()
+    # The base method for vac_grad discards the with_solvent. Change its base to
+    # the solvent-attached base method
+    vac_grad.base = base_method
+    name = with_solvent.__class__.__name__ + vac_grad.__class__.__name__
+    return lib.set_class(WithSolventGrad(vac_grad),
+                         (WithSolventGrad, vac_grad.__class__), name)
 
 class WithSolventGrad:
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -467,19 +519,17 @@ class WithSolventGrad:
 
     def to_cpu(self):
         from pyscf.solvent.grad import pcm  # type: ignore
-        grad_method = self.undo_solvent().to_cpu()
-        return pcm.make_grad_object(grad_method)
+        return self.base.to_cpu().PCM().Gradients()
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-        dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
+        logger.debug(self, 'Compute gradients from solvents')
+        self.de_solvent = self.base.with_solvent.grad(dm)
+        logger.debug(self, 'Compute gradients from solutes')
         self.de_solute = super().kernel(*args, **kwargs)
-        self.de_solvent = grad_qv(self.base.with_solvent, dm)
-        self.de_solvent+= grad_solver(self.base.with_solvent, dm)
-        self.de_solvent+= grad_nuc(self.base.with_solvent, dm)
         self.de = self.de_solute + self.de_solvent
 
         if self.verbose >= logger.NOTE:

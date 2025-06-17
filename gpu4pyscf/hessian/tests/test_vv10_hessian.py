@@ -14,10 +14,12 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 import pyscf
 from gpu4pyscf.dft import rks
 from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_vnlc_deriv1_numerical, \
-                                  _get_enlc_deriv2, _get_enlc_deriv2_numerical
+                                  _get_enlc_deriv2, _get_enlc_deriv2_numerical, \
+                                  get_dweight_dA, get_d2weight_dAdB
 
 def setUpModule():
     global mol
@@ -424,6 +426,41 @@ class KnownValues(unittest.TestCase):
         test_dF = _get_vnlc_deriv1(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
         assert np.linalg.norm(test_dF - reference_dF) < 1e-8
+
+    def test_becke_second_derivative(self):
+        mf = rks.RKS(mol, xc = "PBE")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.build()
+        grids = mf.grids
+
+        test_d2w = get_d2weight_dAdB(mol, grids)
+
+        reference_d2w = cp.empty([mol.natm, mol.natm, 3, 3, grids.coords.shape[0]])
+        dx = 1e-5
+        mol_copy = mol.copy()
+        for i_atom in range(mol.natm):
+            for i_xyz in range(3):
+                xyz_p = mol.atom_coords()
+                xyz_p[i_atom, i_xyz] += dx
+                mol_copy.set_geom_(xyz_p, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_p = get_dweight_dA(mol_copy, grids)
+
+                xyz_m = mol.atom_coords()
+                xyz_m[i_atom, i_xyz] -= dx
+                mol_copy.set_geom_(xyz_m, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_m = get_dweight_dA(mol_copy, grids)
+
+                reference_d2w[i_atom, :, i_xyz, :, :] = (w_p - w_m) / (2 * dx)
+        grids.build(mol)
+
+        assert cp.max(cp.abs(test_d2w - reference_d2w)) < 1e-7
+
 
 if __name__ == "__main__":
     print("Full Tests for RKS Hessian with VV10")
