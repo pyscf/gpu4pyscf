@@ -148,6 +148,147 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     return de, de/EI, de_etf, de_etf/EI
 
 
+def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
+    """
+    Only supports for excited-excited states.
+    Ref:
+    [1] 10.1063/1.4903986 main reference
+    [2] 10.1021/acs.accounts.1c00312
+    [3] 10.1063/1.4885817
+    """
+    if singlet is False:
+        raise NotImplementedError('Only supports for singlet states')
+    mol = td_nac.mol
+    mf = td_nac.base._scf
+    mf_grad = mf.nuc_grad_method()
+    mo_coeff = cp.asarray(mf.mo_coeff)
+    mo_energy = cp.asarray(mf.mo_energy)
+    mo_occ = cp.asarray(mf.mo_occ)
+    nao, nmo = mo_coeff.shape
+    nocc = int((mo_occ > 0).sum())
+    nvir = nmo - nocc
+    orbv = mo_coeff[:, nocc:]
+    orbo = mo_coeff[:, :nocc]
+
+    xI, yI = x_yI
+    xJ, yJ = x_yJ
+    
+    xI = cp.asarray(xI).reshape(nocc, nvir).T
+    if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
+        yI = cp.zeros_like(xI)
+    yI = cp.asarray(yI).reshape(nocc, nvir).T
+    xJ = cp.asarray(xJ).reshape(nocc, nvir).T
+    if not isinstance(yJ, np.ndarray) and not isinstance(yJ, cp.ndarray):
+        yJ = cp.zeros_like(xJ)
+    yJ = cp.asarray(yJ).reshape(nocc, nvir).T
+
+    xpyI = (xI + yI).reshape(nocc, nvir).T
+    xmyI = (xI - yI).reshape(nocc, nvir).T
+    dvvI = contract("ai,bi->ab", xpyI, xpyI) + contract("ai,bi->ab", xmyI, xmyI)  # 2 T_{ab}
+    dooI = -contract("ai,aj->ij", xpyI, xpyI) - contract("ai,aj->ij", xmyI, xmyI)  # 2 T_{ij}
+    dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))  # (X+Y) in ao basis
+    dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))  # (X-Y) in ao basis
+    dmzooI = reduce(cp.dot, (orbo, dooI, orbo.T))  # T_{ij}*2 in ao basis
+    dmzooI += reduce(cp.dot, (orbv, dvvI, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
+
+    xpyJ = (xJ + yJ).reshape(nocc, nvir).T
+    xmyJ = (xJ - yJ).reshape(nocc, nvir).T
+    dvvJ = contract("ai,bi->ab", xpyJ, xpyJ) + contract("ai,bi->ab", xmyJ, xmyJ)  # 2 T_{ab}
+    dooJ = -contract("ai,aj->ij", xpyJ, xpyJ) - contract("ai,aj->ij", xmyJ, xmyJ)  # 2 T_{ij}
+    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T))  # (X+Y) in ao basis
+    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T))  # (X-Y) in ao basis
+    dmzooJ = reduce(cp.dot, (orbo, dooJ, orbo.T))  # T_{ij}*2 in ao basis
+    dmzooJ += reduce(cp.dot, (orbv, dvvJ, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
+
+    LI = xI-yI    # eq.(83) in Ref. [1]
+    
+
+    vresp = mf.gen_response(singlet=None, hermi=1)
+
+    def fvind(x):
+        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
+        v1ao = vresp(dm + dm.T)
+        return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
+
+    z1 = cphf.solve(
+        fvind,
+        mo_energy,
+        mo_occ,
+        -LI*1.0*EI, # only one spin, negative in cphf
+        max_cycle=td_nac.cphf_max_cycle,
+        tol=td_nac.cphf_conv_tol)[0] # eq.(83) in Ref. [1]
+
+    z1 = z1.reshape(nvir, nocc)
+    z1ao = reduce(cp.dot, (orbv, z1, orbo.T)) * 2 # double occupency
+    # eq.(50) in Ref. [1]
+    z1aoS = (z1ao + z1ao.T)*0.5 # 0.5 is in the definition of z1aoS
+    # eq.(73) in Ref. [1]
+    GZS = vresp(z1aoS) # generate the double occupency 
+    GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
+    W = cp.zeros((nmo, nmo))  # eq.(75) in Ref. [1]
+    W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
+    zeta0 = mo_energy[nocc:, cp.newaxis]
+    zeta0 = z1 * zeta0
+    W[:nocc, nocc:] = GZS_mo[:nocc, nocc:] + 0.5*yI.T*EI + 0.5*zeta0.T #* eq.(43), (56), (28) in Ref. [1]
+    zeta1 = mo_energy[cp.newaxis, :nocc]
+    zeta1 = z1 * zeta1
+    W[nocc:, :nocc] = 0.5*xI*EI + 0.5*zeta1
+    W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
+
+    mf_grad = mf.nuc_grad_method()
+    s1 = mf_grad.get_ovlp(mol)
+    dmz1doo = z1aoS
+    oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
+
+    if atmlst is None:
+        atmlst = range(mol.natm)
+    
+    h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
+    s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    dh_td = contract("xij,ij->xi", h1, dmz1doo)
+    ds = contract("xij,ij->xi", s1, (W + W.T))
+
+    dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
+    if mol.has_ecp():
+        dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+    extra_force = cp.zeros((len(atmlst), 3))
+
+    dvhf_all = 0
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0) 
+    for k, ia in enumerate(atmlst):
+        extra_force[k] += mf_grad.extra_force(ia, locals())
+    dvhf_all += dvhf
+    dvhf = td_nac.get_veff(mol, dmz1doo)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
+    dvhf = td_nac.get_veff(mol, oo0)
+    for k, ia in enumerate(atmlst):
+        extra_force[k] -= mf_grad.extra_force(ia, locals())
+    dvhf_all -= dvhf
+
+    delec = dh_td*2 - ds
+    aoslices = mol.aoslice_by_atom()
+    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+
+    offsetdic = mol.offset_nr_by_atom()
+    xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
+    yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
+    ds_x = contract("xij,ji->xi", s1, xIao*EI)
+    ds_y = contract("xij,ji->xi", s1, yIao*EI)
+    ds_x_etf = contract("xij,ij->xi", s1, (xIao*EI + xIao.T*EI) * 0.5)
+    ds_y_etf = contract("xij,ij->xi", s1, (yIao*EI + yIao.T*EI) * 0.5)
+    dsxy = cp.asarray([cp.sum(ds_x[:, p0:p1] + ds_y[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+    dsxy_etf = cp.asarray([cp.sum(ds_x_etf[:, p0:p1] + ds_y_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec 
+    de_etf = de + dsxy_etf
+    de += dsxy 
+    
+    de = de.get()
+    de_etf = de_etf.get()
+    return de, de/EI, de_etf, de_etf/EI
+
+
 class NAC(lib.StreamObject):
 
     cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 20)
