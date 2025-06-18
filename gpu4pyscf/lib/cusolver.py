@@ -98,7 +98,7 @@ libcusolver.cusolverDnZhegvd.argtypes = [
     ctypes.c_void_p   # *devInfo
 ]
 
-def eigh(h, s):
+def eigh(h, s, overwrite=False):
     '''
     solve generalized eigenvalue problem
     '''
@@ -110,6 +110,9 @@ def eigh(h, s):
         # .T.copy() is equivalent to .conj()
         A = h.conj()
         B = s.conj()
+    elif overwrite:
+        A = h
+        B = s
     else:
         A = h.copy()
         B = s.copy()

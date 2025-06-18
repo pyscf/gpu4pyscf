@@ -55,6 +55,7 @@ typedef struct {
 
 typedef struct {
     int naux;
+    int aux_sh_offset;
     // The effective basis pair Id = ish*nbas+jsh
     int *bas_ij_idx;
     // the bas_ij_idx offset for each blockIdx.x

@@ -245,14 +245,7 @@ class KohnShamDFT(rks.KohnShamDFT):
                  self._numint.libxc.__name__,
                  self._numint.libxc.__version__,
                  self._numint.libxc.__reference__)
-        
-        # TODO: add this later
-        '''
-        if log.verbose >= logger.INFO:
-            log.info('XC functionals = %s', self.xc)
-            if hasattr(self._numint.libxc, 'xc_reference'):
-                log.info(textwrap.indent('\n'.join(self._numint.libxc.xc_reference(self.xc)), '    '))
-        '''
+        log.info('XC functionals = %s', self.xc)
         self.grids.dump_flags(verbose)
 
         if self.do_nlc():
