@@ -141,6 +141,3 @@ H  -5.8042 -1.0067 12.1503
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     assert abs(vj1 - ref).max() < 1e-9
-
-test_j_engine()
-#test_j_engine_tall_tile()
