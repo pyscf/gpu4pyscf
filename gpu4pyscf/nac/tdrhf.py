@@ -259,7 +259,6 @@ class NAC(lib.StreamObject):
                 return rhf_grad._jk_energy_per_atom(
                     mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
 
-
     def _finalize(self):
         if self.verbose >= logger.NOTE:
             logger.note(
