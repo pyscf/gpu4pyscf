@@ -30,6 +30,7 @@ def test_j_engine():
         H   0.      1.    .6
         ''',
         basis='def2-tzvp',
+        #basis=[[1, [1,1]]],
         unit='B',)
 
     np.random.seed(9)
@@ -40,6 +41,7 @@ def test_j_engine():
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     ref = get_jk(mol, dm, with_k=False)[0]
+    print(abs(vj1 - ref).max())
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
     assert abs(vj1 - ref).max() < 1e-9
 
@@ -94,14 +96,13 @@ def test_j_engine_multiple_dms():
 
     np.random.seed(9)
     nao = mol.nao
-    dm = np.random.rand(7, nao, nao)
-    dm = dm + dm.transpose(0, 2, 1)
-
-    vj = j_engine.get_j(mol, dm)
-    vj1 = vj.get()
-    ref = get_jk(mol, dm, with_k=False)[0]
-    #assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
-    assert abs(vj1 - ref).max() < 1e-9
+    for n in range(2, 8):
+        dm = np.random.rand(n, nao, nao)
+        dm = dm + dm.transpose(0, 2, 1)
+        vj = j_engine.get_j(mol, dm)
+        vj1 = vj.get()
+        ref = get_jk(mol, dm, with_k=False)[0]
+        assert abs(vj1 - ref).max() < 1e-9
 
 def test_j_engine_integral_screen():
     basis = ([[0,[2**x,1]] for x in range(-1, 5)] +
@@ -141,3 +142,5 @@ H  -5.8042 -1.0067 12.1503
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     assert abs(vj1 - ref).max() < 1e-9
+
+test_j_engine()

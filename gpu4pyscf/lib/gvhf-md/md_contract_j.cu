@@ -170,8 +170,8 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             continue;
         }
         __syncthreads();
-        for (int n = t_id; n < threadsx; n += threads) {
-            int task_ij = task_ij0 + n;
+        if (t_id < threadsx) {
+            int task_ij = task_ij0 + t_id;
             if (task_ij < npairs_ij) {
                 int pair_ij = pair_ij_mapping[task_ij];
                 int ish = pair_ij / nbas;
@@ -184,12 +184,12 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 double xij = (ai * ri[0] + aj * rj[0]) / aij;
                 double yij = (ai * ri[1] + aj * rj[1]) / aij;
                 double zij = (ai * ri[2] + aj * rj[2]) / aij;
-                Rp_cache[n+0*threadsx] = xij;
-                Rp_cache[n+1*threadsx] = yij;
-                Rp_cache[n+2*threadsx] = zij;
-                Rp_cache[n+3*threadsx] = aij;
+                Rp_cache[t_id+0*threadsx] = xij;
+                Rp_cache[t_id+1*threadsx] = yij;
+                Rp_cache[t_id+2*threadsx] = zij;
+                Rp_cache[t_id+3*threadsx] = aij;
             } else {
-                Rp_cache[n+3*threadsx] = 1.; // aij
+                Rp_cache[t_id+3*threadsx] = 1.; // aij
             }
         }
         double fac_sym = PI_FAC;
@@ -313,7 +313,6 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             uint16_t *p1_kl = Rt2_ij_kl + Rt2_idx_offsets[lij*RT2_MAX+lkl];
             int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lkl];
             for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
-                __syncthreads();
                 double val = 0.;
                 if (k < nf3kl) {
                     double phase = efg_phase[k];
@@ -332,13 +331,14 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 }
             }
 
+            for (int k = 0; k < nf3kl; ++k) {
+                double dm_kl = efg_phase[k] * dm[kl_loc0+k];
 #pragma unroll
-            for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
-                if (i >= nf3ij) break;
-                int off = i * nf3kl;
-                for (int k = 0; k < nf3kl; ++k) {
+                for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                    if (i >= nf3ij) break;
+                    int off = i * nf3kl;
                     double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
-                    vj_ij[n] += efg_phase[k] * s * dm[kl_loc0+k];
+                    vj_ij[n] += s * dm_kl;
                 }
             }
         }
@@ -646,7 +646,6 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 switch (remaining_n_dm) {
                 case 1:
                     for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
-                        __syncthreads();
                         double val = 0.;
                         if (k < nf3kl) {
                             double phase = efg_phase[k];
@@ -663,19 +662,19 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                             vj_kl_cache[sq_kl+k*bsizey] += val;
                         }
                     }
+                    for (int k = 0; k < nf3kl; ++k) {
+                        double dm_kl = efg_phase[k] * dm[kl_loc0+k];
 #pragma unroll
-                    for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
-                        if (i >= nf3ij) break;
-                        int off = i * nf3kl;
-                        for (int k = 0; k < nf3kl; ++k) {
+                        for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                            if (i >= nf3ij) break;
+                            int off = i * nf3kl;
                             double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
-                            vj_ij[n] += efg_phase[k] * s * dm[kl_loc0+k];
+                            vj_ij[n] += s * dm_kl;
                         }
                     }
                     break;
                 case 2:
                     for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
-                        __syncthreads();
                         double val0 = 0.;
                         double val1 = 0.;
                         if (k < nf3kl) {
@@ -697,15 +696,16 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                             vj_kl_cache[sq_kl1+k*bsizey] += val1;
                         }
                     }
+                    for (int k = 0; k < nf3kl; ++k) {
+                        double dm_kl  = efg_phase[k] * dm [kl_loc0+k];
+                        double dm_kl1 = efg_phase[k] * dm1[kl_loc0+k];
 #pragma unroll
-                    for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
-                        if (i >= nf3ij) break;
-                        int off = i * nf3kl;
-                        for (int k = 0; k < nf3kl; ++k) {
+                        for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                            if (i >= nf3ij) break;
+                            int off = i * nf3kl;
                             double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
-                            double phase_s = efg_phase[k] * s;
-                            vj_ij[n        ] += phase_s * dm [kl_loc0+k];
-                            vj_ij[n+IJ_SIZE] += phase_s * dm1[kl_loc0+k];
+                            vj_ij[n        ] += s * dm_kl ;
+                            vj_ij[n+IJ_SIZE] += s * dm_kl1;
                         }
                     }
                     break;
@@ -713,7 +713,6 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                     dm3 = dm2;
                 default:
                     for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
-                        __syncthreads();
                         double val0 = 0.;
                         double val1 = 0.;
                         double val2 = 0.;
@@ -744,18 +743,20 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                             vj_kl_cache[sq_kl3+k*bsizey] += val3;
                         }
                     }
-
+                    for (int k = 0; k < nf3kl; ++k) {
+                        double dm_kl0 = efg_phase[k] * dm [kl_loc0+k];
+                        double dm_kl1 = efg_phase[k] * dm1[kl_loc0+k];
+                        double dm_kl2 = efg_phase[k] * dm2[kl_loc0+k];
+                        double dm_kl3 = efg_phase[k] * dm3[kl_loc0+k];
 #pragma unroll
-                    for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
-                        if (i >= nf3ij) break;
-                        int off = i * nf3kl;
-                        for (int k = 0; k < nf3kl; ++k) {
+                        for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                            if (i >= nf3ij) break;
+                            int off = i * nf3kl;
                             double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
-                            double phase_s = efg_phase[k] * s;
-                            vj_ij[n+IJ_SIZE*0] += phase_s * dm [kl_loc0+k];
-                            vj_ij[n+IJ_SIZE*1] += phase_s * dm1[kl_loc0+k];
-                            vj_ij[n+IJ_SIZE*2] += phase_s * dm2[kl_loc0+k];
-                            vj_ij[n+IJ_SIZE*3] += phase_s * dm3[kl_loc0+k];
+                            vj_ij[n+IJ_SIZE*0] += s * dm_kl0;
+                            vj_ij[n+IJ_SIZE*1] += s * dm_kl1;
+                            vj_ij[n+IJ_SIZE*2] += s * dm_kl2;
+                            vj_ij[n+IJ_SIZE*3] += s * dm_kl3;
                         }
                     }
                 }
@@ -763,8 +764,6 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
             double *vj_cache = Rp_cache;
             double *vj_cache1 = vj_cache + threads;
-            double *vj_cache2 = vj_cache + threads*2;
-            double *vj_cache3 = vj_cache + threads*3;
             switch (remaining_n_dm) {
             case 1:
 #pragma unroll
@@ -810,26 +809,21 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
                     if (i >= nf3ij+gout_id) break;
                     __syncthreads();
-                    vj_cache [t_id] = vj_ij[n];
-                    vj_cache1[t_id] = vj_ij[n+IJ_SIZE];
-                    vj_cache2[t_id] = vj_ij[n+IJ_SIZE*2];
-                    vj_cache3[t_id] = vj_ij[n+IJ_SIZE*3];
+                    for (int m = 0; m < DM_BLOCK; ++m) {
+                        vj_cache[t_id+threads*m] = vj_ij[n+IJ_SIZE*m];
+                    }
                     for (int stride = threadsy/2; stride > 0; stride /= 2) {
                         __syncthreads();
                         if (ty < stride) {
-                            vj_cache [t_id] += vj_cache [t_id + stride*threadsx];
-                            vj_cache1[t_id] += vj_cache1[t_id + stride*threadsx];
-                            vj_cache2[t_id] += vj_cache2[t_id + stride*threadsx];
-                            vj_cache3[t_id] += vj_cache3[t_id + stride*threadsx];
+                            for (int m = 0; m < DM_BLOCK; ++m) {
+                                vj_cache[t_id+threads*m] += vj_cache[t_id+threads*m + stride*threadsx];
+                            }
                         }
                     }
                     __syncthreads();
                     if (ty == 0 && i < nf3ij && task_ij0+tx < npairs_ij) {
-                        atomicAdd(vj +ij_loc0+i, vj_cache [t_id]);
-                        atomicAdd(vj1+ij_loc0+i, vj_cache1[t_id]);
-                        atomicAdd(vj2+ij_loc0+i, vj_cache2[t_id]);
-                        if (remaining_n_dm > 3) {
-                            atomicAdd(vj3+ij_loc0+i, vj_cache3[t_id]);
+                        for (int m = 0; m < min(remaining_n_dm, DM_BLOCK); ++m) {
+                            atomicAdd(vj+dm_size*m+ij_loc0+i, vj_cache[t_id+threads*m]);
                         }
                     }
                 }

@@ -402,9 +402,9 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     lkl = lk + ll
     nf3ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3kl = (lkl+1)*(lkl+2)*(lkl+3)//6
+    Rt_size = (order+1)*(order+2)*(2*order+3)//6
     gout_stride_min = _nearest_power2(
         int((nf3ij+VJ_IJ_REGISTERS-1) / VJ_IJ_REGISTERS), False)
-    Rt_size = (order+1)*(order+2)*(2*order+3)//6
 
     unit = order+1 + Rt_size
     #counts = shm_size // ((unit+gout_stride_min-1)//gout_stride_min*8)
@@ -417,12 +417,15 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = min(32, 128 // (lkl+1))
+    tilex = 48
     # Guess number of batches for kl indices
     tiley = (shm_size//8 - nsq*unit - (ij*4+ij*nf3ij*n_dm)) // (kl*4+kl*nf3kl*n_dm)
-    tiley = min(tilex, tiley, kl*4)
-    if tiley < 5:
-        tiley = 5
+    tiley = min(tilex, tiley)
+    tiley = tiley // 4 * 4
+    if tiley < 4:
+        tiley = 4
+    if li == lk and lj == ll:
+        tilex = tiley
     cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2

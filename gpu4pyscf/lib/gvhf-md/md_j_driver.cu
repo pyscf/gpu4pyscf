@@ -30,6 +30,7 @@ extern __global__ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBounds
 extern __global__ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley, int dm_size);
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds);
+int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, int dm_size);
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
@@ -58,40 +59,42 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
 
     JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
 
-    if (1){//!md_j_unrolled(&envs, &jk, &bounds)) {
-        int threads_ij = scheme[0];
-        int threads_kl = scheme[1];
-        int gout_stride = scheme[2];
-        int tilex = scheme[3];
-        int tiley = scheme[4];
-        int buflen = scheme[5];
-        switch (threads_ij) {
-        case 1: bounds.qd_ij_max = qd_ij_max[0]; break;
-        case 2: bounds.qd_ij_max = qd_ij_max[1]; break;
-        case 4: bounds.qd_ij_max = qd_ij_max[2]; break;
-        case 8: bounds.qd_ij_max = qd_ij_max[3]; break;
-        case 16: bounds.qd_ij_max = qd_ij_max[4]; break;
-        case 32: bounds.qd_ij_max = qd_ij_max[5]; break;
-        }
-        switch (threads_kl) {
-        case 1: bounds.qd_kl_max = qd_kl_max[0]; break;
-        case 2: bounds.qd_kl_max = qd_kl_max[1]; break;
-        case 4: bounds.qd_kl_max = qd_kl_max[2]; break;
-        case 8: bounds.qd_kl_max = qd_kl_max[3]; break;
-        case 16: bounds.qd_kl_max = qd_kl_max[4]; break;
-        case 32: bounds.qd_kl_max = qd_kl_max[5]; break;
-        }
-        int bsizex = threads_ij * tilex;
-        int bsizey = threads_kl * tiley;
-        int nsq_per_block = threads_ij * threads_kl;
-        dim3 threads(nsq_per_block, gout_stride);
-        int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
-        int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
-        dim3 blocks(blocks_ij, blocks_kl);
-        if (n_dm == 1) {
+    int threads_ij = scheme[0];
+    int threads_kl = scheme[1];
+    int gout_stride = scheme[2];
+    int tilex = scheme[3];
+    int tiley = scheme[4];
+    int buflen = scheme[5];
+    switch (threads_ij) {
+    case 1: bounds.qd_ij_max = qd_ij_max[0]; break;
+    case 2: bounds.qd_ij_max = qd_ij_max[1]; break;
+    case 4: bounds.qd_ij_max = qd_ij_max[2]; break;
+    case 8: bounds.qd_ij_max = qd_ij_max[3]; break;
+    case 16: bounds.qd_ij_max = qd_ij_max[4]; break;
+    case 32: bounds.qd_ij_max = qd_ij_max[5]; break;
+    }
+    switch (threads_kl) {
+    case 1: bounds.qd_kl_max = qd_kl_max[0]; break;
+    case 2: bounds.qd_kl_max = qd_kl_max[1]; break;
+    case 4: bounds.qd_kl_max = qd_kl_max[2]; break;
+    case 8: bounds.qd_kl_max = qd_kl_max[3]; break;
+    case 16: bounds.qd_kl_max = qd_kl_max[4]; break;
+    case 32: bounds.qd_kl_max = qd_kl_max[5]; break;
+    }
+    int bsizex = threads_ij * tilex;
+    int bsizey = threads_kl * tiley;
+    int nsq_per_block = threads_ij * threads_kl;
+    dim3 threads(nsq_per_block, gout_stride);
+    int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
+    int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
+    dim3 blocks(blocks_ij, blocks_kl);
+    if (n_dm == 1) {
+        if (!md_j_unrolled(&envs, &jk, &bounds)) {
             md_j_1dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
-        } else {
+        }
+    } else {
+        if (!md_j_4dm_unrolled(&envs, &jk, &bounds, dm_size)) {
             md_j_4dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size);
         }
