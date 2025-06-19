@@ -172,7 +172,6 @@ class _VHFOpt(jk._VHFOpt):
         ao_loc = sorted_mol.ao_loc
         n_dm, nao = dms.shape[:2]
         assert dms.ndim == 3 and nao == ao_loc[-1]
-        assert n_dm == 1
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
@@ -209,12 +208,14 @@ class _VHFOpt(jk._VHFOpt):
         pair_loc = pair_loc.get()
         dms = dms.get()
         dm_size = pair_loc[-1]
-        dm_xyz = np.zeros(dm_size)
+        dm_xyz = np.zeros((n_dm, dm_size))
         # Must use this modified _env to ensure the consistency with GPU kernel
         # In this _env, normalization coefficients for s and p funcitons are scaled.
         _env = _scale_sp_ctr_coeff(prim_mol)
         libvhf_md.Et_dot_dm(
-            dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
+            dm_xyz.ctypes, dms.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(dm_size),
+            ao_loc.ctypes, pair_loc.ctypes,
             pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
             p2c_mapping.ctypes,
             ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
@@ -331,7 +332,9 @@ class _VHFOpt(jk._VHFOpt):
         vj_xyz = vj_xyz.get()
         vj = np.zeros_like(dms)
         libvhf_md.jengine_dot_Et(
-            vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
+            vj.ctypes, vj_xyz.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(dm_size),
+            ao_loc.ctypes, pair_loc.ctypes,
             pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
             p2c_mapping.ctypes,
             ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
@@ -349,7 +352,7 @@ class _VHFOpt(jk._VHFOpt):
             vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                      dms, 1, mol._atm, mol._bas, mol._env,
                                      shls_excludes=shls_excludes)
-            vj1 = asarray(vs_h[0])
+            vj1 = asarray(vs_h)
             vj += hermi_triu(vj1)
         return vj
 
@@ -434,4 +437,5 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
         ij = nsq // kl
         cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
     gout_stride = threads // nsq
-    return ij, kl, gout_stride, tilex, tiley, nsq*unit+cache_size
+    buflen = nsq*unit+cache_size
+    return ij, kl, gout_stride, tilex, tiley, buflen

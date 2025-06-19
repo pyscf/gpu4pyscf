@@ -186,7 +186,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
         }
         double *vj_cache = Rp_cache;
@@ -394,7 +394,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_1_0 * dm_kl0;
@@ -651,22 +651,22 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+816] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_1_0 * dm_kl0;
             vj_ij[3] += R_0_1_0_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+1];
+            dm_kl0 = dm[kl_loc0+1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_1_1 * dm_kl0;
             vj_ij[3] -= R_0_1_0_1 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+2];
+            dm_kl0 = dm[kl_loc0+2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_2_0 * dm_kl0;
             vj_ij[3] -= R_0_1_1_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+3];
+            dm_kl0 = dm[kl_loc0+3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_1_0 * dm_kl0;
@@ -892,7 +892,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -1188,7 +1188,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+672] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -1199,7 +1199,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_0_1 * dm_kl0;
             vj_ij[8] += R_0_1_1_0 * dm_kl0;
             vj_ij[9] += R_0_2_0_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+1];
+            dm_kl0 = dm[kl_loc0+1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -1210,7 +1210,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_0_2 * dm_kl0;
             vj_ij[8] -= R_0_1_1_1 * dm_kl0;
             vj_ij[9] -= R_0_2_0_1 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+2];
+            dm_kl0 = dm[kl_loc0+2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -1221,7 +1221,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_1_1 * dm_kl0;
             vj_ij[8] -= R_0_1_2_0 * dm_kl0;
             vj_ij[9] -= R_0_2_1_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+3];
+            dm_kl0 = dm[kl_loc0+3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -1651,7 +1651,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+2880] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -1662,7 +1662,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_0_1 * dm_kl0;
             vj_ij[8] += R_0_1_1_0 * dm_kl0;
             vj_ij[9] += R_0_2_0_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+1];
+            dm_kl0 = dm[kl_loc0+1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -1673,7 +1673,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_0_2 * dm_kl0;
             vj_ij[8] -= R_0_1_1_1 * dm_kl0;
             vj_ij[9] -= R_0_2_0_1 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+2];
+            dm_kl0 = dm[kl_loc0+2];
             vj_ij[0] += R_0_0_0_2 * dm_kl0;
             vj_ij[1] += R_0_0_0_3 * dm_kl0;
             vj_ij[2] += R_0_0_0_4 * dm_kl0;
@@ -1684,7 +1684,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_0_3 * dm_kl0;
             vj_ij[8] += R_0_1_1_2 * dm_kl0;
             vj_ij[9] += R_0_2_0_2 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+3];
+            dm_kl0 = dm[kl_loc0+3];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -1695,7 +1695,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_1_1 * dm_kl0;
             vj_ij[8] -= R_0_1_2_0 * dm_kl0;
             vj_ij[9] -= R_0_2_1_0 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+4];
+            dm_kl0 = dm[kl_loc0+4];
             vj_ij[0] += R_0_0_1_1 * dm_kl0;
             vj_ij[1] += R_0_0_1_2 * dm_kl0;
             vj_ij[2] += R_0_0_1_3 * dm_kl0;
@@ -1706,7 +1706,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_1_2 * dm_kl0;
             vj_ij[8] += R_0_1_2_1 * dm_kl0;
             vj_ij[9] += R_0_2_1_1 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+5];
+            dm_kl0 = dm[kl_loc0+5];
             vj_ij[0] += R_0_0_2_0 * dm_kl0;
             vj_ij[1] += R_0_0_2_1 * dm_kl0;
             vj_ij[2] += R_0_0_2_2 * dm_kl0;
@@ -1717,7 +1717,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_2_1 * dm_kl0;
             vj_ij[8] += R_0_1_3_0 * dm_kl0;
             vj_ij[9] += R_0_2_2_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+6];
+            dm_kl0 = dm[kl_loc0+6];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -1728,7 +1728,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_2_0_1 * dm_kl0;
             vj_ij[8] -= R_0_2_1_0 * dm_kl0;
             vj_ij[9] -= R_0_3_0_0 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+7];
+            dm_kl0 = dm[kl_loc0+7];
             vj_ij[0] += R_0_1_0_1 * dm_kl0;
             vj_ij[1] += R_0_1_0_2 * dm_kl0;
             vj_ij[2] += R_0_1_0_3 * dm_kl0;
@@ -1739,7 +1739,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_2_0_2 * dm_kl0;
             vj_ij[8] += R_0_2_1_1 * dm_kl0;
             vj_ij[9] += R_0_3_0_1 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+8];
+            dm_kl0 = dm[kl_loc0+8];
             vj_ij[0] += R_0_1_1_0 * dm_kl0;
             vj_ij[1] += R_0_1_1_1 * dm_kl0;
             vj_ij[2] += R_0_1_1_2 * dm_kl0;
@@ -1750,7 +1750,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_2_1_1 * dm_kl0;
             vj_ij[8] += R_0_2_2_0 * dm_kl0;
             vj_ij[9] += R_0_3_1_0 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+9];
+            dm_kl0 = dm[kl_loc0+9];
             vj_ij[0] += R_0_2_0_0 * dm_kl0;
             vj_ij[1] += R_0_2_0_1 * dm_kl0;
             vj_ij[2] += R_0_2_0_2 * dm_kl0;
@@ -2011,7 +2011,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -2387,7 +2387,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+1680] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -2408,7 +2408,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_0_1 * dm_kl0;
             vj_ij[18] += R_0_2_1_0 * dm_kl0;
             vj_ij[19] += R_0_3_0_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+1];
+            dm_kl0 = dm[kl_loc0+1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -2429,7 +2429,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_0_2 * dm_kl0;
             vj_ij[18] -= R_0_2_1_1 * dm_kl0;
             vj_ij[19] -= R_0_3_0_1 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+2];
+            dm_kl0 = dm[kl_loc0+2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -2450,7 +2450,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_1_1 * dm_kl0;
             vj_ij[18] -= R_0_2_2_0 * dm_kl0;
             vj_ij[19] -= R_0_3_1_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+3];
+            dm_kl0 = dm[kl_loc0+3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -3031,7 +3031,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+2592] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -3052,7 +3052,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_0_1 * dm_kl0;
             vj_ij[18] += R_0_2_1_0 * dm_kl0;
             vj_ij[19] += R_0_3_0_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+1];
+            dm_kl0 = dm[kl_loc0+1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -3073,7 +3073,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_0_2 * dm_kl0;
             vj_ij[18] -= R_0_2_1_1 * dm_kl0;
             vj_ij[19] -= R_0_3_0_1 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+2];
+            dm_kl0 = dm[kl_loc0+2];
             vj_ij[0] += R_0_0_0_2 * dm_kl0;
             vj_ij[1] += R_0_0_0_3 * dm_kl0;
             vj_ij[2] += R_0_0_0_4 * dm_kl0;
@@ -3094,7 +3094,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_0_3 * dm_kl0;
             vj_ij[18] += R_0_2_1_2 * dm_kl0;
             vj_ij[19] += R_0_3_0_2 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+3];
+            dm_kl0 = dm[kl_loc0+3];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -3115,7 +3115,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_1_1 * dm_kl0;
             vj_ij[18] -= R_0_2_2_0 * dm_kl0;
             vj_ij[19] -= R_0_3_1_0 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+4];
+            dm_kl0 = dm[kl_loc0+4];
             vj_ij[0] += R_0_0_1_1 * dm_kl0;
             vj_ij[1] += R_0_0_1_2 * dm_kl0;
             vj_ij[2] += R_0_0_1_3 * dm_kl0;
@@ -3136,7 +3136,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_1_2 * dm_kl0;
             vj_ij[18] += R_0_2_2_1 * dm_kl0;
             vj_ij[19] += R_0_3_1_1 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+5];
+            dm_kl0 = dm[kl_loc0+5];
             vj_ij[0] += R_0_0_2_0 * dm_kl0;
             vj_ij[1] += R_0_0_2_1 * dm_kl0;
             vj_ij[2] += R_0_0_2_2 * dm_kl0;
@@ -3157,7 +3157,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_2_1 * dm_kl0;
             vj_ij[18] += R_0_2_3_0 * dm_kl0;
             vj_ij[19] += R_0_3_2_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+6];
+            dm_kl0 = dm[kl_loc0+6];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -3178,7 +3178,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_3_0_1 * dm_kl0;
             vj_ij[18] -= R_0_3_1_0 * dm_kl0;
             vj_ij[19] -= R_0_4_0_0 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+7];
+            dm_kl0 = dm[kl_loc0+7];
             vj_ij[0] += R_0_1_0_1 * dm_kl0;
             vj_ij[1] += R_0_1_0_2 * dm_kl0;
             vj_ij[2] += R_0_1_0_3 * dm_kl0;
@@ -3199,7 +3199,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_3_0_2 * dm_kl0;
             vj_ij[18] += R_0_3_1_1 * dm_kl0;
             vj_ij[19] += R_0_4_0_1 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+8];
+            dm_kl0 = dm[kl_loc0+8];
             vj_ij[0] += R_0_1_1_0 * dm_kl0;
             vj_ij[1] += R_0_1_1_1 * dm_kl0;
             vj_ij[2] += R_0_1_1_2 * dm_kl0;
@@ -3220,7 +3220,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_3_1_1 * dm_kl0;
             vj_ij[18] += R_0_3_2_0 * dm_kl0;
             vj_ij[19] += R_0_4_1_0 * dm_kl0;
-            dm_kl0 = 1 * dm[kl_loc0+9];
+            dm_kl0 = dm[kl_loc0+9];
             vj_ij[0] += R_0_2_0_0 * dm_kl0;
             vj_ij[1] += R_0_2_0_1 * dm_kl0;
             vj_ij[2] += R_0_2_0_2 * dm_kl0;
@@ -3536,7 +3536,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -4042,7 +4042,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+1488] += vj_kl0; }
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -4078,7 +4078,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] += R_0_3_0_1 * dm_kl0;
             vj_ij[33] += R_0_3_1_0 * dm_kl0;
             vj_ij[34] += R_0_4_0_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+1];
+            dm_kl0 = dm[kl_loc0+1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -4114,7 +4114,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] -= R_0_3_0_2 * dm_kl0;
             vj_ij[33] -= R_0_3_1_1 * dm_kl0;
             vj_ij[34] -= R_0_4_0_1 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+2];
+            dm_kl0 = dm[kl_loc0+2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -4150,7 +4150,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] -= R_0_3_1_1 * dm_kl0;
             vj_ij[33] -= R_0_3_2_0 * dm_kl0;
             vj_ij[34] -= R_0_4_1_0 * dm_kl0;
-            dm_kl0 = -1 * dm[kl_loc0+3];
+            dm_kl0 = dm[kl_loc0+3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -4559,7 +4559,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
             }{
-            dm_kl0 = 1 * dm[kl_loc0+0];
+            dm_kl0 = dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl0;
             double R_0_0_0_1 = zpq * gamma_inc[sq_id+1*256];
             vj_ij[1] += R_0_0_0_1 * dm_kl0;

@@ -49,8 +49,9 @@ void md_j_4dm_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 128;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 5632; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 1920; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -79,6 +80,10 @@ void md_j_4dm_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 3712; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 29; ++batch_ij) {
         int task_ij0 = blockIdx.x * 464 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -120,8 +125,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 1 * min(remaining_n_dm, 8);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 1;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 1;
+            int i = n - i_dm * 1;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[8];
         for (int ij = 0; ij < 8; ++ij) {
@@ -273,12 +279,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 29; n += 16) {
-        int batch_kl = n % 29;
+        int kl = n / 29;
+        int batch_kl = n - kl * 29;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 464 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 29;
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*464+kl*464]);
             }
@@ -338,8 +344,9 @@ void md_j_4dm_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 512;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 5056; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 1728; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -368,6 +375,10 @@ void md_j_4dm_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 3328; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -409,8 +420,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 4 * min(remaining_n_dm, 8);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 4;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 4;
+            int i = n - i_dm * 4;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[32];
         for (int ij = 0; ij < 32; ++ij) {
@@ -606,12 +618,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 26; n += 16) {
-        int batch_kl = n % 26;
+        int kl = n / 26;
+        int batch_kl = n - kl * 26;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 416 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 26;
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*416+kl*416]);
             }
@@ -674,8 +686,9 @@ void md_j_4dm_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 512;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 4672; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 576; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -704,6 +717,10 @@ void md_j_4dm_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 4096; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 8; ++batch_ij) {
         int task_ij0 = blockIdx.x * 128 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -745,8 +762,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 4 * min(remaining_n_dm, 8);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 4;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 4;
+            int i = n - i_dm * 4;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[32];
         for (int ij = 0; ij < 32; ++ij) {
@@ -1016,104 +1034,104 @@ while (remaining_n_dm > 0) {
             vj_ij[27] += R_0_1_0_0 * dm_kl[6];
             vj_ij[31] += R_0_1_0_0 * dm_kl[7];
             for (int m = 0; m < 8; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
-            vj_ij[0] -= R_0_0_0_1 * dm_kl[0];
-            vj_ij[4] -= R_0_0_0_1 * dm_kl[1];
-            vj_ij[8] -= R_0_0_0_1 * dm_kl[2];
-            vj_ij[12] -= R_0_0_0_1 * dm_kl[3];
-            vj_ij[16] -= R_0_0_0_1 * dm_kl[4];
-            vj_ij[20] -= R_0_0_0_1 * dm_kl[5];
-            vj_ij[24] -= R_0_0_0_1 * dm_kl[6];
-            vj_ij[28] -= R_0_0_0_1 * dm_kl[7];
-            vj_ij[1] -= R_0_0_0_2 * dm_kl[0];
-            vj_ij[5] -= R_0_0_0_2 * dm_kl[1];
-            vj_ij[9] -= R_0_0_0_2 * dm_kl[2];
-            vj_ij[13] -= R_0_0_0_2 * dm_kl[3];
-            vj_ij[17] -= R_0_0_0_2 * dm_kl[4];
-            vj_ij[21] -= R_0_0_0_2 * dm_kl[5];
-            vj_ij[25] -= R_0_0_0_2 * dm_kl[6];
-            vj_ij[29] -= R_0_0_0_2 * dm_kl[7];
-            vj_ij[2] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[6] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[10] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[14] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[18] -= R_0_0_1_1 * dm_kl[4];
-            vj_ij[22] -= R_0_0_1_1 * dm_kl[5];
-            vj_ij[26] -= R_0_0_1_1 * dm_kl[6];
-            vj_ij[30] -= R_0_0_1_1 * dm_kl[7];
-            vj_ij[3] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[7] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[11] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[15] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[19] -= R_0_1_0_1 * dm_kl[4];
-            vj_ij[23] -= R_0_1_0_1 * dm_kl[5];
-            vj_ij[27] -= R_0_1_0_1 * dm_kl[6];
-            vj_ij[31] -= R_0_1_0_1 * dm_kl[7];
+            vj_ij[0] += R_0_0_0_1 * dm_kl[0];
+            vj_ij[4] += R_0_0_0_1 * dm_kl[1];
+            vj_ij[8] += R_0_0_0_1 * dm_kl[2];
+            vj_ij[12] += R_0_0_0_1 * dm_kl[3];
+            vj_ij[16] += R_0_0_0_1 * dm_kl[4];
+            vj_ij[20] += R_0_0_0_1 * dm_kl[5];
+            vj_ij[24] += R_0_0_0_1 * dm_kl[6];
+            vj_ij[28] += R_0_0_0_1 * dm_kl[7];
+            vj_ij[1] += R_0_0_0_2 * dm_kl[0];
+            vj_ij[5] += R_0_0_0_2 * dm_kl[1];
+            vj_ij[9] += R_0_0_0_2 * dm_kl[2];
+            vj_ij[13] += R_0_0_0_2 * dm_kl[3];
+            vj_ij[17] += R_0_0_0_2 * dm_kl[4];
+            vj_ij[21] += R_0_0_0_2 * dm_kl[5];
+            vj_ij[25] += R_0_0_0_2 * dm_kl[6];
+            vj_ij[29] += R_0_0_0_2 * dm_kl[7];
+            vj_ij[2] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[6] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[10] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[14] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[18] += R_0_0_1_1 * dm_kl[4];
+            vj_ij[22] += R_0_0_1_1 * dm_kl[5];
+            vj_ij[26] += R_0_0_1_1 * dm_kl[6];
+            vj_ij[30] += R_0_0_1_1 * dm_kl[7];
+            vj_ij[3] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[7] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[11] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[15] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[19] += R_0_1_0_1 * dm_kl[4];
+            vj_ij[23] += R_0_1_0_1 * dm_kl[5];
+            vj_ij[27] += R_0_1_0_1 * dm_kl[6];
+            vj_ij[31] += R_0_1_0_1 * dm_kl[7];
             for (int m = 0; m < 8; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2]; }
-            vj_ij[0] -= R_0_0_1_0 * dm_kl[0];
-            vj_ij[4] -= R_0_0_1_0 * dm_kl[1];
-            vj_ij[8] -= R_0_0_1_0 * dm_kl[2];
-            vj_ij[12] -= R_0_0_1_0 * dm_kl[3];
-            vj_ij[16] -= R_0_0_1_0 * dm_kl[4];
-            vj_ij[20] -= R_0_0_1_0 * dm_kl[5];
-            vj_ij[24] -= R_0_0_1_0 * dm_kl[6];
-            vj_ij[28] -= R_0_0_1_0 * dm_kl[7];
-            vj_ij[1] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[5] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[9] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[13] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[17] -= R_0_0_1_1 * dm_kl[4];
-            vj_ij[21] -= R_0_0_1_1 * dm_kl[5];
-            vj_ij[25] -= R_0_0_1_1 * dm_kl[6];
-            vj_ij[29] -= R_0_0_1_1 * dm_kl[7];
-            vj_ij[2] -= R_0_0_2_0 * dm_kl[0];
-            vj_ij[6] -= R_0_0_2_0 * dm_kl[1];
-            vj_ij[10] -= R_0_0_2_0 * dm_kl[2];
-            vj_ij[14] -= R_0_0_2_0 * dm_kl[3];
-            vj_ij[18] -= R_0_0_2_0 * dm_kl[4];
-            vj_ij[22] -= R_0_0_2_0 * dm_kl[5];
-            vj_ij[26] -= R_0_0_2_0 * dm_kl[6];
-            vj_ij[30] -= R_0_0_2_0 * dm_kl[7];
-            vj_ij[3] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[7] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[11] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[15] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[19] -= R_0_1_1_0 * dm_kl[4];
-            vj_ij[23] -= R_0_1_1_0 * dm_kl[5];
-            vj_ij[27] -= R_0_1_1_0 * dm_kl[6];
-            vj_ij[31] -= R_0_1_1_0 * dm_kl[7];
+            vj_ij[0] += R_0_0_1_0 * dm_kl[0];
+            vj_ij[4] += R_0_0_1_0 * dm_kl[1];
+            vj_ij[8] += R_0_0_1_0 * dm_kl[2];
+            vj_ij[12] += R_0_0_1_0 * dm_kl[3];
+            vj_ij[16] += R_0_0_1_0 * dm_kl[4];
+            vj_ij[20] += R_0_0_1_0 * dm_kl[5];
+            vj_ij[24] += R_0_0_1_0 * dm_kl[6];
+            vj_ij[28] += R_0_0_1_0 * dm_kl[7];
+            vj_ij[1] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[5] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[9] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[13] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[17] += R_0_0_1_1 * dm_kl[4];
+            vj_ij[21] += R_0_0_1_1 * dm_kl[5];
+            vj_ij[25] += R_0_0_1_1 * dm_kl[6];
+            vj_ij[29] += R_0_0_1_1 * dm_kl[7];
+            vj_ij[2] += R_0_0_2_0 * dm_kl[0];
+            vj_ij[6] += R_0_0_2_0 * dm_kl[1];
+            vj_ij[10] += R_0_0_2_0 * dm_kl[2];
+            vj_ij[14] += R_0_0_2_0 * dm_kl[3];
+            vj_ij[18] += R_0_0_2_0 * dm_kl[4];
+            vj_ij[22] += R_0_0_2_0 * dm_kl[5];
+            vj_ij[26] += R_0_0_2_0 * dm_kl[6];
+            vj_ij[30] += R_0_0_2_0 * dm_kl[7];
+            vj_ij[3] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[7] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[11] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[15] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[19] += R_0_1_1_0 * dm_kl[4];
+            vj_ij[23] += R_0_1_1_0 * dm_kl[5];
+            vj_ij[27] += R_0_1_1_0 * dm_kl[6];
+            vj_ij[31] += R_0_1_1_0 * dm_kl[7];
             for (int m = 0; m < 8; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
-            vj_ij[0] -= R_0_1_0_0 * dm_kl[0];
-            vj_ij[4] -= R_0_1_0_0 * dm_kl[1];
-            vj_ij[8] -= R_0_1_0_0 * dm_kl[2];
-            vj_ij[12] -= R_0_1_0_0 * dm_kl[3];
-            vj_ij[16] -= R_0_1_0_0 * dm_kl[4];
-            vj_ij[20] -= R_0_1_0_0 * dm_kl[5];
-            vj_ij[24] -= R_0_1_0_0 * dm_kl[6];
-            vj_ij[28] -= R_0_1_0_0 * dm_kl[7];
-            vj_ij[1] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[5] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[9] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[13] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[17] -= R_0_1_0_1 * dm_kl[4];
-            vj_ij[21] -= R_0_1_0_1 * dm_kl[5];
-            vj_ij[25] -= R_0_1_0_1 * dm_kl[6];
-            vj_ij[29] -= R_0_1_0_1 * dm_kl[7];
-            vj_ij[2] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[6] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[10] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[14] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[18] -= R_0_1_1_0 * dm_kl[4];
-            vj_ij[22] -= R_0_1_1_0 * dm_kl[5];
-            vj_ij[26] -= R_0_1_1_0 * dm_kl[6];
-            vj_ij[30] -= R_0_1_1_0 * dm_kl[7];
-            vj_ij[3] -= R_0_2_0_0 * dm_kl[0];
-            vj_ij[7] -= R_0_2_0_0 * dm_kl[1];
-            vj_ij[11] -= R_0_2_0_0 * dm_kl[2];
-            vj_ij[15] -= R_0_2_0_0 * dm_kl[3];
-            vj_ij[19] -= R_0_2_0_0 * dm_kl[4];
-            vj_ij[23] -= R_0_2_0_0 * dm_kl[5];
-            vj_ij[27] -= R_0_2_0_0 * dm_kl[6];
-            vj_ij[31] -= R_0_2_0_0 * dm_kl[7];
+            vj_ij[0] += R_0_1_0_0 * dm_kl[0];
+            vj_ij[4] += R_0_1_0_0 * dm_kl[1];
+            vj_ij[8] += R_0_1_0_0 * dm_kl[2];
+            vj_ij[12] += R_0_1_0_0 * dm_kl[3];
+            vj_ij[16] += R_0_1_0_0 * dm_kl[4];
+            vj_ij[20] += R_0_1_0_0 * dm_kl[5];
+            vj_ij[24] += R_0_1_0_0 * dm_kl[6];
+            vj_ij[28] += R_0_1_0_0 * dm_kl[7];
+            vj_ij[1] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[5] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[9] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[13] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[17] += R_0_1_0_1 * dm_kl[4];
+            vj_ij[21] += R_0_1_0_1 * dm_kl[5];
+            vj_ij[25] += R_0_1_0_1 * dm_kl[6];
+            vj_ij[29] += R_0_1_0_1 * dm_kl[7];
+            vj_ij[2] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[6] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[10] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[14] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[18] += R_0_1_1_0 * dm_kl[4];
+            vj_ij[22] += R_0_1_1_0 * dm_kl[5];
+            vj_ij[26] += R_0_1_1_0 * dm_kl[6];
+            vj_ij[30] += R_0_1_1_0 * dm_kl[7];
+            vj_ij[3] += R_0_2_0_0 * dm_kl[0];
+            vj_ij[7] += R_0_2_0_0 * dm_kl[1];
+            vj_ij[11] += R_0_2_0_0 * dm_kl[2];
+            vj_ij[15] += R_0_2_0_0 * dm_kl[3];
+            vj_ij[19] += R_0_2_0_0 * dm_kl[4];
+            vj_ij[23] += R_0_2_0_0 * dm_kl[5];
+            vj_ij[27] += R_0_2_0_0 * dm_kl[6];
+            vj_ij[31] += R_0_2_0_0 * dm_kl[7];
         }
         double *vj_cache = Rp_cache;
         switch (remaining_n_dm) {
@@ -1180,12 +1198,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 32; n += 16) {
-        int batch_kl = n % 8;
+        int kl = n / 8;
+        int batch_kl = n - kl * 8;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 128 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 8;
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*512+kl*128]);
             }
@@ -1245,8 +1263,9 @@ void md_j_4dm_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 1280;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 4096; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 1408; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -1275,6 +1294,10 @@ void md_j_4dm_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 2688; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -1316,8 +1339,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 10 * min(remaining_n_dm, 8);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 10;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 10;
+            int i = n - i_dm * 10;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[80];
         for (int ij = 0; ij < 80; ++ij) {
@@ -1618,12 +1642,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 21; n += 16) {
-        int batch_kl = n % 21;
+        int kl = n / 21;
+        int batch_kl = n - kl * 21;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 336 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 21;
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*336+kl*336]);
             }
@@ -1683,8 +1707,9 @@ void md_j_4dm_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 640;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 4224; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 896; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -1713,6 +1738,10 @@ void md_j_4dm_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 3328; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -1754,8 +1783,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 10 * min(remaining_n_dm, 4);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 10;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 10;
+            int i = n - i_dm * 10;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[40];
         for (int ij = 0; ij < 40; ++ij) {
@@ -2077,128 +2107,128 @@ while (remaining_n_dm > 0) {
             vj_ij[29] += R_0_2_0_0 * dm_kl[2];
             vj_ij[39] += R_0_2_0_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
-            vj_ij[0] -= R_0_0_0_1 * dm_kl[0];
-            vj_ij[10] -= R_0_0_0_1 * dm_kl[1];
-            vj_ij[20] -= R_0_0_0_1 * dm_kl[2];
-            vj_ij[30] -= R_0_0_0_1 * dm_kl[3];
-            vj_ij[1] -= R_0_0_0_2 * dm_kl[0];
-            vj_ij[11] -= R_0_0_0_2 * dm_kl[1];
-            vj_ij[21] -= R_0_0_0_2 * dm_kl[2];
-            vj_ij[31] -= R_0_0_0_2 * dm_kl[3];
-            vj_ij[2] -= R_0_0_0_3 * dm_kl[0];
-            vj_ij[12] -= R_0_0_0_3 * dm_kl[1];
-            vj_ij[22] -= R_0_0_0_3 * dm_kl[2];
-            vj_ij[32] -= R_0_0_0_3 * dm_kl[3];
-            vj_ij[3] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[13] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[23] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[33] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[4] -= R_0_0_1_2 * dm_kl[0];
-            vj_ij[14] -= R_0_0_1_2 * dm_kl[1];
-            vj_ij[24] -= R_0_0_1_2 * dm_kl[2];
-            vj_ij[34] -= R_0_0_1_2 * dm_kl[3];
-            vj_ij[5] -= R_0_0_2_1 * dm_kl[0];
-            vj_ij[15] -= R_0_0_2_1 * dm_kl[1];
-            vj_ij[25] -= R_0_0_2_1 * dm_kl[2];
-            vj_ij[35] -= R_0_0_2_1 * dm_kl[3];
-            vj_ij[6] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[16] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[26] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[36] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[7] -= R_0_1_0_2 * dm_kl[0];
-            vj_ij[17] -= R_0_1_0_2 * dm_kl[1];
-            vj_ij[27] -= R_0_1_0_2 * dm_kl[2];
-            vj_ij[37] -= R_0_1_0_2 * dm_kl[3];
-            vj_ij[8] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[18] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[28] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[38] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[9] -= R_0_2_0_1 * dm_kl[0];
-            vj_ij[19] -= R_0_2_0_1 * dm_kl[1];
-            vj_ij[29] -= R_0_2_0_1 * dm_kl[2];
-            vj_ij[39] -= R_0_2_0_1 * dm_kl[3];
+            vj_ij[0] += R_0_0_0_1 * dm_kl[0];
+            vj_ij[10] += R_0_0_0_1 * dm_kl[1];
+            vj_ij[20] += R_0_0_0_1 * dm_kl[2];
+            vj_ij[30] += R_0_0_0_1 * dm_kl[3];
+            vj_ij[1] += R_0_0_0_2 * dm_kl[0];
+            vj_ij[11] += R_0_0_0_2 * dm_kl[1];
+            vj_ij[21] += R_0_0_0_2 * dm_kl[2];
+            vj_ij[31] += R_0_0_0_2 * dm_kl[3];
+            vj_ij[2] += R_0_0_0_3 * dm_kl[0];
+            vj_ij[12] += R_0_0_0_3 * dm_kl[1];
+            vj_ij[22] += R_0_0_0_3 * dm_kl[2];
+            vj_ij[32] += R_0_0_0_3 * dm_kl[3];
+            vj_ij[3] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[13] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[23] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[33] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[4] += R_0_0_1_2 * dm_kl[0];
+            vj_ij[14] += R_0_0_1_2 * dm_kl[1];
+            vj_ij[24] += R_0_0_1_2 * dm_kl[2];
+            vj_ij[34] += R_0_0_1_2 * dm_kl[3];
+            vj_ij[5] += R_0_0_2_1 * dm_kl[0];
+            vj_ij[15] += R_0_0_2_1 * dm_kl[1];
+            vj_ij[25] += R_0_0_2_1 * dm_kl[2];
+            vj_ij[35] += R_0_0_2_1 * dm_kl[3];
+            vj_ij[6] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[16] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[26] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[36] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[7] += R_0_1_0_2 * dm_kl[0];
+            vj_ij[17] += R_0_1_0_2 * dm_kl[1];
+            vj_ij[27] += R_0_1_0_2 * dm_kl[2];
+            vj_ij[37] += R_0_1_0_2 * dm_kl[3];
+            vj_ij[8] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[18] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[28] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[38] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[9] += R_0_2_0_1 * dm_kl[0];
+            vj_ij[19] += R_0_2_0_1 * dm_kl[1];
+            vj_ij[29] += R_0_2_0_1 * dm_kl[2];
+            vj_ij[39] += R_0_2_0_1 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2]; }
-            vj_ij[0] -= R_0_0_1_0 * dm_kl[0];
-            vj_ij[10] -= R_0_0_1_0 * dm_kl[1];
-            vj_ij[20] -= R_0_0_1_0 * dm_kl[2];
-            vj_ij[30] -= R_0_0_1_0 * dm_kl[3];
-            vj_ij[1] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[11] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[21] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[31] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[2] -= R_0_0_1_2 * dm_kl[0];
-            vj_ij[12] -= R_0_0_1_2 * dm_kl[1];
-            vj_ij[22] -= R_0_0_1_2 * dm_kl[2];
-            vj_ij[32] -= R_0_0_1_2 * dm_kl[3];
-            vj_ij[3] -= R_0_0_2_0 * dm_kl[0];
-            vj_ij[13] -= R_0_0_2_0 * dm_kl[1];
-            vj_ij[23] -= R_0_0_2_0 * dm_kl[2];
-            vj_ij[33] -= R_0_0_2_0 * dm_kl[3];
-            vj_ij[4] -= R_0_0_2_1 * dm_kl[0];
-            vj_ij[14] -= R_0_0_2_1 * dm_kl[1];
-            vj_ij[24] -= R_0_0_2_1 * dm_kl[2];
-            vj_ij[34] -= R_0_0_2_1 * dm_kl[3];
-            vj_ij[5] -= R_0_0_3_0 * dm_kl[0];
-            vj_ij[15] -= R_0_0_3_0 * dm_kl[1];
-            vj_ij[25] -= R_0_0_3_0 * dm_kl[2];
-            vj_ij[35] -= R_0_0_3_0 * dm_kl[3];
-            vj_ij[6] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[16] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[26] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[36] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[7] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[17] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[27] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[37] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[8] -= R_0_1_2_0 * dm_kl[0];
-            vj_ij[18] -= R_0_1_2_0 * dm_kl[1];
-            vj_ij[28] -= R_0_1_2_0 * dm_kl[2];
-            vj_ij[38] -= R_0_1_2_0 * dm_kl[3];
-            vj_ij[9] -= R_0_2_1_0 * dm_kl[0];
-            vj_ij[19] -= R_0_2_1_0 * dm_kl[1];
-            vj_ij[29] -= R_0_2_1_0 * dm_kl[2];
-            vj_ij[39] -= R_0_2_1_0 * dm_kl[3];
+            vj_ij[0] += R_0_0_1_0 * dm_kl[0];
+            vj_ij[10] += R_0_0_1_0 * dm_kl[1];
+            vj_ij[20] += R_0_0_1_0 * dm_kl[2];
+            vj_ij[30] += R_0_0_1_0 * dm_kl[3];
+            vj_ij[1] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[11] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[21] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[31] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[2] += R_0_0_1_2 * dm_kl[0];
+            vj_ij[12] += R_0_0_1_2 * dm_kl[1];
+            vj_ij[22] += R_0_0_1_2 * dm_kl[2];
+            vj_ij[32] += R_0_0_1_2 * dm_kl[3];
+            vj_ij[3] += R_0_0_2_0 * dm_kl[0];
+            vj_ij[13] += R_0_0_2_0 * dm_kl[1];
+            vj_ij[23] += R_0_0_2_0 * dm_kl[2];
+            vj_ij[33] += R_0_0_2_0 * dm_kl[3];
+            vj_ij[4] += R_0_0_2_1 * dm_kl[0];
+            vj_ij[14] += R_0_0_2_1 * dm_kl[1];
+            vj_ij[24] += R_0_0_2_1 * dm_kl[2];
+            vj_ij[34] += R_0_0_2_1 * dm_kl[3];
+            vj_ij[5] += R_0_0_3_0 * dm_kl[0];
+            vj_ij[15] += R_0_0_3_0 * dm_kl[1];
+            vj_ij[25] += R_0_0_3_0 * dm_kl[2];
+            vj_ij[35] += R_0_0_3_0 * dm_kl[3];
+            vj_ij[6] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[16] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[26] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[36] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[7] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[17] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[27] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[37] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[8] += R_0_1_2_0 * dm_kl[0];
+            vj_ij[18] += R_0_1_2_0 * dm_kl[1];
+            vj_ij[28] += R_0_1_2_0 * dm_kl[2];
+            vj_ij[38] += R_0_1_2_0 * dm_kl[3];
+            vj_ij[9] += R_0_2_1_0 * dm_kl[0];
+            vj_ij[19] += R_0_2_1_0 * dm_kl[1];
+            vj_ij[29] += R_0_2_1_0 * dm_kl[2];
+            vj_ij[39] += R_0_2_1_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
-            vj_ij[0] -= R_0_1_0_0 * dm_kl[0];
-            vj_ij[10] -= R_0_1_0_0 * dm_kl[1];
-            vj_ij[20] -= R_0_1_0_0 * dm_kl[2];
-            vj_ij[30] -= R_0_1_0_0 * dm_kl[3];
-            vj_ij[1] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[11] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[21] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[31] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[2] -= R_0_1_0_2 * dm_kl[0];
-            vj_ij[12] -= R_0_1_0_2 * dm_kl[1];
-            vj_ij[22] -= R_0_1_0_2 * dm_kl[2];
-            vj_ij[32] -= R_0_1_0_2 * dm_kl[3];
-            vj_ij[3] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[13] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[23] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[33] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[4] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[14] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[24] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[34] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[5] -= R_0_1_2_0 * dm_kl[0];
-            vj_ij[15] -= R_0_1_2_0 * dm_kl[1];
-            vj_ij[25] -= R_0_1_2_0 * dm_kl[2];
-            vj_ij[35] -= R_0_1_2_0 * dm_kl[3];
-            vj_ij[6] -= R_0_2_0_0 * dm_kl[0];
-            vj_ij[16] -= R_0_2_0_0 * dm_kl[1];
-            vj_ij[26] -= R_0_2_0_0 * dm_kl[2];
-            vj_ij[36] -= R_0_2_0_0 * dm_kl[3];
-            vj_ij[7] -= R_0_2_0_1 * dm_kl[0];
-            vj_ij[17] -= R_0_2_0_1 * dm_kl[1];
-            vj_ij[27] -= R_0_2_0_1 * dm_kl[2];
-            vj_ij[37] -= R_0_2_0_1 * dm_kl[3];
-            vj_ij[8] -= R_0_2_1_0 * dm_kl[0];
-            vj_ij[18] -= R_0_2_1_0 * dm_kl[1];
-            vj_ij[28] -= R_0_2_1_0 * dm_kl[2];
-            vj_ij[38] -= R_0_2_1_0 * dm_kl[3];
-            vj_ij[9] -= R_0_3_0_0 * dm_kl[0];
-            vj_ij[19] -= R_0_3_0_0 * dm_kl[1];
-            vj_ij[29] -= R_0_3_0_0 * dm_kl[2];
-            vj_ij[39] -= R_0_3_0_0 * dm_kl[3];
+            vj_ij[0] += R_0_1_0_0 * dm_kl[0];
+            vj_ij[10] += R_0_1_0_0 * dm_kl[1];
+            vj_ij[20] += R_0_1_0_0 * dm_kl[2];
+            vj_ij[30] += R_0_1_0_0 * dm_kl[3];
+            vj_ij[1] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[11] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[21] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[31] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[2] += R_0_1_0_2 * dm_kl[0];
+            vj_ij[12] += R_0_1_0_2 * dm_kl[1];
+            vj_ij[22] += R_0_1_0_2 * dm_kl[2];
+            vj_ij[32] += R_0_1_0_2 * dm_kl[3];
+            vj_ij[3] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[13] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[23] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[33] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[4] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[14] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[24] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[34] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[5] += R_0_1_2_0 * dm_kl[0];
+            vj_ij[15] += R_0_1_2_0 * dm_kl[1];
+            vj_ij[25] += R_0_1_2_0 * dm_kl[2];
+            vj_ij[35] += R_0_1_2_0 * dm_kl[3];
+            vj_ij[6] += R_0_2_0_0 * dm_kl[0];
+            vj_ij[16] += R_0_2_0_0 * dm_kl[1];
+            vj_ij[26] += R_0_2_0_0 * dm_kl[2];
+            vj_ij[36] += R_0_2_0_0 * dm_kl[3];
+            vj_ij[7] += R_0_2_0_1 * dm_kl[0];
+            vj_ij[17] += R_0_2_0_1 * dm_kl[1];
+            vj_ij[27] += R_0_2_0_1 * dm_kl[2];
+            vj_ij[37] += R_0_2_0_1 * dm_kl[3];
+            vj_ij[8] += R_0_2_1_0 * dm_kl[0];
+            vj_ij[18] += R_0_2_1_0 * dm_kl[1];
+            vj_ij[28] += R_0_2_1_0 * dm_kl[2];
+            vj_ij[38] += R_0_2_1_0 * dm_kl[3];
+            vj_ij[9] += R_0_3_0_0 * dm_kl[0];
+            vj_ij[19] += R_0_3_0_0 * dm_kl[1];
+            vj_ij[29] += R_0_3_0_0 * dm_kl[2];
+            vj_ij[39] += R_0_3_0_0 * dm_kl[3];
         }
         double *vj_cache = Rp_cache;
         switch (remaining_n_dm) {
@@ -2265,12 +2295,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 52; n += 16) {
-        int batch_kl = n % 13;
+        int kl = n / 13;
+        int batch_kl = n - kl * 13;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 208 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 13;
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*832+kl*208]);
             }
@@ -2333,8 +2363,9 @@ void md_j_4dm_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 640;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 3584; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 384; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -2363,6 +2394,10 @@ void md_j_4dm_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 3200; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 5; ++batch_ij) {
         int task_ij0 = blockIdx.x * 80 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -2404,8 +2439,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 10 * min(remaining_n_dm, 4);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 10;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 10;
+            int i = n - i_dm * 10;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[40];
         for (int ij = 0; ij < 40; ++ij) {
@@ -3062,46 +3098,46 @@ while (remaining_n_dm > 0) {
             vj_ij[29] += R_0_2_0_0 * dm_kl[2];
             vj_ij[39] += R_0_2_0_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
-            vj_ij[0] -= R_0_0_0_1 * dm_kl[0];
-            vj_ij[10] -= R_0_0_0_1 * dm_kl[1];
-            vj_ij[20] -= R_0_0_0_1 * dm_kl[2];
-            vj_ij[30] -= R_0_0_0_1 * dm_kl[3];
-            vj_ij[1] -= R_0_0_0_2 * dm_kl[0];
-            vj_ij[11] -= R_0_0_0_2 * dm_kl[1];
-            vj_ij[21] -= R_0_0_0_2 * dm_kl[2];
-            vj_ij[31] -= R_0_0_0_2 * dm_kl[3];
-            vj_ij[2] -= R_0_0_0_3 * dm_kl[0];
-            vj_ij[12] -= R_0_0_0_3 * dm_kl[1];
-            vj_ij[22] -= R_0_0_0_3 * dm_kl[2];
-            vj_ij[32] -= R_0_0_0_3 * dm_kl[3];
-            vj_ij[3] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[13] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[23] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[33] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[4] -= R_0_0_1_2 * dm_kl[0];
-            vj_ij[14] -= R_0_0_1_2 * dm_kl[1];
-            vj_ij[24] -= R_0_0_1_2 * dm_kl[2];
-            vj_ij[34] -= R_0_0_1_2 * dm_kl[3];
-            vj_ij[5] -= R_0_0_2_1 * dm_kl[0];
-            vj_ij[15] -= R_0_0_2_1 * dm_kl[1];
-            vj_ij[25] -= R_0_0_2_1 * dm_kl[2];
-            vj_ij[35] -= R_0_0_2_1 * dm_kl[3];
-            vj_ij[6] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[16] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[26] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[36] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[7] -= R_0_1_0_2 * dm_kl[0];
-            vj_ij[17] -= R_0_1_0_2 * dm_kl[1];
-            vj_ij[27] -= R_0_1_0_2 * dm_kl[2];
-            vj_ij[37] -= R_0_1_0_2 * dm_kl[3];
-            vj_ij[8] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[18] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[28] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[38] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[9] -= R_0_2_0_1 * dm_kl[0];
-            vj_ij[19] -= R_0_2_0_1 * dm_kl[1];
-            vj_ij[29] -= R_0_2_0_1 * dm_kl[2];
-            vj_ij[39] -= R_0_2_0_1 * dm_kl[3];
+            vj_ij[0] += R_0_0_0_1 * dm_kl[0];
+            vj_ij[10] += R_0_0_0_1 * dm_kl[1];
+            vj_ij[20] += R_0_0_0_1 * dm_kl[2];
+            vj_ij[30] += R_0_0_0_1 * dm_kl[3];
+            vj_ij[1] += R_0_0_0_2 * dm_kl[0];
+            vj_ij[11] += R_0_0_0_2 * dm_kl[1];
+            vj_ij[21] += R_0_0_0_2 * dm_kl[2];
+            vj_ij[31] += R_0_0_0_2 * dm_kl[3];
+            vj_ij[2] += R_0_0_0_3 * dm_kl[0];
+            vj_ij[12] += R_0_0_0_3 * dm_kl[1];
+            vj_ij[22] += R_0_0_0_3 * dm_kl[2];
+            vj_ij[32] += R_0_0_0_3 * dm_kl[3];
+            vj_ij[3] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[13] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[23] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[33] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[4] += R_0_0_1_2 * dm_kl[0];
+            vj_ij[14] += R_0_0_1_2 * dm_kl[1];
+            vj_ij[24] += R_0_0_1_2 * dm_kl[2];
+            vj_ij[34] += R_0_0_1_2 * dm_kl[3];
+            vj_ij[5] += R_0_0_2_1 * dm_kl[0];
+            vj_ij[15] += R_0_0_2_1 * dm_kl[1];
+            vj_ij[25] += R_0_0_2_1 * dm_kl[2];
+            vj_ij[35] += R_0_0_2_1 * dm_kl[3];
+            vj_ij[6] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[16] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[26] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[36] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[7] += R_0_1_0_2 * dm_kl[0];
+            vj_ij[17] += R_0_1_0_2 * dm_kl[1];
+            vj_ij[27] += R_0_1_0_2 * dm_kl[2];
+            vj_ij[37] += R_0_1_0_2 * dm_kl[3];
+            vj_ij[8] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[18] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[28] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[38] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[9] += R_0_2_0_1 * dm_kl[0];
+            vj_ij[19] += R_0_2_0_1 * dm_kl[1];
+            vj_ij[29] += R_0_2_0_1 * dm_kl[2];
+            vj_ij[39] += R_0_2_0_1 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+2]; }
             vj_ij[0] += R_0_0_0_2 * dm_kl[0];
             vj_ij[10] += R_0_0_0_2 * dm_kl[1];
@@ -3144,46 +3180,46 @@ while (remaining_n_dm > 0) {
             vj_ij[29] += R_0_2_0_2 * dm_kl[2];
             vj_ij[39] += R_0_2_0_2 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
-            vj_ij[0] -= R_0_0_1_0 * dm_kl[0];
-            vj_ij[10] -= R_0_0_1_0 * dm_kl[1];
-            vj_ij[20] -= R_0_0_1_0 * dm_kl[2];
-            vj_ij[30] -= R_0_0_1_0 * dm_kl[3];
-            vj_ij[1] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[11] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[21] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[31] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[2] -= R_0_0_1_2 * dm_kl[0];
-            vj_ij[12] -= R_0_0_1_2 * dm_kl[1];
-            vj_ij[22] -= R_0_0_1_2 * dm_kl[2];
-            vj_ij[32] -= R_0_0_1_2 * dm_kl[3];
-            vj_ij[3] -= R_0_0_2_0 * dm_kl[0];
-            vj_ij[13] -= R_0_0_2_0 * dm_kl[1];
-            vj_ij[23] -= R_0_0_2_0 * dm_kl[2];
-            vj_ij[33] -= R_0_0_2_0 * dm_kl[3];
-            vj_ij[4] -= R_0_0_2_1 * dm_kl[0];
-            vj_ij[14] -= R_0_0_2_1 * dm_kl[1];
-            vj_ij[24] -= R_0_0_2_1 * dm_kl[2];
-            vj_ij[34] -= R_0_0_2_1 * dm_kl[3];
-            vj_ij[5] -= R_0_0_3_0 * dm_kl[0];
-            vj_ij[15] -= R_0_0_3_0 * dm_kl[1];
-            vj_ij[25] -= R_0_0_3_0 * dm_kl[2];
-            vj_ij[35] -= R_0_0_3_0 * dm_kl[3];
-            vj_ij[6] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[16] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[26] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[36] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[7] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[17] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[27] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[37] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[8] -= R_0_1_2_0 * dm_kl[0];
-            vj_ij[18] -= R_0_1_2_0 * dm_kl[1];
-            vj_ij[28] -= R_0_1_2_0 * dm_kl[2];
-            vj_ij[38] -= R_0_1_2_0 * dm_kl[3];
-            vj_ij[9] -= R_0_2_1_0 * dm_kl[0];
-            vj_ij[19] -= R_0_2_1_0 * dm_kl[1];
-            vj_ij[29] -= R_0_2_1_0 * dm_kl[2];
-            vj_ij[39] -= R_0_2_1_0 * dm_kl[3];
+            vj_ij[0] += R_0_0_1_0 * dm_kl[0];
+            vj_ij[10] += R_0_0_1_0 * dm_kl[1];
+            vj_ij[20] += R_0_0_1_0 * dm_kl[2];
+            vj_ij[30] += R_0_0_1_0 * dm_kl[3];
+            vj_ij[1] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[11] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[21] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[31] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[2] += R_0_0_1_2 * dm_kl[0];
+            vj_ij[12] += R_0_0_1_2 * dm_kl[1];
+            vj_ij[22] += R_0_0_1_2 * dm_kl[2];
+            vj_ij[32] += R_0_0_1_2 * dm_kl[3];
+            vj_ij[3] += R_0_0_2_0 * dm_kl[0];
+            vj_ij[13] += R_0_0_2_0 * dm_kl[1];
+            vj_ij[23] += R_0_0_2_0 * dm_kl[2];
+            vj_ij[33] += R_0_0_2_0 * dm_kl[3];
+            vj_ij[4] += R_0_0_2_1 * dm_kl[0];
+            vj_ij[14] += R_0_0_2_1 * dm_kl[1];
+            vj_ij[24] += R_0_0_2_1 * dm_kl[2];
+            vj_ij[34] += R_0_0_2_1 * dm_kl[3];
+            vj_ij[5] += R_0_0_3_0 * dm_kl[0];
+            vj_ij[15] += R_0_0_3_0 * dm_kl[1];
+            vj_ij[25] += R_0_0_3_0 * dm_kl[2];
+            vj_ij[35] += R_0_0_3_0 * dm_kl[3];
+            vj_ij[6] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[16] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[26] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[36] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[7] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[17] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[27] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[37] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[8] += R_0_1_2_0 * dm_kl[0];
+            vj_ij[18] += R_0_1_2_0 * dm_kl[1];
+            vj_ij[28] += R_0_1_2_0 * dm_kl[2];
+            vj_ij[38] += R_0_1_2_0 * dm_kl[3];
+            vj_ij[9] += R_0_2_1_0 * dm_kl[0];
+            vj_ij[19] += R_0_2_1_0 * dm_kl[1];
+            vj_ij[29] += R_0_2_1_0 * dm_kl[2];
+            vj_ij[39] += R_0_2_1_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+4]; }
             vj_ij[0] += R_0_0_1_1 * dm_kl[0];
             vj_ij[10] += R_0_0_1_1 * dm_kl[1];
@@ -3267,46 +3303,46 @@ while (remaining_n_dm > 0) {
             vj_ij[29] += R_0_2_2_0 * dm_kl[2];
             vj_ij[39] += R_0_2_2_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+6]; }
-            vj_ij[0] -= R_0_1_0_0 * dm_kl[0];
-            vj_ij[10] -= R_0_1_0_0 * dm_kl[1];
-            vj_ij[20] -= R_0_1_0_0 * dm_kl[2];
-            vj_ij[30] -= R_0_1_0_0 * dm_kl[3];
-            vj_ij[1] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[11] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[21] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[31] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[2] -= R_0_1_0_2 * dm_kl[0];
-            vj_ij[12] -= R_0_1_0_2 * dm_kl[1];
-            vj_ij[22] -= R_0_1_0_2 * dm_kl[2];
-            vj_ij[32] -= R_0_1_0_2 * dm_kl[3];
-            vj_ij[3] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[13] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[23] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[33] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[4] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[14] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[24] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[34] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[5] -= R_0_1_2_0 * dm_kl[0];
-            vj_ij[15] -= R_0_1_2_0 * dm_kl[1];
-            vj_ij[25] -= R_0_1_2_0 * dm_kl[2];
-            vj_ij[35] -= R_0_1_2_0 * dm_kl[3];
-            vj_ij[6] -= R_0_2_0_0 * dm_kl[0];
-            vj_ij[16] -= R_0_2_0_0 * dm_kl[1];
-            vj_ij[26] -= R_0_2_0_0 * dm_kl[2];
-            vj_ij[36] -= R_0_2_0_0 * dm_kl[3];
-            vj_ij[7] -= R_0_2_0_1 * dm_kl[0];
-            vj_ij[17] -= R_0_2_0_1 * dm_kl[1];
-            vj_ij[27] -= R_0_2_0_1 * dm_kl[2];
-            vj_ij[37] -= R_0_2_0_1 * dm_kl[3];
-            vj_ij[8] -= R_0_2_1_0 * dm_kl[0];
-            vj_ij[18] -= R_0_2_1_0 * dm_kl[1];
-            vj_ij[28] -= R_0_2_1_0 * dm_kl[2];
-            vj_ij[38] -= R_0_2_1_0 * dm_kl[3];
-            vj_ij[9] -= R_0_3_0_0 * dm_kl[0];
-            vj_ij[19] -= R_0_3_0_0 * dm_kl[1];
-            vj_ij[29] -= R_0_3_0_0 * dm_kl[2];
-            vj_ij[39] -= R_0_3_0_0 * dm_kl[3];
+            vj_ij[0] += R_0_1_0_0 * dm_kl[0];
+            vj_ij[10] += R_0_1_0_0 * dm_kl[1];
+            vj_ij[20] += R_0_1_0_0 * dm_kl[2];
+            vj_ij[30] += R_0_1_0_0 * dm_kl[3];
+            vj_ij[1] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[11] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[21] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[31] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[2] += R_0_1_0_2 * dm_kl[0];
+            vj_ij[12] += R_0_1_0_2 * dm_kl[1];
+            vj_ij[22] += R_0_1_0_2 * dm_kl[2];
+            vj_ij[32] += R_0_1_0_2 * dm_kl[3];
+            vj_ij[3] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[13] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[23] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[33] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[4] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[14] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[24] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[34] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[5] += R_0_1_2_0 * dm_kl[0];
+            vj_ij[15] += R_0_1_2_0 * dm_kl[1];
+            vj_ij[25] += R_0_1_2_0 * dm_kl[2];
+            vj_ij[35] += R_0_1_2_0 * dm_kl[3];
+            vj_ij[6] += R_0_2_0_0 * dm_kl[0];
+            vj_ij[16] += R_0_2_0_0 * dm_kl[1];
+            vj_ij[26] += R_0_2_0_0 * dm_kl[2];
+            vj_ij[36] += R_0_2_0_0 * dm_kl[3];
+            vj_ij[7] += R_0_2_0_1 * dm_kl[0];
+            vj_ij[17] += R_0_2_0_1 * dm_kl[1];
+            vj_ij[27] += R_0_2_0_1 * dm_kl[2];
+            vj_ij[37] += R_0_2_0_1 * dm_kl[3];
+            vj_ij[8] += R_0_2_1_0 * dm_kl[0];
+            vj_ij[18] += R_0_2_1_0 * dm_kl[1];
+            vj_ij[28] += R_0_2_1_0 * dm_kl[2];
+            vj_ij[38] += R_0_2_1_0 * dm_kl[3];
+            vj_ij[9] += R_0_3_0_0 * dm_kl[0];
+            vj_ij[19] += R_0_3_0_0 * dm_kl[1];
+            vj_ij[29] += R_0_3_0_0 * dm_kl[2];
+            vj_ij[39] += R_0_3_0_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+7]; }
             vj_ij[0] += R_0_1_0_1 * dm_kl[0];
             vj_ij[10] += R_0_1_0_1 * dm_kl[1];
@@ -3496,12 +3532,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 50; n += 16) {
-        int batch_kl = n % 5;
+        int kl = n / 5;
+        int batch_kl = n - kl * 5;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 80 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 5;
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*800+kl*80]);
             }
@@ -3561,8 +3597,9 @@ void md_j_4dm_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 1280;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 3776; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 1920; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -3591,6 +3628,10 @@ void md_j_4dm_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 1856; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -3632,8 +3673,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 20 * min(remaining_n_dm, 4);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 20;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 20;
+            int i = n - i_dm * 20;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[80];
         for (int ij = 0; ij < 80; ++ij) {
@@ -3953,12 +3995,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 29; n += 16) {
-        int batch_kl = n % 29;
+        int kl = n / 29;
+        int batch_kl = n - kl * 29;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 464 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 29;
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*464+kl*464]);
             }
@@ -4018,8 +4060,9 @@ void md_j_4dm_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     double *gamma_inc = dm_ij_cache + 1280;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
-    for (int n = thread_id; n < 3584; n += 256) {
-        vj_kl_cache[n] = 0.;
+
+    for (int n = thread_id; n < 768; n += 256) {
+        Rq_cache[n] = 0.;
     }
     __syncthreads();
 
@@ -4048,6 +4091,10 @@ void md_j_4dm_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
 
 int remaining_n_dm = jk.n_dm;
 while (remaining_n_dm > 0) {
+    __syncthreads();
+    for (int n = thread_id; n < 2816; n += 256) {
+        vj_kl_cache[n] = 0.;
+    }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
@@ -4089,8 +4136,9 @@ while (remaining_n_dm > 0) {
         int ij_loc0 = pair_ij_loc[task_ij];
         int nf3ij_dm = 20 * min(remaining_n_dm, 4);
         for (int n = ty; n < nf3ij_dm; n += 16) {
-            int i = n / 20;
-            dm_ij_cache[tx+n*16] = dm[i*dm_size+ij_loc0+n];
+            int i_dm = n / 20;
+            int i = n - i_dm * 20;
+            dm_ij_cache[tx+n*16] = dm[i_dm*dm_size+ij_loc0+i];
         }
         double vj_ij[80];
         for (int ij = 0; ij < 80; ++ij) {
@@ -4679,282 +4727,282 @@ while (remaining_n_dm > 0) {
             vj_ij[59] += R_0_3_0_0 * dm_kl[2];
             vj_ij[79] += R_0_3_0_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
-            vj_ij[0] -= R_0_0_0_1 * dm_kl[0];
-            vj_ij[20] -= R_0_0_0_1 * dm_kl[1];
-            vj_ij[40] -= R_0_0_0_1 * dm_kl[2];
-            vj_ij[60] -= R_0_0_0_1 * dm_kl[3];
-            vj_ij[1] -= R_0_0_0_2 * dm_kl[0];
-            vj_ij[21] -= R_0_0_0_2 * dm_kl[1];
-            vj_ij[41] -= R_0_0_0_2 * dm_kl[2];
-            vj_ij[61] -= R_0_0_0_2 * dm_kl[3];
-            vj_ij[2] -= R_0_0_0_3 * dm_kl[0];
-            vj_ij[22] -= R_0_0_0_3 * dm_kl[1];
-            vj_ij[42] -= R_0_0_0_3 * dm_kl[2];
-            vj_ij[62] -= R_0_0_0_3 * dm_kl[3];
+            vj_ij[0] += R_0_0_0_1 * dm_kl[0];
+            vj_ij[20] += R_0_0_0_1 * dm_kl[1];
+            vj_ij[40] += R_0_0_0_1 * dm_kl[2];
+            vj_ij[60] += R_0_0_0_1 * dm_kl[3];
+            vj_ij[1] += R_0_0_0_2 * dm_kl[0];
+            vj_ij[21] += R_0_0_0_2 * dm_kl[1];
+            vj_ij[41] += R_0_0_0_2 * dm_kl[2];
+            vj_ij[61] += R_0_0_0_2 * dm_kl[3];
+            vj_ij[2] += R_0_0_0_3 * dm_kl[0];
+            vj_ij[22] += R_0_0_0_3 * dm_kl[1];
+            vj_ij[42] += R_0_0_0_3 * dm_kl[2];
+            vj_ij[62] += R_0_0_0_3 * dm_kl[3];
             double R_3_0_0_1 = zpq * gamma_inc[sq_id+4*256];
             double R_2_0_0_2 = zpq * R_3_0_0_1 + 1 * gamma_inc[sq_id+3*256];
             double R_1_0_0_3 = zpq * R_2_0_0_2 + 2 * R_2_0_0_1;
             double R_0_0_0_4 = zpq * R_1_0_0_3 + 3 * R_1_0_0_2;
-            vj_ij[3] -= R_0_0_0_4 * dm_kl[0];
-            vj_ij[23] -= R_0_0_0_4 * dm_kl[1];
-            vj_ij[43] -= R_0_0_0_4 * dm_kl[2];
-            vj_ij[63] -= R_0_0_0_4 * dm_kl[3];
-            vj_ij[4] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[24] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[44] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[64] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[5] -= R_0_0_1_2 * dm_kl[0];
-            vj_ij[25] -= R_0_0_1_2 * dm_kl[1];
-            vj_ij[45] -= R_0_0_1_2 * dm_kl[2];
-            vj_ij[65] -= R_0_0_1_2 * dm_kl[3];
+            vj_ij[3] += R_0_0_0_4 * dm_kl[0];
+            vj_ij[23] += R_0_0_0_4 * dm_kl[1];
+            vj_ij[43] += R_0_0_0_4 * dm_kl[2];
+            vj_ij[63] += R_0_0_0_4 * dm_kl[3];
+            vj_ij[4] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[24] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[44] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[64] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[5] += R_0_0_1_2 * dm_kl[0];
+            vj_ij[25] += R_0_0_1_2 * dm_kl[1];
+            vj_ij[45] += R_0_0_1_2 * dm_kl[2];
+            vj_ij[65] += R_0_0_1_2 * dm_kl[3];
             double R_0_0_1_3 = ypq * R_1_0_0_3;
-            vj_ij[6] -= R_0_0_1_3 * dm_kl[0];
-            vj_ij[26] -= R_0_0_1_3 * dm_kl[1];
-            vj_ij[46] -= R_0_0_1_3 * dm_kl[2];
-            vj_ij[66] -= R_0_0_1_3 * dm_kl[3];
-            vj_ij[7] -= R_0_0_2_1 * dm_kl[0];
-            vj_ij[27] -= R_0_0_2_1 * dm_kl[1];
-            vj_ij[47] -= R_0_0_2_1 * dm_kl[2];
-            vj_ij[67] -= R_0_0_2_1 * dm_kl[3];
+            vj_ij[6] += R_0_0_1_3 * dm_kl[0];
+            vj_ij[26] += R_0_0_1_3 * dm_kl[1];
+            vj_ij[46] += R_0_0_1_3 * dm_kl[2];
+            vj_ij[66] += R_0_0_1_3 * dm_kl[3];
+            vj_ij[7] += R_0_0_2_1 * dm_kl[0];
+            vj_ij[27] += R_0_0_2_1 * dm_kl[1];
+            vj_ij[47] += R_0_0_2_1 * dm_kl[2];
+            vj_ij[67] += R_0_0_2_1 * dm_kl[3];
             double R_1_0_1_2 = ypq * R_2_0_0_2;
             double R_0_0_2_2 = ypq * R_1_0_1_2 + 1 * R_1_0_0_2;
-            vj_ij[8] -= R_0_0_2_2 * dm_kl[0];
-            vj_ij[28] -= R_0_0_2_2 * dm_kl[1];
-            vj_ij[48] -= R_0_0_2_2 * dm_kl[2];
-            vj_ij[68] -= R_0_0_2_2 * dm_kl[3];
+            vj_ij[8] += R_0_0_2_2 * dm_kl[0];
+            vj_ij[28] += R_0_0_2_2 * dm_kl[1];
+            vj_ij[48] += R_0_0_2_2 * dm_kl[2];
+            vj_ij[68] += R_0_0_2_2 * dm_kl[3];
             double R_2_0_1_1 = ypq * R_3_0_0_1;
             double R_1_0_2_1 = ypq * R_2_0_1_1 + 1 * R_2_0_0_1;
             double R_0_0_3_1 = ypq * R_1_0_2_1 + 2 * R_1_0_1_1;
-            vj_ij[9] -= R_0_0_3_1 * dm_kl[0];
-            vj_ij[29] -= R_0_0_3_1 * dm_kl[1];
-            vj_ij[49] -= R_0_0_3_1 * dm_kl[2];
-            vj_ij[69] -= R_0_0_3_1 * dm_kl[3];
-            vj_ij[10] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[30] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[50] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[70] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[11] -= R_0_1_0_2 * dm_kl[0];
-            vj_ij[31] -= R_0_1_0_2 * dm_kl[1];
-            vj_ij[51] -= R_0_1_0_2 * dm_kl[2];
-            vj_ij[71] -= R_0_1_0_2 * dm_kl[3];
+            vj_ij[9] += R_0_0_3_1 * dm_kl[0];
+            vj_ij[29] += R_0_0_3_1 * dm_kl[1];
+            vj_ij[49] += R_0_0_3_1 * dm_kl[2];
+            vj_ij[69] += R_0_0_3_1 * dm_kl[3];
+            vj_ij[10] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[30] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[50] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[70] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[11] += R_0_1_0_2 * dm_kl[0];
+            vj_ij[31] += R_0_1_0_2 * dm_kl[1];
+            vj_ij[51] += R_0_1_0_2 * dm_kl[2];
+            vj_ij[71] += R_0_1_0_2 * dm_kl[3];
             double R_0_1_0_3 = xpq * R_1_0_0_3;
-            vj_ij[12] -= R_0_1_0_3 * dm_kl[0];
-            vj_ij[32] -= R_0_1_0_3 * dm_kl[1];
-            vj_ij[52] -= R_0_1_0_3 * dm_kl[2];
-            vj_ij[72] -= R_0_1_0_3 * dm_kl[3];
-            vj_ij[13] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[33] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[53] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[73] -= R_0_1_1_1 * dm_kl[3];
+            vj_ij[12] += R_0_1_0_3 * dm_kl[0];
+            vj_ij[32] += R_0_1_0_3 * dm_kl[1];
+            vj_ij[52] += R_0_1_0_3 * dm_kl[2];
+            vj_ij[72] += R_0_1_0_3 * dm_kl[3];
+            vj_ij[13] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[33] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[53] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[73] += R_0_1_1_1 * dm_kl[3];
             double R_0_1_1_2 = xpq * R_1_0_1_2;
-            vj_ij[14] -= R_0_1_1_2 * dm_kl[0];
-            vj_ij[34] -= R_0_1_1_2 * dm_kl[1];
-            vj_ij[54] -= R_0_1_1_2 * dm_kl[2];
-            vj_ij[74] -= R_0_1_1_2 * dm_kl[3];
+            vj_ij[14] += R_0_1_1_2 * dm_kl[0];
+            vj_ij[34] += R_0_1_1_2 * dm_kl[1];
+            vj_ij[54] += R_0_1_1_2 * dm_kl[2];
+            vj_ij[74] += R_0_1_1_2 * dm_kl[3];
             double R_0_1_2_1 = xpq * R_1_0_2_1;
-            vj_ij[15] -= R_0_1_2_1 * dm_kl[0];
-            vj_ij[35] -= R_0_1_2_1 * dm_kl[1];
-            vj_ij[55] -= R_0_1_2_1 * dm_kl[2];
-            vj_ij[75] -= R_0_1_2_1 * dm_kl[3];
-            vj_ij[16] -= R_0_2_0_1 * dm_kl[0];
-            vj_ij[36] -= R_0_2_0_1 * dm_kl[1];
-            vj_ij[56] -= R_0_2_0_1 * dm_kl[2];
-            vj_ij[76] -= R_0_2_0_1 * dm_kl[3];
+            vj_ij[15] += R_0_1_2_1 * dm_kl[0];
+            vj_ij[35] += R_0_1_2_1 * dm_kl[1];
+            vj_ij[55] += R_0_1_2_1 * dm_kl[2];
+            vj_ij[75] += R_0_1_2_1 * dm_kl[3];
+            vj_ij[16] += R_0_2_0_1 * dm_kl[0];
+            vj_ij[36] += R_0_2_0_1 * dm_kl[1];
+            vj_ij[56] += R_0_2_0_1 * dm_kl[2];
+            vj_ij[76] += R_0_2_0_1 * dm_kl[3];
             double R_1_1_0_2 = xpq * R_2_0_0_2;
             double R_0_2_0_2 = xpq * R_1_1_0_2 + 1 * R_1_0_0_2;
-            vj_ij[17] -= R_0_2_0_2 * dm_kl[0];
-            vj_ij[37] -= R_0_2_0_2 * dm_kl[1];
-            vj_ij[57] -= R_0_2_0_2 * dm_kl[2];
-            vj_ij[77] -= R_0_2_0_2 * dm_kl[3];
+            vj_ij[17] += R_0_2_0_2 * dm_kl[0];
+            vj_ij[37] += R_0_2_0_2 * dm_kl[1];
+            vj_ij[57] += R_0_2_0_2 * dm_kl[2];
+            vj_ij[77] += R_0_2_0_2 * dm_kl[3];
             double R_1_1_1_1 = xpq * R_2_0_1_1;
             double R_0_2_1_1 = xpq * R_1_1_1_1 + 1 * R_1_0_1_1;
-            vj_ij[18] -= R_0_2_1_1 * dm_kl[0];
-            vj_ij[38] -= R_0_2_1_1 * dm_kl[1];
-            vj_ij[58] -= R_0_2_1_1 * dm_kl[2];
-            vj_ij[78] -= R_0_2_1_1 * dm_kl[3];
+            vj_ij[18] += R_0_2_1_1 * dm_kl[0];
+            vj_ij[38] += R_0_2_1_1 * dm_kl[1];
+            vj_ij[58] += R_0_2_1_1 * dm_kl[2];
+            vj_ij[78] += R_0_2_1_1 * dm_kl[3];
             double R_2_1_0_1 = xpq * R_3_0_0_1;
             double R_1_2_0_1 = xpq * R_2_1_0_1 + 1 * R_2_0_0_1;
             double R_0_3_0_1 = xpq * R_1_2_0_1 + 2 * R_1_1_0_1;
-            vj_ij[19] -= R_0_3_0_1 * dm_kl[0];
-            vj_ij[39] -= R_0_3_0_1 * dm_kl[1];
-            vj_ij[59] -= R_0_3_0_1 * dm_kl[2];
-            vj_ij[79] -= R_0_3_0_1 * dm_kl[3];
+            vj_ij[19] += R_0_3_0_1 * dm_kl[0];
+            vj_ij[39] += R_0_3_0_1 * dm_kl[1];
+            vj_ij[59] += R_0_3_0_1 * dm_kl[2];
+            vj_ij[79] += R_0_3_0_1 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2]; }
-            vj_ij[0] -= R_0_0_1_0 * dm_kl[0];
-            vj_ij[20] -= R_0_0_1_0 * dm_kl[1];
-            vj_ij[40] -= R_0_0_1_0 * dm_kl[2];
-            vj_ij[60] -= R_0_0_1_0 * dm_kl[3];
-            vj_ij[1] -= R_0_0_1_1 * dm_kl[0];
-            vj_ij[21] -= R_0_0_1_1 * dm_kl[1];
-            vj_ij[41] -= R_0_0_1_1 * dm_kl[2];
-            vj_ij[61] -= R_0_0_1_1 * dm_kl[3];
-            vj_ij[2] -= R_0_0_1_2 * dm_kl[0];
-            vj_ij[22] -= R_0_0_1_2 * dm_kl[1];
-            vj_ij[42] -= R_0_0_1_2 * dm_kl[2];
-            vj_ij[62] -= R_0_0_1_2 * dm_kl[3];
-            vj_ij[3] -= R_0_0_1_3 * dm_kl[0];
-            vj_ij[23] -= R_0_0_1_3 * dm_kl[1];
-            vj_ij[43] -= R_0_0_1_3 * dm_kl[2];
-            vj_ij[63] -= R_0_0_1_3 * dm_kl[3];
-            vj_ij[4] -= R_0_0_2_0 * dm_kl[0];
-            vj_ij[24] -= R_0_0_2_0 * dm_kl[1];
-            vj_ij[44] -= R_0_0_2_0 * dm_kl[2];
-            vj_ij[64] -= R_0_0_2_0 * dm_kl[3];
-            vj_ij[5] -= R_0_0_2_1 * dm_kl[0];
-            vj_ij[25] -= R_0_0_2_1 * dm_kl[1];
-            vj_ij[45] -= R_0_0_2_1 * dm_kl[2];
-            vj_ij[65] -= R_0_0_2_1 * dm_kl[3];
-            vj_ij[6] -= R_0_0_2_2 * dm_kl[0];
-            vj_ij[26] -= R_0_0_2_2 * dm_kl[1];
-            vj_ij[46] -= R_0_0_2_2 * dm_kl[2];
-            vj_ij[66] -= R_0_0_2_2 * dm_kl[3];
-            vj_ij[7] -= R_0_0_3_0 * dm_kl[0];
-            vj_ij[27] -= R_0_0_3_0 * dm_kl[1];
-            vj_ij[47] -= R_0_0_3_0 * dm_kl[2];
-            vj_ij[67] -= R_0_0_3_0 * dm_kl[3];
-            vj_ij[8] -= R_0_0_3_1 * dm_kl[0];
-            vj_ij[28] -= R_0_0_3_1 * dm_kl[1];
-            vj_ij[48] -= R_0_0_3_1 * dm_kl[2];
-            vj_ij[68] -= R_0_0_3_1 * dm_kl[3];
+            vj_ij[0] += R_0_0_1_0 * dm_kl[0];
+            vj_ij[20] += R_0_0_1_0 * dm_kl[1];
+            vj_ij[40] += R_0_0_1_0 * dm_kl[2];
+            vj_ij[60] += R_0_0_1_0 * dm_kl[3];
+            vj_ij[1] += R_0_0_1_1 * dm_kl[0];
+            vj_ij[21] += R_0_0_1_1 * dm_kl[1];
+            vj_ij[41] += R_0_0_1_1 * dm_kl[2];
+            vj_ij[61] += R_0_0_1_1 * dm_kl[3];
+            vj_ij[2] += R_0_0_1_2 * dm_kl[0];
+            vj_ij[22] += R_0_0_1_2 * dm_kl[1];
+            vj_ij[42] += R_0_0_1_2 * dm_kl[2];
+            vj_ij[62] += R_0_0_1_2 * dm_kl[3];
+            vj_ij[3] += R_0_0_1_3 * dm_kl[0];
+            vj_ij[23] += R_0_0_1_3 * dm_kl[1];
+            vj_ij[43] += R_0_0_1_3 * dm_kl[2];
+            vj_ij[63] += R_0_0_1_3 * dm_kl[3];
+            vj_ij[4] += R_0_0_2_0 * dm_kl[0];
+            vj_ij[24] += R_0_0_2_0 * dm_kl[1];
+            vj_ij[44] += R_0_0_2_0 * dm_kl[2];
+            vj_ij[64] += R_0_0_2_0 * dm_kl[3];
+            vj_ij[5] += R_0_0_2_1 * dm_kl[0];
+            vj_ij[25] += R_0_0_2_1 * dm_kl[1];
+            vj_ij[45] += R_0_0_2_1 * dm_kl[2];
+            vj_ij[65] += R_0_0_2_1 * dm_kl[3];
+            vj_ij[6] += R_0_0_2_2 * dm_kl[0];
+            vj_ij[26] += R_0_0_2_2 * dm_kl[1];
+            vj_ij[46] += R_0_0_2_2 * dm_kl[2];
+            vj_ij[66] += R_0_0_2_2 * dm_kl[3];
+            vj_ij[7] += R_0_0_3_0 * dm_kl[0];
+            vj_ij[27] += R_0_0_3_0 * dm_kl[1];
+            vj_ij[47] += R_0_0_3_0 * dm_kl[2];
+            vj_ij[67] += R_0_0_3_0 * dm_kl[3];
+            vj_ij[8] += R_0_0_3_1 * dm_kl[0];
+            vj_ij[28] += R_0_0_3_1 * dm_kl[1];
+            vj_ij[48] += R_0_0_3_1 * dm_kl[2];
+            vj_ij[68] += R_0_0_3_1 * dm_kl[3];
             double R_3_0_1_0 = ypq * gamma_inc[sq_id+4*256];
             double R_2_0_2_0 = ypq * R_3_0_1_0 + 1 * gamma_inc[sq_id+3*256];
             double R_1_0_3_0 = ypq * R_2_0_2_0 + 2 * R_2_0_1_0;
             double R_0_0_4_0 = ypq * R_1_0_3_0 + 3 * R_1_0_2_0;
-            vj_ij[9] -= R_0_0_4_0 * dm_kl[0];
-            vj_ij[29] -= R_0_0_4_0 * dm_kl[1];
-            vj_ij[49] -= R_0_0_4_0 * dm_kl[2];
-            vj_ij[69] -= R_0_0_4_0 * dm_kl[3];
-            vj_ij[10] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[30] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[50] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[70] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[11] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[31] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[51] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[71] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[12] -= R_0_1_1_2 * dm_kl[0];
-            vj_ij[32] -= R_0_1_1_2 * dm_kl[1];
-            vj_ij[52] -= R_0_1_1_2 * dm_kl[2];
-            vj_ij[72] -= R_0_1_1_2 * dm_kl[3];
-            vj_ij[13] -= R_0_1_2_0 * dm_kl[0];
-            vj_ij[33] -= R_0_1_2_0 * dm_kl[1];
-            vj_ij[53] -= R_0_1_2_0 * dm_kl[2];
-            vj_ij[73] -= R_0_1_2_0 * dm_kl[3];
-            vj_ij[14] -= R_0_1_2_1 * dm_kl[0];
-            vj_ij[34] -= R_0_1_2_1 * dm_kl[1];
-            vj_ij[54] -= R_0_1_2_1 * dm_kl[2];
-            vj_ij[74] -= R_0_1_2_1 * dm_kl[3];
+            vj_ij[9] += R_0_0_4_0 * dm_kl[0];
+            vj_ij[29] += R_0_0_4_0 * dm_kl[1];
+            vj_ij[49] += R_0_0_4_0 * dm_kl[2];
+            vj_ij[69] += R_0_0_4_0 * dm_kl[3];
+            vj_ij[10] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[30] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[50] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[70] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[11] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[31] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[51] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[71] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[12] += R_0_1_1_2 * dm_kl[0];
+            vj_ij[32] += R_0_1_1_2 * dm_kl[1];
+            vj_ij[52] += R_0_1_1_2 * dm_kl[2];
+            vj_ij[72] += R_0_1_1_2 * dm_kl[3];
+            vj_ij[13] += R_0_1_2_0 * dm_kl[0];
+            vj_ij[33] += R_0_1_2_0 * dm_kl[1];
+            vj_ij[53] += R_0_1_2_0 * dm_kl[2];
+            vj_ij[73] += R_0_1_2_0 * dm_kl[3];
+            vj_ij[14] += R_0_1_2_1 * dm_kl[0];
+            vj_ij[34] += R_0_1_2_1 * dm_kl[1];
+            vj_ij[54] += R_0_1_2_1 * dm_kl[2];
+            vj_ij[74] += R_0_1_2_1 * dm_kl[3];
             double R_0_1_3_0 = xpq * R_1_0_3_0;
-            vj_ij[15] -= R_0_1_3_0 * dm_kl[0];
-            vj_ij[35] -= R_0_1_3_0 * dm_kl[1];
-            vj_ij[55] -= R_0_1_3_0 * dm_kl[2];
-            vj_ij[75] -= R_0_1_3_0 * dm_kl[3];
-            vj_ij[16] -= R_0_2_1_0 * dm_kl[0];
-            vj_ij[36] -= R_0_2_1_0 * dm_kl[1];
-            vj_ij[56] -= R_0_2_1_0 * dm_kl[2];
-            vj_ij[76] -= R_0_2_1_0 * dm_kl[3];
-            vj_ij[17] -= R_0_2_1_1 * dm_kl[0];
-            vj_ij[37] -= R_0_2_1_1 * dm_kl[1];
-            vj_ij[57] -= R_0_2_1_1 * dm_kl[2];
-            vj_ij[77] -= R_0_2_1_1 * dm_kl[3];
+            vj_ij[15] += R_0_1_3_0 * dm_kl[0];
+            vj_ij[35] += R_0_1_3_0 * dm_kl[1];
+            vj_ij[55] += R_0_1_3_0 * dm_kl[2];
+            vj_ij[75] += R_0_1_3_0 * dm_kl[3];
+            vj_ij[16] += R_0_2_1_0 * dm_kl[0];
+            vj_ij[36] += R_0_2_1_0 * dm_kl[1];
+            vj_ij[56] += R_0_2_1_0 * dm_kl[2];
+            vj_ij[76] += R_0_2_1_0 * dm_kl[3];
+            vj_ij[17] += R_0_2_1_1 * dm_kl[0];
+            vj_ij[37] += R_0_2_1_1 * dm_kl[1];
+            vj_ij[57] += R_0_2_1_1 * dm_kl[2];
+            vj_ij[77] += R_0_2_1_1 * dm_kl[3];
             double R_1_1_2_0 = xpq * R_2_0_2_0;
             double R_0_2_2_0 = xpq * R_1_1_2_0 + 1 * R_1_0_2_0;
-            vj_ij[18] -= R_0_2_2_0 * dm_kl[0];
-            vj_ij[38] -= R_0_2_2_0 * dm_kl[1];
-            vj_ij[58] -= R_0_2_2_0 * dm_kl[2];
-            vj_ij[78] -= R_0_2_2_0 * dm_kl[3];
+            vj_ij[18] += R_0_2_2_0 * dm_kl[0];
+            vj_ij[38] += R_0_2_2_0 * dm_kl[1];
+            vj_ij[58] += R_0_2_2_0 * dm_kl[2];
+            vj_ij[78] += R_0_2_2_0 * dm_kl[3];
             double R_2_1_1_0 = xpq * R_3_0_1_0;
             double R_1_2_1_0 = xpq * R_2_1_1_0 + 1 * R_2_0_1_0;
             double R_0_3_1_0 = xpq * R_1_2_1_0 + 2 * R_1_1_1_0;
-            vj_ij[19] -= R_0_3_1_0 * dm_kl[0];
-            vj_ij[39] -= R_0_3_1_0 * dm_kl[1];
-            vj_ij[59] -= R_0_3_1_0 * dm_kl[2];
-            vj_ij[79] -= R_0_3_1_0 * dm_kl[3];
+            vj_ij[19] += R_0_3_1_0 * dm_kl[0];
+            vj_ij[39] += R_0_3_1_0 * dm_kl[1];
+            vj_ij[59] += R_0_3_1_0 * dm_kl[2];
+            vj_ij[79] += R_0_3_1_0 * dm_kl[3];
             for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
-            vj_ij[0] -= R_0_1_0_0 * dm_kl[0];
-            vj_ij[20] -= R_0_1_0_0 * dm_kl[1];
-            vj_ij[40] -= R_0_1_0_0 * dm_kl[2];
-            vj_ij[60] -= R_0_1_0_0 * dm_kl[3];
-            vj_ij[1] -= R_0_1_0_1 * dm_kl[0];
-            vj_ij[21] -= R_0_1_0_1 * dm_kl[1];
-            vj_ij[41] -= R_0_1_0_1 * dm_kl[2];
-            vj_ij[61] -= R_0_1_0_1 * dm_kl[3];
-            vj_ij[2] -= R_0_1_0_2 * dm_kl[0];
-            vj_ij[22] -= R_0_1_0_2 * dm_kl[1];
-            vj_ij[42] -= R_0_1_0_2 * dm_kl[2];
-            vj_ij[62] -= R_0_1_0_2 * dm_kl[3];
-            vj_ij[3] -= R_0_1_0_3 * dm_kl[0];
-            vj_ij[23] -= R_0_1_0_3 * dm_kl[1];
-            vj_ij[43] -= R_0_1_0_3 * dm_kl[2];
-            vj_ij[63] -= R_0_1_0_3 * dm_kl[3];
-            vj_ij[4] -= R_0_1_1_0 * dm_kl[0];
-            vj_ij[24] -= R_0_1_1_0 * dm_kl[1];
-            vj_ij[44] -= R_0_1_1_0 * dm_kl[2];
-            vj_ij[64] -= R_0_1_1_0 * dm_kl[3];
-            vj_ij[5] -= R_0_1_1_1 * dm_kl[0];
-            vj_ij[25] -= R_0_1_1_1 * dm_kl[1];
-            vj_ij[45] -= R_0_1_1_1 * dm_kl[2];
-            vj_ij[65] -= R_0_1_1_1 * dm_kl[3];
-            vj_ij[6] -= R_0_1_1_2 * dm_kl[0];
-            vj_ij[26] -= R_0_1_1_2 * dm_kl[1];
-            vj_ij[46] -= R_0_1_1_2 * dm_kl[2];
-            vj_ij[66] -= R_0_1_1_2 * dm_kl[3];
-            vj_ij[7] -= R_0_1_2_0 * dm_kl[0];
-            vj_ij[27] -= R_0_1_2_0 * dm_kl[1];
-            vj_ij[47] -= R_0_1_2_0 * dm_kl[2];
-            vj_ij[67] -= R_0_1_2_0 * dm_kl[3];
-            vj_ij[8] -= R_0_1_2_1 * dm_kl[0];
-            vj_ij[28] -= R_0_1_2_1 * dm_kl[1];
-            vj_ij[48] -= R_0_1_2_1 * dm_kl[2];
-            vj_ij[68] -= R_0_1_2_1 * dm_kl[3];
-            vj_ij[9] -= R_0_1_3_0 * dm_kl[0];
-            vj_ij[29] -= R_0_1_3_0 * dm_kl[1];
-            vj_ij[49] -= R_0_1_3_0 * dm_kl[2];
-            vj_ij[69] -= R_0_1_3_0 * dm_kl[3];
-            vj_ij[10] -= R_0_2_0_0 * dm_kl[0];
-            vj_ij[30] -= R_0_2_0_0 * dm_kl[1];
-            vj_ij[50] -= R_0_2_0_0 * dm_kl[2];
-            vj_ij[70] -= R_0_2_0_0 * dm_kl[3];
-            vj_ij[11] -= R_0_2_0_1 * dm_kl[0];
-            vj_ij[31] -= R_0_2_0_1 * dm_kl[1];
-            vj_ij[51] -= R_0_2_0_1 * dm_kl[2];
-            vj_ij[71] -= R_0_2_0_1 * dm_kl[3];
-            vj_ij[12] -= R_0_2_0_2 * dm_kl[0];
-            vj_ij[32] -= R_0_2_0_2 * dm_kl[1];
-            vj_ij[52] -= R_0_2_0_2 * dm_kl[2];
-            vj_ij[72] -= R_0_2_0_2 * dm_kl[3];
-            vj_ij[13] -= R_0_2_1_0 * dm_kl[0];
-            vj_ij[33] -= R_0_2_1_0 * dm_kl[1];
-            vj_ij[53] -= R_0_2_1_0 * dm_kl[2];
-            vj_ij[73] -= R_0_2_1_0 * dm_kl[3];
-            vj_ij[14] -= R_0_2_1_1 * dm_kl[0];
-            vj_ij[34] -= R_0_2_1_1 * dm_kl[1];
-            vj_ij[54] -= R_0_2_1_1 * dm_kl[2];
-            vj_ij[74] -= R_0_2_1_1 * dm_kl[3];
-            vj_ij[15] -= R_0_2_2_0 * dm_kl[0];
-            vj_ij[35] -= R_0_2_2_0 * dm_kl[1];
-            vj_ij[55] -= R_0_2_2_0 * dm_kl[2];
-            vj_ij[75] -= R_0_2_2_0 * dm_kl[3];
-            vj_ij[16] -= R_0_3_0_0 * dm_kl[0];
-            vj_ij[36] -= R_0_3_0_0 * dm_kl[1];
-            vj_ij[56] -= R_0_3_0_0 * dm_kl[2];
-            vj_ij[76] -= R_0_3_0_0 * dm_kl[3];
-            vj_ij[17] -= R_0_3_0_1 * dm_kl[0];
-            vj_ij[37] -= R_0_3_0_1 * dm_kl[1];
-            vj_ij[57] -= R_0_3_0_1 * dm_kl[2];
-            vj_ij[77] -= R_0_3_0_1 * dm_kl[3];
-            vj_ij[18] -= R_0_3_1_0 * dm_kl[0];
-            vj_ij[38] -= R_0_3_1_0 * dm_kl[1];
-            vj_ij[58] -= R_0_3_1_0 * dm_kl[2];
-            vj_ij[78] -= R_0_3_1_0 * dm_kl[3];
+            vj_ij[0] += R_0_1_0_0 * dm_kl[0];
+            vj_ij[20] += R_0_1_0_0 * dm_kl[1];
+            vj_ij[40] += R_0_1_0_0 * dm_kl[2];
+            vj_ij[60] += R_0_1_0_0 * dm_kl[3];
+            vj_ij[1] += R_0_1_0_1 * dm_kl[0];
+            vj_ij[21] += R_0_1_0_1 * dm_kl[1];
+            vj_ij[41] += R_0_1_0_1 * dm_kl[2];
+            vj_ij[61] += R_0_1_0_1 * dm_kl[3];
+            vj_ij[2] += R_0_1_0_2 * dm_kl[0];
+            vj_ij[22] += R_0_1_0_2 * dm_kl[1];
+            vj_ij[42] += R_0_1_0_2 * dm_kl[2];
+            vj_ij[62] += R_0_1_0_2 * dm_kl[3];
+            vj_ij[3] += R_0_1_0_3 * dm_kl[0];
+            vj_ij[23] += R_0_1_0_3 * dm_kl[1];
+            vj_ij[43] += R_0_1_0_3 * dm_kl[2];
+            vj_ij[63] += R_0_1_0_3 * dm_kl[3];
+            vj_ij[4] += R_0_1_1_0 * dm_kl[0];
+            vj_ij[24] += R_0_1_1_0 * dm_kl[1];
+            vj_ij[44] += R_0_1_1_0 * dm_kl[2];
+            vj_ij[64] += R_0_1_1_0 * dm_kl[3];
+            vj_ij[5] += R_0_1_1_1 * dm_kl[0];
+            vj_ij[25] += R_0_1_1_1 * dm_kl[1];
+            vj_ij[45] += R_0_1_1_1 * dm_kl[2];
+            vj_ij[65] += R_0_1_1_1 * dm_kl[3];
+            vj_ij[6] += R_0_1_1_2 * dm_kl[0];
+            vj_ij[26] += R_0_1_1_2 * dm_kl[1];
+            vj_ij[46] += R_0_1_1_2 * dm_kl[2];
+            vj_ij[66] += R_0_1_1_2 * dm_kl[3];
+            vj_ij[7] += R_0_1_2_0 * dm_kl[0];
+            vj_ij[27] += R_0_1_2_0 * dm_kl[1];
+            vj_ij[47] += R_0_1_2_0 * dm_kl[2];
+            vj_ij[67] += R_0_1_2_0 * dm_kl[3];
+            vj_ij[8] += R_0_1_2_1 * dm_kl[0];
+            vj_ij[28] += R_0_1_2_1 * dm_kl[1];
+            vj_ij[48] += R_0_1_2_1 * dm_kl[2];
+            vj_ij[68] += R_0_1_2_1 * dm_kl[3];
+            vj_ij[9] += R_0_1_3_0 * dm_kl[0];
+            vj_ij[29] += R_0_1_3_0 * dm_kl[1];
+            vj_ij[49] += R_0_1_3_0 * dm_kl[2];
+            vj_ij[69] += R_0_1_3_0 * dm_kl[3];
+            vj_ij[10] += R_0_2_0_0 * dm_kl[0];
+            vj_ij[30] += R_0_2_0_0 * dm_kl[1];
+            vj_ij[50] += R_0_2_0_0 * dm_kl[2];
+            vj_ij[70] += R_0_2_0_0 * dm_kl[3];
+            vj_ij[11] += R_0_2_0_1 * dm_kl[0];
+            vj_ij[31] += R_0_2_0_1 * dm_kl[1];
+            vj_ij[51] += R_0_2_0_1 * dm_kl[2];
+            vj_ij[71] += R_0_2_0_1 * dm_kl[3];
+            vj_ij[12] += R_0_2_0_2 * dm_kl[0];
+            vj_ij[32] += R_0_2_0_2 * dm_kl[1];
+            vj_ij[52] += R_0_2_0_2 * dm_kl[2];
+            vj_ij[72] += R_0_2_0_2 * dm_kl[3];
+            vj_ij[13] += R_0_2_1_0 * dm_kl[0];
+            vj_ij[33] += R_0_2_1_0 * dm_kl[1];
+            vj_ij[53] += R_0_2_1_0 * dm_kl[2];
+            vj_ij[73] += R_0_2_1_0 * dm_kl[3];
+            vj_ij[14] += R_0_2_1_1 * dm_kl[0];
+            vj_ij[34] += R_0_2_1_1 * dm_kl[1];
+            vj_ij[54] += R_0_2_1_1 * dm_kl[2];
+            vj_ij[74] += R_0_2_1_1 * dm_kl[3];
+            vj_ij[15] += R_0_2_2_0 * dm_kl[0];
+            vj_ij[35] += R_0_2_2_0 * dm_kl[1];
+            vj_ij[55] += R_0_2_2_0 * dm_kl[2];
+            vj_ij[75] += R_0_2_2_0 * dm_kl[3];
+            vj_ij[16] += R_0_3_0_0 * dm_kl[0];
+            vj_ij[36] += R_0_3_0_0 * dm_kl[1];
+            vj_ij[56] += R_0_3_0_0 * dm_kl[2];
+            vj_ij[76] += R_0_3_0_0 * dm_kl[3];
+            vj_ij[17] += R_0_3_0_1 * dm_kl[0];
+            vj_ij[37] += R_0_3_0_1 * dm_kl[1];
+            vj_ij[57] += R_0_3_0_1 * dm_kl[2];
+            vj_ij[77] += R_0_3_0_1 * dm_kl[3];
+            vj_ij[18] += R_0_3_1_0 * dm_kl[0];
+            vj_ij[38] += R_0_3_1_0 * dm_kl[1];
+            vj_ij[58] += R_0_3_1_0 * dm_kl[2];
+            vj_ij[78] += R_0_3_1_0 * dm_kl[3];
             double R_3_1_0_0 = xpq * gamma_inc[sq_id+4*256];
             double R_2_2_0_0 = xpq * R_3_1_0_0 + 1 * gamma_inc[sq_id+3*256];
             double R_1_3_0_0 = xpq * R_2_2_0_0 + 2 * R_2_1_0_0;
             double R_0_4_0_0 = xpq * R_1_3_0_0 + 3 * R_1_2_0_0;
-            vj_ij[19] -= R_0_4_0_0 * dm_kl[0];
-            vj_ij[39] -= R_0_4_0_0 * dm_kl[1];
-            vj_ij[59] -= R_0_4_0_0 * dm_kl[2];
-            vj_ij[79] -= R_0_4_0_0 * dm_kl[3];
+            vj_ij[19] += R_0_4_0_0 * dm_kl[0];
+            vj_ij[39] += R_0_4_0_0 * dm_kl[1];
+            vj_ij[59] += R_0_4_0_0 * dm_kl[2];
+            vj_ij[79] += R_0_4_0_0 * dm_kl[3];
             }
         }
         double *vj_cache = Rp_cache;
@@ -5022,12 +5070,12 @@ while (remaining_n_dm > 0) {
         }
     }
     for (int n = tx; n < 44; n += 16) {
-        int batch_kl = n % 11;
+        int kl = n / 11;
+        int batch_kl = n - kl * 11;
         int sq_kl = ty + batch_kl * 16;
         int task_kl = blockIdx.y * 176 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n / 11;
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
                 atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*704+kl*176]);
             }

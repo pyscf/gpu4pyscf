@@ -30,7 +30,6 @@ def test_j_engine():
         H   0.      1.    .6
         ''',
         basis='def2-tzvp',
-        #basis=[[1, [1,1]]],
         unit='B',)
 
     np.random.seed(9)
@@ -41,7 +40,6 @@ def test_j_engine():
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     ref = get_jk(mol, dm, with_k=False)[0]
-    print(abs(vj1 - ref).max())
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
     assert abs(vj1 - ref).max() < 1e-9
 
@@ -102,6 +100,9 @@ def test_j_engine_multiple_dms():
         vj = j_engine.get_j(mol, dm)
         vj1 = vj.get()
         ref = get_jk(mol, dm, with_k=False)[0]
+        print(n, abs(vj1 - ref).max())
+        #print(vj1)
+        #print(ref)
         assert abs(vj1 - ref).max() < 1e-9
 
 def test_j_engine_integral_screen():
@@ -143,4 +144,5 @@ H  -5.8042 -1.0067 12.1503
     vj1 = vj.get()
     assert abs(vj1 - ref).max() < 1e-9
 
-test_j_engine()
+test_j_engine_multiple_dms()
+print('d')

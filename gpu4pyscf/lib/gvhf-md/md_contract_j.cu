@@ -366,12 +366,12 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         int xslot_id = t_id / threadsy;
         int ty = t_id % threadsy;
         for (int n = xslot_id; n < nf3kl * tiley; n += xslots) {
-            int batch_kl = n % tiley;
+            int kl = n / tiley;
+            int batch_kl = n  - kl * tiley;
             int sq_kl = ty + batch_kl * threadsy;
             int task_kl = blockIdx.y * bsizey + sq_kl;
             if (task_kl < npairs_kl) {
                 int kl_loc0 = pair_kl_loc[task_kl];
-                int kl = n / tiley;
                 atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*bsizey]);
             }
         }
@@ -447,13 +447,9 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *dm_ij_cache1 = dm_ij_cache + nf3ij * threadsx;
     double *dm_ij_cache2 = dm_ij_cache + nf3ij * threadsx*2;
     double *dm_ij_cache3 = dm_ij_cache + nf3ij * threadsx*3;
-    double *vj_kl_cache1 = vj_kl_cache + nf3kl * bsizey;
-    double *vj_kl_cache2 = vj_kl_cache + nf3kl * bsizey*2;
-    double *vj_kl_cache3 = vj_kl_cache + nf3kl * bsizey*3;
 
-    // zero out all cache;
-    for (int n = t_id; n < nf3kl*bsizey*DM_BLOCK + (threadsx+bsizey)*4; n += threads) {
-        vj_kl_cache[n] = 0;
+    for (int n = t_id; n < (threadsx+bsizey)*4; n += threads) {
+        Rq_cache[n] = 0;
     }
     __syncthreads();
     for (int n = t_id; n < bsizey; n += threads) {
@@ -483,12 +479,14 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *vj = jk.vj;
     int remaining_n_dm = jk.n_dm;
     while (remaining_n_dm > 0) {
+        __syncthreads();
+        for (int n = t_id; n < nf3kl*bsizey*DM_BLOCK; n += threads) {
+            vj_kl_cache[n] = 0;
+        }
+
         double *dm1 = dm + dm_size;
         double *dm2 = dm + dm_size*2;
         double *dm3 = dm + dm_size*3;
-        double *vj1 = vj + dm_size;
-        double *vj2 = vj + dm_size*2;
-        double *vj3 = vj + dm_size*3;
         for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
             int task_ij0 = blockIdx.x * bsizex + batch_ij * threadsx;
             if (task_ij0 >= npairs_ij) {
@@ -531,8 +529,9 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             int ij_loc0 = pair_ij_loc[task_ij];
             int nf3ij_dm = nf3ij * min(remaining_n_dm, DM_BLOCK);
             for (int n = yslot_id; n < nf3ij_dm; n += yslots) {
-                int i = n / nf3ij;
-                dm_ij_cache[tx+n*threadsx] = dm[i*dm_size+ij_loc0+n];
+                int i_dm = n / nf3ij;
+                int i = n - i_dm * nf3ij;
+                dm_ij_cache[tx+n*threadsx] = dm[i_dm*dm_size+ij_loc0+i];
             }
             double vj_ij[IJ_SIZE*DM_BLOCK];
 #pragma unroll
@@ -799,8 +798,8 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                     }
                     __syncthreads();
                     if (ty == 0 && i < nf3ij && task_ij0+tx < npairs_ij) {
-                        atomicAdd(vj +ij_loc0+i, vj_cache [t_id]);
-                        atomicAdd(vj1+ij_loc0+i, vj_cache1[t_id]);
+                        atomicAdd(vj        +ij_loc0+i, vj_cache [t_id]);
+                        atomicAdd(vj+dm_size+ij_loc0+i, vj_cache1[t_id]);
                     }
                 }
                 break;
@@ -831,16 +830,22 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         }
         __syncthreads();
         {
+            double *vj1 = vj + dm_size;
+            double *vj2 = vj + dm_size*2;
+            double *vj3 = vj + dm_size*3;
+            double *vj_kl_cache1 = vj_kl_cache + nf3kl * bsizey;
+            double *vj_kl_cache2 = vj_kl_cache + nf3kl * bsizey*2;
+            double *vj_kl_cache3 = vj_kl_cache + nf3kl * bsizey*3;
             int xslots = threadsx * gout_stride;
             int xslot_id = t_id / threadsy;
             int ty = t_id % threadsy;
             for (int n = xslot_id; n < nf3kl * tiley; n += xslots) {
-                int batch_kl = n % tiley;
+                int kl = n / tiley;
+                int batch_kl = n - kl * tiley;
                 int sq_kl = ty + batch_kl * threadsy;
                 int task_kl = blockIdx.y * bsizey + sq_kl;
                 if (task_kl < npairs_kl) {
                     int kl_loc0 = pair_kl_loc[task_kl];
-                    int kl = n / tiley;
                     switch (remaining_n_dm) {
                     case 1:
                         atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*bsizey]);

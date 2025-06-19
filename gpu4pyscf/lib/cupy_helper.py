@@ -967,9 +967,20 @@ def grouped_gemm(As, Bs, Cs=None):
     return Cs
 
 def condense(opname, a, loc_x, loc_y=None):
+    '''Aggregate the last two dimensions of an array using the specified operation.
+
+    .. code-block:: python
+
+        for i,i0 in enumerate(loc_x[:-1]):
+            i1 = loc_x[i+1]
+            for j,j0 in enumerate(loc_y[:-1]):
+                j1 = loc_y[j+1]
+                out[i,j] = op(a[..., i0:i1, j0:j1])
+    '''
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
     a = cupy.asarray(a, order='C')
+    assert a.ndim >= 2
     if loc_y is None:
         loc_y = loc_x
     do_transpose = False
@@ -980,7 +991,8 @@ def condense(opname, a, loc_x, loc_y=None):
             do_transpose = True
         a = a[None]
     else:
-        assert a.flags.c_contiguous
+        nx, ny = a.shape[-2:]
+        a = a.reshape(-1, nx, ny)
     loc_x = cupy.asarray(loc_x, cupy.int32)
     loc_y = cupy.asarray(loc_y, cupy.int32)
     nloc_x = loc_x.size - 1
