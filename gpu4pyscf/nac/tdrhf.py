@@ -184,21 +184,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xpyI = (xI + yI).reshape(nocc, nvir).T
     xmyI = (xI - yI).reshape(nocc, nvir).T
-    dvvI = contract("ai,bi->ab", xpyI, xpyI) + contract("ai,bi->ab", xmyI, xmyI)
-    dooI = -contract("ai,aj->ij", xpyI, xpyI) - contract("ai,aj->ij", xmyI, xmyI)
     dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))
     dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
-    dmzooI = reduce(cp.dot, (orbo, dooI, orbo.T))
-    dmzooI += reduce(cp.dot, (orbv, dvvI, orbv.T))
 
     xpyJ = (xJ + yJ).reshape(nocc, nvir).T
     xmyJ = (xJ - yJ).reshape(nocc, nvir).T
-    dvvJ = contract("ai,bi->ab", xpyJ, xpyJ) + contract("ai,bi->ab", xmyJ, xmyJ)
-    dooJ = -contract("ai,aj->ij", xpyJ, xpyJ) - contract("ai,aj->ij", xmyJ, xmyJ)
     dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T)) 
     dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T)) 
-    dmzooJ = reduce(cp.dot, (orbo, dooJ, orbo.T)) 
-    dmzooJ += reduce(cp.dot, (orbv, dvvJ, orbv.T))
 
     dvvIJ = contract("ai,bi->ab", xpyI, xpyJ) + contract("ai,bi->ab", xmyI, xmyJ)
     dooIJ = -contract("ai,aj->ij", xpyI, xpyJ) - contract("ai,aj->ij", xmyI, xmyJ)
@@ -315,7 +307,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     mf_grad = td_nac.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
     z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
-    dmz1doo = z1aoS + dmzooJI  # P
+    dmz1doo = z1aoS + dmzooIJ  # P
     oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
     Wtilde = im0 * (EJ - EI)
 
