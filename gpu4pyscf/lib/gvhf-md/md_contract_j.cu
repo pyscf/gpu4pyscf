@@ -475,18 +475,18 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         }
     }
 
-    double *dm = jk.dm;
-    double *vj = jk.vj;
-    int remaining_n_dm = jk.n_dm;
-    while (remaining_n_dm > 0) {
+    for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += DM_BLOCK) {
+        int remaining_n_dm = jk.n_dm - dm_offset;
+        double *vj = jk.vj + dm_offset * dm_size;
+        double *dm = jk.dm + dm_offset * dm_size;
+        double *dm1 = dm + dm_size;
+        double *dm2 = dm + dm_size*2;
+        double *dm3 = dm + dm_size*3;
         __syncthreads();
         for (int n = t_id; n < nf3kl*bsizey*DM_BLOCK; n += threads) {
             vj_kl_cache[n] = 0;
         }
 
-        double *dm1 = dm + dm_size;
-        double *dm2 = dm + dm_size*2;
-        double *dm3 = dm + dm_size*3;
         for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
             int task_ij0 = blockIdx.x * bsizex + batch_ij * threadsx;
             if (task_ij0 >= npairs_ij) {
@@ -642,8 +642,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lkl];
                 uint16_t *p1_kl = Rt2_ij_kl + Rt2_idx_offsets[lij*RT2_MAX+lkl];
                 int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lkl];
-                switch (remaining_n_dm) {
-                case 1:
+                if (remaining_n_dm == 1) {
                     for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
                         double val = 0.;
                         if (k < nf3kl) {
@@ -671,8 +670,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                             vj_ij[n] += s * dm_kl;
                         }
                     }
-                    break;
-                case 2:
+                } else if (remaining_n_dm == 2) {
                     for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
                         double val0 = 0.;
                         double val1 = 0.;
@@ -707,10 +705,8 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                             vj_ij[n+IJ_SIZE] += s * dm_kl1;
                         }
                     }
-                    break;
-                case 3:
-                    dm3 = dm2;
-                default:
+                } else {
+                    if (remaining_n_dm == 3) dm3 = dm2;
                     for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
                         double val0 = 0.;
                         double val1 = 0.;
@@ -762,9 +758,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             }
 
             double *vj_cache = Rp_cache;
-            double *vj_cache1 = vj_cache + threads;
-            switch (remaining_n_dm) {
-            case 1:
+            if (remaining_n_dm == 1) {
 #pragma unroll
                 for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
                     if (i >= nf3ij+gout_id) break;
@@ -781,8 +775,8 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                         atomicAdd(vj+ij_loc0+i, vj_cache[t_id]);
                     }
                 }
-                break;
-            case 2:
+            } else if (remaining_n_dm == 2) {
+                double *vj_cache1 = vj_cache + threads;
 #pragma unroll
                 for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
                     if (i >= nf3ij+gout_id) break;
@@ -802,8 +796,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                         atomicAdd(vj+dm_size+ij_loc0+i, vj_cache1[t_id]);
                     }
                 }
-                break;
-            default:
+            } else {
 #pragma unroll
                 for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
                     if (i >= nf3ij+gout_id) break;
@@ -868,17 +861,5 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 }
             }
         }
-        switch (remaining_n_dm) {
-        case 1:
-            remaining_n_dm -= 1;
-            break;
-        case 2:
-            remaining_n_dm -= 2;
-            break;
-        default:
-            remaining_n_dm -= 4;
-        }
-        dm += dm_size * 4;
-        vj += dm_size * 4;
     }
 }

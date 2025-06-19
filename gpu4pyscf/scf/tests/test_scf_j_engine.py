@@ -94,15 +94,12 @@ def test_j_engine_multiple_dms():
 
     np.random.seed(9)
     nao = mol.nao
-    for n in range(2, 8):
+    for n in range(2, 10):
         dm = np.random.rand(n, nao, nao)
         dm = dm + dm.transpose(0, 2, 1)
         vj = j_engine.get_j(mol, dm)
         vj1 = vj.get()
         ref = get_jk(mol, dm, with_k=False)[0]
-        print(n, abs(vj1 - ref).max())
-        #print(vj1)
-        #print(ref)
         assert abs(vj1 - ref).max() < 1e-9
 
 def test_j_engine_integral_screen():
@@ -143,6 +140,3 @@ H  -5.8042 -1.0067 12.1503
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     assert abs(vj1 - ref).max() < 1e-9
-
-test_j_engine_multiple_dms()
-print('d')
