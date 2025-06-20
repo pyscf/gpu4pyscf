@@ -233,7 +233,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             for (int m = 0; m < 8; ++m) {
                 vj_kl_cache[sq_kl+m*336+0] += vj_kl[m];
             } }
-            for (int m = 0; m < 8; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 8; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[1] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[2] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -587,7 +590,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             for (int m = 0; m < 8; ++m) {
                 vj_kl_cache[sq_kl+m*336+0] += vj_kl[m];
             } }
-            for (int m = 0; m < 8; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 8; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[4] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[8] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -1257,7 +1263,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             for (int m = 0; m < 8; ++m) {
                 vj_kl_cache[sq_kl+m*448+336] += vj_kl[m];
             } }
-            for (int m = 0; m < 8; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 8; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[4] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[8] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -1290,7 +1299,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             vj_ij[23] += R_0_1_0_0 * dm_kl[5];
             vj_ij[27] += R_0_1_0_0 * dm_kl[6];
             vj_ij[31] += R_0_1_0_0 * dm_kl[7];
-            for (int m = 0; m < 8; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
+            for (int m = 0; m < 8; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1];
+            }
             vj_ij[0] += R_0_0_0_1 * dm_kl[0];
             vj_ij[4] += R_0_0_0_1 * dm_kl[1];
             vj_ij[8] += R_0_0_0_1 * dm_kl[2];
@@ -1323,7 +1335,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             vj_ij[23] += R_0_1_0_1 * dm_kl[5];
             vj_ij[27] += R_0_1_0_1 * dm_kl[6];
             vj_ij[31] += R_0_1_0_1 * dm_kl[7];
-            for (int m = 0; m < 8; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2]; }
+            for (int m = 0; m < 8; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2];
+            }
             vj_ij[0] += R_0_0_1_0 * dm_kl[0];
             vj_ij[4] += R_0_0_1_0 * dm_kl[1];
             vj_ij[8] += R_0_0_1_0 * dm_kl[2];
@@ -1356,7 +1371,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             vj_ij[23] += R_0_1_1_0 * dm_kl[5];
             vj_ij[27] += R_0_1_1_0 * dm_kl[6];
             vj_ij[31] += R_0_1_1_0 * dm_kl[7];
-            for (int m = 0; m < 8; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
+            for (int m = 0; m < 8; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3];
+            }
             vj_ij[0] += R_0_1_0_0 * dm_kl[0];
             vj_ij[4] += R_0_1_0_0 * dm_kl[1];
             vj_ij[8] += R_0_1_0_0 * dm_kl[2];
@@ -1466,14 +1484,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
     }
 } }
 
-// TILEX=48, TILEY=21
+// TILEX=48, TILEY=20
 __global__ static
 void md_j_4dm_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_size)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
-    int task_kl0 = blockIdx.y * 336;
+    int task_kl0 = blockIdx.y * 320;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
@@ -1498,20 +1516,20 @@ void md_j_4dm_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;
     extern __shared__ double vj_kl_cache[];
-    double *Rq_cache = vj_kl_cache + 2688;
-    double *Rp_cache = Rq_cache + 1344;
+    double *Rq_cache = vj_kl_cache + 2560;
+    double *Rp_cache = Rq_cache + 1280;
     double *dm_ij_cache = Rp_cache + 64;
     double *gamma_inc = dm_ij_cache + 1280;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
 
-    for (int n = thread_id; n < 1408; n += 256) {
+    for (int n = thread_id; n < 1344; n += 256) {
         Rq_cache[n] = 0.;
     }
     __syncthreads();
 
-    for (int n = thread_id; n < 336; n += 256) {
-        int task_kl = blockIdx.y * 336 + n;
+    for (int n = thread_id; n < 320; n += 256) {
+        int task_kl = blockIdx.y * 320 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -1525,11 +1543,11 @@ void md_j_4dm_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
             double ykl = (ak * rk[1] + al * rl[1]) / akl;
             double zkl = (ak * rk[2] + al * rl[2]) / akl;
             Rq_cache[n+0] = xkl;
-            Rq_cache[n+336] = ykl;
-            Rq_cache[n+672] = zkl;
-            Rq_cache[n+1008] = akl;
+            Rq_cache[n+320] = ykl;
+            Rq_cache[n+640] = zkl;
+            Rq_cache[n+960] = akl;
         } else {
-            Rq_cache[n+1008] = 1.;
+            Rq_cache[n+960] = 1.;
         }
     }
 
@@ -1538,7 +1556,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
     double *dm = jk.dm + dm_offset * dm_size;
     double *vj = jk.vj + dm_offset * dm_size;
     __syncthreads();
-    for (int n = thread_id; n < 2688; n += 256) {
+    for (int n = thread_id; n < 2560; n += 256) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
@@ -1590,15 +1608,15 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         for (int ij = 0; ij < 80; ++ij) {
             vj_ij[ij] = 0;
         }
-        for (int batch_kl = 0; batch_kl < 21; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 336 + batch_kl * 16;
+        for (int batch_kl = 0; batch_kl < 20; ++batch_kl) {
+            int task_kl0 = blockIdx.y * 320 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
             if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*21] + q_cond[pair_ij0] < bounds.cutoff) {
+                qd_kl_max[batch_kl+blockIdx.y*20] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -1620,9 +1638,9 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             double zij = Rp_cache[tx+32];
             double aij = Rp_cache[tx+48];
             double xkl = Rq_cache[sq_kl+0];
-            double ykl = Rq_cache[sq_kl+336];
-            double zkl = Rq_cache[sq_kl+672];
-            double akl = Rq_cache[sq_kl+1008];
+            double ykl = Rq_cache[sq_kl+320];
+            double zkl = Rq_cache[sq_kl+640];
+            double akl = Rq_cache[sq_kl+960];
             fac = fac / (aij*akl*sqrt(aij+akl));
             double xpq = xij - xkl;
             double ypq = yij - ykl;
@@ -1667,7 +1685,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 8; ++m) {
-                vj_kl_cache[sq_kl+m*336+0] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*320+0] += vj_kl[m];
             } }
             dm_kl[0] = 1 * dm[kl_loc0+0];
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
@@ -1720,7 +1738,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 2; ++m) {
-                vj_kl_cache[sq_kl+m*336+0] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*320+0] += vj_kl[m];
             } }
             for (int m = 0; m < 2; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
@@ -1843,9 +1861,12 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 8; ++m) {
-                vj_kl_cache[sq_kl+m*336+0] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*320+0] += vj_kl[m];
             } }
-            for (int m = 0; m < 8; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 8; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[10] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[20] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -1989,15 +2010,15 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             }
         }
     }
-    for (int n = tx; n < 21; n += 16) {
-        int kl = n / 21;
-        int batch_kl = n - kl * 21;
+    for (int n = tx; n < 20; n += 16) {
+        int kl = n / 20;
+        int batch_kl = n - kl * 20;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 336 + sq_kl;
+        int task_kl = blockIdx.y * 320 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(8, remaining_n_dm); ++m) {
-                atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*336+kl*336]);
+                atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*320+kl*320]);
             }
         }
     }
@@ -2786,7 +2807,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             for (int m = 0; m < 4; ++m) {
                 vj_kl_cache[sq_kl+m*832+624] += vj_kl[m];
             } }
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[10] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[20] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -2827,7 +2851,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_0_0 * dm_kl[1];
             vj_ij[29] += R_0_2_0_0 * dm_kl[2];
             vj_ij[39] += R_0_2_0_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1];
+            }
             vj_ij[0] += R_0_0_0_1 * dm_kl[0];
             vj_ij[10] += R_0_0_0_1 * dm_kl[1];
             vj_ij[20] += R_0_0_0_1 * dm_kl[2];
@@ -2868,7 +2895,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_0_1 * dm_kl[1];
             vj_ij[29] += R_0_2_0_1 * dm_kl[2];
             vj_ij[39] += R_0_2_0_1 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2];
+            }
             vj_ij[0] += R_0_0_1_0 * dm_kl[0];
             vj_ij[10] += R_0_0_1_0 * dm_kl[1];
             vj_ij[20] += R_0_0_1_0 * dm_kl[2];
@@ -2909,7 +2939,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_1_0 * dm_kl[1];
             vj_ij[29] += R_0_2_1_0 * dm_kl[2];
             vj_ij[39] += R_0_2_1_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3];
+            }
             vj_ij[0] += R_0_1_0_0 * dm_kl[0];
             vj_ij[10] += R_0_1_0_0 * dm_kl[1];
             vj_ij[20] += R_0_1_0_0 * dm_kl[2];
@@ -4696,7 +4729,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             for (int m = 0; m < 4; ++m) {
                 vj_kl_cache[sq_kl+m*800+720] += vj_kl[m];
             } }
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[10] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[20] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -4737,7 +4773,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_0_0 * dm_kl[1];
             vj_ij[29] += R_0_2_0_0 * dm_kl[2];
             vj_ij[39] += R_0_2_0_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1];
+            }
             vj_ij[0] += R_0_0_0_1 * dm_kl[0];
             vj_ij[10] += R_0_0_0_1 * dm_kl[1];
             vj_ij[20] += R_0_0_0_1 * dm_kl[2];
@@ -4778,7 +4817,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_0_1 * dm_kl[1];
             vj_ij[29] += R_0_2_0_1 * dm_kl[2];
             vj_ij[39] += R_0_2_0_1 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+2]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+2];
+            }
             vj_ij[0] += R_0_0_0_2 * dm_kl[0];
             vj_ij[10] += R_0_0_0_2 * dm_kl[1];
             vj_ij[20] += R_0_0_0_2 * dm_kl[2];
@@ -4819,7 +4861,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_0_2 * dm_kl[1];
             vj_ij[29] += R_0_2_0_2 * dm_kl[2];
             vj_ij[39] += R_0_2_0_2 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3];
+            }
             vj_ij[0] += R_0_0_1_0 * dm_kl[0];
             vj_ij[10] += R_0_0_1_0 * dm_kl[1];
             vj_ij[20] += R_0_0_1_0 * dm_kl[2];
@@ -4860,7 +4905,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_1_0 * dm_kl[1];
             vj_ij[29] += R_0_2_1_0 * dm_kl[2];
             vj_ij[39] += R_0_2_1_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+4]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+4];
+            }
             vj_ij[0] += R_0_0_1_1 * dm_kl[0];
             vj_ij[10] += R_0_0_1_1 * dm_kl[1];
             vj_ij[20] += R_0_0_1_1 * dm_kl[2];
@@ -4901,7 +4949,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_1_1 * dm_kl[1];
             vj_ij[29] += R_0_2_1_1 * dm_kl[2];
             vj_ij[39] += R_0_2_1_1 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+5]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+5];
+            }
             vj_ij[0] += R_0_0_2_0 * dm_kl[0];
             vj_ij[10] += R_0_0_2_0 * dm_kl[1];
             vj_ij[20] += R_0_0_2_0 * dm_kl[2];
@@ -4942,7 +4993,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_2_2_0 * dm_kl[1];
             vj_ij[29] += R_0_2_2_0 * dm_kl[2];
             vj_ij[39] += R_0_2_2_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+6]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+6];
+            }
             vj_ij[0] += R_0_1_0_0 * dm_kl[0];
             vj_ij[10] += R_0_1_0_0 * dm_kl[1];
             vj_ij[20] += R_0_1_0_0 * dm_kl[2];
@@ -4983,7 +5037,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_3_0_0 * dm_kl[1];
             vj_ij[29] += R_0_3_0_0 * dm_kl[2];
             vj_ij[39] += R_0_3_0_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+7]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+7];
+            }
             vj_ij[0] += R_0_1_0_1 * dm_kl[0];
             vj_ij[10] += R_0_1_0_1 * dm_kl[1];
             vj_ij[20] += R_0_1_0_1 * dm_kl[2];
@@ -5024,7 +5081,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_3_0_1 * dm_kl[1];
             vj_ij[29] += R_0_3_0_1 * dm_kl[2];
             vj_ij[39] += R_0_3_0_1 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+8]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+8];
+            }
             vj_ij[0] += R_0_1_1_0 * dm_kl[0];
             vj_ij[10] += R_0_1_1_0 * dm_kl[1];
             vj_ij[20] += R_0_1_1_0 * dm_kl[2];
@@ -5065,7 +5125,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[19] += R_0_3_1_0 * dm_kl[1];
             vj_ij[29] += R_0_3_1_0 * dm_kl[2];
             vj_ij[39] += R_0_3_1_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+9]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+9];
+            }
             vj_ij[0] += R_0_2_0_0 * dm_kl[0];
             vj_ij[10] += R_0_2_0_0 * dm_kl[1];
             vj_ij[20] += R_0_2_0_0 * dm_kl[2];
@@ -5679,7 +5742,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             for (int m = 0; m < 4; ++m) {
                 vj_kl_cache[sq_kl+m*464+0] += vj_kl[m];
             } }
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[20] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[40] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -5837,14 +5903,14 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
     }
 } }
 
-// TILEX=48, TILEY=11
+// TILEX=48, TILEY=10
 __global__ static
 void md_j_4dm_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_size)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int task_ij0 = blockIdx.x * 768;
-    int task_kl0 = blockIdx.y * 176;
+    int task_kl0 = blockIdx.y * 160;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
@@ -5869,20 +5935,20 @@ void md_j_4dm_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;
     extern __shared__ double vj_kl_cache[];
-    double *Rq_cache = vj_kl_cache + 2816;
-    double *Rp_cache = Rq_cache + 704;
+    double *Rq_cache = vj_kl_cache + 2560;
+    double *Rp_cache = Rq_cache + 640;
     double *dm_ij_cache = Rp_cache + 64;
     double *gamma_inc = dm_ij_cache + 1280;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
 
-    for (int n = thread_id; n < 768; n += 256) {
+    for (int n = thread_id; n < 704; n += 256) {
         Rq_cache[n] = 0.;
     }
     __syncthreads();
 
-    for (int n = thread_id; n < 176; n += 256) {
-        int task_kl = blockIdx.y * 176 + n;
+    for (int n = thread_id; n < 160; n += 256) {
+        int task_kl = blockIdx.y * 160 + n;
         if (task_kl < npairs_kl) {
             int pair_kl = pair_kl_mapping[task_kl];
             int ksh = pair_kl / nbas;
@@ -5896,11 +5962,11 @@ void md_j_4dm_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds, int dm_s
             double ykl = (ak * rk[1] + al * rl[1]) / akl;
             double zkl = (ak * rk[2] + al * rl[2]) / akl;
             Rq_cache[n+0] = xkl;
-            Rq_cache[n+176] = ykl;
-            Rq_cache[n+352] = zkl;
-            Rq_cache[n+528] = akl;
+            Rq_cache[n+160] = ykl;
+            Rq_cache[n+320] = zkl;
+            Rq_cache[n+480] = akl;
         } else {
-            Rq_cache[n+528] = 1.;
+            Rq_cache[n+480] = 1.;
         }
     }
 
@@ -5909,7 +5975,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
     double *dm = jk.dm + dm_offset * dm_size;
     double *vj = jk.vj + dm_offset * dm_size;
     __syncthreads();
-    for (int n = thread_id; n < 2816; n += 256) {
+    for (int n = thread_id; n < 2560; n += 256) {
         vj_kl_cache[n] = 0.;
     }
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
@@ -5961,15 +6027,15 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         for (int ij = 0; ij < 80; ++ij) {
             vj_ij[ij] = 0;
         }
-        for (int batch_kl = 0; batch_kl < 11; ++batch_kl) {
-            int task_kl0 = blockIdx.y * 176 + batch_kl * 16;
+        for (int batch_kl = 0; batch_kl < 10; ++batch_kl) {
+            int task_kl0 = blockIdx.y * 160 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
             if (qd_ij_max[batch_ij+blockIdx.x*48] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[batch_kl+blockIdx.y*11] + q_cond[pair_ij0] < bounds.cutoff) {
+                qd_kl_max[batch_kl+blockIdx.y*10] + q_cond[pair_ij0] < bounds.cutoff) {
                 continue;
             }
 
@@ -5991,9 +6057,9 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             double zij = Rp_cache[tx+32];
             double aij = Rp_cache[tx+48];
             double xkl = Rq_cache[sq_kl+0];
-            double ykl = Rq_cache[sq_kl+176];
-            double zkl = Rq_cache[sq_kl+352];
-            double akl = Rq_cache[sq_kl+528];
+            double ykl = Rq_cache[sq_kl+160];
+            double zkl = Rq_cache[sq_kl+320];
+            double akl = Rq_cache[sq_kl+480];
             fac = fac / (aij*akl*sqrt(aij+akl));
             double xpq = xij - xkl;
             double ypq = yij - ykl;
@@ -6068,7 +6134,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+0] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+0] += vj_kl[m];
             } }
             vj_kl[0] = 0.;
             vj_kl[0] -= R_0_0_0_1 * dm_ij_cache[tx+0];
@@ -6117,7 +6183,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+176] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+160] += vj_kl[m];
             } }
             vj_kl[0] = 0.;
             vj_kl[0] -= R_0_0_1_0 * dm_ij_cache[tx+0];
@@ -6156,7 +6222,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+352] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+320] += vj_kl[m];
             } }
             vj_kl[0] = 0.;
             vj_kl[0] -= R_0_1_0_0 * dm_ij_cache[tx+0];
@@ -6189,7 +6255,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+528] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+480] += vj_kl[m];
             } }
             }{
             dm_kl[0] = 1 * dm[kl_loc0+0];
@@ -6422,7 +6488,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 2; ++m) {
-                vj_kl_cache[sq_kl+m*704+0] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+0] += vj_kl[m];
             } }
             for (int m = 0; m < 2; ++m) vj_kl[m] = 0.;
             vj_kl[0] -= R_0_0_0_1 * dm_ij_cache[tx+0];
@@ -6491,7 +6557,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 2; ++m) {
-                vj_kl_cache[sq_kl+m*704+176] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+160] += vj_kl[m];
             } }
             for (int m = 0; m < 2; ++m) vj_kl[m] = 0.;
             vj_kl[0] -= R_0_0_1_0 * dm_ij_cache[tx+0];
@@ -6550,7 +6616,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 2; ++m) {
-                vj_kl_cache[sq_kl+m*704+352] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+320] += vj_kl[m];
             } }
             for (int m = 0; m < 2; ++m) vj_kl[m] = 0.;
             vj_kl[0] -= R_0_1_0_0 * dm_ij_cache[tx+0];
@@ -6603,7 +6669,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 2; ++m) {
-                vj_kl_cache[sq_kl+m*704+528] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+480] += vj_kl[m];
             } }
             }{
             for (int m = 0; m < 2; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
@@ -6956,7 +7022,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+0] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+0] += vj_kl[m];
             } }
             for (int m = 0; m < 4; ++m) vj_kl[m] = 0.;
             vj_kl[0] -= R_0_0_0_1 * dm_ij_cache[tx+0];
@@ -7065,7 +7131,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+176] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+160] += vj_kl[m];
             } }
             for (int m = 0; m < 4; ++m) vj_kl[m] = 0.;
             vj_kl[0] -= R_0_0_1_0 * dm_ij_cache[tx+0];
@@ -7164,7 +7230,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+352] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+320] += vj_kl[m];
             } }
             for (int m = 0; m < 4; ++m) vj_kl[m] = 0.;
             vj_kl[0] -= R_0_1_0_0 * dm_ij_cache[tx+0];
@@ -7257,10 +7323,13 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             } }
             if (tx == 0) {
             for (int m = 0; m < 4; ++m) {
-                vj_kl_cache[sq_kl+m*704+528] += vj_kl[m];
+                vj_kl_cache[sq_kl+m*640+480] += vj_kl[m];
             } }
             }{
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = 1 * dm[m*dm_size+kl_loc0+0];
+            }
             vj_ij[0] += gamma_inc[sq_id+0*256] * dm_kl[0];
             vj_ij[20] += gamma_inc[sq_id+0*256] * dm_kl[1];
             vj_ij[40] += gamma_inc[sq_id+0*256] * dm_kl[2];
@@ -7372,7 +7441,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[39] += R_0_3_0_0 * dm_kl[1];
             vj_ij[59] += R_0_3_0_0 * dm_kl[2];
             vj_ij[79] += R_0_3_0_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+1];
+            }
             vj_ij[0] += R_0_0_0_1 * dm_kl[0];
             vj_ij[20] += R_0_0_0_1 * dm_kl[1];
             vj_ij[40] += R_0_0_0_1 * dm_kl[2];
@@ -7473,7 +7545,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[39] += R_0_3_0_1 * dm_kl[1];
             vj_ij[59] += R_0_3_0_1 * dm_kl[2];
             vj_ij[79] += R_0_3_0_1 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+2];
+            }
             vj_ij[0] += R_0_0_1_0 * dm_kl[0];
             vj_ij[20] += R_0_0_1_0 * dm_kl[1];
             vj_ij[40] += R_0_0_1_0 * dm_kl[2];
@@ -7564,7 +7639,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             vj_ij[39] += R_0_3_1_0 * dm_kl[1];
             vj_ij[59] += R_0_3_1_0 * dm_kl[2];
             vj_ij[79] += R_0_3_1_0 * dm_kl[3];
-            for (int m = 0; m < 4; ++m) { dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3]; }
+            for (int m = 0; m < 4; ++m) {
+                if (m >= remaining_n_dm) break;
+                dm_kl[m] = -1 * dm[m*dm_size+kl_loc0+3];
+            }
             vj_ij[0] += R_0_1_0_0 * dm_kl[0];
             vj_ij[20] += R_0_1_0_0 * dm_kl[1];
             vj_ij[40] += R_0_1_0_0 * dm_kl[2];
@@ -7713,15 +7791,15 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             }
         }
     }
-    for (int n = tx; n < 44; n += 16) {
-        int kl = n / 11;
-        int batch_kl = n - kl * 11;
+    for (int n = tx; n < 40; n += 16) {
+        int kl = n / 10;
+        int batch_kl = n - kl * 10;
         int sq_kl = ty + batch_kl * 16;
-        int task_kl = blockIdx.y * 176 + sq_kl;
+        int task_kl = blockIdx.y * 160 + sq_kl;
         if (task_kl < npairs_kl) {
             int kl_loc0 = pair_kl_loc[task_kl];
             for (int m = 0; m < min(4, remaining_n_dm); ++m) {
-                atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*704+kl*176]);
+                atomicAdd(vj+m*dm_size+kl_loc0+kl, vj_kl_cache[sq_kl+m*640+kl*160]);
             }
         }
     }
@@ -7754,10 +7832,10 @@ int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, i
         dim3 blocks((npairs_ij + 111) / 112, (npairs_kl + 111) / 112, 1);
         md_j_4dm_1_1<<<blocks, threads, 6080*sizeof(double)>>>(*envs, *jk, *bounds, dm_size);
     } break;
-    case 18: { // lij=2, lkl=0, tilex=48, tiley=21
+    case 18: { // lij=2, lkl=0, tilex=48, tiley=20
         dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 335) / 336, 1);
-        md_j_4dm_2_0<<<blocks, threads, 6144*sizeof(double)>>>(*envs, *jk, *bounds, dm_size);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 319) / 320, 1);
+        md_j_4dm_2_0<<<blocks, threads, 5952*sizeof(double)>>>(*envs, *jk, *bounds, dm_size);
     } break;
     case 19: { // lij=2, lkl=1, tilex=48, tiley=13
         dim3 threads(16, 16);
@@ -7774,10 +7852,10 @@ int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, i
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 463) / 464, 1);
         md_j_4dm_3_0<<<blocks, threads, 6080*sizeof(double)>>>(*envs, *jk, *bounds, dm_size);
     } break;
-    case 28: { // lij=3, lkl=1, tilex=48, tiley=11
+    case 28: { // lij=3, lkl=1, tilex=48, tiley=10
         dim3 threads(16, 16);
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 175) / 176, 1);
-        md_j_4dm_3_1<<<blocks, threads, 6144*sizeof(double)>>>(*envs, *jk, *bounds, dm_size);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 159) / 160, 1);
+        md_j_4dm_3_1<<<blocks, threads, 5824*sizeof(double)>>>(*envs, *jk, *bounds, dm_size);
     } break;
     default: return 0;
     }
