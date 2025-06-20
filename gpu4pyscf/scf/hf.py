@@ -27,7 +27,7 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot)
-from gpu4pyscf.scf import diis, jk
+from gpu4pyscf.scf import diis, jk, j_engine
 from gpu4pyscf.lib import logger
 
 __all__ = [
@@ -46,8 +46,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         if with_k: vk = vk.get()
     return vj, vk
 
-def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True,
             omega=None):
+    if omega is None:
+        omega = mol.omega
     vhfopt = mf._opt_gpu.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
@@ -74,15 +76,17 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     mo_occ[e_idx[:nocc]] = 2
     return mo_occ
 
-def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=None):
+def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     if dm is None: dm = mf.make_rdm1()
-    if dm_last is None or not mf.direct_scf:
-        vj, vk = mf.get_jk(mol, dm, hermi)
-        return vj - vk * .5
-    else:
-        ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-        vj, vk = mf.get_jk(mol, ddm, hermi)
-        return vj - vk * .5 + vhf_last
+    if dm_last is not None and mf.direct_scf:
+        dm = asarray(dm) - asarray(dm_last)
+    vj = mf.get_j(mol, dm, hermi)
+    vhf = mf.get_k(mol, dm, hermi)
+    vhf *= -.5
+    vhf += vj
+    if vhf_last is not None:
+        vhf += asarray(vhf_last)
+    return vhf
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
@@ -610,8 +614,6 @@ class SCF(pyscf_lib.StreamObject):
     _finalize                = hf_cpu.SCF._finalize
     init_direct_scf          = NotImplemented
     get_jk                   = _get_jk
-    get_j                    = hf_cpu.SCF.get_j
-    get_k                    = hf_cpu.SCF.get_k
     get_veff                 = NotImplemented
     mulliken_meta            = hf_cpu.SCF.mulliken_meta
     pop                      = hf_cpu.SCF.pop
@@ -681,6 +683,20 @@ class SCF(pyscf_lib.StreamObject):
                 self.mol, self.chkfile, envs['e_tot'],
                 cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
                 cupy.asnumpy(envs['mo_occ']), overwrite_mol=False)
+
+    def get_j(self, mol=None, dm=None, hermi=1, omega=None):
+        if mol is None:
+            mol = self.mol
+        if omega is None:
+            omega = mol.omega
+        if omega not in self._opt_jengine:
+            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
+            self._opt_jengine[omega] = jopt
+        jopt = self._opt_jengine[omega]
+        return j_engine.get_j(mol, dm, hermi, jopt)
+
+    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
+        return self.get_jk(mol, dm, hermi, with_j=False, omega=omega)[1]
 
 class KohnShamDFT:
     '''

@@ -168,7 +168,7 @@ class RKS(rks.RKS):
             vk = vk.get()
 
         vxc = vxc.get()
-        log.timer_debug1('jk total', *cput1)
+        log.timer_debug1('veff', *cput0)
         vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
         return vxc
 

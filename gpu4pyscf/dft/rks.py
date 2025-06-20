@@ -115,53 +115,44 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         logger.debug(ks, 'nelec by numeric integration = %s', n)
     t0 = logger.timer_debug1(ks, 'vxc tot', *t0)
 
-    #enabling range-separated hybrids
-    if not ni.libxc.is_hybrid_xc(ks.xc):
-        vk = None
-        omega = mol.omega
-        if omega in ks._opt_jengine:
-            jopt = ks._opt_jengine[omega]
-        else:
-            ks._opt_jengine[omega] = jopt = j_engine._VHFOpt(mol, ks.direct_scf_tol).build()
-
-        vj_last = getattr(vhf_last, 'vj', None)
-        if vj_last is not None:
-            ddm = asarray(dm) - asarray(dm_last)
-            vj = j_engine.get_j(mol, ddm, hermi, jopt)
-            vj += asarray(vj_last)
-        else:
-            vj = j_engine.get_j(mol, dm, hermi, jopt)
-        vj_last = None
-        vxc += vj
-    else:
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
-        if (ks._eri is None and ks.direct_scf and
-            getattr(vhf_last, 'vk', None) is not None):
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-            vj, vk = ks.get_jk(mol, ddm, hermi)
-            vk *= hyb
-            if abs(omega) > 1e-10:  # For range separated Coulomb operator
-                vklr = ks.get_k(mol, ddm, hermi, omega=omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vj += vhf_last.vj
-            vk += vhf_last.vk
-        else:
-            vj, vk = ks.get_jk(mol, dm, hermi)
-            vk *= hyb
-            if abs(omega) > 1e-10:
-                vklr = ks.get_k(mol, dm, hermi, omega=omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-        vxc += vj - vk * .5
-        if ground_state:
-            exc -= cupy.einsum('ij,ji', dm, vk).real * .5 * .5
-    
+    dm_orig = dm
+    vj_last = getattr(vhf_last, 'vj', None)
+    if vj_last is not None:
+        dm = asarray(dm) - asarray(dm_last)
+    vj = ks.get_j(mol, dm, hermi)
+    if vj_last is not None:
+        vj += asarray(vj_last)
+    vxc += vj
     if ground_state:
-        ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
+        ecoul = float(cupy.einsum('ij,ij', dm_orig, vj).real) * .5
     else:
         ecoul = None
-    t0 = logger.timer_debug1(ks, 'jk total', *t0)
+
+    vk = None
+    if ni.libxc.is_hybrid_xc(ks.xc):
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
+        if omega == 0:
+            vk = ks.get_k(mol, dm, hermi)
+            vk *= hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            vk = ks.get_k(mol, dm, hermi, omega=-omega)
+            vk *= hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            vk = ks.get_k(mol, dm, hermi, omega=omega)
+            vk *= alpha
+        else: # SR and LR exchange with different ratios
+            vk = ks.get_k(mol, dm, hermi)
+            vk *= hyb
+            vklr = ks.get_k(mol, dm, hermi, omega=omega)
+            vklr *= (alpha - hyb)
+            vk += vklr
+        vk *= .5
+        if vj_last is not None:
+            vk += asarray(vhf_last.vk)
+        vxc -= vk
+        if ground_state:
+            exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
+    t0 = logger.timer_debug1(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 
@@ -251,14 +242,7 @@ class KohnShamDFT(rks.KohnShamDFT):
                  self._numint.libxc.__name__,
                  self._numint.libxc.__version__,
                  self._numint.libxc.__reference__)
-        
-        # TODO: add this later
-        '''
-        if log.verbose >= logger.INFO:
-            log.info('XC functionals = %s', self.xc)
-            if hasattr(self._numint.libxc, 'xc_reference'):
-                log.info(textwrap.indent('\n'.join(self._numint.libxc.xc_reference(self.xc)), '    '))
-        '''
+        log.info('XC functionals = %s', self.xc)
         self.grids.dump_flags(verbose)
 
         if self.do_nlc():

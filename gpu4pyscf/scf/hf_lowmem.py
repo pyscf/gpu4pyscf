@@ -198,7 +198,7 @@ class RHF(hf.RHF):
         raise NotImplementedError
 
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
-        '''Constructus the lower-triangular part of the Fock matrix.'''
+        '''Constructus the lower-triangular part of the Veff matrix.'''
         log = logger.new_logger(mol, self.verbose)
         cput0 = log.init_timer()
 
@@ -229,7 +229,7 @@ class RHF(hf.RHF):
         vhf = pack_tril(vhf[0])
         if vhf_last is not None:
             vhf += asarray(vhf_last)
-        log.timer('vj and vk', *cput0)
+        log.timer('veff', *cput0)
         return vhf.get()
 
     def _delta_rdm1(self, dm_or_wfn, dm_last, vhfopt):
