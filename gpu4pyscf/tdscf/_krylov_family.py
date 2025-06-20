@@ -293,16 +293,21 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(' use user-specified function to generate initial guess.')
     else:
         log.info(' use hdiag to generate initial guess.')
-        initguess_fn = globals()[f'_{problem_type}_diagonal_initguess']
 
+        initguess_functions = {
+            'eigenvalue':     _eigenvalue_diagonal_initguess,
+            'linear':         _linear_diagonal_initguess,
+            'shifted_linear': _shifted_linear_diagonal_initguess,
+        }
+        initguess_fn = initguess_functions[problem_type]
+  
 
     ''' Generate initial guess '''
     log.info('generating initial guess')
     if problem_type == 'eigenvalue':
         init_guess = initguess_fn(n_states=size_new, hdiag=hdiag)
         if isinstance(init_guess, tuple):
-            energies, init_guess_vec = init_guess
-            energies = energies*HARTREE2EV
+            _energies, init_guess_vec = init_guess
             init_guess = init_guess_vec
 
     elif problem_type == 'linear':
@@ -319,7 +324,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(' use user-specified function for preconditioning.')
     else:
         log.info(' use hdiag for preconditioning.')   
-        precond_fn = globals()[f'_{problem_type}_diagonal_precond']
+        precond_functions = {
+            'eigenvalue':     _eigenvalue_diagonal_precond,
+            'linear':         _linear_diagonal_precond,
+            'shifted_linear': _shifted_linear_diagonal_precond,
+        }
+        precond_fn = precond_functions[problem_type]
         precond_fn = partial(precond_fn, hdiag=hdiag)
 
     for ii in range(max_iter):
@@ -582,38 +592,3 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
 
     return output
 
-
-def test_krylov_solver():
-
-    cp.random.seed(42)
-    A_size = 1000
-    n_vec = 5
-    A = cp.random.rand(A_size,A_size)*0.01
-    A = A + A.T
-    scaling = 30
-    cp.fill_diagonal(A, (cp.random.rand(A_size)+2) * scaling)
-    omega_shift = (cp.random.rand(n_vec)+2) * scaling
-    rhs = cp.random.rand(n_vec, A_size) * scaling
-
-    def matrix_vector_product(x):
-        return x.dot(A)
-
-    hdiag = cp.diag(A)
-
-    eigenvalues, eigenvecters = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
-                            problem_type='eigenvalue', n_states=5,
-                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
-
-    solution_vectors = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
-                            problem_type='linear', rhs=rhs,
-                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
-    
-    solution_vectors_shifted = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
-                            problem_type='shifted_linear', rhs=rhs, omega_shift=omega_shift,
-                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
-    
-    return eigenvalues, eigenvecters, solution_vectors, solution_vectors_shifted
-
-if __name__ == '__main__':
-    test_krylov_solver()
-    
