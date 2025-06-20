@@ -24,6 +24,7 @@ import pyscf
 from gpu4pyscf.lib import logger
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad import tdrks
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
@@ -61,6 +62,11 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
         yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     LI = xI-yI    # eq.(83) in Ref. [1]
+
+    ni = mf._numint
+    ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -110,27 +116,54 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
-    extra_force = cp.zeros((len(atmlst), 3))
 
+    j_factor = 1.0
+    k_factor = 0.0
+    if with_k:
+        k_factor = hyb
+    extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0) 
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor) 
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
-    dvhf = td_nac.get_veff(mol, dmz1doo)
+    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0)
+    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
+
+    if with_k and omega != 0:
+        j_factor = 0.0
+        k_factor = alpha-hyb  # =beta
+
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega) 
+        for k, ia in enumerate(atmlst):
+            extra_force[k] += mf_grad.extra_force(ia, locals())
+        dvhf_all += dvhf
+        dvhf = td_nac.get_veff(mol, dmz1doo, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega)
+        for k, ia in enumerate(atmlst):
+            extra_force[k] -= mf_grad.extra_force(ia, locals())
+        dvhf_all -= dvhf
+        dvhf = td_nac.get_veff(mol, oo0, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega)
+        for k, ia in enumerate(atmlst):
+            extra_force[k] -= mf_grad.extra_force(ia, locals())
+        dvhf_all -= dvhf
+
+    f1ooP, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
+    veff1_0 = vxc1[1:]
+    veff1_1 = f1ooP[1:]
 
     delec = dh_td*2 - ds
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
 
-    offsetdic = mol.offset_nr_by_atom()
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
     ds_x = contract("xij,ji->xi", s1, xIao*EI)
@@ -139,7 +172,13 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     ds_y_etf = contract("xij,ij->xi", s1, (yIao*EI + yIao.T*EI) * 0.5)
     dsxy = cp.asarray([cp.sum(ds_x[:, p0:p1] + ds_y[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     dsxy_etf = cp.asarray([cp.sum(ds_x_etf[:, p0:p1] + ds_y_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec 
+    dveff1_0 = cp.asarray(
+        [contract("xpq,pq->x", veff1_0[:, p0:p1], dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
+    dveff1_0 += cp.asarray([
+            contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), dmz1doo[:, p0:p1],)
+            for p0, p1 in aoslices[:, 2:]])
+    dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
+    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec + dveff1_0 + dveff1_1
     de_etf = de + dsxy_etf
     de += dsxy 
     
@@ -259,6 +298,7 @@ class NAC(lib.StreamObject):
                 return rhf_grad._jk_energy_per_atom(
                     mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
 
+
     def _finalize(self):
         if self.verbose >= logger.NOTE:
             logger.note(
@@ -303,4 +343,4 @@ class NAC(lib.StreamObject):
     to_gpu = lib.to_gpu
 
 
-tdscf.rhf.TDA.NAC = tdscf.rhf.TDHF.NAC = lib.class_as_method(NAC)
+tdscf.rks.TDA.NAC = tdscf.rks.TDDFT.NAC = lib.class_as_method(NAC)

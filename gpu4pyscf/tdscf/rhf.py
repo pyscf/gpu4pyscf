@@ -414,6 +414,13 @@ class TDBase(lib.StreamObject):
             from gpu4pyscf.grad import tdrhf
             return tdrhf.Gradients(self)
 
+    def NAC(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError("density fitting NAC is not supported.")
+        else:
+            from gpu4pyscf.nac import tdrhf
+            return tdrhf.NAC(self)
+
     as_scanner = as_scanner
 
     oscillator_strength = tdhf_cpu.oscillator_strength

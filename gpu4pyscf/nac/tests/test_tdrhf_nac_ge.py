@@ -16,7 +16,7 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
-from pyscf import lib, gto, scf
+from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
 
@@ -43,7 +43,7 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    def test_grad_tda_singlet_cpu(self):
+    def test_grad_tda_singlet_qchem(self):
         """
         benchmark from qchem
         $rem
@@ -124,14 +124,12 @@ class KnownValues(unittest.TestCase):
         ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
                             [ 0.103969, -0.000000, -0.000000],
                             [-0.103969,  0.000000, -0.000000]])
-        print(np.abs(nac1.de/td.e[1]) - np.abs(ref))
-        print(nac1.de)
         assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
-    def test_grad_tdhf_singlet_cpu(self):
+    def test_grad_tdhf_singlet_qchem(self):
         """
         benchmark from Qchem
         $rem
