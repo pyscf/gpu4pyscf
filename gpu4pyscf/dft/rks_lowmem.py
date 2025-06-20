@@ -216,15 +216,14 @@ def initialize_grids(ks, mol=None, dm_or_wfn=None):
             ks.grids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
 
-        if ks.do_nlc() and ks.nlcgrids.coords is None:
-            if ks.nlcgrids.coords is None:
-                t0 = logger.init_timer(ks)
-                #ks.nlcgrids.build(with_non0tab=True)
-                ks.nlcgrids.build()
-                ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
-                ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
-                if ks.small_rho_cutoff > 1e-20:
-                    # Filter grids the first time setup grids
-                    ks.nlcgrids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.nlcgrids)
-                t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
+    if ks.do_nlc() and ks.nlcgrids.coords is None:
+        t0 = logger.init_timer(ks)
+        #ks.nlcgrids.build(with_non0tab=True)
+        ks.nlcgrids.build()
+        ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
+        ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
+        if ks.small_rho_cutoff > 1e-20:
+            # Filter grids the first time setup grids
+            ks.nlcgrids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.nlcgrids)
+        t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
     return ks

@@ -49,17 +49,16 @@ def initialize_grids(ks, mol=None, dm=None):
             ks.grids = prune_small_rho_grids_(ks, ks.mol, dm, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
 
-        if ks.do_nlc() and ks.nlcgrids.coords is None:
-            if ks.nlcgrids.coords is None:
-                t0 = logger.init_timer(ks)
-                #ks.nlcgrids.build(with_non0tab=True)
-                ks.nlcgrids.build()
-                ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
-                ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
-                if ks.small_rho_cutoff > 1e-20 and ground_state:
-                    # Filter grids the first time setup grids
-                    ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
-                t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
+    if ks.do_nlc() and ks.nlcgrids.coords is None:
+        t0 = logger.init_timer(ks)
+        #ks.nlcgrids.build(with_non0tab=True)
+        ks.nlcgrids.build()
+        ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
+        ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
+        if ks.small_rho_cutoff > 1e-20 and ground_state:
+            # Filter grids the first time setup grids
+            ks.nlcgrids = prune_small_rho_grids_(ks, ks.mol, dm, ks.nlcgrids)
+        t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
     return ks
 
 def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
