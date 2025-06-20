@@ -25,7 +25,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
-        task_ij0 < task_kl0) {
+        task_ij0+400 <= task_kl0) {
         return;
     }
     int tx = threadIdx.x;
@@ -142,8 +142,8 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
-            if (pair_ij_mapping == pair_kl_mapping) {
-                if (task_ij0 < task_kl0) continue;
+            if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
+                continue;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -515,7 +515,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
-        task_ij0 < task_kl0) {
+        task_ij0+144 <= task_kl0) {
         return;
     }
     int tx = threadIdx.x;
@@ -632,8 +632,8 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
-            if (pair_ij_mapping == pair_kl_mapping) {
-                if (task_ij0 < task_kl0) continue;
+            if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
+                continue;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -1658,7 +1658,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
-        task_ij0 < task_kl0) {
+        task_ij0+176 <= task_kl0) {
         return;
     }
     int tx = threadIdx.x;
@@ -1775,8 +1775,8 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
-            if (pair_ij_mapping == pair_kl_mapping) {
-                if (task_ij0 < task_kl0) continue;
+            if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
+                continue;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
