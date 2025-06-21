@@ -181,8 +181,10 @@ class _DFHF:
         # for DFT
         if isinstance(self, rks.KohnShamDFT):
             if dm.ndim == 2:
+                raise
                 return rks.get_veff(self, dm=dm)
             elif dm.ndim == 3:
+                raise
                 return uks.get_veff(self, dm=dm)
 
         if dm.ndim == 2:

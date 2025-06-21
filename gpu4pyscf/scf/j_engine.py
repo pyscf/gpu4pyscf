@@ -157,8 +157,6 @@ class _VHFOpt(jk._VHFOpt):
         assert self.tile == 1
         self._tile_q_cond_cpu = q_cond
 
-        if mol.omega < 0:
-            raise NotImplementedError
         log.timer('Initialize q_cond', *cput0)
         return self
 

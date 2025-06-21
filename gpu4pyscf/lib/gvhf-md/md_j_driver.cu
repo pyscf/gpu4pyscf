@@ -29,8 +29,8 @@ extern __global__ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBounds
                                    int threadsx, int threadsy, int tilex, int tiley);
 extern __global__ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley, int dm_size);
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds);
-int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, int dm_size);
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, double omega);
+int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, double omega, int dm_size);
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
@@ -81,6 +81,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     case 16: bounds.qd_kl_max = qd_kl_max[4]; break;
     case 32: bounds.qd_kl_max = qd_kl_max[5]; break;
     }
+    double omega = env[PTR_RANGE_OMEGA];
     int bsizex = threads_ij * tilex;
     int bsizey = threads_kl * tiley;
     int nsq_per_block = threads_ij * threads_kl;
@@ -89,12 +90,12 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
     dim3 blocks(blocks_ij, blocks_kl);
     if (n_dm == 1) {
-        if (!md_j_unrolled(&envs, &jk, &bounds)) {
+        if (!md_j_unrolled(&envs, &jk, &bounds, omega)) {
             md_j_1dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
         }
     } else {
-        if (!md_j_4dm_unrolled(&envs, &jk, &bounds, dm_size)) {
+        if (!md_j_4dm_unrolled(&envs, &jk, &bounds, omega, dm_size)) {
             md_j_4dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size);
         }

@@ -37,11 +37,22 @@ def test_j_engine():
     dm = np.random.rand(nao, nao)
     dm = dm.dot(dm.T)
 
-    vj = j_engine.get_j(mol, dm)
-    vj1 = vj.get()
+    vj1 = j_engine.get_j(mol, dm).get()
     ref = get_jk(mol, dm, with_k=False)[0]
     assert abs(lib.fp(vj1) - -2327.4715195591784) < 1e-9
     assert abs(vj1 - ref).max() < 1e-9
+
+    mol.omega = 0.2
+    vj1 = j_engine.get_j(mol, dm).get()
+    ref = get_jk(mol, dm, hermi=1, with_k=False)[0]
+    assert abs(vj1 - ref).max() < 1e-9
+    assert abs(lib.fp(vj1) -  1163.932604635460) < 5e-10
+
+    mol.omega = -0.2
+    vj1 = j_engine.get_j(mol, dm).get()
+    ref = get_jk(mol, dm, hermi=1, with_k=False)[0]
+    assert abs(vj1 - ref).max() < 5e-9
+    assert abs(lib.fp(vj1) - -3491.404124194866) < 5e-10
 
 def test_j_engine_8fold_symmetry():
     mol = pyscf.M(
@@ -101,6 +112,22 @@ def test_j_engine_multiple_dms():
         vj1 = vj.get()
         ref = get_jk(mol, dm, with_k=False)[0]
         assert abs(vj1 - ref).max() < 1e-9
+
+    mol.omega = 0.2
+    dm = np.random.rand(2, nao, nao)
+    dm = dm + dm.transpose(0, 2, 1)
+    vj = j_engine.get_j(mol, dm)
+    vj1 = vj.get()
+    ref = get_jk(mol, dm, with_k=False)[0]
+    assert abs(vj1 - ref).max() < 1e-9
+
+    mol.omega = -0.2
+    dm = np.random.rand(2, nao, nao)
+    dm = dm + dm.transpose(0, 2, 1)
+    vj = j_engine.get_j(mol, dm)
+    vj1 = vj.get()
+    ref = get_jk(mol, dm, with_k=False)[0]
+    assert abs(vj1 - ref).max() < 1e-9
 
 def test_j_engine_integral_screen():
     basis = ([[0,[2**x,1]] for x in range(-1, 5)] +

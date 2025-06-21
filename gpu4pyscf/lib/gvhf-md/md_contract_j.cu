@@ -21,7 +21,7 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
-#include "gvhf-rys/gamma_inc.cu"
+#include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
 #define RT2_MAX 9
@@ -263,16 +263,10 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             double zpq = zij - zkl;
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * akl / (aij + akl);
-            double theta_rr = theta * rr;
             if (gout_id == 0) {
-                eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
-                double a2 = -2. * theta;
-                fac /= aij*akl*sqrt(aij+akl);
-                gamma_inc[sq_id] *= fac;
-                for (int i = 1; i <= order; i++) {
-                    fac *= a2;
-                    gamma_inc[sq_id+i*nsq_per_block] *= fac;
-                }
+                double omega = env[PTR_RANGE_OMEGA];
+                boys_fn(gamma_inc, theta, rr, omega, fac/(aij*akl*sqrt(aij+akl)),
+                        order, sq_id, nsq_per_block);
                 Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
             }
             for (int n = 1; n <= order; ++n) {
@@ -590,16 +584,10 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 double zpq = zij - zkl;
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                double theta_rr = theta * rr;
                 if (gout_id == 0) {
-                    eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
-                    double a2 = -2. * theta;
-                    fac /= aij*akl*sqrt(aij+akl);
-                    gamma_inc[sq_id] *= fac;
-                    for (int i = 1; i <= order; i++) {
-                        fac *= a2;
-                        gamma_inc[sq_id+i*nsq_per_block] *= fac;
-                    }
+                    double omega = env[PTR_RANGE_OMEGA];
+                    boys_fn(gamma_inc, theta, rr, omega, fac/(aij*akl*sqrt(aij+akl)),
+                            order, sq_id, nsq_per_block);
                     Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
                 }
                 for (int n = 1; n <= order; ++n) {

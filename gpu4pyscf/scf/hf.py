@@ -696,8 +696,6 @@ class SCF(pyscf_lib.StreamObject):
             mol = self.mol
         if omega is None:
             omega = mol.omega
-        if omega != 0:
-            raise NotImplementedError
         if omega not in self._opt_jengine:
             jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
             self._opt_jengine[omega] = jopt
