@@ -236,14 +236,9 @@ class GDF(lib.StreamObject):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        if omega is not None and omega > 0:
+        if omega is not None and omega != 0:
             cell = self.cell
-            # * AFT is computationally more efficient than GDF for the
-            #   long-range Coulomb
-            # * The sparse mesh is not appropriate for low dimensional systems
-            #   with infinity vacuum since the ERI may require large mesh to
-            #   sample density in vacuum.
-            if cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum':
+            if omega > 0:
                 mydf = AFTDF(cell, self.kpts)
                 ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
                 mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
