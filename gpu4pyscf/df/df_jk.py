@@ -114,14 +114,16 @@ class _DFHF:
         self.with_df.reset(mol)
         return super().reset(mol)
 
+    def get_j(self, mol=None, dm=None, hermi=1, omega=None):
+        return self.with_df.get_jk(dm, hermi, True, False, self.direct_scf_tol, omega)[0]
+
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):
         if dm is None: dm = self.make_rdm1()
         if self.with_df and self.only_dfj:
             vj = vk = None
             if with_j:
-                vj, vk = self.with_df.get_jk(dm, hermi, True, False,
-                                             self.direct_scf_tol, omega)
+                vj = self.get_j(mol, dm, hermi, omega)
             if with_k:
                 vk = super().get_jk(mol, dm, hermi, False, True, omega)[1]
         elif self.with_df:
@@ -177,34 +179,21 @@ class _DFHF:
         '''
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
+        assert not self.direct_scf
 
         # for DFT
         if isinstance(self, rks.KohnShamDFT):
             if dm.ndim == 2:
-                raise
                 return rks.get_veff(self, dm=dm)
             elif dm.ndim == 3:
-                raise
                 return uks.get_veff(self, dm=dm)
 
         if dm.ndim == 2:
-            if self.direct_scf:
-                ddm = cupy.asarray(dm) - dm_last
-                vj, vk = self.get_jk(mol, ddm, hermi=hermi)
-                return vhf_last + vj - vk * .5
-            else:
-                vj, vk = self.get_jk(mol, dm, hermi=hermi)
-                return vj - vk * .5
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            return vj - vk * .5
         elif dm.ndim == 3:
-            if self.direct_scf:
-                ddm = cupy.asarray(dm) - dm_last
-                vj, vk = self.get_jk(mol, ddm, hermi=hermi)
-                vhf = vj[0] + vj[1] - vk
-                vhf += cupy.asarray(vhf_last)
-                return vhf
-            else:
-                vj, vk = self.get_jk(mol, dm, hermi=hermi)
-                return vj[0] + vj[1] - vk
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            return vj[0] + vj[1] - vk
         else:
             raise NotImplementedError("Please check the dimension of the density matrix, it should not reach here.")
 

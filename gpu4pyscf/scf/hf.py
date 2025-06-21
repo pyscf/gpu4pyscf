@@ -77,7 +77,7 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mf.verbose >= logger.INFO and nocc < nmo:
         homo = float(mo_energy[e_idx[nocc-1]])
         lumo = float(mo_energy[e_idx[nocc]])
-        if e_sort[nocc-1]+1e-3 > e_sort[nocc]:
+        if homo+1e-3 > lumo:
             logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
         else:
             logger.info(mf, '  HOMO = %.15g  LUMO = %.15g', homo, lumo)
