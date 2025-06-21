@@ -74,6 +74,13 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
     mo_occ[e_idx[:nocc]] = 2
+    if mf.verbose >= logger.INFO and nocc < nmo:
+        homo = float(mo_energy[e_idx[nocc-1]])
+        lumo = float(mo_energy[e_idx[nocc]])
+        if e_sort[nocc-1]+1e-3 > e_sort[nocc]:
+            logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+        else:
+            logger.info(mf, '  HOMO = %.15g  LUMO = %.15g', homo, lumo)
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
@@ -689,6 +696,8 @@ class SCF(pyscf_lib.StreamObject):
             mol = self.mol
         if omega is None:
             omega = mol.omega
+        if omega != 0:
+            raise NotImplementedError
         if omega not in self._opt_jengine:
             jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
             self._opt_jengine[omega] = jopt
