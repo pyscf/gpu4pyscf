@@ -161,12 +161,16 @@ class _VHFOpt(jk._VHFOpt):
         return self
 
     def get_j(self, dms, verbose):
-        if callable(dms):
-            dms = dms()
         log = logger.new_logger(self.mol, verbose)
         sorted_mol = self.sorted_mol
         prim_mol = self.prim_mol
-        p2c_mapping = self.prim_to_ctr_mapping
+        # Small arrays pair_mappings, pair_loc etc may the occupy freed memory
+        # created in dms(). Preallocate workspace for these arrays
+        workspace = cp.empty(prim_mol.nbas**2*2)
+        workspace = None # noqa: F841
+        if callable(dms):
+            dms = dms()
+        p2c_mapping = cp.asarray(self.prim_to_ctr_mapping)
         ao_loc = sorted_mol.ao_loc
         n_dm, nao = dms.shape[:2]
         assert dms.ndim == 3 and nao == ao_loc[-1]
@@ -193,6 +197,7 @@ class _VHFOpt(jk._VHFOpt):
                 pair_lst.append(pair_ij_mapping)
                 p0, p1 = p1, p1 + pair_ij_mapping.size
                 task_offsets[i,j] = p0
+        pair_mapping_size = p1
         pair_lst = cp.asarray(cp.hstack(pair_lst), dtype=np.int32)
 
         ls = cp.asarray(prim_mol._bas[:,ANG_OF], dtype=np.int32)
@@ -200,22 +205,24 @@ class _VHFOpt(jk._VHFOpt):
         ll = ll.ravel()[pair_lst] # drops the pairs that do not contribute to integrals
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
         pair_loc = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
-        xyz_size = None
+        xyz_size = ls = ll = None
 
         pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)
         pair_loc = pair_loc.get()
+        dm_xyz_size = pair_loc[-1]
+        log.debug1('dm_xyz_size = %s, nao = %s, pair_mapping_size = %s',
+                   dm_xyz_size, nao, pair_mapping_size)
         dms = dms.get()
-        dm_size = pair_loc[-1]
-        dm_xyz = np.zeros((n_dm, dm_size))
+        dm_xyz = np.zeros((n_dm, dm_xyz_size))
         # Must use this modified _env to ensure the consistency with GPU kernel
         # In this _env, normalization coefficients for s and p funcitons are scaled.
         _env = _scale_sp_ctr_coeff(prim_mol)
         libvhf_md.Et_dot_dm(
             dm_xyz.ctypes, dms.ctypes,
-            ctypes.c_int(n_dm), ctypes.c_int(dm_size),
+            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, pair_loc.ctypes,
             pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
-            p2c_mapping.ctypes,
+            self.prim_to_ctr_mapping.ctypes,
             ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
             prim_mol._bas.ctypes, _env.ctypes)
 
@@ -281,7 +288,7 @@ class _VHFOpt(jk._VHFOpt):
                 err = kern(
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(dm_size),
+                    ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
                     rys_envs, (ctypes.c_int*6)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(pair_ij_mapping.size),
@@ -331,10 +338,10 @@ class _VHFOpt(jk._VHFOpt):
         vj = np.zeros_like(dms)
         libvhf_md.jengine_dot_Et(
             vj.ctypes, vj_xyz.ctypes,
-            ctypes.c_int(n_dm), ctypes.c_int(dm_size),
+            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, pair_loc.ctypes,
             pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
-            p2c_mapping.ctypes,
+            self.prim_to_ctr_mapping.ctypes,
             ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
             prim_mol._bas.ctypes, _env.ctypes)
         vj = transpose_sum(asarray(vj))

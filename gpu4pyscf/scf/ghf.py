@@ -15,6 +15,7 @@
 import numpy as np
 import cupy as cp
 from cupyx.scipy.linalg import block_diag
+from pyscf.lib import PauliMatrices
 from pyscf.scf import ghf as ghf_cpu
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
@@ -30,8 +31,6 @@ class GHF(hf.SCF):
 
     _eigh = staticmethod(hf.eigh)
     scf = kernel = hf.RHF.kernel
-    get_hcore = return_cupy_array(ghf_cpu.GHF.get_hcore)
-    get_ovlp = return_cupy_array(ghf_cpu.GHF.get_ovlp)
     make_rdm2 = NotImplemented
     newton = NotImplemented
     x2c = x2c1e = sfx2c1e = NotImplemented
@@ -65,7 +64,7 @@ class GHF(hf.SCF):
 
         if self.with_soc and mol.has_ecp_soc():
             # The ECP SOC contribution = <|1j * s * U_SOC|>
-            s = .5 * lib.PauliMatrices
+            s = .5 * PauliMatrices
             ecpso = np.einsum('sxy,spq->xpyq', -1j * s, mol.intor('ECPso'))
             # Convert to complex array
             hcore = hcore + asarray(ecpso.reshape(hcore.shape))

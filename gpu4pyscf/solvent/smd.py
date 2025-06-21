@@ -298,12 +298,20 @@ def get_cds_legacy(smdobj):
                     ctypes.byref(gcds), ctypes.byref(areacds), dcds)
     return gcds.value / hartree2kcal, dcds
 
-class SMD(pcm.PCM):
+class SMD(lib.StreamObject):
+    from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
+
     _keys = {
-        'intopt', 'method', 'e_cds', 'solvent_descriptors', 'r_probe', 'sasa_ng'
+        'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
+        'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
+        'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'frozen_dm0_for_finite_difference_without_response',
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n',
+        'e_cds', 'solvent_descriptors', 'sasa_ng'
     }
+
     def __init__(self, mol, solvent=''):
-        super().__init__(mol)
+        pcm.PCM.__init__(self, mol)
         self.vdw_scale = 1.0
         self.sasa_ng = 590 # quadrature grids for calculating SASA
         self.r_probe = 0.4/radii.BOHR
@@ -410,30 +418,42 @@ class SMD(pcm.PCM):
         v_grids_n = np.dot(atom_charges, v_ng)
         self.v_grids_n = cupy.asarray(v_grids_n)
 
+    kernel = pcm.PCM.kernel
+    _get_vind = pcm.PCM._get_vind
+    _get_qsym = pcm.PCM._get_qsym
+    _get_vgrids = pcm.PCM._get_vgrids
+    _get_v = pcm.PCM._get_v
+    _get_vmat = pcm.PCM._get_vmat
+    _B_dot_x = pcm.PCM._B_dot_x
+    left_multiply_R = pcm.PCM.left_multiply_R
+    left_solve_K = pcm.PCM.left_solve_K
+    if_method_in_CPCM_category = pcm.PCM.if_method_in_CPCM_category
+
     def get_cds(self):
         return get_cds_legacy(self)[0]
 
     def nuc_grad_method(self, grad_method):
-        from gpu4pyscf.solvent.grad import smd as smd_grad
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(grad_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return smd_grad.make_grad_object(grad_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def grad(self, dm):
+        from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_nuc, grad_solver
+        de_solvent = grad_qv(self, dm)
+        de_solvent+= grad_solver(self, dm)
+        de_solvent+= grad_nuc(self, dm)
+        return de_solvent
 
     def Hessian(self, hess_method):
-        from gpu4pyscf.solvent.hessian import smd as smd_hess
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(hess_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return smd_hess.make_hess_object(hess_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def hess(self, dm):
+        from gpu4pyscf.solvent.hessian.pcm import (
+            analytical_hess_nuc, analytical_hess_qv, analytical_hess_solver)
+        de_solvent  =    analytical_hess_nuc(self, dm, verbose=self.verbose)
+        de_solvent +=     analytical_hess_qv(self, dm, verbose=self.verbose)
+        de_solvent += analytical_hess_solver(self, dm, verbose=self.verbose)
+        return de_solvent
 
     def reset(self, mol=None):
-        super().reset(mol)
+        pcm.PCM.reset(self, mol)
         self.e_cds = None
         return self

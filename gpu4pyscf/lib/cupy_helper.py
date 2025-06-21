@@ -63,7 +63,9 @@ def print_mem_info():
     #stack_size_per_thread = cupy.cuda.runtime.deviceGetLimit(0x00)
     #mem_stack = stack_size_per_thread
     GB = 1024 * 1024 * 1024
-    print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB')
+    msg = f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB'
+    print(msg)
+    return msg
 
 def get_avail_mem():
     mempool = cupy.get_default_memory_pool()
@@ -455,13 +457,15 @@ def take_last2d(a, indices, out=None):
     assert a.flags.c_contiguous
     assert a.shape[-1] == a.shape[-2]
     nao = a.shape[-1]
-    assert len(indices) == nao
+    nidx = len(indices)
     if a.ndim == 2:
         count = 1
     else:
         count = np.prod(a.shape[:-2])
     if out is None:
-        out = cupy.zeros_like(a)
+        out = cupy.zeros((count, nidx, nidx))
+    else:
+        assert out.size == count*nidx*nidx
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.take_last2d(
@@ -470,10 +474,13 @@ def take_last2d(a, indices, out=None):
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(indices_int32.data.ptr, ctypes.c_void_p),
         ctypes.c_int(count),
+        ctypes.c_int(nidx),
         ctypes.c_int(nao)
     )
     if err != 0:
         raise RuntimeError('failed in take_last2d kernel')
+    if a.ndim == 2:
+        out = out.reshape(nidx,nidx)
     return out
 
 def takebak(out, a, indices, axis=-1):
@@ -1101,4 +1108,23 @@ def sandwich_dot(a, c, out=None):
     if a_ndim == 2:
         out = out[0]
     return out
-    
+
+def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
+    '''
+    Customize CuPy memory allocator.
+
+    For large memory allocations (>100MB by default), the custom allocator bypasses
+    the CuPy memory pool, directly calling the CUDA malloc API. The large memory
+    chunks will be released back to the system when the associated object is
+    destroyed. Only small memory blocks are allocated from the CuPy memory pool.
+
+    Execute the following command to restore the default CuPy malloc
+        cupy.cuda.set_allocator(cupy.get_default_memory_pool().malloc)
+    '''
+    cuda_malloc = cupy.cuda.memory._malloc
+    default_mempool_malloc = cupy.get_default_memory_pool().malloc
+    def malloc(size):
+        if size >= n_bytes_threshold:
+            return cuda_malloc(size)
+        return default_mempool_malloc(size)
+    cupy.cuda.set_allocator(malloc)

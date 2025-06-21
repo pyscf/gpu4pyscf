@@ -28,6 +28,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     '''
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
+    if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
+        dm = cupy.asarray((dm*.5,dm*.5))
+    else:
+        dm = asarray(dm)
     assert dm.ndim == 3
     t0 = logger.init_timer(ks)
     rks.initialize_grids(ks, mol, cupy.asarray(dm[0]+dm[1]))

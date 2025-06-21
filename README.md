@@ -20,6 +20,12 @@ Then, install the appropriate package based on your CUDA version:
 | **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
 | **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
 
+The versions of CuPy and cuTENSOR are strongly interdependent and should not be combined arbitrarily.
+The recommended combinations include:
+1. CuPy 13.3.0 + cuTENSOR 2.0.2
+2. CuPy 13.4.1 + cuTENSOR 2.2.0
+
+Using other versions or combinations may lead to failures in functionality. 
 We **recommend** creating a dedicated environment using:
 ```sh
 pip3 install --no-cache-dir -r requirements.txt

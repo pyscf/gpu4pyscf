@@ -1,0 +1,38 @@
+# --- Normalize all text files ---
+* text=auto
+
+# --- Python files ---
+*.py text eol=lf
+
+# --- CUDA and C/C++ source files ---
+*.cu  text eol=lf
+*.cuh text eol=lf
+*.c   text eol=lf
+*.cpp text eol=lf
+*.h   text eol=lf
+*.hpp text eol=lf
+
+# --- Scripts and config files ---
+*.sh     text eol=lf
+*.bat    text eol=crlf
+*.ps1    text eol=crlf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+
+# --- Ignore binary files from normalization ---
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.pdf   binary
+*.exe   binary
+*.dll   binary
+*.so    binary
+*.a     binary
+*.pyc   binary
+*.pyd   binary
+*.ptx   binary
+*.cubin binary

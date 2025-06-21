@@ -47,7 +47,66 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
 }
 
 __global__
-static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim, 
+static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
+                          double *coords, int ngrids, int block_size,
+                          int *atm, int natm, int *bas, int nbas, double *env)
+{
+    int grid_block_id = blockIdx.x;
+    int grid_start = grid_block_id * block_size;
+    int grid_stop = min(grid_start+block_size, ngrids);
+    int shl_block_id = blockIdx.y;
+    int thread_id = threadIdx.x;
+    int ish = shl_block_id * blockDim.x + thread_id;
+    if (ish >= nbas) {
+        ish = 0;
+    }
+
+    int atm_id = bas[ish*BAS_SLOTS+ATOM_OF];
+    int ang = bas[ish*BAS_SLOTS+ANG_OF];
+    int nprim = bas[ish*BAS_SLOTS+NPRIM_OF];
+    double *exps = env + bas[ish*BAS_SLOTS+PTR_EXP];
+    double *coeffs = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *ri = env + atm[atm_id*ATM_SLOTS+PTR_COORD];
+    double atom_x = ri[0];
+    double atom_y = ri[1];
+    double atom_z = ri[2];
+
+    __shared__ double gridx_cache[NG_PER_BLOCK*3];
+    double *gridy_cache = gridx_cache + NG_PER_BLOCK;
+    double *gridz_cache = gridy_cache + NG_PER_BLOCK;
+
+    int8_t is_large = 0;
+    for (int grid0 = grid_start; grid0 < grid_stop; grid0 += NG_PER_BLOCK) {
+        if (grid0 + thread_id < ngrids) {
+            gridx_cache[thread_id] = coords[         grid0+thread_id];
+            gridy_cache[thread_id] = coords[ngrids  +grid0+thread_id];
+            gridz_cache[thread_id] = coords[ngrids*2+grid0+thread_id];
+        }
+        __syncthreads();
+        // check if any GTO values on grids are larger than threshold
+        if (is_large) {
+            continue;
+        }
+        int ng_in_tile = min(NG_PER_BLOCK, ngrids-grid0);
+        for (int grid_id = 0; grid_id < ng_in_tile; ++grid_id) {
+            double rx = gridx_cache[grid_id] - atom_x;
+            double ry = gridy_cache[grid_id] - atom_y;
+            double rz = gridz_cache[grid_id] - atom_z;
+            double rr = rx * rx + ry * ry + rz * rz + 1e-300;
+            double gto_sup = 1e-300;
+            for (int ip = 0; ip < nprim; ++ip) {
+                gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
+            }
+            is_large |= log(fabs(gto_sup)) + ang*log(rr)/2 > log_cutoff;
+        }
+    }
+    if (shl_block_id * blockDim.x + thread_id < nbas) {
+        non0shl_mask[grid_block_id*nbas + ish] = is_large;
+    }
+}
+
+__global__
+static void _screen_index_legacy(int *non0shl_idx, double cutoff, int ang, int nprim, 
         double *coords, int ngrids, int bas_offset, GTOValEnvVars gto_envs){
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     int ish = blockIdx.y + bas_offset;
@@ -1903,7 +1962,26 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     return 0;
 }
 
-int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
+int GDFTscreen_index(cudaStream_t stream, int8_t *non0shl_mask, double log_cutoff,
+                 double *grids, int ngrids, int block_size,
+                 int *atm, int natm, int *bas, int nbas, double *env)
+{
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids+block_size-1)/block_size,
+                (nbas+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+    _screen_index<<<blocks, threads, 0, stream>>> (
+            non0shl_mask, log_cutoff, grids, ngrids, block_size,
+            atm, natm, bas, nbas, env);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int GDFTscreen_index_legacy(cudaStream_t stream, int *non0shl_idx, double cutoff,
                  double *grids, int ngrids, int *ctr_offsets, int nctr, int *bas,
                  GTOValEnvVars *gto_envs)
 {
@@ -1923,7 +2001,7 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
             fprintf(stderr, "l = %d not supported\n", l);
             return 1;
         }
-        _screen_index<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim, 
+        _screen_index_legacy<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim, 
                 grids, ngrids, bas_offset, *gto_envs);
     }
 
