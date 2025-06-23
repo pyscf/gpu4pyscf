@@ -35,11 +35,24 @@ from pyscf.scf import _vhf
 
 def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     """
-    Only supports for ground-excited states.
+    Only supports for singlet states.
     Ref:
     [1] 10.1063/1.4903986 main reference
     [2] 10.1021/acs.accounts.1c00312
     [3] 10.1063/1.4885817
+
+    Args:
+        td_nac (gpu4pyscf.tdscf.rhf.TDA): Non-adiabatic coupling object for TDDFT or TDHF.
+        x_yI (tuple): (xI, yI), xI and YI are the eigenvectors corresponding to the excitation and de-excitation.
+        EI (float): excitation energy for state I
+
+    Kwargs:
+        singlet (bool): Whether calculate singlet states.
+        atmlst (list): List of atoms to calculate the NAC.
+        verbose (int): Verbosity level.
+
+    Returns:
+        nacv (np.ndarray): NAC matrix element.
     """
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
@@ -54,6 +67,10 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     nvir = nmo - nocc
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
+    if getattr(mf, 'with_solvent', None) is not None:
+        raise NotImplementedError('With solvent is not supported yet')
+    if getattr(mf, 'with_df', None) is not None:
+        raise NotImplementedError('With density fitting is not supported yet')
 
     xI, yI = x_yI
     xI = cp.asarray(xI).reshape(nocc, nvir).T
@@ -95,7 +112,6 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
-    s1 = mf_grad.get_ovlp(mol)
     dmz1doo = z1aoS
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
@@ -130,7 +146,6 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
 
-    offsetdic = mol.offset_nr_by_atom()
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
     ds_x = contract("xij,ji->xi", s1, xIao*EI)
@@ -168,8 +183,7 @@ class NAC(lib.StreamObject):
         "de",
         "de_scaled",
         "de_etf",
-        "de_etf_scaled",
-        "_write"
+        "de_etf_scaled"
     }
 
     def __init__(self, td):
