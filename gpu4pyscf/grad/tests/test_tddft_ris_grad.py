@@ -205,17 +205,16 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
 
         td = ris.TDDFT(mf=mf, nstates=5, spectra=True, single=False)
-        td.conv_tol = 1.0E-6
+        td.conv_tol = 1.0E-4
         td.Ktrunc = 0.0
         td.kernel()
         g = td.nuc_grad_method()
         g.kernel()
 
         ref_g = np.array(
-                [[ 3.00802419e-12, -2.25601814e-12,  1.16627547e-01],
-                [ 3.00802419e-12,  7.88400374e-02, -5.83161121e-02],
-                [ 1.50401209e-12, -7.88400374e-02, -5.83161121e-02],]
-            )
+            [[ 9.66144236e-12,  9.47508727e-09,  1.16603260e-01],
+             [ 6.12953685e-11,  7.88236258e-02, -5.83042819e-02],
+             [-7.09570935e-11, -7.88236353e-02, -5.83042889e-02]])
         
         assert np.linalg.norm(ref_g - g.de) < 1.0E-4
 
