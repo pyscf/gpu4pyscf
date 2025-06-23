@@ -182,34 +182,27 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         yJ = cp.zeros_like(xJ)
     yJ = cp.asarray(yJ).reshape(nocc, nvir).T
 
-    xpyI = (xI + yI).reshape(nocc, nvir).T
-    xmyI = (xI - yI).reshape(nocc, nvir).T
+    xpyI = (xI + yI)
+    xmyI = (xI - yI)
     dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))
     dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
-
-    xpyJ = (xJ + yJ).reshape(nocc, nvir).T
-    xmyJ = (xJ - yJ).reshape(nocc, nvir).T
+    xpyJ = (xJ + yJ)
+    xmyJ = (xJ - yJ)
     dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T)) 
     dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T)) 
 
-    dvvIJ = contract("ai,bi->ab", xpyI, xpyJ) + contract("ai,bi->ab", xmyI, xmyJ)
-    dooIJ = -contract("ai,aj->ij", xpyI, xpyJ) - contract("ai,aj->ij", xmyI, xmyJ)
-    dmzooIJ = reduce(cp.dot, (orbo, dooIJ, orbo.T)) + reduce(cp.dot, (orbv, dvvIJ, orbv.T))
-    dmzooIJ *= 0.5
-    dvvJI = contract("ai,bi->ab", xpyJ, xpyI) + contract("ai,bi->ab", xmyJ, xmyI)
-    dooJI = -contract("ai,aj->ij", xpyJ, xpyI) - contract("ai,aj->ij", xmyJ, xmyI)
-    dmzooJI = reduce(cp.dot, (orbo, dooJI, orbo.T)) + reduce(cp.dot, (orbv, dvvJI, orbv.T))
-    dmzooJI *= 0.5
-    dmzooIJ = dmzooIJ + dmzooJI
-
     rIJoo =-contract('ai,aj->ij', xJ, xI) - contract('ai,aj->ij', yI, yJ)
     rIJvv = contract('ai,bi->ab', xI, xJ) + contract('ai,bi->ab', yJ, yI)
+    TIJoo = (rIJoo + rIJoo.T) * 0.5
+    TIJvv = (rIJvv + rIJvv.T) * 0.5
+    dmzooIJ = reduce(cp.dot, (orbo, TIJoo, orbo.T)) * 2
+    dmzooIJ += reduce(cp.dot, (orbv, TIJvv, orbv.T)) * 2
 
     vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
-    vj1I, vk1I = mf.get_jk(mol, dmxpyI + dmxpyI.T, hermi=0)
-    vj2I, vk2I = mf.get_jk(mol, dmxmyI - dmxmyI.T, hermi=0)
-    vj1J, vk1J = mf.get_jk(mol, dmxpyJ + dmxpyJ.T, hermi=0)
-    vj2J, vk2J = mf.get_jk(mol, dmxmyJ - dmxmyJ.T, hermi=0)
+    vj1I, vk1I = mf.get_jk(mol, (dmxpyI + dmxpyI.T), hermi=0)
+    vj2I, vk2I = mf.get_jk(mol, (dmxmyI - dmxmyI.T), hermi=0)
+    vj1J, vk1J = mf.get_jk(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
+    vj2J, vk2J = mf.get_jk(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
     if not isinstance(vj0IJ, cp.ndarray):
         vj0IJ = cp.asarray(vj0IJ)
     if not isinstance(vk0IJ, cp.ndarray):
@@ -230,35 +223,29 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         vj2J = cp.asarray(vj2J)
     if not isinstance(vk2J, cp.ndarray):
         vk2J = cp.asarray(vk2J)
+
     veff0doo = vj0IJ * 2 - vk0IJ
     wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
     veffI = vj1I * 2 - vk1I
     veffI *= 0.5
-    veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff)) * 0.5
+    veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  # 2 for dm + dm.T
     wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
     veffJ = vj1J * 2 - vk1J
     veffJ *= 0.5
-    veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff)) * 0.5
+    veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  # 2 for dm + dm.T
     wvo += contract("ac,ai->ci", veff0mopJ[nocc:, nocc:], xpyI) * 2
     veffI = -vk2I
     veffI *= 0.5
-    veff0momI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff)) * 0.5
+    veff0momI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0momI[:nocc, :nocc], xmyJ) * 2
     wvo += contract("ac,ai->ci", veff0momI[nocc:, nocc:], xmyJ) * 2
     veffJ = -vk2J
     veffJ *= 0.5
-    veff0momJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff)) * 0.5
+    veff0momJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0momJ[:nocc, :nocc], xmyI) * 2
     wvo += contract("ac,ai->ci", veff0momJ[nocc:, nocc:], xmyI) * 2
-
-    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-
-    def fvind(x):  # For singlet, closed shell ground state
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))  # 2 for double occupancy
-        v1ao = vresp(dm + dm.T)  # for the upused 2
-        return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -276,40 +263,57 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         tol=td_nac.cphf_conv_tol)[0] # eq.(83) in Ref. [1]
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    veff = vresp(z1ao + z1ao.T)
+    veff = vresp((z1ao + z1ao.T))
+    fock_matrix = mf.get_fock()
+    fock_mo = reduce(cp.dot, (mo_coeff.T, fock_matrix, mo_coeff))
+    TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
+    TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
+    TFvo = cp.dot(TIJvv, fock_mo[nocc:,:nocc])
+    TFvv = cp.dot(TIJvv, fock_mo[nocc:,nocc:])
 
-    im0 = cp.zeros((nmo, nmo))
-    im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo + veff, orbo))
-    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0mopI[nocc:, :nocc], xpyJ)*0.5
-    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0momI[nocc:, :nocc], xmyJ)*0.5
-    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0mopJ[nocc:, :nocc], xpyI)*0.5
-    im0[:nocc, :nocc] += contract("ak,ai->ki", veff0momJ[nocc:, :nocc], xmyI)*0.5
-    im0[nocc:, nocc:] = contract("ci,ai->ac", veff0mopI[nocc:, :nocc], xpyJ)*0.5
-    im0[nocc:, nocc:] += contract("ci,ai->ac", veff0momI[nocc:, :nocc], xmyJ)*0.5
-    im0[nocc:, nocc:] += contract("ci,ai->ac", veff0mopJ[nocc:, :nocc], xpyI)*0.5
-    im0[nocc:, nocc:] += contract("ci,ai->ac", veff0momJ[nocc:, :nocc], xmyI)*0.5
-    im0[nocc:, :nocc] = contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ)
-    im0[nocc:, :nocc] += contract("ki,ai->ak", veff0momI[:nocc, :nocc], xmyJ)
-    im0[nocc:, :nocc] += contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI)
-    im0[nocc:, :nocc] += contract("ki,ai->ak", veff0momJ[:nocc, :nocc], xmyI)
+    Qex = cp.zeros((nmo, nmo))
+    Qex[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo, orbo))
+    Qex[:nocc, :nocc]+= TFoo*2.0
+    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopI[nocc:, :nocc], xpyJ)
+    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0momI[nocc:, :nocc], xmyJ)
+    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopJ[nocc:, :nocc], xpyI)
+    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0momJ[nocc:, :nocc], xmyI)
+    Qex[:nocc, :nocc]+=rIJoo.T*(EJ-EI)
 
-    zeta = (mo_energy[:,cp.newaxis] + mo_energy)*0.5
-    zeta[nocc:, :nocc] = mo_energy[:nocc]
-    zeta[:nocc, nocc:] = mo_energy[nocc:]
-    dm1 = cp.zeros((nmo, nmo))
-    dm1[:nocc, :nocc] = (dooIJ + dooJI)*0.5
-    dm1[nocc:, nocc:] = (dvvIJ + dvvJI)*0.5
-    dm1[nocc:, :nocc] = z1
-    im0 = reduce(cp.dot, (mo_coeff, im0 + zeta * dm1, mo_coeff.T))
+    Qex[:nocc, nocc:] = reduce(cp.dot, (orbo.T, veff0doo, orbv))
+    Qex[:nocc, nocc:]+= TFov*2.0
+    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopI[nocc:, nocc:], xpyJ)
+    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0momI[nocc:, nocc:], xmyJ)
+    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopJ[nocc:, nocc:], xpyI)
+    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0momJ[nocc:, nocc:], xmyI)
 
-    # Initialize hcore_deriv with the underlying SCF object because some
-    # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
+    Qex[nocc:, :nocc] = TFvo*2
+    Qex[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopI[:nocc, :nocc], xpyJ)
+    Qex[nocc:, :nocc]-= contract("ij,ai->aj", veff0momI[:nocc, :nocc], xmyJ)
+    Qex[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopJ[:nocc, :nocc], xpyI)
+    Qex[nocc:, :nocc]-= contract("ij,ai->aj", veff0momJ[:nocc, :nocc], xmyI)
+
+    Qex[nocc:, nocc:] = TFvv*2.0
+    Qex[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopI[:nocc, nocc:], xpyJ)
+    Qex[nocc:, nocc:]-= contract("ib,ai->ab", veff0momI[:nocc, nocc:], xmyJ)
+    Qex[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopJ[:nocc, nocc:], xpyI)
+    Qex[nocc:, nocc:]-= contract("ib,ai->ab", veff0momJ[:nocc, nocc:], xmyI)
+    Qex[nocc:, nocc:]+=rIJvv.T*(EJ-EI)
+
+    im0 = Qex*0.5
+    im0[:nocc, :nocc]+= reduce(cp.dot, (orbo.T, veff, orbo))*(EJ-EI)*0.5
+    im0[:nocc, nocc:]+= reduce(cp.dot, (orbo.T, veff, orbv))*(EJ-EI)*0.5
+    im0[:nocc, nocc:]+= cp.dot(fock_mo[nocc:,nocc:],z1).T*(EJ-EI)*0.25
+    im0[nocc:, :nocc]+= cp.dot(z1, fock_mo[:nocc,:nocc]*(EJ-EI))*0.25
+
+    im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
+
     mf_grad = td_nac.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
     z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
     dmz1doo = z1aoS + dmzooIJ  # P
     oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
-    Wtilde = im0 * (EJ - EI)
+    Wtilde = im0
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -368,13 +372,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
 
-    offsetdic = mol.offset_nr_by_atom()
     rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))*2
     rIJvv_ao = reduce(cp.dot, (orbv, rIJvv, orbv.T))*2
-    rIJooS = (dooJI + dooIJ) * 0.5
-    rIJvvS = (dvvJI + dvvIJ) * 0.5
-    rIJooS_ao = reduce(cp.dot, (orbo, rIJooS, orbo.T))
-    rIJvvS_ao = reduce(cp.dot, (orbv, rIJvvS, orbv.T))
+    rIJooS_ao = reduce(cp.dot, (orbo, TIJoo, orbo.T))*2
+    rIJvvS_ao = reduce(cp.dot, (orbv, TIJvv, orbv.T))*2
     ds_oo = contract("xij,ji->xi", s1, rIJoo_ao * (EJ - EI))
     ds_vv = contract("xij,ji->xi", s1, rIJvv_ao * (EJ - EI))
     ds_oo_etf = contract("xij,ji->xi", s1, rIJooS_ao * (EJ - EI))
@@ -387,7 +388,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     
     de = de.get()
     de_etf = de_etf.get()
-    return de, de/EI, de_etf, de_etf/EI
+    return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 
 class NAC(lib.StreamObject):
