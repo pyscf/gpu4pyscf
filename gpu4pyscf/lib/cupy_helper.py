@@ -839,19 +839,26 @@ def pinv(a, lindep=1e-10):
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
 
-def cond(a):
+def cond(a, sympos=False):
     """
     Calculate the condition number of a matrix.
 
     Parameters:
     a (cupy.ndarray): The input matrix.
+    sympos : Whether the input matrix is symmetric and positive definite.
 
     Returns:
     float: The condition number of the matrix.
     """
-    _, s, _ = cupy.linalg.svd(a)
-    cond_number = s[0] / s[-1]
-    return cond_number
+    if sympos:
+        s = cupy.linalg.eigvalsh(a)
+        if s[0] <= 0:
+            raise RuntimeError('matrix is not positive definite')
+        return s[-1] / s[0]
+    else:
+        _, s, _ = cupy.linalg.svd(a)
+        cond_number = s[0] / s[-1]
+        return cond_number
 
 def grouped_dot(As, Bs, Cs=None):
     '''

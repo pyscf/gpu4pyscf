@@ -585,9 +585,9 @@ class SCF(pyscf_lib.StreamObject):
     def check_sanity(self):
         s1e = self.get_ovlp()
         if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
-            c = cond(s1e)
+            c = cond(s1e, sympos=True)
         else:
-            c = cupy.asarray([cond(xi) for xi in s1e])
+            c = cupy.asarray([cond(xi, sympos=True) for xi in s1e])
         logger.debug(self, 'cond(S) = %s', c)
         if cupy.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
