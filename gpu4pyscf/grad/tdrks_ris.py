@@ -42,6 +42,7 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
+    
     if J_fit is None:
         J_fit = td_grad.base.J_fit
     if K_fit is None:
@@ -68,6 +69,11 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     xmy = (x - y).reshape(nocc, nvir).T
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
+    if getattr(mf, 'with_solvent', None) is not None:
+        raise NotImplementedError('With solvent is not supported yet')
+    if getattr(mf, 'with_df', None) is not None:
+        raise NotImplementedError('With density fitting is not supported yet')
+    
     dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
     doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
     dmxpy = reduce(cp.dot, (orbv, xpy, orbo.T))  # (X+Y) in ao basis
@@ -302,11 +308,11 @@ def get_extra_force(atom_id, envs):
 def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
     
     if omega != 0.0:
-        vj, _, vjaux, _ = tdrhf_df.get_jk_ris(mf_J, mol, dm, omega=omega, hermi=hermi)
-        _, vk, _, vkaux = tdrhf_df.get_jk_ris(mf_K, mol, dm, omega=omega, hermi=hermi)
+        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, omega=omega, hermi=hermi)
+        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, omega=omega, hermi=hermi)
     else:
-        vj, _, vjaux, _ = tdrhf_df.get_jk_ris(mf_J, mol, dm, hermi=hermi)
-        _, vk, _, vkaux = tdrhf_df.get_jk_ris(mf_K, mol, dm, hermi=hermi)
+        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, hermi=hermi)
+        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, hermi=hermi)
     vhf = vj * j_factor - vk * .5 * k_factor
     e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
     vhf = tag_array(vhf, aux=e1_aux)
@@ -320,6 +326,10 @@ class Gradients(tdrhf.Gradients):
             state : int
                 Excited state ID.  state = 1 means the first excited state.
         """
+        log = self.base.log
+        warn_message = "TDDFT-ris gradient is still in the experimental stage, \n" +\
+            "and its APIs are subject to change in future releases."
+        log.warn(warn_message)
         if xy is None:
             if state is None:
                 state = self.state
@@ -327,8 +337,7 @@ class Gradients(tdrhf.Gradients):
                 self.state = state
 
             if state == 0:
-                logger.warn(
-                    self,
+                log.warn(
                     "state=0 found in the input. Gradients of ground state is computed.",
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)

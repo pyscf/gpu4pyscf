@@ -53,128 +53,19 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     In the CPU version, get_jk returns the first order derivatives of J/K matrices.
     '''
     if mol is None: mol = mf_grad.mol
-    if isinstance(mf_grad.base, scf_gpu.rohf.ROHF):
-        raise NotImplementedError()
-    elif isinstance(mf_grad.base, scf_gpu.hf.SCF):
-        mf = mf_grad.base
+    if getattr(mf_grad, "base", None) is not None:
+        if isinstance(mf_grad.base, scf_gpu.rohf.ROHF):
+            raise NotImplementedError()
+        elif isinstance(mf_grad.base, scf_gpu.hf.SCF):
+            mf = mf_grad.base
+        else:
+            mf = mf_grad.base._scf 
     else:
-        mf = mf_grad.base._scf 
-
+        if isinstance(mf_grad, scf_gpu.hf.SCF):
+            mf = mf_grad
+        else:
+            raise RuntimeError("Should not reach here.")
     if(dm0 is None): dm0 = mf.make_rdm1()
-    if omega is None:
-        with_df = mf.with_df
-    else:
-        key = '%.6f' % omega
-        if key in mf.with_df._rsh_df:
-            with_df = mf.with_df._rsh_df[key]
-        else:
-            dfobj = mf.with_df
-            with_df = dfobj._rsh_df[key] = dfobj.copy().reset()
-
-    auxmol = with_df.auxmol
-    if not hasattr(with_df, 'intopt') or with_df._cderi is None:
-        with_df.build(omega=omega)
-    intopt = with_df.intopt
-    naux = with_df.naux
-
-    log = logger.new_logger(mol, mol.verbose)
-    t0 = (logger.process_clock(), logger.perf_counter())
-    
-    dm = intopt.sort_orbitals(dm0, axis=[0,1])
-
-    orbol, orbor = _decompose_rdm1_svd(dm)
-    nl = orbol.shape[-1]
-    nr = orbor.shape[-1]
-    rhoj, rhok = get_rhojk_td(with_df, dm, orbol, orbor, with_j=with_j, with_k=with_k)
-    
-    # (d/dX P|Q) contributions
-    if omega and omega > 1e-10:
-        with auxmol.with_range_coulomb(omega):
-            int2c_e1 = auxmol.intor('int2c2e_ip1')
-    else:
-        int2c_e1 = auxmol.intor('int2c2e_ip1')
-    int2c_e1 = cupy.asarray(int2c_e1)
-
-    rhoj_cart = rhok_cart = None
-    auxslices = auxmol.aoslice_by_atom()
-    aux_cart2sph = intopt.aux_cart2sph
-    low = with_df.cd_low
-    low_t = low.T.copy()
-    ejaux = ekaux = None
-    if with_j:
-        if low.tag == 'eig':
-            rhoj = cupy.dot(low_t.T, rhoj)
-        elif low.tag == 'cd':
-            #rhoj = solve_triangular(low_t, rhoj, lower=False)
-            rhoj = solve_triangular(low_t, rhoj, lower=False, overwrite_b=True)
-        if not auxmol.cart:
-            rhoj_cart = contract('pq,q->p', aux_cart2sph, rhoj)
-        else:
-            rhoj_cart = rhoj
-
-        rhoj = intopt.unsort_orbitals(rhoj, aux_axis=[0])
-        tmp = contract('xpq,q->xp', int2c_e1, rhoj)
-        vjaux = -contract('xp,p->xp', tmp, rhoj)
-        ejaux = cupy.array([-vjaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
-        rhoj = vjaux = tmp = None
-    if with_k:
-        if low.tag == 'eig':
-            rhok = contract('pq,qij->pij', low_t.T, rhok)
-        elif low.tag == 'cd':
-            #rhok = solve_triangular(low_t, rhok, lower=False)
-            rhok = solve_triangular(low_t, rhok.reshape(naux, -1), lower=False, overwrite_b=True).reshape(naux, nl, nr)
-            rhok = rhok.copy(order='C')
-        tmp = contract('pij,qji->pq', rhok, rhok)
-        tmp = intopt.unsort_orbitals(tmp, aux_axis=[0,1])
-        vkaux = -contract('xpq,pq->xp', int2c_e1, tmp)
-        ekaux = cupy.array([-vkaux[:,p0:p1].sum(axis=1) for p0, p1 in auxslices[:,2:]])
-        vkaux = tmp = None
-        if not auxmol.cart:
-            rhok_cart = contract('pq,qkl->pkl', aux_cart2sph, rhok)
-        else:
-            rhok_cart = rhok
-        rhok = None
-    low_t = None
-    t0 = log.timer_debug1('rhoj and rhok', *t0)
-    int2c_e1 = None
-
-    dm_cart = dm
-    orbol_cart = orbol
-    orbor_cart = orbor
-    if not mol.cart:
-        # sph2cart for ao
-        cart2sph = intopt.cart2sph
-        orbol_cart = cart2sph @ orbol
-        orbor_cart = cart2sph @ orbor
-        dm_cart = cart2sph @ dm @ cart2sph.T
-        
-    with_df._cderi = None # release GPU memory
-    ej, ek, ejaux_3c, ekaux_3c = get_grad_vjk_td(with_df, mol, auxmol, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart,
-                                        with_j=with_j, with_k=with_k, omega=omega)
-    if with_j:
-        ej = -ej
-        ejaux -= ejaux_3c
-    if with_k:
-        ek = -ek
-        ekaux -= ekaux_3c
-        if hermi == 2:
-            if ekaux is not None:
-                ekaux *= -1
-            ek *= -1
-    t0 = log.timer_debug1('(di,j|P) and (i,j|dP)', *t0)
-    return ej, ek, ejaux, ekaux
-
-
-def get_jk_ris(mf, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega=None):
-    '''
-    Computes the first-order derivatives of the energy contributions from
-    J and K terms per atom.
-
-    NOTE: This function is incompatible to the one implemented in PySCF CPU version.
-    In the CPU version, get_jk returns the first order derivatives of J/K matrices.
-    '''
-    if mol is None: mol = mf.mol
-    assert dm0 is not None
     if omega is None:
         with_df = mf.with_df
     else:
