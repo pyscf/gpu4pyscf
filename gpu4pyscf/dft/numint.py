@@ -446,7 +446,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
         nao = _sorted_mol.nao
-        if xctype == 'LDA':
+        if xctype in ['LDA', 'HF']:
             ao_deriv = 0
         else:
             ao_deriv = 1
@@ -498,19 +498,21 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
         dm_mask_buf = mo_buf = mo_coeff = None
 
         weights = cupy.asarray(grids.weights[grid_start:grid_end])
-        # libxc calls are still running on default stream
-        exc, vxc = ni.eval_xc_eff(xc_code, rho_tot, deriv=1, xctype=xctype)[:2]
-        vxc = cupy.asarray(vxc, order='C')
-        exc = cupy.asarray(exc, order='C')
+        excsum = 0.0
         den = rho_tot[0] * weights
         nelec = float(den.sum())
-        excsum = float(cupy.dot(den, exc[:,0]))
-        wv = vxc
-        wv *= weights
-        if xctype == 'GGA':
-            wv[0] *= .5
-        if xctype == 'MGGA':
-            wv[[0,4]] *= .5
+        # libxc calls are still running on default stream
+        if xctype != 'HF':
+            exc, vxc = ni.eval_xc_eff(xc_code, rho_tot, deriv=1, xctype=xctype)[:2]
+            vxc = cupy.asarray(vxc, order='C')
+            exc = cupy.asarray(exc, order='C')
+            excsum = float(cupy.dot(den, exc[:,0]))
+            wv = vxc
+            wv *= weights
+            if xctype == 'GGA':
+                wv[0] *= .5
+            if xctype == 'MGGA':
+                wv[[0,4]] *= .5
         exc = den = vxc = rho_tot = weights = None
         t0 = log.timer_debug1(f'eval vxc on Device {device_id}', *t0)
 
@@ -860,7 +862,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         vmata = cupy.zeros((nset, nao, nao))
         vmatb = cupy.zeros((nset, nao, nao))
 
-        if xctype == 'LDA':
+        if xctype in ['LDA', 'HF']:
             ao_deriv = 0
         else:
             ao_deriv = 1
@@ -886,20 +888,27 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     rho_b = eval_rho2(_sorted_mol, ao_mask, mo_coeff_mask[1], mo_occ[1], None, xctype)
 
                 rho = cupy.stack([rho_a, rho_b], axis=0)
-                exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+                if xctype != 'HF':
+                    exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
                 t1 = log.timer_debug1('eval vxc', *t0)
-                if xctype == 'LDA':
+                if xctype in ['LDA', 'HF']:
                     den_a = rho_a * weight
-                    den_b = rho_b * weight
+                    den_b = rho_b * weight      
+                else:
+                    den_a = rho_a[0] * weight
+                    den_b = rho_b[0] * weight
+                nelec[0,i] += den_a.sum()
+                nelec[1,i] += den_b.sum()
+                if xctype != 'HF':
+                    excsum[i] += cupy.dot(den_a, exc[:,0])
+                    excsum[i] += cupy.dot(den_b, exc[:,0])
+                if xctype in 'LDA':
                     wv = vxc[:,0] * weight
                     va = ao_mask.dot(_scale_ao(ao_mask, wv[0]).T)
                     vb = ao_mask.dot(_scale_ao(ao_mask, wv[1]).T)
                     add_sparse(vmata[i], va, idx)
                     add_sparse(vmatb[i], vb, idx)
-
                 elif xctype == 'GGA':
-                    den_a = rho_a[0] * weight
-                    den_b = rho_b[0] * weight
                     wv = vxc * weight
                     wv[:,0] *= .5
                     va = ao_mask[0].dot(_scale_ao(ao_mask, wv[0]).T)
@@ -909,8 +918,6 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 elif xctype == 'NLC':
                     raise NotImplementedError('NLC')
                 elif xctype == 'MGGA':
-                    den_a = rho_a[0] * weight
-                    den_b = rho_b[0] * weight
                     wv = vxc * weight
                     wv[:,[0, 4]] *= .5
                     va = ao_mask[0].dot(_scale_ao(ao_mask[:4], wv[0,:4]).T)
@@ -923,10 +930,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     pass
                 else:
                     raise NotImplementedError(f'numint.nr_uks for functional {xc_code}')
-                nelec[0,i] += den_a.sum()
-                nelec[1,i] += den_b.sum()
-                excsum[i] += cupy.dot(den_a, exc[:,0])
-                excsum[i] += cupy.dot(den_b, exc[:,0])
+
                 t1 = log.timer_debug1('integration', *t1)
 
     return nelec, excsum, (vmata, vmatb)
@@ -1241,6 +1245,8 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                                                   max_memory=None,
                                                   grid_range=(grid_start, grid_end)):
 
+            if xctype == 'HF':
+                continue
             t0 = log.init_timer()
             p0, p1 = p1, p1+len(weights)
             # precompute fxc_w
@@ -1478,7 +1484,7 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
     _sorted_mol = opt._sorted_mol
     mo_coeff = cupy.asarray(mo_coeff)
     nao = _sorted_mol.nao
-    if mo_coeff.ndim == 2: # RHF
+    if mo_coeff.ndim == 2: # spin restricted
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
         rho = []
         t1 = t0 = log.init_timer()
@@ -1510,7 +1516,11 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
         #rho = (cupy.hstack(rhoa), cupy.hstack(rhob))
         rho = cupy.stack([cupy.hstack(rhoa), cupy.hstack(rhob)], axis=0)
         t0 = log.timer_debug1('eval rho in fxc', *t0)
-    vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype)[1:3]
+    if xctype != 'HF':
+        vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype)[1:3]
+    else:
+        vxc = 0
+        fxc = 0
     t0 = log.timer_debug1('eval fxc', *t0)
     return rho, vxc, fxc
 
