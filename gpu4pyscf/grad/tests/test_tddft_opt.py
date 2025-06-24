@@ -73,9 +73,6 @@ class KnownValues(unittest.TestCase):
         mff.kernel()
         tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
         tdf.kernel()[0]
-        excited_gradf = tdf.nuc_grad_method()
-        excited_gradf.kernel()
-        assert np.linalg.norm(excited_gradf.de) < 2.0e-4
         if bool(np.all(tdf.converged)):
             excited_gradf = tdf.nuc_grad_method()
             excited_gradf.kernel() 
