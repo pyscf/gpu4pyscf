@@ -24,6 +24,7 @@ import pyscf
 from gpu4pyscf.lib import logger
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad import tdrks
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
@@ -31,11 +32,12 @@ from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
 from pyscf.scf import _vhf
+from gpu4pyscf.nac import tdrhf
 
 
 def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     """
-    Only supports for singlet states.
+    Only supports for ground-excited states.
     Ref:
     [1] 10.1063/1.4903986 main reference
     [2] 10.1021/acs.accounts.1c00312
@@ -79,6 +81,11 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     LI = xI-yI    # eq.(83) in Ref. [1]
 
+    ni = mf._numint
+    ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+
     vresp = mf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
@@ -112,6 +119,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
+    s1 = mf_grad.get_ovlp(mol)
     dmz1doo = z1aoS
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
@@ -126,21 +134,49 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
-    extra_force = cp.zeros((len(atmlst), 3))
 
+    j_factor = 1.0
+    k_factor = 0.0
+    if with_k:
+        k_factor = hyb
+    extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0) 
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor) 
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
-    dvhf = td_nac.get_veff(mol, dmz1doo)
+    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0)
+    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
+
+    if with_k and omega != 0:
+        j_factor = 0.0
+        k_factor = alpha-hyb  # =beta
+
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega) 
+        for k, ia in enumerate(atmlst):
+            extra_force[k] += mf_grad.extra_force(ia, locals())
+        dvhf_all += dvhf
+        dvhf = td_nac.get_veff(mol, dmz1doo, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega)
+        for k, ia in enumerate(atmlst):
+            extra_force[k] -= mf_grad.extra_force(ia, locals())
+        dvhf_all -= dvhf
+        dvhf = td_nac.get_veff(mol, oo0, 
+                                j_factor=j_factor, k_factor=k_factor, omega=omega)
+        for k, ia in enumerate(atmlst):
+            extra_force[k] -= mf_grad.extra_force(ia, locals())
+        dvhf_all -= dvhf
+
+    f1ooP, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
+    veff1_0 = vxc1[1:]
+    veff1_1 = f1ooP[1:]
 
     delec = dh_td*2 - ds
     aoslices = mol.aoslice_by_atom()
@@ -154,7 +190,13 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     ds_y_etf = contract("xij,ij->xi", s1, (yIao*EI + yIao.T*EI) * 0.5)
     dsxy = cp.asarray([cp.sum(ds_x[:, p0:p1] + ds_y[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     dsxy_etf = cp.asarray([cp.sum(ds_x_etf[:, p0:p1] + ds_y_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec 
+    dveff1_0 = cp.asarray(
+        [contract("xpq,pq->x", veff1_0[:, p0:p1], dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
+    dveff1_0 += cp.asarray([
+            contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), dmz1doo[:, p0:p1],)
+            for p0, p1 in aoslices[:, 2:]])
+    dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
+    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec + dveff1_0 + dveff1_1
     de_etf = de + dsxy_etf
     de += dsxy 
     
@@ -163,158 +205,13 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     return de, de/EI, de_etf, de_etf/EI
 
 
-class NAC(lib.StreamObject):
-
-    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 20)
-    cphf_conv_tol = getattr(__config__, "grad_tdrhf_Gradients_cphf_conv_tol", 1e-8)
-
-    to_cpu = utils.to_cpu
-    to_gpu = utils.to_gpu
-    device = utils.device
-
-    _keys = {
-        "cphf_max_cycle",
-        "cphf_conv_tol",
-        "mol",
-        "base",
-        "chkfile",
-        "states",
-        "atmlst",
-        "de",
-        "de_scaled",
-        "de_etf",
-        "de_etf_scaled"
-    }
-
-    def __init__(self, td):
-        self.verbose = td.verbose
-        self.stdout = td.stdout
-        self.mol = td.mol
-        self.base = td
-        self.states = (0, 1)  # of which the gradients to be computed.
-        self.atmlst = None
-        self.de = None
-        self.de_scaled = None
-        self.de_etf = None
-        self.de_etf_scaled = None
-
-    _write      = rhf_grad_cpu.GradientsBase._write
-
-    def dump_flags(self, verbose=None):
-        log = logger.new_logger(self, verbose)
-        log.info("\n")
-        log.info(
-            "******** LR %s gradients for %s ********",
-            self.base.__class__,
-            self.base._scf.__class__,
-        )
-        log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
-        log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
-        log.info("chkfile = %s", self.chkfile)
-        log.info(f"States ID = {self.states}")
-        log.info("\n")
-        return self
+class NAC(tdrhf.NAC):
 
     @lib.with_doc(get_nacv.__doc__)
     def get_nacv(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv(self, x_yI, EI, singlet, atmlst, verbose)
 
-    def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
-
-        logger.warn(self, "This module is under development!!")
-
-        if singlet is None:
-            singlet = self.base.singlet
-        if atmlst is None:
-            atmlst = self.atmlst
-        else:
-            self.atmlst = atmlst
-
-        if self.verbose >= logger.WARN:
-            self.check_sanity()
-        if self.verbose >= logger.INFO:
-            self.dump_flags()
-
-        if xy_I is None or xy_J is None:
-            states = sorted(self.states)
-            I, J = states
-            if I < 0 or J < 0:
-                raise ValueError("Excited states ID should be non-negetive integers.")
-            elif I > 0:
-                raise NotImplementedError("Only for ground-excited states nonadiabatic coupling.")
-            elif I == 0:
-                xy_I = self.base.xy[J-1]
-                E_I = self.base.e[J-1]
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
-            else:
-                raise NotImplementedError("Only for ground-excited states nonadiabatic coupling.")
-        return self.de
-    
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
-        """
-        Computes the first-order derivatives of the energy contributions from
-        Veff per atom.
-
-        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
-        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
-        """
-        if mol is None:
-            mol = self.mol
-        if dm is None:
-            dm = self.base.make_rdm1()
-        if omega == 0.0:
-            vhfopt = self.base._scf._opt_gpu.get(None, None)
-            return rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
-        else:
-            vhfopt = self.base._scf._opt_gpu.get(omega, None)
-            with mol.with_range_coulomb(omega):
-                return rhf_grad._jk_energy_per_atom(
-                    mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
-
-    def _finalize(self):
-        if self.verbose >= logger.NOTE:
-            logger.note(
-                self,
-                "--------- %s nonadiabatic derivative coupling for states %d and %d----------",
-                self.base.__class__.__name__,
-                self.states[0],
-                self.states[1],
-            )
-            self._write(self.mol, self.de, self.atmlst)
-            logger.note(
-                self,
-                "--------- %s nonadiabatic derivative coupling for states %d and %d after E scaled (divided by E)----------",
-                self.base.__class__.__name__,
-                self.states[0],
-                self.states[1],
-            )
-            self._write(self.mol, self.de_scaled, self.atmlst)
-            logger.note(
-                self,
-                "--------- %s nonadiabatic derivative coupling for states %d and %d with ETF----------",
-                self.base.__class__.__name__,
-                self.states[0],
-                self.states[1],
-            )
-            self._write(self.mol, self.de_etf, self.atmlst)
-            logger.note(
-                self,
-                "--------- %s nonadiabatic derivative coupling for states %d and %d with ETF after E scaled (divided by E)----------",
-                self.base.__class__.__name__,
-                self.states[0],
-                self.states[1],
-            )
-            self._write(self.mol, self.de_etf_scaled, self.atmlst)
-            logger.note(self, "----------------------------------------------")
-
-    def solvent_response(self, dm):
-        return 0.0
-
     as_scanner = NotImplemented
 
-    to_gpu = lib.to_gpu
 
-
-tdscf.rhf.TDA.NAC = tdscf.rhf.TDHF.NAC = lib.class_as_method(NAC)
+tdscf.rks.TDA.NAC = tdscf.rks.TDDFT.NAC = lib.class_as_method(NAC)
