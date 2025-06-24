@@ -53,13 +53,18 @@ def get_jk(mf_grad, mol=None, dm0=None, hermi=0, with_j=True, with_k=True, omega
     In the CPU version, get_jk returns the first order derivatives of J/K matrices.
     '''
     if mol is None: mol = mf_grad.mol
-    if isinstance(mf_grad.base, scf_gpu.rohf.ROHF):
-        raise NotImplementedError()
-    elif isinstance(mf_grad.base, scf_gpu.hf.SCF):
-        mf = mf_grad.base
+    if getattr(mf_grad, "base", None) is not None:
+        if isinstance(mf_grad.base, scf_gpu.rohf.ROHF):
+            raise NotImplementedError()
+        elif isinstance(mf_grad.base, scf_gpu.hf.SCF):
+            mf = mf_grad.base
+        else:
+            mf = mf_grad.base._scf 
     else:
-        mf = mf_grad.base._scf 
-
+        if isinstance(mf_grad, scf_gpu.hf.SCF):
+            mf = mf_grad
+        else:
+            raise RuntimeError("Should not reach here.")
     if(dm0 is None): dm0 = mf.make_rdm1()
     if omega is None:
         with_df = mf.with_df

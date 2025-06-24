@@ -18,11 +18,14 @@ import time
 import cupyx.scipy.linalg as cpx_linalg
 
 from pyscf import gto, lib
+from gpu4pyscf import scf
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
 from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
+from gpu4pyscf.df import int3c2e
+from pyscf import ao2mo
 
 
 CITATION_INFO = """
@@ -594,6 +597,109 @@ def get_ibja_MVP(T_ia):
 
     return ibja_MVP
 
+def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
+    r'''A and B matrices for TDDFT response function.
+
+    A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
+    B[i,a,j,b] = (ai||bj)
+
+    Ref: Chem Phys Lett, 256, 454
+    '''
+
+    if mo_energy is None:
+        mo_energy = mf.mo_energy
+    if mo_coeff is None:
+        mo_coeff = mf.mo_coeff
+    if mo_occ is None:
+        mo_occ = mf.mo_occ
+
+    mo_energy = cp.asarray(mo_energy)
+    mo_coeff = cp.asarray(mo_coeff)
+    mo_occ = cp.asarray(mo_occ)
+    mol = mf.mol
+    nao, nmo = mo_coeff.shape
+    occidx = cp.where(mo_occ==2)[0]
+    viridx = cp.where(mo_occ==0)[0]
+    orbv = mo_coeff[:,viridx]
+    orbo = mo_coeff[:,occidx]
+    nvir = orbv.shape[1]
+    nocc = orbo.shape[1]
+    mo = cp.hstack((orbo,orbv))
+
+    e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+    a = cp.diag(e_ia.ravel()).reshape(nocc,nvir,nocc,nvir)
+    b = cp.zeros_like(a)
+    ni = mf._numint
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+    if K_fit == J_fit and (omega == 0 or omega is None):
+        auxmol_K = auxmol_J
+    else:
+        auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+
+    def get_erimo(auxmol_i):
+        naux = auxmol_i.nao
+        int3c = int3c2e.get_int3c2e(mol, auxmol_i)
+        int2c2e = auxmol_i.intor('int2c2e')
+        int3c = cp.asarray(int3c)
+        int2c2e = cp.asarray(int2c2e)
+        df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+        df_coef = df_coef.reshape(naux, nao, nao)
+        eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+        return eri_mo
+    def get_erimo_omega(auxmol_i, omega):
+        naux = auxmol_i.nao
+        int3c = int3c2e.get_int3c2e(mol, auxmol_i, omega=omega)
+        with auxmol_i.with_range_coulomb(omega):
+            int2c2e = auxmol_i.intor('int2c2e')
+        int3c = cp.asarray(int3c)
+        int2c2e = cp.asarray(int2c2e)
+        df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao*nao, naux).T)
+        df_coef = df_coef.reshape(naux, nao, nao)
+        eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+        return eri_mo
+    def add_hf_(a, b, hyb=1):
+        eri_mo_J = get_erimo(auxmol_J)
+        eri_mo_K = get_erimo(auxmol_K)
+        if singlet:
+            a += cp.einsum('iabj->iajb', eri_mo_J[:nocc,nocc:,nocc:,:nocc]) * 2
+            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b += cp.einsum('iajb->iajb', eri_mo_J[:nocc,nocc:,:nocc,nocc:]) * 2
+            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * hyb
+        else:
+            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * hyb
+
+    if getattr(td, 'with_solvent', None):
+        raise NotImplementedError("PCM TDDFT RIS is not supported")
+
+    if isinstance(mf, scf.hf.KohnShamDFT):
+        add_hf_(a, b, hyb)
+        if omega != 0:  # For RSH
+            eri_mo_K = get_erimo_omega(auxmol_K, omega)
+            k_fac = alpha - hyb
+            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
+            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
+
+        if mf.do_nlc():
+            raise NotImplementedError('vv10 nlc not implemented in get_ab(). '
+                                      'However the nlc contribution is small in TDDFT, '
+                                      'so feel free to take the risk and comment out this line.')
+    else:
+        add_hf_(a, b)
+
+    return a.get(), b.get()
+
 class RisBase(lib.StreamObject):
     def __init__(self,
                 mf,
@@ -623,9 +729,14 @@ class RisBase(lib.StreamObject):
             mf.mo_coeff = cp.asarray(mf.mo_coeff, dtype=cp.float32)
 
         self.mf = mf
+        self._scf = mf
+        self.chkfile = mf.chkfile
+        self.singlet = True # TODO: add R-T excitation.
+        self.exclude_nlc = False # TODO: exclude nlc functional 
         self.theta = theta
         self.J_fit = J_fit
         self.K_fit = K_fit
+        self.xy = None
 
         self.Ktrunc = Ktrunc
         self.a_x = a_x
@@ -648,6 +759,14 @@ class RisBase(lib.StreamObject):
 
         logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
+
+    def get_ab(self, mf=None):
+        if mf is None:
+            mf = self.mf
+        J_fit = self.J_fit
+        K_fit = self.K_fit
+        theta = self.theta
+        return get_ab(self, mf, J_fit, K_fit, theta, singlet=True)
 
     def build(self):
         log = self.log
@@ -810,6 +929,10 @@ class RisBase(lib.StreamObject):
             mdpol_beta = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ[1], C_vir=self.C_vir[1])
             mdpol = cp.vstack((mdpol_alpha, mdpol_beta))
         return mdpol
+
+    def nuc_grad_method(self):
+        from gpu4pyscf.grad import tdrks_ris
+        return tdrks_ris.Gradients(self)
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
@@ -1661,6 +1784,7 @@ class TDDFT(RisBase):
             X, Y = math_helper.XmY_2_XY(Z=Z, AmB_sq=hdiag_sq, omega=energies)
 
         log.debug(f'check norm of X^TX - Y^YY - I = {cp.linalg.norm( (cp.dot(X, X.T) - cp.dot(Y, Y.T)) - cp.eye(self.nstates) ):.2e}')
+        self.xy = X, Y
 
         P = self.get_P()
         mdpol = self.get_mdpol()
