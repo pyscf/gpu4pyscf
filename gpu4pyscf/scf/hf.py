@@ -102,19 +102,19 @@ def level_shift(s, d, f, factor):
     return f + dm_vir * factor
 
 def get_hcore(mol):
-    h = mol.intor_symmetric('int1e_kin')
     if mol._pseudo:
         # Although mol._pseudo for GTH PP is only available in Cell, GTH PP
         # may exist if mol is converted from cell object.
         from pyscf.gto import pp_int
+        h = mol.intor_symmetric('int1e_kin')
         h += pp_int.get_gth_pp(mol)
         h = asarray(h)
     else:
         assert not mol.nucmod
-        #:h+= mol.intor_symmetric('int1e_nuc')
         from gpu4pyscf.gto.int3c1e import int1e_grids
-        h = asarray(h)
-        h += int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
+        #:h = mol.intor_symmetric('int1e_nuc')
+        h = int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
+        h += asarray(mol.intor_symmetric('int1e_kin'))
     if len(mol._ecpbas) > 0:
         h += get_ecp(mol)
     return h
@@ -442,16 +442,18 @@ def init_guess_by_minao(mol):
     mol2 = mol.copy()
 
     aoslice = mol.aoslice_by_atom()
+    nao = aoslice[-1,3]
+    dm = cupy.zeros((nao, nao))
+    # Preallocate a buffer in cupy memory pool for small arrays held in atm_conf
+    workspace = cupy.empty(50**2*12)
+    workspace = None # noqa: F841
     atm_conf = {}
-    dm = []
     mo_coeff = []
     mo_occ = []
-    for ia in range(mol.natm):
+    for ia, (p0, p1) in enumerate(aoslice[:,2:]):
         symb = mol.atom_symbol(ia)
         if gto.is_ghost_atom(symb):
-            i0, i1 = aoslice[ia,2:]
-            n = i1 - i0
-            dm.append(cupy.zeros((n, n)))
+            n = p1 - p0
             mo_coeff.append(cupy.zeros((n, 0)))
             mo_occ.append(cupy.zeros(0))
             continue
@@ -466,16 +468,15 @@ def init_guess_by_minao(mol):
             s22 = mol2.intor_symmetric('int1e_ovlp')
             s21 = gto.mole.intor_cross('int1e_ovlp', mol2, mol1)
             c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
-            c = cupy.asarray(c[:,occ>0])
-            occ = cupy.asarray(occ[occ>0])
+            c = cupy.asarray(c[:,occ>0], order='C')
+            occ = cupy.asarray(occ[occ>0], order='C')
             atm_conf[symb] = occ, c
 
         occ, c = atm_conf[symb]
-        dm.append((c*occ).dot(c.conj().T))
+        dm[p0:p1,p0:p1] = (c*occ).dot(c.conj().T)
         mo_coeff.append(c)
         mo_occ.append(occ)
 
-    dm = block_diag(dm)
     mo_coeff = block_diag(mo_coeff)
     mo_occ = cupy.hstack(mo_occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
@@ -728,6 +729,11 @@ class RHF(SCF):
 
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
+        if self.istype('_Solvation'):
+            raise RuntimeError(
+                'It is recommended to call density_fit() before applying a solvent model. '
+                'Calling density_fit() after the solvent model may result in '
+                'incorrect nuclear gradients, TDDFT, and other methods.')
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
 
     def newton(self):

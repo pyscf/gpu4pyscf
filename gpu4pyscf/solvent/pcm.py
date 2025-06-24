@@ -43,10 +43,19 @@ def pcm_for_scf(mf, solvent_obj=None, dm=None):
         solvent_obj = PCM(mf.mol)
     return _attach_solvent._for_scf(mf, solvent_obj, dm)
 
+def pcm_for_tdscf(method, *args, **kwargs):
+    msg = ('Solvent model for TDDFT methods must be initialized at SCF level. '
+           'The TDDFT can then be applied as a submethod of the SCF object. '
+           'For example, mf.PCM().TDA(equilibrium_solvation=False)')
+    raise RuntimeError(msg)
+
 # Inject PCM to SCF, TODO: add it to other methods later
 from gpu4pyscf import scf
+from gpu4pyscf import tdscf
 scf.hf.RHF.PCM = pcm_for_scf
 scf.uhf.UHF.PCM = pcm_for_scf
+tdscf.rhf.TDBase.PCM = pcm_for_tdscf
+
 # TABLE II,  J. Chem. Phys. 122, 194110 (2005)
 XI = {
     6: 4.84566077868,
@@ -241,6 +250,8 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
     return D, S
 
 class PCM(lib.StreamObject):
+    from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
+
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
@@ -248,7 +259,6 @@ class PCM(lib.StreamObject):
         'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n'
     }
-    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mol):
         self.mol = mol
@@ -289,11 +299,6 @@ class PCM(lib.StreamObject):
         if self.atom_radii:
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         return self
-
-    def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        obj = to_cpu(self)
-        return obj.reset()
 
     def build(self, ng=None):
         if self.radii_table is None:
@@ -468,24 +473,25 @@ class PCM(lib.StreamObject):
         return vmat
 
     def nuc_grad_method(self, grad_method):
-        from gpu4pyscf.solvent.grad import pcm as pcm_grad
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(grad_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return pcm_grad.make_grad_object(grad_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def grad(self, dm):
+        from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_nuc, grad_solver
+        de_solvent = grad_qv(self, dm)
+        de_solvent+= grad_solver(self, dm)
+        de_solvent+= grad_nuc(self, dm)
+        return de_solvent
 
     def Hessian(self, hess_method):
-        from gpu4pyscf.solvent.hessian import pcm as pcm_hess
-        if self.frozen:
-            raise RuntimeError('Frozen solvent model is not supported')
-        from gpu4pyscf import scf
-        if isinstance(hess_method.base, (scf.hf.RHF, scf.uhf.UHF)):
-            return pcm_hess.make_hess_object(hess_method)
-        else:
-            raise RuntimeError('Only SCF gradient is supported')
+        raise DeprecationWarning
+
+    def hess(self, dm):
+        from gpu4pyscf.solvent.hessian.pcm import (
+            analytical_hess_nuc, analytical_hess_qv, analytical_hess_solver)
+        de_solvent  =    analytical_hess_nuc(self, dm, verbose=self.verbose)
+        de_solvent +=     analytical_hess_qv(self, dm, verbose=self.verbose)
+        de_solvent += analytical_hess_solver(self, dm, verbose=self.verbose)
+        return de_solvent
 
     def reset(self, mol=None):
         if mol is not None:

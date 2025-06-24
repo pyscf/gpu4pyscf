@@ -258,12 +258,9 @@ class TDSCF_GradScanner(lib.GradScanner):
             self.state = state
 
         td_scanner = self.base
-        td_scanner(mol)
         assert td_scanner.device == 'gpu'
         assert self.device == 'gpu'
-        if getattr(self.base, 'with_solvent', None):
-            self.base.with_solvent.mol = mol
-            self.base.with_solvent.build()
+        td_scanner(mol)
         # TODO: Check root flip.  Maybe avoid the initial guess in TDHF otherwise
         # large error may be found in the excited states amplitudes
         de = self.kernel(state=state, **kwargs)
@@ -279,7 +276,7 @@ class TDSCF_GradScanner(lib.GradScanner):
 
 class Gradients(rhf_grad.GradientsBase):
 
-    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 20)
+    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 50)
     cphf_conv_tol = getattr(__config__, "grad_tdrhf_Gradients_cphf_conv_tol", 1e-8)
 
     to_cpu = utils.to_cpu

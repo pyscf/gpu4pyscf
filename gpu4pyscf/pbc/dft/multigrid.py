@@ -81,7 +81,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     cell = ni.cell
     dm_kpts = cp.asarray(dm_kpts)
     rhoG = _eval_rhoG(ni, dm_kpts, hermi, kpts)
-    coulG = tools.get_coulG(cell, mesh=cell.mesh)
+    coulG = tools.get_coulG(cell, mesh=ni.mesh)
     #:vG = np.einsum('ng,g->ng', rhoG, coulG)
     vG = rhoG
     vG *= coulG
@@ -1102,7 +1102,7 @@ def _ovlp_mask_estimation(cell, cell0_nprims, supmol_bas, supmol_env,
     return ovlp_mask, Ecut, radius
 
 def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
-                 xctype='LDA', hermi=1):
+                 mesh, xctype='LDA', hermi=1):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     a = cell.lattice_vectors()
@@ -1145,7 +1145,7 @@ def create_tasks(cell, prim_bas, supmol_bas, supmol_env, ao_loc_in_cell0,
     remaining_mask, ovlp_mask = ovlp_mask, None
     Gbase = 2*np.pi / cell_len
     ngrid_min = 512
-    mesh = np.asarray(cell.mesh)
+    mesh = np.asarray(mesh)
     assert all(mesh < 1000)
     tasks = []
     if 1:
@@ -1292,7 +1292,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
             prim_bas = self.supmol_bas[:self.primitive_nbas]
             self._tasks[xctype, hermi] = tasks = create_tasks(
                 self.cell, prim_bas, self.supmol_bas, self.supmol_env,
-                self.ao_loc_in_cell0, xctype, hermi)
+                self.ao_loc_in_cell0, self.mesh, xctype, hermi)
             logger.debug(self.cell, 'Multigrid ntasks for %s: %s', xctype, len(tasks))
         return tasks
 
