@@ -271,40 +271,42 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     TFvo = cp.dot(TIJvv, fock_mo[nocc:,:nocc])
     TFvv = cp.dot(TIJvv, fock_mo[nocc:,nocc:])
 
-    Qex = cp.zeros((nmo, nmo))
-    Qex[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo, orbo))
-    Qex[:nocc, :nocc]+= TFoo*2.0
-    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopI[nocc:, :nocc], xpyJ)
-    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0momI[nocc:, :nocc], xmyJ)
-    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopJ[nocc:, :nocc], xpyI)
-    Qex[:nocc, :nocc]+= contract("ak,ai->ik", veff0momJ[nocc:, :nocc], xmyI)
-    Qex[:nocc, :nocc]+=rIJoo.T*(EJ-EI)
+    im0 = cp.zeros((nmo, nmo))
+    im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo, orbo))
+    im0[:nocc, :nocc]+= TFoo*2.0
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopI[nocc:, :nocc], xpyJ)
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momI[nocc:, :nocc], xmyJ)
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopJ[nocc:, :nocc], xpyI)
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momJ[nocc:, :nocc], xmyI)
+    im0[:nocc, :nocc]+=rIJoo.T*(EJ-EI)
 
-    Qex[:nocc, nocc:] = reduce(cp.dot, (orbo.T, veff0doo, orbv))
-    Qex[:nocc, nocc:]+= TFov*2.0
-    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopI[nocc:, nocc:], xpyJ)
-    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0momI[nocc:, nocc:], xmyJ)
-    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopJ[nocc:, nocc:], xpyI)
-    Qex[:nocc, nocc:]+= contract("ab,ai->ib", veff0momJ[nocc:, nocc:], xmyI)
+    im0[:nocc, nocc:] = reduce(cp.dot, (orbo.T, veff0doo, orbv))
+    im0[:nocc, nocc:]+= TFov*2.0
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopI[nocc:, nocc:], xpyJ)
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0momI[nocc:, nocc:], xmyJ)
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopJ[nocc:, nocc:], xpyI)
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0momJ[nocc:, nocc:], xmyI)
 
-    Qex[nocc:, :nocc] = TFvo*2
-    Qex[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopI[:nocc, :nocc], xpyJ)
-    Qex[nocc:, :nocc]-= contract("ij,ai->aj", veff0momI[:nocc, :nocc], xmyJ)
-    Qex[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopJ[:nocc, :nocc], xpyI)
-    Qex[nocc:, :nocc]-= contract("ij,ai->aj", veff0momJ[:nocc, :nocc], xmyI)
+    im0[nocc:, :nocc] = TFvo*2
+    im0[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopI[:nocc, :nocc], xpyJ)
+    im0[nocc:, :nocc]-= contract("ij,ai->aj", veff0momI[:nocc, :nocc], xmyJ)
+    im0[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopJ[:nocc, :nocc], xpyI)
+    im0[nocc:, :nocc]-= contract("ij,ai->aj", veff0momJ[:nocc, :nocc], xmyI)
 
-    Qex[nocc:, nocc:] = TFvv*2.0
-    Qex[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopI[:nocc, nocc:], xpyJ)
-    Qex[nocc:, nocc:]-= contract("ib,ai->ab", veff0momI[:nocc, nocc:], xmyJ)
-    Qex[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopJ[:nocc, nocc:], xpyI)
-    Qex[nocc:, nocc:]-= contract("ib,ai->ab", veff0momJ[:nocc, nocc:], xmyI)
-    Qex[nocc:, nocc:]+=rIJvv.T*(EJ-EI)
+    im0[nocc:, nocc:] = TFvv*2.0
+    im0[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopI[:nocc, nocc:], xpyJ)
+    im0[nocc:, nocc:]-= contract("ib,ai->ab", veff0momI[:nocc, nocc:], xmyJ)
+    im0[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopJ[:nocc, nocc:], xpyI)
+    im0[nocc:, nocc:]-= contract("ib,ai->ab", veff0momJ[:nocc, nocc:], xmyI)
+    im0[nocc:, nocc:]+=rIJvv.T*(EJ-EI)
 
-    im0 = Qex*0.5
+    im0 = im0*0.5
     im0[:nocc, :nocc]+= reduce(cp.dot, (orbo.T, veff, orbo))*(EJ-EI)*0.5
     im0[:nocc, nocc:]+= reduce(cp.dot, (orbo.T, veff, orbv))*(EJ-EI)*0.5
     im0[:nocc, nocc:]+= cp.dot(fock_mo[nocc:,nocc:],z1).T*(EJ-EI)*0.25
     im0[nocc:, :nocc]+= cp.dot(z1, fock_mo[:nocc,:nocc]*(EJ-EI))*0.25
+    # 0.5 * 0.5 first is in the equation,
+    # second 0.5 due to z1.
 
     im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
 
@@ -488,7 +490,7 @@ class NAC(lib.StreamObject):
                 self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
                     = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
                 self._finalize()
-        return self.de
+        return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
     
     def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
         """
