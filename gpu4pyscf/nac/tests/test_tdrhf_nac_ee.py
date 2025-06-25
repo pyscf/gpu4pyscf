@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,155 +43,7 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    def test_grad_tda_singlet_qchem(self):
-        """
-        benchmark from qchem
-        $rem
-        JOBTYPE              sp
-        METHOD               hf
-        BASIS                cc-pvdz
-        CIS_N_ROOTS          5
-        CIS_SINGLETS         TRUE
-        CIS_TRIPLETS         FALSE
-        SYMMETRY             FALSE
-        SYM_IGNORE           TRUE
-        SCF_CONVERGENCE      14
-        XC_GRID 000099000590
-        ! RPA 2
-        BASIS_LIN_DEP_THRESH 12
-        CIS_DER_NUMSTATE   3
-        CALC_NAC           true
-        $end
-
-        $derivative_coupling
-        0 is the reference state
-        0 1 2
-        $end
-        ---------------------------------------------------
-        DC between ground and excited states with ETF:
-        Atom         X              Y              Z     
-        ---------------------------------------------------
-        1       0.388607       0.000000      -0.000000
-        2      -0.194304      -0.000000      -0.000000
-        3      -0.194304       0.000000      -0.000000
-        ---------------------------------------------------
-        ---------------------------------------------------
-        CIS Force Matrix Element
-        Atom         X              Y              Z     
-        ---------------------------------------------------
-        1       0.131606       0.000000      -0.000000
-        2      -0.065803      -0.000000      -0.000000
-        3      -0.065803       0.000000      -0.000000
-        ---------------------------------------------------
-        ---------------------------------------------------
-        CIS derivative coupling without ETF
-        Atom         X              Y              Z     
-        ---------------------------------------------------
-        1      -0.066695       0.000000      -0.000000
-        2      -0.094903      -0.000000      -0.000000
-        3      -0.094903       0.000000      -0.000000
-        ---------------------------------------------------
-        """
-        mf = scf.RHF(mol).to_gpu()
-        mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
-        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
-        nac1.states=(1,0)
-        nac1.kernel()
-        ref = np.array([[ -0.066695,  0.000000,  0.000000],
-                        [ -0.094903, -0.000000, -0.000000],
-                        [ -0.094903,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[ 0.388607,  0.000000,  0.000000],
-                                   [-0.194304, -0.000000, -0.000000],
-                                   [-0.194304,  0.000000, -0.000000]])
-        ref_etf = np.array([[ 0.131606,  0.000000,  0.000000],
-                            [-0.065803, -0.000000, -0.000000],
-                            [-0.065803,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[0]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
-
-        nac1.states=(2,0)
-        nac1.kernel()
-        ref = np.array([[  0.000000,  0.000000,  0.000000],
-                        [  0.098107, -0.000000, -0.000000],
-                        [ -0.098107,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[ 0.000000,  0.000000,  0.000000],
-                                   [ 0.257419, -0.000000, -0.000000],
-                                   [-0.257419,  0.000000, -0.000000]])
-        ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
-                            [ 0.103969, -0.000000, -0.000000],
-                            [-0.103969,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
-
-    def test_grad_tdhf_singlet_qchem(self):
-        """
-        benchmark from Qchem
-        $rem
-        JOBTYPE              sp          
-        METHOD               hf       
-        BASIS                cc-pvdz     
-        CIS_N_ROOTS          5       
-        CIS_SINGLETS         TRUE        
-        CIS_TRIPLETS         FALSE       
-        SYMMETRY             FALSE       
-        SYM_IGNORE           TRUE   
-        SCF_CONVERGENCE      14
-        XC_GRID 000099000590
-        RPA True
-        BASIS_LIN_DEP_THRESH 12
-        CIS_DER_NUMSTATE   3
-        CALC_NAC           true
-        $end
-
-        $derivative_coupling
-        0 is the reference state
-        0 1 2
-        $end
-        """
-        mf = scf.RHF(mol).to_gpu()
-        mf.kernel()
-        td = mf.TDHF().set(nstates=5)
-        td.kernel()
-        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
-        nac1.states=(1,0)
-        nac1.kernel()
-        ref = np.array([[ -0.037645,  0.000000,  0.000000],
-                        [ -0.093950, -0.000000, -0.000000],
-                        [ -0.093950,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[ 0.399489,  0.000000,  0.000000],
-                                   [-0.199744, -0.000000, -0.000000],
-                                   [-0.199744,  0.000000, -0.000000]])
-        ref_etf = np.array([[ 0.134429,  0.000000,  0.000000],
-                            [-0.067214, -0.000000, -0.000000],
-                            [-0.067214,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[0]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
-
-        nac1.states=(2,0)
-        nac1.kernel()
-        ref = np.array([[ -0.000000,  0.000000,  0.000000],
-                        [  0.095909, -0.000000, -0.000000],
-                        [ -0.095909,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[ 0.000000,  0.000000,  0.000000],
-                                   [ 0.262906, -0.000000, -0.000000],
-                                   [-0.262906,  0.000000, -0.000000]])
-        ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
-                            [ 0.105513, -0.000000, -0.000000],
-                            [-0.105513,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
-
-    def test_grad_tdhf_singlet_bdf(self):
+    def test_grad_tdhf_singlet_bdf_qchem_12(self):
         """
         benchmark from both Qchem and BDF
         $rem
@@ -215,7 +67,7 @@ class KnownValues(unittest.TestCase):
         0 is the reference state
         0 1 2
         $end
-
+        ======== next is bdf input =======
         $COMPASS
         Title
         NAC-test
@@ -309,7 +161,63 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_bdf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_bdf)).max() < 1e-4
 
+    def test_grad_tda_singlet_qchem(self):
+        mf = scf.RHF(mol).to_gpu()
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        td.kernel()
+        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac1.states=(1,2)
+        nac1.kernel()
+        ref_etf_scaled_qchem = np.array([[-0.000000,  2.324939,  0.000000],
+                                         [ 0.000000, -1.162470,  0.870959],
+                                         [ 0.000000, -1.162470, -0.870959]])
+        ref_qchem = np.array([[-0.000000,  2.256714,  0.000000],
+                              [ 0.000000, -1.228419,  0.849342],
+                              [ 0.000000, -1.228419, -0.849343]])
+        ref_etf_qchem = np.array([[-0.000000,  0.151652,  0.000000],
+                                  [ 0.000000, -0.075826,  0.056811],
+                                  [ 0.000000, -0.075826, -0.056811]])
+        assert abs(np.abs(nac1.de/(td.e[1] - td.e[0])) - np.abs(ref_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_qchem)).max() < 1e-4
+
+        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac1.states=(1,3)
+        nac1.kernel()
+        ref_etf_scaled_qchem = np.array([[-0.785926,  0.000000,  0.000000],
+                                         [ 0.392963, -0.000000, -0.000000],
+                                         [ 0.392963,  0.000000, -0.000000]])
+        ref_qchem = np.array([[-0.897866,  0.000000,  0.000000],
+                              [ 0.436555, -0.000000, -0.000000],
+                              [ 0.436555,  0.000000, -0.000000]])
+        ref_etf_qchem = np.array([[-0.075626,  0.000000,  0.000000],
+                                  [ 0.037813, -0.000000, -0.000000],
+                                  [ 0.037813,  0.000000, -0.000000]])
+        assert abs(np.abs(nac1.de/(td.e[2] - td.e[0])) - np.abs(ref_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_qchem)).max() < 1e-4
+
+        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac1.states=(2,3)
+        nac1.kernel()
+        ref_etf_scaled_qchem = np.array([[-0.000000,  0.000000,  0.000000],
+                                         [ 0.021695, -0.000000, -0.000000],
+                                         [-0.021695,  0.000000, -0.000000]])
+        ref_qchem = np.array([[-0.000000,  0.000000,  0.000000],
+                              [ 0.022423, -0.000000, -0.000000],
+                              [-0.022423,  0.000000, -0.000000]])
+        ref_etf_qchem = np.array([[-0.000000,  0.000000,  0.000000],
+                                  [ 0.000672, -0.000000, -0.000000],
+                                  [-0.000672,  0.000000, -0.000000]])
+        assert abs(np.abs(nac1.de/(td.e[2] - td.e[1])) - np.abs(ref_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_qchem)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_qchem)).max() < 1e-4
+
 
 if __name__ == "__main__":
-    print("Full Tests for TD-RHF nonadiabatic coupling vectors between ground and excited states.")
+    print("Full Tests for TD-RHF nonadiabatic coupling vectors between excited states.")
     unittest.main()

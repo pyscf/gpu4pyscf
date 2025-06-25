@@ -33,9 +33,10 @@ from gpu4pyscf import tdscf
 from pyscf.scf import _vhf
 
 
-def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
+def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     """
-    Only supports for singlet states.
+    Calculate non-adiabatic coupling vectors between ground and excited states.
+    Now, only supports for singlet states.
     Ref:
     [1] 10.1063/1.4903986 main reference
     [2] 10.1021/acs.accounts.1c00312
@@ -43,7 +44,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
 
     Args:
         td_nac (gpu4pyscf.tdscf.rhf.TDA): Non-adiabatic coupling object for TDDFT or TDHF.
-        x_yI (tuple): (xI, yI), xI and YI are the eigenvectors corresponding to the excitation and de-excitation.
+        x_yI (tuple): (xI, yI), xI and yI are the eigenvectors corresponding to the excitation and de-excitation.
         EI (float): excitation energy for state I
 
     Kwargs:
@@ -175,11 +176,27 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
     """
-    Only supports for excited-excited states.
+    Only supports for excited-excited states. 
+    Quadratic-response-associated terms are all neglected.
+    
     Ref:
     [1] 10.1063/1.4903986 main reference
     [2] 10.1021/acs.accounts.1c00312
     [3] 10.1063/1.4885817
+
+    Args:
+        td_nac: TDNAC object
+        x_yI: (xI, yI) 
+            xI and yI are the eigenvectors corresponding to the excitation and de-excitation for state I
+        x_yJ: (xJ, yJ) 
+            xJ and yJ are the eigenvectors corresponding to the excitation and de-excitation for state J
+        EI: energy of state I
+        EJ: energy of state J
+    
+    Keyword args:
+        singlet (bool): Whether calculate singlet states.
+        atmlst (list): List of atoms to calculate the NAC.
+        verbose (int): Verbosity level.
     """
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
@@ -194,6 +211,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     nvir = nmo - nocc
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
+    if getattr(mf, 'with_solvent', None) is not None:
+        raise NotImplementedError('With solvent is not supported yet')
+    if getattr(mf, 'with_df', None) is not None:
+        raise NotImplementedError('With density fitting is not supported yet')
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
@@ -254,12 +275,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     veffI = vj1I * 2 - vk1I
     veffI *= 0.5
     veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
-    wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  # 2 for dm + dm.T
+    wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  
     wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
     veffJ = vj1J * 2 - vk1J
     veffJ *= 0.5
     veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
-    wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  # 2 for dm + dm.T
+    wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  
     wvo += contract("ac,ai->ci", veff0mopJ[nocc:, nocc:], xpyI) * 2
     veffI = -vk2I
     veffI *= 0.5
@@ -271,6 +292,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     veff0momJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0momJ[:nocc, :nocc], xmyI) * 2
     wvo += contract("ac,ai->ci", veff0momJ[nocc:, nocc:], xmyI) * 2
+    # The up parts are according to eq. (86) and (86) in Ref. [1]
 
     vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -285,7 +307,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         mo_occ,
         wvo/(EJ-EI), # only one spin, negative in cphf
         max_cycle=td_nac.cphf_max_cycle,
-        tol=td_nac.cphf_conv_tol)[0] # eq.(83) in Ref. [1]
+        tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp((z1ao + z1ao.T))
@@ -296,14 +318,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     TFvo = cp.dot(TIJvv, fock_mo[nocc:,:nocc])
     TFvv = cp.dot(TIJvv, fock_mo[nocc:,nocc:])
 
+    # W is calculated, eqs. (75)~(78) in Ref. [1]
+    # in which g_{IJ} (86) in Ref. [1] is calculated
     im0 = cp.zeros((nmo, nmo))
-    im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo, orbo))
-    im0[:nocc, :nocc]+= TFoo*2.0
-    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopI[nocc:, :nocc], xpyJ)
-    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momI[nocc:, :nocc], xmyJ)
-    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopJ[nocc:, :nocc], xpyI)
-    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momJ[nocc:, :nocc], xmyI)
-    im0[:nocc, :nocc]+=rIJoo.T*(EJ-EI)
+    im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo, orbo)) # 1st term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= TFoo*2.0 # 2nd term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopI[nocc:, :nocc], xpyJ) # 3rd term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momI[nocc:, :nocc], xmyJ) # 4th term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopJ[nocc:, :nocc], xpyI) # 5th term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momJ[nocc:, :nocc], xmyI) # 6th term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+=rIJoo.T*(EJ-EI) # only gamma^{IJ}(II) in Eq. (29) in Ref. [1] is considered.
 
     im0[:nocc, nocc:] = reduce(cp.dot, (orbo.T, veff0doo, orbv))
     im0[:nocc, nocc:]+= TFov*2.0
@@ -332,6 +356,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     im0[nocc:, :nocc]+= cp.dot(z1, fock_mo[:nocc,:nocc]*(EJ-EI))*0.25
     # 0.5 * 0.5 first is in the equation,
     # second 0.5 due to z1.
+    # The up parts are according to eqs. (75)~(78) in Ref. [1]
+    # * It should be noted that, the quadratic response part is omitted!
 
     im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
 
@@ -340,7 +366,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
     dmz1doo = z1aoS + dmzooIJ  # P
     oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
-    Wtilde = im0
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -348,7 +373,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = contract("xij,ij->xi", h1, dmz1doo)
-    ds = contract("xij,ij->xi", s1, (Wtilde + Wtilde.T))
+    ds = contract("xij,ij->xi", s1, (im0 + im0.T))
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if mol.has_ecp():
@@ -360,6 +385,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
+    # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
+    # thus minus the contribution from same DM ({D,D}, {P,P}).
     dvhf = td_nac.get_veff(mol, dmz1doo)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
@@ -374,10 +401,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
+    # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
+    # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
     dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
+    dvhf_all -= dvhf # NOTE: minus
     dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
@@ -409,7 +438,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ds_vv_etf = contract("xij,ji->xi", s1, rIJvvS_ao * (EJ - EI))
     dsxy = cp.asarray([cp.sum(ds_oo[:, p0:p1] + ds_vv[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     dsxy_etf = cp.asarray([cp.sum(ds_oo_etf[:, p0:p1] + ds_vv_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec 
+    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec  # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy 
     
@@ -446,12 +475,12 @@ class NAC(lib.StreamObject):
         self.stdout = td.stdout
         self.mol = td.mol
         self.base = td
-        self.states = (0, 1)  # of which the gradients to be computed.
+        self.states = (0, 1)  # between which the NACV to be computed. 0 means ground state.
         self.atmlst = None
-        self.de = None
-        self.de_scaled = None
-        self.de_etf = None
-        self.de_etf_scaled = None
+        self.de = None  # Known as CIS Force Matrix Element
+        self.de_scaled = None # CIS derivative coupling without ETF
+        self.de_etf = None 
+        self.de_etf_scaled = None # Knwon as CIS derivative coupling with ETF
 
     _write      = rhf_grad_cpu.GradientsBase._write
 
@@ -470,9 +499,10 @@ class NAC(lib.StreamObject):
         log.info("\n")
         return self
 
-    @lib.with_doc(get_nacv.__doc__)
-    def get_nacv(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
-        return get_nacv(self, x_yI, EI, singlet, atmlst, verbose)
+    @lib.with_doc(get_nacv_ge.__doc__)
+    def get_nacv_ge(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
+        return get_nacv_ge(self, x_yI, EI, singlet, atmlst, verbose)
+    @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
@@ -496,17 +526,21 @@ class NAC(lib.StreamObject):
             states = sorted(self.states)
             nstates = len(self.base.e)
             I, J = states
+            if I == J:
+                raise ValueError("I and J should be different.")
             if I < 0 or J < 0:
                 raise ValueError("Excited states ID should be non-negetive integers.")
             elif I > nstates or J > nstates:
                 raise ValueError(f"Excited state exceeds the number of states {nstates}.")
             elif I == 0:
+                logger.info(self, f"NACV between ground and excited state {J}.")
                 xy_I = self.base.xy[J-1]
                 E_I = self.base.e[J-1]
                 self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
+                    = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
                 self._finalize()
             else:
+                logger.info(self, f"NACV between excited state {I} and {J}.")
                 xy_I = self.base.xy[I-1]
                 E_I = self.base.e[I-1]
                 xy_J = self.base.xy[J-1]
