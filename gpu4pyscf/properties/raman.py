@@ -38,6 +38,7 @@ def polarizability_derivative_numerical_dx(mf, dx = 1e-3):
             mol_copy.build()
             mf.reset(mol_copy)
             mf.kernel()
+            assert mf.converged
             p_p = polarizability.eval_polarizability(mf)
 
             xyz_m = mol.atom_coords()
@@ -46,6 +47,7 @@ def polarizability_derivative_numerical_dx(mf, dx = 1e-3):
             mol_copy.build()
             mf.reset(mol_copy)
             mf.kernel()
+            assert mf.converged
             p_m = polarizability.eval_polarizability(mf)
 
             dpdx[i_atom, i_xyz, :, :] = (p_p - p_m) / (2 * dx)
@@ -95,6 +97,7 @@ def polarizability_derivative_numerical_dEdE(mf, dE = 2.5e-3):
                 mf.with_solvent.frozen_dm0_for_finite_difference_without_response = dm0
 
         mf.kernel()
+        assert mf.converged
         dm = mf.make_rdm1()
         gradient = mf.nuc_grad_method().kernel()
         gradient = cp.asarray(gradient)

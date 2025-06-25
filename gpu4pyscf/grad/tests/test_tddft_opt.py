@@ -45,6 +45,7 @@ class KnownValues(unittest.TestCase):
     def test_opt_rhf_tda(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA().set(nstates=3)
         td.kernel()
         td_cpu = td.to_cpu()
@@ -55,6 +56,7 @@ class KnownValues(unittest.TestCase):
     def test_opt_rks_tda(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA().set(nstates=3)
         td.kernel()
         td_cpu = td.to_cpu()
@@ -65,22 +67,25 @@ class KnownValues(unittest.TestCase):
     def test_opt_rks_tda_pcm_1(self):
         mf = dft.RKS(mol, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
         td.kernel()
         mol_gpu = optimize(td)
 
         mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu()
         mff.kernel()
+        assert mff.converged
         tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
         tdf.kernel()[0]
-        if bool(np.all(tdf.converged)):
-            excited_gradf = tdf.nuc_grad_method()
-            excited_gradf.kernel() 
-            assert np.linalg.norm(excited_gradf.de) < 2.0e-4
+        assert bool(np.all(tdf.converged))
+        excited_gradf = tdf.nuc_grad_method()
+        excited_gradf.kernel()
+        assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
     def test_opt_rks_tda_pcm_2(self):
         mf = dft.RKS(mol, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
         td.kernel()
 
@@ -89,12 +94,13 @@ class KnownValues(unittest.TestCase):
 
         mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu()
         mff.kernel()
+        assert mff.converged
         tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
         tdf.kernel()[0]
-        if bool(np.all(tdf.converged)):
-            excited_gradf = tdf.nuc_grad_method()
-            excited_gradf.kernel() 
-            assert np.linalg.norm(excited_gradf.de) < 2.0e-4
+        assert bool(np.all(tdf.converged))
+        excited_gradf = tdf.nuc_grad_method()
+        excited_gradf.kernel()
+        assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
 if __name__ == "__main__":
     print("Full Tests for geomtry optimization for excited states using TDHF or TDDFT.")
