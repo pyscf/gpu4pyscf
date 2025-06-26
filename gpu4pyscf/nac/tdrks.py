@@ -35,8 +35,10 @@ from pyscf.scf import _vhf
 from gpu4pyscf.nac import tdrhf
 
 
-def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
+def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     """
+    Calculate non-adiabatic coupling vectors between ground and excited states.
+    Now, only supports for singlet states.
     Only supports for ground-excited states.
     Ref:
     [1] 10.1063/1.4903986 main reference
@@ -207,9 +209,9 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
 
 class NAC(tdrhf.NAC):
 
-    @lib.with_doc(get_nacv.__doc__)
-    def get_nacv(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
-        return get_nacv(self, x_yI, EI, singlet, atmlst, verbose)
+    @lib.with_doc(get_nacv_ge.__doc__)
+    def get_nacv_ge(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
+        return get_nacv_ge(self, x_yI, EI, singlet, atmlst, verbose)
 
     as_scanner = NotImplemented
 

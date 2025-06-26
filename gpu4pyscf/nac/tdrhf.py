@@ -147,18 +147,8 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
 
-    offsetdic = mol.offset_nr_by_atom()
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
     yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
-    ds_x = contract("xij,ji->xi", s1, xIao*EI)
-    ds_y = contract("xij,ji->xi", s1, yIao*EI)
-    ds_x_etf = contract("xij,ij->xi", s1, (xIao*EI + xIao.T*EI) * 0.5)
-    ds_y_etf = contract("xij,ij->xi", s1, (yIao*EI + yIao.T*EI) * 0.5)
-    dsxy = cp.asarray([cp.sum(ds_x[:, p0:p1] + ds_y[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dsxy_etf = cp.asarray([cp.sum(ds_x_etf[:, p0:p1] + ds_y_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec 
-    de_etf = de + dsxy_etf
-    de += dsxy 
     ds_x = contract("xij,ji->xi", s1, xIao*EI)
     ds_y = contract("xij,ji->xi", s1, yIao*EI)
     ds_x_etf = contract("xij,ij->xi", s1, (xIao*EI + xIao.T*EI) * 0.5)
