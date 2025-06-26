@@ -15,7 +15,7 @@ namespace gpu4pyscf::gpbc::multi_grid {
 
 template <typename KernelType, int n_channels,
           int i_angular, int j_angular, bool is_non_orthogonal>
-__global__ void evaluate_density_kernel(
+__global__ static void evaluate_density_kernel(
     KernelType *density, const KernelType *density_matrices,
     const int *non_trivial_pairs, const int *i_shells, const int *j_shells,
     const int n_j_shells, const int *shell_to_ao_indices,
@@ -373,7 +373,7 @@ void evaluate_density_driver(
 
 template <typename KernelType, int n_channels, int i_angular, int j_angular,
           bool is_non_orthogonal>
-__global__ void evaluate_xc_kernel(
+__global__ static void evaluate_xc_kernel(
     KernelType *fock, const KernelType *xc_weights, const int *non_trivial_pairs,
     const int *i_shells, const int *j_shells, const int n_j_shells,
     const int *shell_to_ao_indices, const int n_i_functions,

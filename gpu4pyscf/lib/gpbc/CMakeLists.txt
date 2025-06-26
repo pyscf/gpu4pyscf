@@ -13,9 +13,13 @@
 # limitations under the License.
 
 #set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80 --ptxas-options=-v")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
 add_library(gpbc SHARED
         multi_grid/drivers.cu
+        multi_grid/screen.cu
+        multi_grid/eval_xc.cu
+        multi_grid/eval_xc_grad.cu
 )
 
 set_target_properties(gpbc PROPERTIES
