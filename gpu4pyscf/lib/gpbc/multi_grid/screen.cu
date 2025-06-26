@@ -18,7 +18,7 @@ extern "C" {
     count_non_trivial_pairs_kernel_macro(li, lj);                              \
     break
 
-void count_non_trivial_pairs(int *n_counts, const int i_angular,
+int count_non_trivial_pairs(int *n_counts, const int i_angular,
                              const int j_angular, const int *i_shells,
                              const int n_i_shells, const int *j_shells,
                              const int n_j_shells,
@@ -65,7 +65,7 @@ void count_non_trivial_pairs(int *n_counts, const int i_angular,
             i_angular, j_angular);
   }
 
-  checkCudaErrors(cudaPeekAtLastError());
+  return checkCudaErrors(cudaPeekAtLastError());
 }
 
 #define screen_gaussian_pairs_kernel_macro(li, lj)                             \
@@ -81,7 +81,7 @@ void count_non_trivial_pairs(int *n_counts, const int i_angular,
     screen_gaussian_pairs_kernel_macro(li, lj);                                \
     break
 
-void screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
+int screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
                            int *pairs_to_blocks_begin, int *pairs_to_blocks_end,
                            const int i_angular, const int j_angular,
                            const int *i_shells, const int n_i_shells,
@@ -132,12 +132,13 @@ void screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
             "screen_gaussian_pairs_kernel\n",
             i_angular, j_angular);
   }
-  checkCudaErrors(cudaPeekAtLastError());
+  int err = checkCudaErrors(cudaPeekAtLastError());
 
   checkCudaErrors(cudaFree(written_counts));
+  return err;
 }
 
-void count_pairs_on_blocks(int *n_pairs_per_block,
+int count_pairs_on_blocks(int *n_pairs_per_block,
                            const int *pairs_to_blocks_begin,
                            const int *pairs_to_blocks_end,
                            const int n_blocks[3], const int n_pairs) {
@@ -152,7 +153,7 @@ void count_pairs_on_blocks(int *n_pairs_per_block,
           n_pairs_per_block, pairs_to_blocks_begin, pairs_to_blocks_end,
           n_pairs);
 
-  checkCudaErrors(cudaPeekAtLastError());
+  return checkCudaErrors(cudaPeekAtLastError());
 }
 
 void put_pairs_on_blocks(int *pairs_on_blocks,

@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include "evaluation.cuh"
 
@@ -19,7 +21,7 @@ void update_dxyz_dabc(const double *dxyz_dabc_on_device) {
                      dxyz_dabc_on_device, 9 * sizeof(double));
 }
 
-void evaluate_density_driver(
+int evaluate_density_driver(
     void *density, const void *density_matrices, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
@@ -33,9 +35,10 @@ void evaluate_density_driver(
     const int *bas, const double *env, const int n_channels,
     const int is_non_orthogonal, const int use_float_precision) {
   if (use_float_precision) {
+#if 0
     if (is_non_orthogonal) {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, true>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, true>(
             (float *)density, (float *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -45,7 +48,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, true>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, true>(
             (float *)density, (float *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -55,7 +58,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
+        return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
             float, true>((float *)density, (float *)density_matrices, i_angular,
                          j_angular, non_trivial_pairs, i_shells, j_shells,
                          n_j_shells, shell_to_ao_indices, n_i_functions,
@@ -68,7 +71,7 @@ void evaluate_density_driver(
       }
     } else {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, false>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, false>(
             (float *)density, (float *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -78,7 +81,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, false>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, false>(
             (float *)density, (float *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -88,7 +91,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
+        return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
             float, false>(
             (float *)density, (float *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
@@ -100,10 +103,14 @@ void evaluate_density_driver(
             env, n_channels);
       }
     }
+#else
+    fprintf(stderr, "single precision not available\n");
+    return 1;
+#endif
   } else {
     if (is_non_orthogonal) {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, true>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, true>(
             (double *)density, (double *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -113,7 +120,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, true>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, true>(
             (double *)density, (double *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -123,7 +130,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
+        return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
             double, true>(
             (double *)density, (double *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
@@ -136,7 +143,7 @@ void evaluate_density_driver(
       }
     } else {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, false>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, false>(
             (double *)density, (double *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -146,7 +153,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, false>(
+        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, false>(
             (double *)density, (double *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
@@ -156,7 +163,7 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
+        return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
             double, false>(
             (double *)density, (double *)density_matrices, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,

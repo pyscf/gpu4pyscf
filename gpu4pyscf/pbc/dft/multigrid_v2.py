@@ -21,7 +21,7 @@ import cupyx.scipy.fft as fft
 import scipy
 
 import pyscf.pbc.gto as gto
-
+from pyscf import lib
 from pyscf.pbc.dft.multigrid import multigrid
 
 from pyscf.pbc.df.df_jk import _format_kpts_band
@@ -36,7 +36,15 @@ import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, load_library
 import gpu4pyscf.mpi as mpi
 
+__all__ = ['MultiGridNumInt']
+
 libgpbc = load_library("libgpbc")
+libgpbc.evaluate_density_driver.restype = ctypes.c_int
+libgpbc.evaluate_xc_driver.restype = ctypes.c_int
+libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int
+libgpbc.count_non_trivial_pairs.restype = ctypes.c_int
+libgpbc.screen_gaussian_pairs.restype = ctypes.c_int
+libgpbc.count_pairs_on_blocks.restype = ctypes.c_int
 
 
 def complex_type(dtype):
@@ -77,16 +85,34 @@ def image_pair_to_difference(
     image_difference_full = (
         translation_vectors[:, None, :] - translation_vectors[None, :, :]
     ).reshape(-1, 3)
-    difference_images, inverse = np.unique(
+    translation_vectors, inverse = np.unique(
         image_difference_full, axis=0, return_inverse=True
     )
 
-    # FIX: is it a bug?
     difference_images = translation_vectors @ lattice_vectors_cpu
 
     index = np.arange(len(difference_images))[inverse]
     return cp.asarray(difference_images), cp.asarray(index, dtype=cp.int32)
 
+def image_phase_for_kpts(cell, kpts=None, Ls=None):
+    if Ls is None:
+        Ls = cell.get_lattice_Ls(cell)
+    n_images = len(Ls)
+    if kpts is None or is_gamma_point(kpts):
+        phase_diff_among_images = cp.asarray([[1.0]])
+        image_pair_difference_index = cp.zeros((n_images, n_images), dtype=cp.int32)
+    else:
+        lattice_vectors = cell.lattice_vectors()
+        reciprocal_lattice_vectors = cp.linalg.inv(lattice_vectors).T
+        difference_images, image_pair_difference_index = image_pair_to_difference(
+            Ls,
+            lattice_vectors,
+            reciprocal_lattice_vectors,
+        )
+        phase_diff_among_images = cp.exp(
+            1j * cp.asarray(kpts.reshape(-1, 3)).dot(difference_images.T)
+        )
+    return phase_diff_among_images, image_pair_difference_index
 
 def count_non_trivial_pairs(
     i_angular,
@@ -104,7 +130,7 @@ def count_non_trivial_pairs(
     n_j_shells = len(j_shells)
     n_images = len(vectors_to_neighboring_images)
     n_pairs = cp.zeros(1, dtype=cp.int32)
-    libgpbc.count_non_trivial_pairs(
+    err = libgpbc.count_non_trivial_pairs(
         cast_to_pointer(n_pairs),
         ctypes.c_int(i_angular),
         ctypes.c_int(j_angular),
@@ -120,6 +146,8 @@ def count_non_trivial_pairs(
         cast_to_pointer(env),
         ctypes.c_double(threshold_in_log),
     )
+    if err != 0:
+        raise RuntimeError(f'count_non_trivial_pairs for li={i_angular} lj={j_angular} failed')
     return int(n_pairs[0])
 
 
@@ -154,7 +182,7 @@ def screen_gaussian_pairs(
     image_indices = cp.full(n_pairs, -1, dtype=cp.int32)
     pairs_to_blocks_begin = cp.full((3, n_pairs), -1, dtype=cp.int32)
     pairs_to_blocks_end = cp.full((3, n_pairs), -1, dtype=cp.int32)
-    libgpbc.screen_gaussian_pairs(
+    err = libgpbc.screen_gaussian_pairs(
         cast_to_pointer(screened_shell_pairs),
         cast_to_pointer(image_indices),
         cast_to_pointer(pairs_to_blocks_begin),
@@ -174,6 +202,8 @@ def screen_gaussian_pairs(
         cast_to_pointer(env),
         ctypes.c_double(threshold_in_log),
     )
+    if err != 0:
+        raise RuntimeError(f'screen_gaussian_pairs for li={i_angular} lj={j_angular} failed')
     return (
         screened_shell_pairs,
         image_indices,
@@ -187,13 +217,15 @@ def assign_pairs_to_blocks(
 ):
     n_blocks = np.prod(n_blocks_abc)
     n_pairs_on_blocks = cp.full(n_blocks + 1, 0, dtype=cp.int32)
-    libgpbc.count_pairs_on_blocks(
+    err = libgpbc.count_pairs_on_blocks(
         cast_to_pointer(n_pairs_on_blocks),
         cast_to_pointer(pairs_to_blocks_begin),
         cast_to_pointer(pairs_to_blocks_end),
         cast_to_pointer(n_blocks_abc),
         ctypes.c_int(n_pairs),
     )
+    if err != 0:
+        raise RuntimeError('count_pairs_on_blocks failed')
 
     n_contributing_blocks = int(n_pairs_on_blocks[-1])
     n_pairs_on_blocks = n_pairs_on_blocks[:-1]
@@ -226,9 +258,9 @@ def assign_pairs_to_blocks(
 
 
 def sort_gaussian_pairs(mydf, xc_type="LDA"):
-    log = logger.new_logger(mydf, mydf.verbose)
-    t0 = log.init_timer()
     cell = mydf.cell
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
     vol = cell.vol
     block_size = np.array([4, 4, 4])
     lattice_vectors = cp.asarray(cell.lattice_vectors())
@@ -285,21 +317,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
         # is super small, for example primitive diamond cell. Using the rcut defined
         # in the global cell can fix this.
         vectors_to_neighboring_images = cp.asarray(gto.eval_gto.get_lattice_Ls(cell))
-        n_images = len(vectors_to_neighboring_images)
 
-        if is_gamma_point(mydf.kpts):
-            phase_diff_among_images = cp.asarray([[1.0]])
-            image_pair_difference_index = cp.zeros((n_images, n_images), dtype=cp.int32)
-        else:
-            # FIX: using bvk cell
-            difference_images, image_pair_difference_index = image_pair_to_difference(
-                vectors_to_neighboring_images.get(),
-                lattice_vectors.get(),
-                reciprocal_lattice_vectors.get(),
-            )
-            phase_diff_among_images = cp.exp(
-                1j * cp.asarray(mydf.kpts.reshape(-1, 3)).dot(difference_images.T)
-            )
         if grids_diffused is None:
             grouped_cell = equivalent_cell_in_localized
             concatenated_coeff = scipy.linalg.block_diag(coeff_in_localized)
@@ -444,8 +462,6 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
                 "atm": atm,
                 "bas": bas,
                 "env": env,
-                "phase_diff_among_images": phase_diff_among_images,
-                "image_pair_difference_index": image_pair_difference_index,
                 "dxyz_dabc": dxyz_dabc,
                 "is_non_orthogonal": is_non_orthogonal,
             }
@@ -454,23 +470,27 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
     mydf.sorted_gaussian_pairs = pairs
 
     t0 = log.timer("sort_gaussian_pairs", *t0)
+    return mydf
 
 
-def evaluate_density_wrapper(pairs_info, dm_slice, ignore_imag=True):
+def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True):
     c_driver = libgpbc.evaluate_density_driver
     n_images = pairs_info["neighboring_images"].shape[0]
-    n_k_points, n_difference_images = pairs_info["phase_diff_among_images"].shape
+    phase_diff_among_images, image_pair_difference_index = img_phase
+    n_k_points, n_difference_images = phase_diff_among_images.shape
     if n_k_points == 1:
         density_matrix_with_translation = dm_slice
     else:
         density_matrix_with_translation = cp.einsum(
-            "kt, ikpq->itpq", pairs_info["phase_diff_among_images"], dm_slice
+            "kt, ikpq->itpq", phase_diff_among_images, dm_slice
         )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
 
-    if ignore_imag is False:
+    if not ignore_imag:
         raise NotImplementedError
+    else:
+        assert abs(density_matrix_with_translation.imag).max() > 1e-8
     density_matrix_with_translation_real_part = cp.asarray(
         density_matrix_with_translation.real, order="C"
     )
@@ -485,7 +505,7 @@ def evaluate_density_wrapper(pairs_info, dm_slice, ignore_imag=True):
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
 
-        c_driver(
+        err = c_driver(
             cast_to_pointer(density),
             cast_to_pointer(density_matrix_with_translation_real_part),
             ctypes.c_int(i_angular),
@@ -504,7 +524,7 @@ def evaluate_density_wrapper(pairs_info, dm_slice, ignore_imag=True):
             cast_to_pointer(gaussians_per_angular_pair["image_indices"]),
             cast_to_pointer(pairs_info["neighboring_images"]),
             ctypes.c_int(n_images),
-            cast_to_pointer(pairs_info["image_pair_difference_index"]),
+            cast_to_pointer(image_pair_difference_index),
             ctypes.c_int(n_difference_images),
             (ctypes.c_int * 3)(*pairs_info["mesh"]),
             cast_to_pointer(pairs_info["atm"]),
@@ -514,25 +534,15 @@ def evaluate_density_wrapper(pairs_info, dm_slice, ignore_imag=True):
             ctypes.c_int(pairs_info["is_non_orthogonal"]),
             use_float_precision,
         )
+        if err != 0:
+            raise RuntimeError(f'evaluate_density_driver for li={i_angular} lj={j_angular} failed')
 
     if mpi.comm.size > 1:
         mpi.comm.reduce(density, in_place=True)
 
     return density
 
-def _get_Gv(cell, mesh):
-    # Default, the 3D uniform grids
-    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
-    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
-    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
-    b = cp.asarray(cell.reciprocal_vectors())
-    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
-    Gv = (rx[:,None,None,None] * b[0] +
-          ry[:,None,None] * b[1]
-          rz[:,None] * b[2])
-    return Gv.reshape(-1, 3)
-
-def _evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=np.zeros((1, 3)), xc_type='LDA'):
+def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=np.zeros((1, 3)), xc_type='LDA'):
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     n_channels, n_k_points = dms.shape[:2]
@@ -595,7 +605,7 @@ def _evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=np.zeros((1, 3)), xc_type='L
 
         density = (
             evaluate_density_wrapper(
-                pairs, cp.asarray(coeff_sandwiched_density_matrix, dtype=mydf.dtype)
+                pairs, coeff_sandwiched_density_matrix
             )
             * weight_per_grid_point
         )
@@ -612,18 +622,19 @@ def _evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=np.zeros((1, 3)), xc_type='L
 
     density_on_g_mesh = density_on_g_mesh.reshape([n_channels, density_slices, -1])
     if xc_type != 'LDA':
-        density_on_g_mesh[:, 1:4] = _get_Gv(cell, mydf.mesh).T
+        density_on_g_mesh[:, 1:4] = tools._get_Gv(mydf.cell, mydf.mesh).T
         density_on_g_mesh[:, 1:4] *= density_on_g_mesh[:, :1] * 1j
     return density_on_g_mesh
 
 
-def evaluate_xc_wrapper(pairs_info, xc_weights):
+def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase):
     c_driver = libgpbc.evaluate_xc_driver
     n_i_functions = len(pairs_info["coeff_in_localized"])
     n_j_functions = len(pairs_info["concatenated_coeff"])
 
     n_channels = xc_weights.shape[0]
-    n_k_points, n_difference_images = pairs_info["phase_diff_among_images"].shape
+    phase_diff_among_images, image_pair_difference_index = img_phase
+    n_k_points, n_difference_images = phase_diff_among_images.shape
     n_images = pairs_info["neighboring_images"].shape[0]
 
     fock = cp.zeros(
@@ -641,7 +652,7 @@ def evaluate_xc_wrapper(pairs_info, xc_weights):
             dtype=xc_weights.dtype,
         )
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
-        c_driver(
+        err = c_driver(
             cast_to_pointer(fock_slice),
             cast_to_pointer(xc_weights),
             ctypes.c_int(i_angular),
@@ -660,7 +671,7 @@ def evaluate_xc_wrapper(pairs_info, xc_weights):
             cast_to_pointer(gaussians_per_angular_pair["image_indices"]),
             cast_to_pointer(pairs_info["neighboring_images"]),
             ctypes.c_int(n_images),
-            cast_to_pointer(pairs_info["image_pair_difference_index"]),
+            cast_to_pointer(image_pair_difference_index),
             ctypes.c_int(n_difference_images),
             cast_to_pointer(pairs_info["mesh"]),
             cast_to_pointer(pairs_info["atm"]),
@@ -671,16 +682,18 @@ def evaluate_xc_wrapper(pairs_info, xc_weights):
             use_float_precision,
         )
         fock += fock_slice
+        if err != 0:
+            raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
 
     if n_k_points > 1:
         return cp.einsum(
-            "kt, ntij -> nkij", pairs_info["phase_diff_among_images"], fock
+            "kt, ntij -> nkij", phase_diff_among_images, fock
         )
     else:
         return fock
 
 
-def _convert_xc_on_g_mesh_to_fock(
+def convert_xc_on_g_mesh_to_fock(
     mydf,
     xc_on_g_mesh,
     hermi=1,
@@ -688,6 +701,7 @@ def _convert_xc_on_g_mesh_to_fock(
 ):
     cell = mydf.cell
     n_k_points = len(kpts)
+    img_phase = image_phase_for_kpts(cell, kpts)
     nao = cell.nao_nr()
 
     xc_on_g_mesh = xc_on_g_mesh.reshape(-1, *mydf.mesh)
@@ -710,15 +724,13 @@ def _convert_xc_on_g_mesh_to_fock(
             pairs["fft_grid"][1][:, None],
             pairs["fft_grid"][2],
         ]
-        interpolated_xc = cp.asarray(
-            ifft_in_place(interpolated_xc).real, order="C", dtype=mydf.dtype
-        )
+        interpolated_xc = cp.asarray(ifft_in_place(interpolated_xc).real, order="C")
 
         n_ao_in_localized = len(pairs["ao_indices_in_localized"])
         libgpbc.update_dxyz_dabc(
             ctypes.cast(pairs["dxyz_dabc"].data.ptr, ctypes.c_void_p)
         )
-        fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc)
+        fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc, img_phase)
         fock_slice = cp.einsum("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
         fock_slice = cp.einsum("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
 
@@ -762,7 +774,7 @@ def _convert_xc_on_g_mesh_to_fock(
 
 
 def evaluate_xc_gradient_wrapper(
-    gradient, pairs_info, xc_weights, dm_slice, ignore_imag=True
+    gradient, pairs_info, xc_weights, dm_slice, img_phase, ignore_imag=True,
 ):
     c_driver = libgpbc.evaluate_xc_gradient_driver
 
@@ -775,13 +787,14 @@ def evaluate_xc_gradient_wrapper(
         use_float_precision = ctypes.c_int(0)
 
     n_images = pairs_info["neighboring_images"].shape[0]
-    n_k_points, n_difference_images = pairs_info["phase_diff_among_images"].shape
+    phase_diff_among_images, image_pair_difference_index = img_phase
+    n_k_points, n_difference_images = phase_diff_among_images.shape
 
     if n_k_points == 1:
         density_matrix_with_translation = dm_slice
     else:
         density_matrix_with_translation = cp.einsum(
-            "kt, ikpq -> itpq", pairs_info["phase_diff_among_images"], dm_slice
+            "kt, ikpq -> itpq", phase_diff_among_images, dm_slice
         )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
@@ -794,7 +807,7 @@ def evaluate_xc_gradient_wrapper(
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
-        c_driver(
+        err = c_driver(
             cast_to_pointer(gradient),
             cast_to_pointer(xc_weights),
             cast_to_pointer(density_matrix_with_translation_real_part),
@@ -814,7 +827,7 @@ def evaluate_xc_gradient_wrapper(
             cast_to_pointer(gaussians_per_angular_pair["image_indices"]),
             cast_to_pointer(pairs_info["neighboring_images"]),
             ctypes.c_int(n_images),
-            cast_to_pointer(pairs_info["image_pair_difference_index"]),
+            cast_to_pointer(image_pair_difference_index),
             ctypes.c_int(n_difference_images),
             cast_to_pointer(pairs_info["mesh"]),
             cast_to_pointer(pairs_info["atm"]),
@@ -824,6 +837,8 @@ def evaluate_xc_gradient_wrapper(
             ctypes.c_int(pairs_info["is_non_orthogonal"]),
             use_float_precision,
         )
+        if err != 0:
+            raise RuntimeError(f'evaluate_xc_gradient_driver for li={i_angular} lj={j_angular} failed')
 
 
 def convert_xc_on_g_mesh_to_fock_gradient(
@@ -839,11 +854,12 @@ def convert_xc_on_g_mesh_to_fock_gradient(
     n_atoms = cell.natm
 
     xc_on_g_mesh = xc_on_g_mesh.reshape(-1, *mydf.mesh)
+    img_phase = image_phase_for_kpts(cell, kpts)
 
     if hermi != 1:
         raise NotImplementedError
 
-    gradient = cp.zeros((n_atoms, 3), dtype=mydf.dtype)
+    gradient = cp.zeros((n_atoms, 3))
 
     for pairs in mydf.sorted_gaussian_pairs:
         interpolated_xc = xc_on_g_mesh[
@@ -853,9 +869,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             pairs["fft_grid"][2],
         ]
 
-        interpolated_xc = cp.asarray(
-            ifft_in_place(interpolated_xc).real, order="C", dtype=mydf.dtype
-        )
+        interpolated_xc = cp.asarray(ifft_in_place(interpolated_xc).real, order="C")
 
         density_matrix_slice = dms[
             :,
@@ -893,7 +907,8 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             gradient,
             pairs,
             interpolated_xc,
-            cp.asarray(coeff_sandwiched_density_matrix, dtype=mydf.dtype),
+            coeff_sandwiched_density_matrix,
+            img_phase,
             ignore_imag=True,
         )
 
@@ -902,30 +917,28 @@ def convert_xc_on_g_mesh_to_fock_gradient(
 
     return gradient
 
-#FIX: merge to multigrid_v1.get_pp
+#FIXME: merge to multigrid_v1.get_pp
 def get_nuc(mydf, kpts=None):
     kpts, is_single_kpt = _check_kpts(mydf, kpts)
     cell = mydf.cell
     mesh = mydf.mesh
     charge = cp.asarray(-cell.atom_charges())
-    Gv = cell.get_Gv(mesh)
+    Gv = tools._get_Gv(cell, mesh)
     SI = cp.asarray(cell.get_SI(Gv))
     rhoG = cp.dot(charge, SI)
 
     coulG = tools.get_coulG(cell, mesh=mesh, Gv=Gv)
     vneG = rhoG * coulG
     hermi = 1
-    vne = _convert_xc_on_g_mesh_to_fock(mydf, vneG, hermi, kpts)[0]
+    vne = convert_xc_on_g_mesh_to_fock(mydf, vneG, hermi, kpts)[0]
 
     if is_single_kpt:
         vne = vne[0]
     return vne
 
-#FIX: merge to multigrid_v1.get_pp
+#FIXME: merge to multigrid_v1.get_pp
 def get_pp(mydf, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
-
-    assert kpts is None or all(kpts == 0)
     is_single_kpt = False
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
@@ -939,7 +952,7 @@ def get_pp(mydf, kpts=None):
     # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
     vpplocG, vpplocG_part1 = multigrid_v1.eval_vpplocG(cell, mesh, cache_part1=True)
     mydf.vpplocG_part1 = vpplocG_part1
-    vpp = _convert_xc_on_g_mesh_to_fock(mydf, vpplocG, hermi=1, kpts=kpts)[0]
+    vpp = convert_xc_on_g_mesh_to_fock(mydf, vpplocG, hermi=1, kpts=kpts)[0]
     t1 = log.timer_debug1("vpploc", *t0)
 
     vppnl = pp_int.get_pp_nl(cell, kpts)
@@ -955,121 +968,53 @@ def get_pp(mydf, kpts=None):
     log.timer("get_pp", *t0)
     return vpp
 
-def _get_j_and_vxc(
-    ni,
-    xc_code,
-    dm_kpts,
-    hermi=1,
-    kpts=None,
-    kpts_band=None,
-    with_j=True, # Whether to include Coulomb in the Vxc matrix
-    return_j=False, # Compute J matrix only, ignore xc_code
-    verbose=None,
-):
-    # TODO: test against ni.kpts
-    if kpts is not None:
-        assert abs(ni.kpts - kpts).max() == 0
+def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
+    '''Get the Coulomb (J) AO matrix at sampled k-points.
 
-    log = logger.new_logger(ni, verbose)
-    t0 = log.init_timer()
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+            Density matrix at each k-point.  If a list of k-point DMs, eg,
+            UHF alpha and beta DM, the alpha and beta DMs are contracted
+            separately.
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        kpts_band : ``(3,)`` ndarray or ``(*,3)`` ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+
+    Returns:
+        vj : (nkpts, nao, nao) ndarray
+        or list of vj if the input dm_kpts is a list of DMs
+    '''
     cell = ni.cell
-    if return_j:
-        xc_type = ni._xc_type(xc_code)
-    else:
-        xc_type = 'LDA':
-
-    if xc_type == "LDA":
-        derivative_order = 0
-    elif xc_type == "GGA":
-        derivative_order = 1
-    else:
-        raise NotImplementedError
-    if ni.sorted_gaussian_pairs is None:
-        ni.build(xc_type)
-
+    log = logger.new_logger(cell)
+    t0 = log.init_timer()
     dm_kpts = cp.asarray(dm_kpts, order="C")
-    dms = fft_jk._format_dms(dm_kpts, kpts)
+    dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
-
     mesh = ni.mesh
     ngrids = np.prod(mesh)
 
-    density = _evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
+    density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts)
+    Gv = tools._get_Gv(cell, mesh)
+    coulomb_kernel_on_g_mesh = tools.get_coulG(cell, Gv=Gv)
 
     coulomb_on_g_mesh = cp.einsum(
-        "ng, g -> g", density[:, 0], ni.coulomb_kernel_on_g_mesh
+        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
     )
-
-    coulomb_energy = 0.5 * cp.einsum(
-        "ng,g->", density[:, 0].real, coulomb_on_g_mesh.real
-    )
-    coulomb_energy += 0.5 * cp.einsum(
-        "ng,g->", density[:, 0].imag, coulomb_on_g_mesh.imag
-    )
-    coulomb_energy /= cell.vol
-
-    log.debug("Multigrid Coulomb energy %s", coulomb_energy)
-    t0 = log.timer("coulomb", *t0)
     weight = cell.vol / ngrids
 
-    density = density.reshape(-1, *mesh) / weight
+    density = density.reshape(-1, *mesh)
     # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
     # computing rhoR with IFFT, the weight factor is not needed.
-    density = cp.asarray(
-        ifft_in_place(density).real.reshape(nset, -1, ngrids),
-        order="C",
-        dtype=ni.dtype,
-    )
+    density = ifft_in_place(density).real.reshape(nset, -1, ngrids)
+    density /= weight
 
-    if return_j:
-        xc_for_fock = _convert_xc_on_g_mesh_to_fock(ni, coulomb_on_g_mesh, hermi, kpts_band)
-        return _format_jks(xc_for_fock, dm_kpts, input_band, kpts)
-
-    n_electrons = density[:, 0].sum() * weight
-
-    if nset == 1:
-        xc_for_energy, xc_for_fock = numerical_integrator.eval_xc_eff(
-            xc_code, density[0], deriv=1, xctype=xc_type
-        )[:2]
-    else:
-        xc_for_energy, xc_for_fock = numerical_integrator.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xc_type
-        )[:2]
-
-    xc_energy_sum = (density[:, 0] * xc_for_energy.flatten()).sum() * weight
-
-    xc_for_fock = xc_for_fock.reshape(-1, *mesh) * weight
-
-    # To reduce the memory usage, we reuse the xc_for_fock name.
-    # Now xc_for_fock represents xc on G space
-    xc_for_fock = fft_in_place(xc_for_fock).reshape(nset, -1, ngrids)
-
-    log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
-
-    if xc_type != "LDA":
-        xc_for_fock = (
-            xc_for_fock[:, 0]
-            - contract("ngp, pg -> np", xc_for_fock[:, 1:4], _get_Gv(cell, mesh)) * 1j
-        )
-        xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
-
-    if with_j:
-        xc_for_fock[:, 0] += coulomb_on_g_mesh
-
-    xc_for_fock = _convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band)
-
-    xc_for_fock = xc_for_fock.reshape(dm_kpts.shape)
-    t0 = log.timer("xc", *t0)
-
-    xc_for_fock = tag_array(
-        xc_for_fock,
-        ecoul=coulomb_energy,
-        exc=xc_energy_sum,
-        vj=None,
-        vk=None,
-    )
-    return n_electrons, xc_energy_sum, xc_for_fock
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    #?ni.copy().reset().build()
+    xc_for_fock = convert_xc_on_g_mesh_to_fock(ni, coulomb_on_g_mesh, hermi, kpts_band)
+    t0 = log.timer("vj", *t0)
+    return _format_jks(xc_for_fock, dm_kpts, input_band, kpts)
 
 def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
            kpts=None, kpts_band=None, with_j=False, verbose=None):
@@ -1093,7 +1038,69 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    raise NotImplementedError
+    cell = ni.cell
+    log = logger.new_logger(cell, verbose)
+    t0 = log.init_timer()
+    xc_type = ni._xc_type(xc_code)
+    if ni.sorted_gaussian_pairs is None:
+        ni.build(xc_type)
+
+    dm_kpts = cp.asarray(dm_kpts, order="C")
+    dms = _format_dms(dm_kpts, kpts)
+    nset = dms.shape[0]
+    assert nset == 1
+
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+
+    density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
+    rho_sf = density[0, 0]
+
+    Gv = tools._get_Gv(cell, mesh)
+    coulomb_kernel_on_g_mesh = tools.get_coulG(cell, Gv=Gv)
+    coulomb_on_g_mesh = rho_sf * coulomb_kernel_on_g_mesh
+    coulomb_energy = 0.5 * rho_sf.conj().dot(coulomb_on_g_mesh).real
+    coulomb_energy /= cell.vol
+    log.debug("Multigrid Coulomb energy %s", coulomb_energy)
+    t0 = log.timer("coulomb", *t0)
+    weight = cell.vol / ngrids
+
+    density = ifft_in_place(density.reshape(-1, *mesh)).real.reshape(-1, ngrids)
+    n_electrons = density[0].sum()
+    density /= weight
+
+    # eval_xc_eff supports float64 only
+    density = cp.asarray(density, dtype=np.float64)
+    xc_for_energy, xc_for_fock = ni.eval_xc_eff(
+        xc_code, density, deriv=1, xctype=xc_type
+    )[:2]
+
+    rho_sf = density[0].real
+    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel())) * weight
+
+    # To reduce the memory usage, we reuse the xc_for_fock name.
+    # Now xc_for_fock represents xc on G space
+    xc_for_fock *= weight
+    xc_for_fock = fft_in_place(xc_for_fock.reshape(-1, *mesh)).reshape(-1, ngrids)
+
+    log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
+
+    if xc_type != "LDA":
+        xc_for_fock = (
+            xc_for_fock[0]
+            - contract("gp, pg -> p", xc_for_fock[1:4], Gv) * 1j
+        )
+        xc_for_fock = xc_for_fock.reshape((-1, ngrids))
+
+    if with_j:
+        xc_for_fock[0] += coulomb_on_g_mesh
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band)
+    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum, vj=None, vk=None)
+    t0 = log.timer("xc", *t0)
+    return n_electrons, xc_energy_sum, veff
 
 # Note nr_uks handles only one set of KUKS density matrices (alpha, beta) in
 # each call (nr_rks supports multiple sets of KRKS density matrices)
@@ -1119,41 +1126,92 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    raise NotImplementedError
+    cell = ni.cell
+    log = logger.new_logger(cell, verbose)
+    t0 = log.init_timer()
+    xc_type = ni._xc_type(xc_code)
+    if ni.sorted_gaussian_pairs is None:
+        ni.build(xc_type)
+
+    dm_kpts = cp.asarray(dm_kpts, order="C")
+    dms = _format_dms(dm_kpts, kpts)
+    nset = dms.shape[0]
+    assert nset == 2
+
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+
+    density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
+    rho_sf = density[0, 0] + density[1, 0]
+
+    Gv = tools._get_Gv(cell, mesh)
+    coulomb_kernel_on_g_mesh = tools.get_coulG(cell, Gv=Gv)
+    coulomb_on_g_mesh = rho_sf * coulomb_kernel_on_g_mesh
+    coulomb_energy = 0.5 * rho_sf.conj().dot(coulomb_on_g_mesh).real
+    coulomb_energy /= cell.vol
+    log.debug("Multigrid Coulomb energy %s", coulomb_energy)
+    t0 = log.timer("coulomb", *t0)
+    weight = cell.vol / ngrids
+
+    density = density.reshape(-1, *mesh)
+    density = ifft_in_place(density).real.reshape(nset, -1, ngrids)
+    n_electrons = density[:, 0].sum()
+    density /= weight
+
+    # eval_xc_eff supports float64 only
+    density = cp.asarray(density, dtype=np.float64)
+    xc_for_energy, xc_for_fock = ni.eval_xc_eff(
+        xc_code, density, deriv=1, xctype=xc_type
+    )[:2]
+
+    rho_sf = (density[0, 0] + density[1, 0]).real
+    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel())) * weight
+
+    # To reduce the memory usage, we reuse the xc_for_fock name.
+    # Now xc_for_fock represents xc on G space
+    xc_for_fock *= weight
+    xc_for_fock = fft_in_place(xc_for_fock.reshape(-1, *mesh)).reshape(nset, -1, ngrids)
+
+    log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
+
+    if xc_type != "LDA":
+        xc_for_fock = (
+            xc_for_fock[:, 0]
+            - contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
+        )
+        xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
+
+    if with_j:
+        xc_for_fock[:, 0] += coulomb_on_g_mesh
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band)
+    veff = _format_jks(veff, dm_kpts, input_band, kpts)
+    veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum, vj=None, vk=None)
+    t0 = log.timer("xc", *t0)
+    return n_electrons, xc_energy_sum, veff
 
 def get_rho(ni, dm, kpts=None):
     '''Density in real space
     '''
-    raise NotImplementedError
+    cell = ni.cell
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+    density = evaluate_density_on_g_mesh(ni, dm, kpts)
+    weight = cell.vol / ngrids
+    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+    # computing rhoR with IFFT, the weight factor is not needed.
+    rhoR = ifft_in_place(density.reshape(-1, *mesh)).real / weight
+    return rhoR.reshape(-1, ngrids)
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
-    def __init__(
-        self,
-        cell,
-        kpts=np.zeros((1, 3)),
-        xc="LDA",
-        use_float_precision=False,
-    ):
+    def __init__(self, cell):
         self.cell = cell
         self.mesh = cell.mesh
-        self.kpts = None
-        if use_float_precision:
-            self.dtype = cp.float32
-        else:
-            self.dtype = cp.float64
-
         self.tasks = None
         self.sorted_gaussian_pairs = None
 
-#?        self.gradient_vector_on_g_mesh = None
-#?        if xc_type == "GGA":
-#?            self.gradient_vector_on_g_mesh = cp.asarray(cell.get_Gv(self.mesh)).T
-#?
-#?        self.coulomb_kernel_on_g_mesh = tools.get_coulG(cell, mesh=self.mesh)
-
-    def build(self, xc_type='LDA'):
-        sort_gaussian_pairs(self, xc_type)
-        return self
+    build = sort_gaussian_pairs
 
     def reset(self, cell=None):
         if cell is not None:
