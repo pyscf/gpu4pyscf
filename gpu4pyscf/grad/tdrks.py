@@ -288,7 +288,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
 # dmvo, dmoo in AO-representation
 # Note spin-trace is applied for fxc, kxc
-def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_kxc=True, singlet=True):
+def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, 
+            with_vxc=True, with_kxc=True, singlet=True, with_nac=False, dmvo_2=None):
     mol = td_grad.mol
     mf = td_grad.base._scf
     grids = mf.grids
@@ -389,11 +390,28 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
             if with_vxc:
                 fmat_(_sorted_mol, v1ao, ao, vxc * weight, mask, shls_slice, ao_loc)
             if with_kxc:
-                tmp = contract("yg,xyzg->xzg", rho1, kxc)
-                tmp = contract("zg,xzg->xg", rho1, tmp)
-                wv = contract("xg,g->xg", tmp, weight)
-                tmp = None
-                fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
+                if with_nac:
+                    assert dmvo_2 is not None
+                    dmvo_2 = (dmvo_2 + dmvo_2.T) * 0.5  # because K_{ia,jb} == K_{ia,bj}
+                    dmvo_2 = opt.sort_orbitals(dmvo_2, axis=[0, 1])
+                    dmvo_2_mask = dmvo_2[mask[:, None], mask]
+                    rho_dmvo_2 = (
+                        ni.eval_rho(_sorted_mol, ao0, dmvo_2_mask, mask, xctype, hermi=1, with_lapl=False) * 2
+                    )  # *2 for alpha + beta
+                    if xctype == "LDA":
+                        rho_dmvo_2 = rho_dmvo_2[cp.newaxis].copy()
+                    tmp = contract("yg,xyzg->xzg", rho1, kxc)
+                    tmp = contract("zg,xzg->xg", rho_dmvo_2, tmp)
+                    wv = contract("xg,g->xg", tmp, weight)
+                    tmp = None
+                    fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
+                else:
+                    assert dmvo_2 is None
+                    tmp = contract("yg,xyzg->xzg", rho1, kxc)
+                    tmp = contract("zg,xzg->xg", rho1, tmp)
+                    wv = contract("xg,g->xg", tmp, weight)
+                    tmp = None
+                    fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
     else:
         for ao, mask, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
             if xctype == "LDA":
