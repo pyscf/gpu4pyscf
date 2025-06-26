@@ -328,6 +328,10 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
     if with_kxc:
         k1ao = cp.zeros((4, nao, nao))
         deriv = 3
+        if with_nac:
+            assert dmvo_2 is not None
+            dmvo_2 = (dmvo_2 + dmvo_2.T) * 0.5  # because K_{ia,jb} == K_{ia,bj}
+            dmvo_2 = opt.sort_orbitals(dmvo_2, axis=[0, 1])
     else:
         k1ao = None
 
@@ -391,9 +395,6 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
                 fmat_(_sorted_mol, v1ao, ao, vxc * weight, mask, shls_slice, ao_loc)
             if with_kxc:
                 if with_nac:
-                    assert dmvo_2 is not None
-                    dmvo_2 = (dmvo_2 + dmvo_2.T) * 0.5  # because K_{ia,jb} == K_{ia,bj}
-                    dmvo_2 = opt.sort_orbitals(dmvo_2, axis=[0, 1])
                     dmvo_2_mask = dmvo_2[mask[:, None], mask]
                     rho_dmvo_2 = (
                         ni.eval_rho(_sorted_mol, ao0, dmvo_2_mask, mask, xctype, hermi=1, with_lapl=False) * 2
@@ -406,7 +407,6 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
                     tmp = None
                     fmat_(_sorted_mol, k1ao, ao, wv, mask, shls_slice, ao_loc)
                 else:
-                    assert dmvo_2 is None
                     tmp = contract("yg,xyzg->xzg", rho1, kxc)
                     tmp = contract("zg,xzg->xg", rho1, tmp)
                     wv = contract("xg,g->xg", tmp, weight)

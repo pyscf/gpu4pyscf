@@ -362,15 +362,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         wvo += contract("ac,ai->ci", veff0momJ[nocc:, nocc:], xmyI) * 2
         # The up parts are according to eq. (86) and (86) in Ref. [1]
     else:
-        vj0IJ = mf.get_j(mol, dmzooIJ, hermi=0)
-        vj1I = mf.get_j(mol, (dmxpyI + dmxpyI.T), hermi=0)
-        vj1J = mf.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
+        vj0IJ = mf.get_j(mol, dmzooIJ, hermi=1)
+        vj1I = mf.get_j(mol, (dmxpyI + dmxpyI.T), hermi=1)
+        vj1J = mf.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=1)
         if not isinstance(vj0IJ, cp.ndarray):
             vj0IJ = cp.asarray(vj0IJ)
         if not isinstance(vj1I, cp.ndarray):
             vj1I = cp.asarray(vj1I)
         if not isinstance(vj1J, cp.ndarray):
             vj1J = cp.asarray(vj1J)
+
         veff0doo = vj0IJ * 2 + f1ooIJ[0] + k1aoIJ[0] * 2
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         veffI = vj1I * 2 + f1voI[0] * 2
@@ -566,10 +567,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         dvhf_all -= dvhf
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
-    veff1_0 = vxc1[1:]
-    veff1_1 = (f1ooIJ[1:] + fxcz1[1:] + k1aoIJ[1:] * 2) * 2
-    veff1_2I = f1voI[1:] * 2
-    veff1_2J = f1voJ[1:] * 2
+    veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
+    # First two terms from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
+    # Final term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
+    veff1_1 = f1ooIJ[1:] + fxcz1[1:] + k1aoIJ[1:] * 2 
+    veff1_2I = f1voI[1:] # term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
+    veff1_2J = f1voJ[1:] # term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
 
     delec = dh_td*2 - ds
     aoslices = mol.aoslice_by_atom()
