@@ -1,26 +1,13 @@
+#include <gint/cuda_alloc.cuh>
+#include <gint/gint.h>
 #include <stdio.h>
 
 #include "evaluation.cuh"
 
 extern "C" {
-void update_lattice_vectors(const double *lattice_vectors_on_device,
-                            const double *reciprocal_lattice_vectors_on_device,
-                            const double *reciprocal_norm_on_device) {
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::lattice_vectors,
-                     lattice_vectors_on_device, 9 * sizeof(double));
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::reciprocal_lattice_vectors,
-                     reciprocal_lattice_vectors_on_device, 9 * sizeof(double));
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::reciprocal_norm,
-                     reciprocal_norm_on_device, 3 * sizeof(double));
-}
 
-void update_dxyz_dabc(const double *dxyz_dabc_on_device) {
-  cudaMemcpyToSymbol(gpu4pyscf::gpbc::multi_grid::dxyz_dabc,
-                     dxyz_dabc_on_device, 9 * sizeof(double));
-}
-
-void evaluate_density_driver(
-    void *density, const void *density_matrices, const int i_angular,
+void evaluate_xc_driver(
+    void *fock, const void *xc_weights, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
     const int n_i_functions, const int n_j_functions,
@@ -35,8 +22,8 @@ void evaluate_density_driver(
   if (use_float_precision) {
     if (is_non_orthogonal) {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, true>(
-            (float *)density, (float *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<float, 1, true>(
+            (float *)fock, (float *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -45,8 +32,8 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, true>(
-            (float *)density, (float *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<float, 2, true>(
+            (float *)fock, (float *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -55,21 +42,21 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
-            float, true>((float *)density, (float *)density_matrices, i_angular,
-                         j_angular, non_trivial_pairs, i_shells, j_shells,
-                         n_j_shells, shell_to_ao_indices, n_i_functions,
-                         n_j_functions, sorted_pairs_per_local_grid,
-                         accumulated_n_pairs_per_local_grid, sorted_block_index,
-                         n_contributing_blocks, image_indices,
-                         vectors_to_neighboring_images, n_images,
-                         image_pair_difference_index, n_difference_images, mesh,
-                         atm, bas, env, n_channels);
+        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_xc_driver<float,
+                                                                         true>(
+            (float *)fock, (float *)xc_weights, i_angular, j_angular,
+            non_trivial_pairs, i_shells, j_shells, n_j_shells,
+            shell_to_ao_indices, n_i_functions, n_j_functions,
+            sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+            sorted_block_index, n_contributing_blocks, image_indices,
+            vectors_to_neighboring_images, n_images,
+            image_pair_difference_index, n_difference_images, mesh, atm, bas,
+            env, n_channels);
       }
     } else {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 1, false>(
-            (float *)density, (float *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<float, 1, false>(
+            (float *)fock, (float *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -78,8 +65,8 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<float, 2, false>(
-            (float *)density, (float *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<float, 2, false>(
+            (float *)fock, (float *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -88,9 +75,9 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
-            float, false>(
-            (float *)density, (float *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_xc_driver<float,
+                                                                         false>(
+            (float *)fock, (float *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -103,8 +90,8 @@ void evaluate_density_driver(
   } else {
     if (is_non_orthogonal) {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, true>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<double, 1, true>(
+            (double *)fock, (double *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -113,8 +100,8 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, true>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<double, 2, true>(
+            (double *)fock, (double *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -123,9 +110,9 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
-            double, true>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_xc_driver<double,
+                                                                         true>(
+            (double *)fock, (double *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -136,8 +123,8 @@ void evaluate_density_driver(
       }
     } else {
       if (n_channels == 1) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, false>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<double, 1, false>(
+            (double *)fock, (double *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -146,8 +133,8 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else if (n_channels == 2) {
-        gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, false>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::evaluate_xc_driver<double, 2, false>(
+            (double *)fock, (double *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
@@ -156,9 +143,9 @@ void evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
-        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
-            double, false>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
+        gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_xc_driver<double,
+                                                                         false>(
+            (double *)fock, (double *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
             shell_to_ao_indices, n_i_functions, n_j_functions,
             sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
