@@ -439,7 +439,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
 class NAC(lib.StreamObject):
 
-    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 20)
+    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 50)
     cphf_conv_tol = getattr(__config__, "grad_tdrhf_Gradients_cphf_conv_tol", 1e-8)
 
     to_cpu = utils.to_cpu
@@ -469,7 +469,7 @@ class NAC(lib.StreamObject):
         self.atmlst = None
         self.de = None  # Known as CIS Force Matrix Element
         self.de_scaled = None # CIS derivative coupling without ETF
-        self.de_etf = None 
+        self.de_etf = None  # CIS Force Matrix Element with ETF
         self.de_etf_scaled = None # Knwon as CIS derivative coupling with ETF
 
     _write      = rhf_grad_cpu.GradientsBase._write
