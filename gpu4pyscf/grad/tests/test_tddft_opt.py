@@ -28,18 +28,27 @@ H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
 
+atom_near_conv = """
+O  -0.000000  -0.000000   0.391241
+H  -0.000000  -1.283134   0.391326
+H  -0.000000   1.283134   0.391326
+"""
+
 bas0 = "631g"
 
 def setUpModule():
-    global mol
+    global mol, mol_near_conv
     mol = pyscf.M(
         atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
+    mol_near_conv = pyscf.M(
+        atom=atom_near_conv, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
 
 
 def tearDownModule():
-    global mol
+    global mol, mol_near_conv
     mol.stdout.close()
-    del mol
+    mol_near_conv.stdout.close()
+    del mol, mol_near_conv
 
 class KnownValues(unittest.TestCase):
     def test_opt_rhf_tda(self):
@@ -65,7 +74,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
     def test_opt_rks_tda_pcm_1(self):
-        mf = dft.RKS(mol, xc='b3lyp').PCM().to_gpu()
+        mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
         assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
@@ -83,7 +92,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
     def test_opt_rks_tda_pcm_2(self):
-        mf = dft.RKS(mol, xc='b3lyp').PCM().to_gpu()
+        mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
         assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)

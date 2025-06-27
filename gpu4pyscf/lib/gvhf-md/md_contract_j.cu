@@ -84,7 +84,11 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
-        task_ij0 < task_kl0) {
+        // when ij pattern and kl pattern are identical, the 8-fold permutation
+        // symmetry can be utilized. Tiles on in the upper triangular part can
+        // be skipped. If the last ij task (task_ij0+bsizex-1) is greater than
+        // the first kl task (task_kl0), tile is completely inside the triu part.
+        task_ij0+bsizex <= task_kl0) {
         return;
     }
 
@@ -233,8 +237,8 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             if (task_kl0 >= npairs_kl) {
                 continue;
             }
-            if (pair_ij_mapping == pair_kl_mapping) {
-                if (task_ij0 < task_kl0) continue;
+            if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
+                continue;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
