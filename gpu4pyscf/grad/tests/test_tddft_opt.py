@@ -39,9 +39,9 @@ bas0 = "631g"
 def setUpModule():
     global mol, mol_near_conv
     mol = pyscf.M(
-        atom=atom, basis=bas0, max_memory=32000, verbose=3)
+        atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
     mol_near_conv = pyscf.M(
-        atom=atom_near_conv, basis=bas0, max_memory=32000, verbose=3)
+        atom=atom_near_conv, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
 
 
 def tearDownModule():
