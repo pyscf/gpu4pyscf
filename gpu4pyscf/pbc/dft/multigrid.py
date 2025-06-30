@@ -1327,8 +1327,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                           for _ in range(nc)])
         return sandwich_dot(mat, c2s)
 
-    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None,
-              omega=None, exxdiv='ewald'):
+    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None, omega=None):
         if kpts is not None:
             raise NotImplementedError
         vj = get_j_kpts(self, dm, hermi, kpts, kpts_band)
