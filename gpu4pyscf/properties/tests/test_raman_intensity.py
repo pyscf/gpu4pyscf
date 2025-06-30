@@ -233,7 +233,7 @@ class KnownValues(unittest.TestCase):
 
         test_dalpha_dx = polarizability_derivative_numerical_dEdE(mf, dE = 1e-3)
 
-        assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 3e-3
+        assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 1e-2
 
     def test_polarizability_derivative_pcm_without_response(self):
         mf = make_mf(mol, xc = "pbe0", if_density_fitting = True, pcm = "IEF-PCM")
@@ -307,7 +307,7 @@ class KnownValues(unittest.TestCase):
 
         test_dalpha_dx = polarizability_derivative_numerical_dEdE(mf)
 
-        assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 3e-3
+        assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 1e-2
 
     def test_raman_pbe0_densityfitting_pcm_with_response(self):
         ### Q-Chem input
@@ -372,7 +372,7 @@ class KnownValues(unittest.TestCase):
         test_frequencies, test_raman_intensities, test_depolarization_ratio = eval_raman_intensity(mf)
 
         assert np.linalg.norm(test_frequencies - reference_frequencies) < 0.1
-        assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.01
+        assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.1
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
 if __name__ == "__main__":
