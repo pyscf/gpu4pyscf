@@ -190,6 +190,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
 
     equal2boundary = None
     if wrap_around and abs(k).sum() > 1e-9:
+        raise NotImplementedError
         equal2boundary = np.zeros(Gv.shape[0], dtype=bool)
         # Here we 'wrap around' the high frequency k+G vectors into their lower
         # frequency counterparts.  Important if you want the gamma point and k-point
