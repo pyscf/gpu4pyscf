@@ -134,6 +134,12 @@ if(BUILD_GDFT)
   add_subdirectory(gdft)
 endif()
 
+option(BUILD_GPBC "Using gpbc" ON)
+if(BUILD_GPBC)
+  add_subdirectory(gpbc)
+endif()
+
+
 option(BUILD_CUPY_HELPER "Using cupy_helper" ON)
 if(BUILD_CUPY_HELPER)
   add_subdirectory(cupy_helper)

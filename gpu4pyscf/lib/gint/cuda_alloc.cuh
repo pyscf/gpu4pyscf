@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include <cuda_runtime.h>
 
 // copy from samples/common/inc/helper_cuda.h

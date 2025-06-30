@@ -719,7 +719,7 @@ def get_nuc(ni, kpts=None):
         vne = vne[0]
     return vne
 
-def eval_vpplocG(cell, mesh):
+def eval_vpplocG(cell, mesh, cache_part1=False):
     '''PRB, 58, 3641 Eq (5) first term
     '''
     assert cell.dimension != 2
@@ -787,7 +787,10 @@ def eval_vpplocG(cell, mesh):
     vlocG_part1 *= tools.get_coulG(cell, Gv=Gv)
     vlocG_part1[0] -= vlocG0
     vlocG += vlocG_part1
-    return vlocG
+    if cache_part1:
+        return vlocG, vlocG_part1
+    else:
+        return vlocG
 
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
