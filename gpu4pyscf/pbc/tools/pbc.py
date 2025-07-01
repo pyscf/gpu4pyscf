@@ -104,7 +104,7 @@ def _get_Gv(cell, mesh):
     b = cp.asarray(cell.reciprocal_vectors())
     #:Gv = lib.cartesian_prod(Gvbase).dot(b)
     Gv = (rx[:,None,None,None] * b[0] +
-          ry[:,None,None] * b[1]
+          ry[:,None,None] * b[1] +
           rz[:,None] * b[2])
     return Gv.reshape(-1, 3)
 
@@ -188,34 +188,6 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     else:
         kG = Gv
 
-    equal2boundary = None
-    if wrap_around and abs(k).sum() > 1e-9:
-        raise NotImplementedError
-        equal2boundary = np.zeros(Gv.shape[0], dtype=bool)
-        # Here we 'wrap around' the high frequency k+G vectors into their lower
-        # frequency counterparts.  Important if you want the gamma point and k-point
-        # answers to agree
-        b = cell.reciprocal_vectors()
-        box_edge = np.einsum('i,ij->ij', np.asarray(mesh)//2+0.5, b)
-        assert (all(np.linalg.solve(box_edge.T, k).round(9).astype(int)==0))
-        reduced_coords = np.linalg.solve(box_edge.T, kG.T).T.round(9)
-        on_edge = reduced_coords.astype(int)
-        if cell.dimension >= 1:
-            equal2boundary |= reduced_coords[:,0] == 1
-            equal2boundary |= reduced_coords[:,0] ==-1
-            kG[on_edge[:,0]== 1] -= 2 * box_edge[0]
-            kG[on_edge[:,0]==-1] += 2 * box_edge[0]
-        if cell.dimension >= 2:
-            equal2boundary |= reduced_coords[:,1] == 1
-            equal2boundary |= reduced_coords[:,1] ==-1
-            kG[on_edge[:,1]== 1] -= 2 * box_edge[1]
-            kG[on_edge[:,1]==-1] += 2 * box_edge[1]
-        if cell.dimension == 3:
-            equal2boundary |= reduced_coords[:,2] == 1
-            equal2boundary |= reduced_coords[:,2] ==-1
-            kG[on_edge[:,2]== 1] -= 2 * box_edge[2]
-            kG[on_edge[:,2]==-1] += 2 * box_edge[2]
-
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0
 
@@ -248,8 +220,16 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     else:
         raise NotImplementedError(f'dimension={cell.dimension}')
 
-    if equal2boundary is not None:
-        coulG[equal2boundary] = 0
+    if wrap_around and abs(k).sum() > 1e-9:
+        # Here we 'wrap around' the high frequency k+G vectors into their lower
+        # frequency counterparts.  Important if you want the gamma point and k-point
+        # answers to agree
+        b = cell.reciprocal_vectors()
+        box_edge = np.einsum('i,ij->ij', np.asarray(mesh)//2+0.5, b)
+        assert (all(np.linalg.solve(box_edge.T, k).round(9).astype(int)==0))
+        reduced_coords = np.linalg.solve(box_edge.T, kG.T).T.round(9)
+        on_edge = abs(reduced_coords.astype(int)) == 1
+        coulG[on_edge[:,0] | on_edge[:,1] | on_edge[:,2]] = 0
 
     # Scale the coulG kernel for attenuated Coulomb integrals.
     # * kwarg omega is used by RangeSeparatedJKBuilder which requires ewald probe charge

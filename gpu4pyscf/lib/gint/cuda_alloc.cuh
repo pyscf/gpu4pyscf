@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <stdio.h>
 #include <cuda_runtime.h>
 
 // copy from samples/common/inc/helper_cuda.h

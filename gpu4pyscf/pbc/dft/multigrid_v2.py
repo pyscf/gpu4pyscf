@@ -31,7 +31,7 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.lib import logger, utils
-from gpu4pyscf.pbc import tools
+from gpu4pyscf.pbc.tools import pbc as pbc_tools
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, load_library
 import gpu4pyscf.mpi as mpi
@@ -96,7 +96,7 @@ def image_pair_to_difference(
 
 def image_phase_for_kpts(cell, kpts=None, Ls=None):
     if Ls is None:
-        Ls = cell.get_lattice_Ls(cell)
+        Ls = gto.eval_gto.get_lattice_Ls(cell)
     n_images = len(Ls)
     if kpts is None or is_gamma_point(kpts):
         phase_diff_among_images = cp.asarray([[1.0]])
@@ -263,20 +263,20 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
     t0 = log.init_timer()
     vol = cell.vol
     block_size = np.array([4, 4, 4])
-    lattice_vectors = cp.asarray(cell.lattice_vectors())
-    off_diagonal = lattice_vectors - cp.diag(lattice_vectors.diagonal())
-    is_non_orthogonal = cp.any(cp.abs(off_diagonal) > 1e-10)
+    lattice_vectors = cell.lattice_vectors()
+    off_diagonal = lattice_vectors - np.diag(lattice_vectors.diagonal())
+    is_non_orthogonal = np.any(np.abs(off_diagonal) > 1e-10)
     if is_non_orthogonal:
         is_non_orthogonal = 1
     else:
         is_non_orthogonal = 0
-    reciprocal_lattice_vectors = cp.asarray(cp.linalg.inv(lattice_vectors).T, order="C")
+    reciprocal_lattice_vectors = np.asarray(np.linalg.inv(lattice_vectors.T), order="C")
 
-    reciprocal_norms = cp.linalg.norm(reciprocal_lattice_vectors, axis=1)
+    reciprocal_norms = np.linalg.norm(reciprocal_lattice_vectors, axis=1)
     libgpbc.update_lattice_vectors(
-        ctypes.cast(lattice_vectors.data.ptr, ctypes.c_void_p),
-        ctypes.cast(reciprocal_lattice_vectors.data.ptr, ctypes.c_void_p),
-        ctypes.cast(reciprocal_norms.data.ptr, ctypes.c_void_p),
+        lattice_vectors.ctypes,
+        reciprocal_lattice_vectors.ctypes,
+        reciprocal_norms.ctypes
     )
 
     tasks = getattr(mydf, "tasks", None)
@@ -302,7 +302,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
             )
         )
 
-        dxyz_dabc = cp.asarray((lattice_vectors.T / cp.asarray(mesh)).T)
+        dxyz_dabc = lattice_vectors / mesh[:,None]
         n_blocks_abc = np.asarray(np.ceil(mesh / block_size), dtype=cp.int32)
         equivalent_cell_in_localized, coeff_in_localized = (
             subcell_in_localized_region.decontract_basis(to_cart=True, aggregate=True)
@@ -599,9 +599,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=np.zeros((1, 3)), xc_type='LD
             pairs["concatenated_coeff"],
         )
 
-        libgpbc.update_dxyz_dabc(
-            ctypes.cast(pairs["dxyz_dabc"].data.ptr, ctypes.c_void_p)
-        )
+        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
 
         density = (
             evaluate_density_wrapper(
@@ -622,7 +620,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=np.zeros((1, 3)), xc_type='LD
 
     density_on_g_mesh = density_on_g_mesh.reshape([n_channels, density_slices, -1])
     if xc_type != 'LDA':
-        density_on_g_mesh[:, 1:4] = tools._get_Gv(mydf.cell, mydf.mesh).T
+        density_on_g_mesh[:, 1:4] = pbc_tools._get_Gv(mydf.cell, mydf.mesh).T
         density_on_g_mesh[:, 1:4] *= density_on_g_mesh[:, :1] * 1j
     return density_on_g_mesh
 
@@ -701,7 +699,8 @@ def convert_xc_on_g_mesh_to_fock(
 ):
     cell = mydf.cell
     n_k_points = len(kpts)
-    img_phase = image_phase_for_kpts(cell, kpts)
+    img_phase = image_phase_for_kpts(
+        cell, kpts, mydf.sorted_gaussian_pairs[0]["neighboring_images"])
     nao = cell.nao_nr()
 
     xc_on_g_mesh = xc_on_g_mesh.reshape(-1, *mydf.mesh)
@@ -727,9 +726,7 @@ def convert_xc_on_g_mesh_to_fock(
         interpolated_xc = cp.asarray(ifft_in_place(interpolated_xc).real, order="C")
 
         n_ao_in_localized = len(pairs["ao_indices_in_localized"])
-        libgpbc.update_dxyz_dabc(
-            ctypes.cast(pairs["dxyz_dabc"].data.ptr, ctypes.c_void_p)
-        )
+        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
         fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc, img_phase)
         fock_slice = cp.einsum("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
         fock_slice = cp.einsum("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
@@ -901,7 +898,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             pairs["concatenated_coeff"],
         )
 
-        libgpbc.update_dxyz_dabc(cast_to_pointer(pairs["dxyz_dabc"]))
+        libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
 
         evaluate_xc_gradient_wrapper(
             gradient,
@@ -918,41 +915,38 @@ def convert_xc_on_g_mesh_to_fock_gradient(
     return gradient
 
 #FIXME: merge to multigrid_v1.get_pp
-def get_nuc(mydf, kpts=None):
-    kpts, is_single_kpt = _check_kpts(mydf, kpts)
-    cell = mydf.cell
-    mesh = mydf.mesh
-    charge = cp.asarray(-cell.atom_charges())
-    Gv = tools._get_Gv(cell, mesh)
-    SI = cp.asarray(cell.get_SI(Gv))
-    rhoG = cp.dot(charge, SI)
-
-    coulG = tools.get_coulG(cell, mesh=mesh, Gv=Gv)
-    vneG = rhoG * coulG
+def get_nuc(ni, kpts=None):
+    if ni.sorted_gaussian_pairs is None:
+        ni.build()
+    kpts, is_single_kpt = _check_kpts(ni, kpts)
+    cell = ni.cell
+    mesh = ni.mesh
+    vneG = multigrid_v1.eval_nucG(cell, mesh)
+    Gv = pbc_tools._get_Gv(cell, mesh)
+    vneG *= pbc_tools.get_coulG(cell, mesh=mesh, Gv=Gv)
     hermi = 1
-    vne = convert_xc_on_g_mesh_to_fock(mydf, vneG, hermi, kpts)[0]
+    vne = convert_xc_on_g_mesh_to_fock(ni, vneG, hermi, kpts)[0]
 
     if is_single_kpt:
         vne = vne[0]
     return vne
 
 #FIXME: merge to multigrid_v1.get_pp
-def get_pp(mydf, kpts=None):
+def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
-    is_single_kpt = False
-    if kpts is None or kpts.ndim == 1:
-        is_single_kpt = True
-    kpts = np.zeros((1, 3))
+    if ni.sorted_gaussian_pairs is None:
+        ni.build()
+    kpts, is_single_kpt = _check_kpts(ni, kpts)
 
-    cell = mydf.cell
+    cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    mesh = mydf.mesh
+    mesh = ni.mesh
     # Compute the vpplocG as
     # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
     vpplocG, vpplocG_part1 = multigrid_v1.eval_vpplocG(cell, mesh, cache_part1=True)
-    mydf.vpplocG_part1 = vpplocG_part1
-    vpp = convert_xc_on_g_mesh_to_fock(mydf, vpplocG, hermi=1, kpts=kpts)[0]
+    ni.vpplocG_part1 = vpplocG_part1
+    vpp = convert_xc_on_g_mesh_to_fock(ni, vpplocG, hermi=1, kpts=kpts)[0]
     t1 = log.timer_debug1("vpploc", *t0)
 
     vppnl = pp_int.get_pp_nl(cell, kpts)
@@ -996,8 +990,8 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     ngrids = np.prod(mesh)
 
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts)
-    Gv = tools._get_Gv(cell, mesh)
-    coulomb_kernel_on_g_mesh = tools.get_coulG(cell, Gv=Gv)
+    Gv = pbc_tools._get_Gv(cell, mesh)
+    coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
 
     coulomb_on_g_mesh = cp.einsum(
         "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
@@ -1010,8 +1004,9 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     density = ifft_in_place(density).real.reshape(nset, -1, ngrids)
     density /= weight
 
+    #if kpts_band is not None:
+    #    ni = ni.copy().reset().build()
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
-    #?ni.copy().reset().build()
     xc_for_fock = convert_xc_on_g_mesh_to_fock(ni, coulomb_on_g_mesh, hermi, kpts_band)
     t0 = log.timer("vj", *t0)
     return _format_jks(xc_for_fock, dm_kpts, input_band, kpts)
@@ -1056,8 +1051,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
     rho_sf = density[0, 0]
 
-    Gv = tools._get_Gv(cell, mesh)
-    coulomb_kernel_on_g_mesh = tools.get_coulG(cell, Gv=Gv)
+    Gv = pbc_tools._get_Gv(cell, mesh)
+    coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
     coulomb_on_g_mesh = rho_sf * coulomb_kernel_on_g_mesh
     coulomb_energy = 0.5 * rho_sf.conj().dot(coulomb_on_g_mesh).real
     coulomb_energy /= cell.vol
@@ -1144,8 +1139,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
     rho_sf = density[0, 0] + density[1, 0]
 
-    Gv = tools._get_Gv(cell, mesh)
-    coulomb_kernel_on_g_mesh = tools.get_coulG(cell, Gv=Gv)
+    Gv = pbc_tools._get_Gv(cell, mesh)
+    coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
     coulomb_on_g_mesh = rho_sf * coulomb_kernel_on_g_mesh
     coulomb_energy = 0.5 * rho_sf.conj().dot(coulomb_on_g_mesh).real
     coulomb_energy /= cell.vol
@@ -1205,8 +1200,9 @@ def get_rho(ni, dm, kpts=None):
     return rhoR.reshape(-1, ngrids)
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
-    def __init__(self, cell):
+    def __init__(self, cell, kpts=None):
         self.cell = cell
+        self.kpts = kpts
         self.mesh = cell.mesh
         self.tasks = None
         self.sorted_gaussian_pairs = None
