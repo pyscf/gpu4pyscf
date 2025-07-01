@@ -16,12 +16,9 @@ import pyscf
 import numpy as np
 import unittest
 import pytest
-from pyscf import scf, dft, tdscf
+from pyscf import dft
 from pyscf.geomopt.geometric_solver import optimize
-import gpu4pyscf
-from gpu4pyscf import scf as gpu_scf
 import gpu4pyscf.tdscf.ris as ris
-from packaging import version
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
