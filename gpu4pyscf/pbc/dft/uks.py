@@ -30,8 +30,7 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.dft import uks as mol_uks
 from gpu4pyscf.pbc.dft import rks
-from gpu4pyscf.pbc.dft import multigrid
-from gpu4pyscf.pbc.dft import multi_grid
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
@@ -47,10 +46,13 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     mem_avail = get_avail_mem()
     log.debug1('available GPU memory for rks.get_veff: %.3f GB', mem_avail/1e9)
 
+    if dm.ndim == 2:  # RHF DM
+        dm = cp.repeat(dm[None]*.5, 2, axis=0)
+
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if isinstance(ni, multigrid.MultiGridNumInt):
+    if isinstance(ni, (multigrid_v2.MultiGridNumInt, multigrid.MultiGridNumInt)):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_uks(
@@ -78,38 +80,6 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                    cp.einsum('ij,ji->', dm[1], vk[1])).real * .5
         log.timer('veff', *t0)
         return vxc
-
-    if isinstance(ks.with_df, multi_grid.FFTDF):
-        if ks.do_nlc():
-            raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
-        n, exc, vxc = multi_grid.get_veff(ks.with_df, ks.xc, dm, hermi,
-                                          kpt.reshape(1, 3), kpts_band,
-                                          with_j=True, return_j=False)
-        logger.info(ks, 'nelec by numeric integration = %s', n)
-        t0 = logger.timer(ks, 'veff', *t0)
-        if hybrid:
-            omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-            if omega == 0:
-                vk = ks.with_df.get_k(dm, hermi, kpt, kpts_band)
-                vk *= hyb
-            elif alpha == 0: # LR=0, only SR exchange
-                vk = ks.with_df.get_k(dm, hermi, kpt, kpts_band, omega=-omega)
-                vk *= hyb
-            elif hyb == 0: # SR=0, only LR exchange
-                vk = ks.with_df.get_k(dm, hermi, kpt, kpts_band, omega=omega)
-                vk *= alpha
-            else: # SR and LR exchange with different ratios
-                vk = ks.with_df.get_k(dm, hermi, kpt, kpts_band)
-                vk *= hyb
-                vklr = ks.with_df.get_k(dm, hermi, kpt, kpts_band, omega=omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vxc -= vk * .5
-            exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
-        return vxc
-
-    if dm.ndim == 2:  # RHF DM
-        dm = cp.repeat(dm[None]*.5, 2, axis=0)
 
     # ndim = 3 : dm.shape = ([alpha,beta], nao, nao)
     ground_state = (dm.ndim == 3 and dm.shape[0] == 2 and kpts_band is None)

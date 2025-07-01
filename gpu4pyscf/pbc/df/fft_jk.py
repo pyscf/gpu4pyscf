@@ -343,7 +343,12 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     return vk
 
 def _format_dms(dm_kpts, kpts):
-    nkpts = len(kpts)
+    if kpts is None:
+        nkpts = 1
+    elif kpts.ndim == 1:
+        nkpts = 1
+    else:
+        nkpts = len(kpts)
     nao = dm_kpts.shape[-1]
     dms = dm_kpts.reshape(-1,nkpts,nao,nao)
     assert dms.dtype in (np.double, np.complex128)
@@ -365,10 +370,16 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
             if dm_kpts.ndim < 3: # RHF dm
                 v_kpts = v_kpts[0]
         else:
+            if kpts is None:
+                nkpts = 1
+            elif kpts.ndim == 1:
+                nkpts = 1
+            else:
+                nkpts = len(kpts)
             assert kpts.ndim == 2
             assert dm_kpts.ndim >= 3
             if dm_kpts.ndim == 3: # KRHF dms
-                assert len(dm_kpts) == len(kpts)
+                assert len(dm_kpts) == nkpts
                 v_kpts = v_kpts[0]
             else:  # KUHF dms
                 assert v_kpts.shape[1] == len(kpts_band)
