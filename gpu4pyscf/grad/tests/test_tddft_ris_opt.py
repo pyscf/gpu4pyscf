@@ -57,7 +57,7 @@ class KnownValues(unittest.TestCase):
         tdf_ris = ris.TDDFT(mf=mff, nstates=5, spectra=False, single=False, GS=True)
         tdf_ris.conv_tol = 1.0E-4
         tdf_ris.Ktrunc = 0.0
-        output = tdf_ris.kernel()
+        tdf_ris.kernel()
         excited_gradf_ris = tdf_ris.nuc_grad_method()
         excited_gradf_ris.kernel()
         assert np.linalg.norm(excited_gradf_ris.de) < 3.0e-4
@@ -80,7 +80,7 @@ class KnownValues(unittest.TestCase):
         tdf_ris = ris.TDDFT(mf=mff, nstates=5, spectra=False, single=False, GS=True)
         tdf_ris.conv_tol = 1.0E-4
         tdf_ris.Ktrunc = 0.0
-        output = tdf_ris.kernel()
+        tdf_ris.kernel()
         excited_gradf_ris = tdf_ris.nuc_grad_method()
         excited_gradf_ris.kernel()
         assert np.linalg.norm(excited_gradf_ris.de) < 3.0e-4
