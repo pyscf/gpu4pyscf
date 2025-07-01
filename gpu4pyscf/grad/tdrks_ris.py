@@ -16,16 +16,14 @@
 from functools import reduce
 import cupy as cp
 import numpy as np
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.grad import tdrhf as tdrhf_df
-from gpu4pyscf.dft import numint,rks
-from pyscf.dft.numint import NumInt as numint_cpu
+from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
@@ -319,6 +317,67 @@ def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omeg
     return vhf
 
 
+def as_scanner(td_grad, state=1):
+    '''Generating a nuclear gradients scanner/solver (for geometry optimizer).
+    The returned solver is a function. This function requires one argument
+    "mol" as input and returns energy and first order nuclear derivatives.
+    The solver will automatically use the results of last calculation as the
+    initial guess of the new calculation.  All parameters assigned in the
+    nuc-grad object and SCF object (DIIS, conv_tol, max_memory etc) are
+    automatically applied in the solver.
+    Note scanner has side effects.  It may change many underlying objects
+    (_scf, with_df, with_x2c, ...) during calculation.
+    '''
+    if isinstance(td_grad, lib.GradScanner):
+        return td_grad
+
+    if state == 0:
+        return td_grad.base._scf.nuc_grad_method().as_scanner()
+
+    logger.info(td_grad, 'Create scanner for %s', td_grad.__class__)
+    name = td_grad.__class__.__name__ + TDSCF_GradScanner.__name_mixin__
+    return lib.set_class(TDSCF_GradScanner(td_grad, state),
+                         (TDSCF_GradScanner, td_grad.__class__), name)
+
+
+class TDSCF_GradScanner(lib.GradScanner):
+    _keys = {'e_tot'}
+
+    def __init__(self, g, state):
+        lib.GradScanner.__init__(self, g)
+        if state is not None:
+            self.state = state
+
+    def __call__(self, mol_or_geom, state=None, **kwargs):
+        if isinstance(mol_or_geom, gto.MoleBase):
+            assert mol_or_geom.__class__ == gto.Mole
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+        self.reset(mol)
+
+        if state is None:
+            state = self.state
+        else:
+            self.state = state
+
+        td_scanner = self.base
+        td_scanner(mol)
+        assert td_scanner.device == 'gpu'
+        assert self.device == 'gpu'
+        # TODO: Check root flip.  Maybe avoid the initial guess in TDHF otherwise
+        # large error may be found in the excited states amplitudes
+        de = self.kernel(state=state, **kwargs)
+        e_tot = self.e_tot[state-1]
+        return e_tot, de
+
+    @property
+    def converged(self):
+        td_scanner = self.base
+        return all((td_scanner._scf.converged,
+                    td_scanner.converged[self.state]))
+
+
 class Gradients(tdrhf.Gradients):
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
@@ -367,6 +426,8 @@ class Gradients(tdrhf.Gradients):
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, theta, singlet, atmlst=None, verbose=logger.info):
         return grad_elec(self, xy, theta, singlet=singlet, atmlst=atmlst, verbose=self.verbose)
+
+    as_scanner = as_scanner
 
 
 Grad = Gradients
