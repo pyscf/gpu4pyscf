@@ -20,6 +20,10 @@ from pyscf import lib
 from pyscf.pbc import gto
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.dft import multigrid as multigrid_cpu
+if hasattr(multigrid_cpu, 'MultiGridNumInt'):
+    MultiGridNumInt_cpu = multigrid_cpu.MultiGridNumInt
+else:
+    MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
 
@@ -52,19 +56,19 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_get_pp(self):
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_pp()
+        ref = MultiGridNumInt_cpu(cell_orth).get_pp()
         out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_nuc(self):
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_nuc()
+        ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
     def test_get_nuc_kpts(self):
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_nuc(kpts)
+        ref = MultiGridNumInt_cpu(cell_orth).get_nuc(kpts)
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc(kpts).get()
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
@@ -74,7 +78,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(2)
         dm = np.random.random((nao,nao)) - .5
         dm = dm.dot(dm.T)
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_rho(dm)
+        ref = MultiGridNumInt_cpu(cell_orth).get_rho(dm)
         out = multigrid.MultiGridNumInt(cell_orth).get_rho(dm).get()
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
@@ -82,7 +86,7 @@ class KnownValues(unittest.TestCase):
         nao = cell_orth.nao
         np.random.seed(2)
         dm = np.random.random((nao,nao)) - .5
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_jk(dm[None], with_k=False)[0]
+        ref = MultiGridNumInt_cpu(cell_orth).get_jk(dm[None], with_k=False)[0]
         out = multigrid.MultiGridNumInt(cell_orth).get_j(dm).get()
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
@@ -94,7 +98,10 @@ class KnownValues(unittest.TestCase):
         dm = dm.dot(dm.T)
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
-        n0, exc0, ref = multigrid_cpu.nr_rks(multigrid_cpu.MultiGridFFTDF(pcell), xc, dm, with_j=True)
+        if hasattr(multigrid_cpu, 'nr_rks'):
+            n0, exc0, ref = multigrid_cpu.nr_rks(MultiGridNumInt_cpu(pcell), xc, dm, with_j=True)
+        else:
+            n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_rks(pcell, None, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
         self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
         self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
@@ -108,7 +115,10 @@ class KnownValues(unittest.TestCase):
         dm = dm.dot(dm.T)
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
-        n0, exc0, ref = multigrid_cpu.nr_rks(multigrid_cpu.MultiGridFFTDF(pcell), xc, dm, with_j=True)
+        if hasattr(multigrid_cpu, 'nr_rks'):
+            n0, exc0, ref = multigrid_cpu.nr_rks(MultiGridNumInt_cpu(pcell), xc, dm, with_j=True)
+        else:
+            n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_rks(pcell, None, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
         self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
         self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
@@ -177,28 +187,4 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")
-    #unittest.main()
-    setUpModule()
-    cell_orth = gto.M(
-        verbose = 7,
-        output = '/dev/null',
-        a = np.diag([3.6, 3.2, 4.5]),
-        atom = '''C     0.      0.      0.
-                  C     1.8     1.8     1.8   ''',
-        #basis = 'gth-dzv',
-        basis = ('gth-dzv', [[3, [2., 1.]], [4, [1., 1.]]]),
-        pseudo = 'gth-pade',
-        precision = 1e-9,
-    )
-    if 1:
-        #from gpu4pyscf.pbc.dft import multi_grid as multigrid
-        #out = multigrid.FFTDF(cell_orth).get_nuc().get()
-        #exit()
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_nuc()
-        out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
-        print(out.shape, ref.shape)
-        print(abs(ref-out).max(), 0, 8)
-    if 0:
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_pp()
-        out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
-        print(abs(ref-out).max(), 0, 8)
+    unittest.main()

@@ -62,22 +62,26 @@ template <int angular>
 __device__ double gaussian_summation_cutoff(const double exponent,
                                             const double prefactor_in_log,
                                             const double threshold_in_log) {
-  constexpr int l = angular + 1;
-  constexpr double approximate_factor = (l + 4) / 2.0;
+// rho[r-Rp] = ci*cj * exp(-theta*(ri-rj)**2) * r**lij * exp(-aij*r**2)
+//           ~= ovlp * r**lij * exp(-aij*r**2)
+// log(ovlp) ~= log(ci*cj) - theta*(ri-rj)**2
+//           ~= log_cicj + prefactor_in_log
+// radius can be solved using fixed iteration
+// radius = (log(ovlp/precision * radius**(lij+l_inc)) / aij)**.5
+// where l_inc = 0 (LDA), 1 (GGA), 2 (MGGA)
   constexpr double log_r = 2.302585092994046; // log(10)
-  const double log_of_doubled_exponents = log(2 * exponent);
+  const double log_of_doubled_exponents = log(2 * exponent); // for derivative
+  const double log_aij = log(exponent) * 1.5;
+  constexpr int l_inc = 1; // TODO: input l_inc for LDA or Coulomb potential
+  // approximate log(ci * cj) for primitive Gaussians functions |i> and |j>
+  // ci ~= sqrt((2*ai)^((li+3)/2) * \Gamma((li+3)/2) * (2li+1)/4pi)
+  //    ~ (2*ai)^((li+3)/4) * ~1
+  // approximate log(ci * cj) by the larger normalization coefficient ~= log(ci)
+  // TODO: consider the basis contraction coefficients
+  double log_cicj = (angular+3)*.25 * log_of_doubled_exponents;
 
-  double approximated_log_of_sum;
-  if ((l + 1) * log_r + log_of_doubled_exponents > 1) {
-    approximated_log_of_sum = -approximate_factor * log_of_doubled_exponents;
-  } else {
-    approximated_log_of_sum =
-        approximate_factor * log_r - log_of_doubled_exponents;
-  }
-  approximated_log_of_sum += prefactor_in_log - threshold_in_log;
-  if (approximated_log_of_sum < exponent) {
-    approximated_log_of_sum = prefactor_in_log - threshold_in_log;
-  }
+  double approximated_log_of_sum = (angular + l_inc) * log_r + log_of_doubled_exponents;
+  approximated_log_of_sum += prefactor_in_log + log_cicj - threshold_in_log;
   if (approximated_log_of_sum < 0) {
     approximated_log_of_sum = 0;
   }
@@ -139,7 +143,7 @@ __global__ void count_non_trivial_pairs_kernel(
   const double ij_exponent = i_exponent + j_exponent;
   const double ij_exponent_in_prefactor =
       i_exponent * j_exponent / ij_exponent *
-      distance_squared<double>(i_x - j_x, i_y - j_y, i_z - j_z);
+      distance_squared(i_x - j_x, i_y - j_y, i_z - j_z);
 
   if (ij_exponent_in_prefactor > EIJ_CUTOFF) {
     is_valid_pair = false;
