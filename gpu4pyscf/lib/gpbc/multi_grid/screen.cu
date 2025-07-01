@@ -27,8 +27,8 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
                              const int *atm, const int *bas, const double *env,
                              const double threshold_in_log) {
   dim3 block_size(16, 16);
-  dim3 block_grid(n_i_shells * n_images / 16 + 1,
-                  n_j_shells * n_images / 16 + 1);
+  dim3 block_grid((n_i_shells * n_images + 15) / 16,
+                  (n_j_shells * n_images + 15) / 16);
   const int mesh_a = mesh[0];
   const int mesh_b = mesh[1];
   const int mesh_c = mesh[2];
@@ -92,8 +92,8 @@ int screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
                            const int *bas, const double *env,
                            const double threshold_in_log) {
   dim3 block_size(16, 16);
-  dim3 block_grid(n_i_shells * n_images / 16 + 1,
-                  n_j_shells * n_images / 16 + 1);
+  dim3 block_grid((n_i_shells * n_images + 15) / 16,
+                  (n_j_shells * n_images + 15) / 16);
   const int mesh_a = mesh[0];
   const int mesh_b = mesh[1];
   const int mesh_c = mesh[2];

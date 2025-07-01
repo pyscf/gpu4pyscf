@@ -177,4 +177,28 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")
-    unittest.main()
+    #unittest.main()
+    setUpModule()
+    cell_orth = gto.M(
+        verbose = 7,
+        output = '/dev/null',
+        a = np.diag([3.6, 3.2, 4.5]),
+        atom = '''C     0.      0.      0.
+                  C     1.8     1.8     1.8   ''',
+        #basis = 'gth-dzv',
+        basis = ('gth-dzv', [[3, [2., 1.]], [4, [1., 1.]]]),
+        pseudo = 'gth-pade',
+        precision = 1e-9,
+    )
+    if 1:
+        #from gpu4pyscf.pbc.dft import multi_grid as multigrid
+        #out = multigrid.FFTDF(cell_orth).get_nuc().get()
+        #exit()
+        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_nuc()
+        out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
+        print(out.shape, ref.shape)
+        print(abs(ref-out).max(), 0, 8)
+    if 0:
+        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_pp()
+        out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
+        print(abs(ref-out).max(), 0, 8)

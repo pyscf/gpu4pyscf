@@ -1274,8 +1274,9 @@ class MGridEnvVars(ctypes.Structure):
 
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
-    def __init__(self, cell):
+    def __init__(self, cell, kpts=None):
         self.cell = cell
+        self.kpts = kpts
         self.mesh = cell.mesh
         # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
         # primitive GTOs in the super-mole.
