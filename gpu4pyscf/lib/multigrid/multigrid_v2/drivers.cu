@@ -47,7 +47,7 @@ void update_dxyz_dabc(const double *dxyz_dabc_on_device) {
 }
 
 int evaluate_density_driver(
-    void *density, const void *density_matrices, const int i_angular,
+    double *density, double *density_matrices, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
     const int n_i_functions, const int n_j_functions,
@@ -57,7 +57,7 @@ int evaluate_density_driver(
     const int *image_indices, const double *vectors_to_neighboring_images,
     const int n_images, const int *image_pair_difference_index,
     const int n_difference_images, const int *mesh, const int *atm,
-    const int *bas, const double *env, const int n_channels,
+    const int *bas, const double *env, int n_channels,
     const int is_non_orthogonal, const int use_float_precision) {
   if (use_float_precision) {
 #if 0
@@ -133,73 +133,72 @@ int evaluate_density_driver(
     return 1;
 #endif
   } else {
-    if (is_non_orthogonal) {
-      if (n_channels == 1) {
-        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, true>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
-            non_trivial_pairs, i_shells, j_shells, n_j_shells,
-            shell_to_ao_indices, n_i_functions, n_j_functions,
-            sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
-            sorted_block_index, n_contributing_blocks, image_indices,
-            vectors_to_neighboring_images, n_images,
-            image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
-      } else if (n_channels == 2) {
-        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, true>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
-            non_trivial_pairs, i_shells, j_shells, n_j_shells,
-            shell_to_ao_indices, n_i_functions, n_j_functions,
-            sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
-            sorted_block_index, n_contributing_blocks, image_indices,
-            vectors_to_neighboring_images, n_images,
-            image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
+    size_t size_dm = (size_t)n_i_functions * n_j_functions * n_difference_images;
+    size_t ngrids = (size_t)mesh[0] * mesh[1] * mesh[2];
+    int err;
+    while (n_channels > 0) {
+      if (is_non_orthogonal) {
+        if (n_channels == 1 || i_angular + j_angular >= 6) {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, true>(
+              (double *)density, (double *)density_matrices, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          density -= ngrids;
+          density_matrices -= size_dm;
+          n_channels -= 1;
+        } else {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, true>(
+              (double *)density, (double *)density_matrices, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          density -= ngrids * 2;
+          density_matrices -= size_dm * 2;
+          n_channels -= 2;
+        }
       } else {
-        return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
-            double, true>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
-            non_trivial_pairs, i_shells, j_shells, n_j_shells,
-            shell_to_ao_indices, n_i_functions, n_j_functions,
-            sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
-            sorted_block_index, n_contributing_blocks, image_indices,
-            vectors_to_neighboring_images, n_images,
-            image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env, n_channels);
+        if (n_channels == 1 || i_angular + j_angular >= 6) {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, false>(
+              (double *)density, (double *)density_matrices, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          density -= ngrids;
+          density_matrices -= size_dm;
+          n_channels -= 1;
+        } else {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, false>(
+              (double *)density, (double *)density_matrices, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          density -= ngrids * 2;
+          density_matrices -= size_dm * 2;
+          n_channels -= 2;
+        }
       }
-    } else {
-      if (n_channels == 1) {
-        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, false>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
-            non_trivial_pairs, i_shells, j_shells, n_j_shells,
-            shell_to_ao_indices, n_i_functions, n_j_functions,
-            sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
-            sorted_block_index, n_contributing_blocks, image_indices,
-            vectors_to_neighboring_images, n_images,
-            image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
-      } else if (n_channels == 2) {
-        return gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, false>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
-            non_trivial_pairs, i_shells, j_shells, n_j_shells,
-            shell_to_ao_indices, n_i_functions, n_j_functions,
-            sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
-            sorted_block_index, n_contributing_blocks, image_indices,
-            vectors_to_neighboring_images, n_images,
-            image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env);
-      } else {
-        return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
-            double, false>(
-            (double *)density, (double *)density_matrices, i_angular, j_angular,
-            non_trivial_pairs, i_shells, j_shells, n_j_shells,
-            shell_to_ao_indices, n_i_functions, n_j_functions,
-            sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
-            sorted_block_index, n_contributing_blocks, image_indices,
-            vectors_to_neighboring_images, n_images,
-            image_pair_difference_index, n_difference_images, mesh, atm, bas,
-            env, n_channels);
+      if (err != 0) {
+          return err;
       }
     }
+    return 0;
   }
 }
 }
