@@ -152,9 +152,9 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     e1 = weight * cp.einsum('kij,kji', h1e_kpts, dm_kpts).get()[()]
     ecoul = vhf.ecoul
     exc = vhf.exc
-    if isinstance(ecoul, cupy.ndarray):
+    if isinstance(ecoul, cp.ndarray):
         ecoul = ecoul.get()[()]
-    if isinstance(exc, cupy.ndarray):
+    if isinstance(exc, cp.ndarray):
         exc = exc.get()[()]
     tot_e = e1 + ecoul + exc
     mf.scf_summary['e1'] = e1.real
