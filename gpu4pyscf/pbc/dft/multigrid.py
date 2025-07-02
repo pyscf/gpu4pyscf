@@ -643,8 +643,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    den = rhoR[:,0].sum(axis=-1)
-    excsum = den.dot(exc[:,0]).sum().get()[()] * weight
+    excsum = rhoR[:,0].dot(exc[:,0]).sum().get()[()] * weight
     wv = (weight * vxc).reshape(2*nvar,ngrids)
     wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
     rhoR = rhoG = den = exc = vxc = wv = None
