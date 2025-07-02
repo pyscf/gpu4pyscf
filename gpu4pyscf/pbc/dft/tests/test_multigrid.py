@@ -19,6 +19,7 @@ import cupy as cp
 import pyscf
 from pyscf import lib
 from pyscf.pbc import gto
+from pyscf.pbc import tools
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.dft import multigrid as multigrid_cpu
 if hasattr(multigrid_cpu, 'MultiGridNumInt'):
@@ -93,12 +94,14 @@ class KnownValues(unittest.TestCase):
         mesh = cell_orth.mesh
         SI = cell_orth.get_SI(mesh=mesh)
         ref = np.einsum('i,ij->j', -cell_orth.atom_charges(), SI)
+        ref *= tools.get_coulG(cell_orth, mesh=mesh)
         dat = multigrid.eval_nucG(cell_orth, mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
         cell = cell_nonorth
         SI = cell.get_SI()
         ref = np.einsum('i,ij->j', -cell.atom_charges(), SI)
+        ref *= tools.get_coulG(cell, mesh=mesh)
         dat = multigrid.eval_nucG(cell, cell.mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 

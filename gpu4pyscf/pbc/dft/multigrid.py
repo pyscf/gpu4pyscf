@@ -700,7 +700,7 @@ def eval_nucG(cell, mesh):
     SIx *= cp.asarray(-cell.atom_charges())[:,None]
     rho_xy = SIx[:,:,None] * SIy[:,None,:]
     nucG = contract('qxy,qz->xyz', rho_xy, SIz).ravel()
-    nucG *= tools.get_coulG(cell, mesh=mesh, Gv=Gv)
+    nucG *= tools.get_coulG(cell, Gv=Gv)
     return nucG
 
 def get_nuc(ni, kpts=None):
