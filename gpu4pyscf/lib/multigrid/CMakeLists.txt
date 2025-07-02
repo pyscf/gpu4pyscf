@@ -20,7 +20,7 @@ add_library(mgrid_v2 SHARED
         multigrid_v2/eval_xc_grad.cu
 )
 
-set_target_properties(gpbc PROPERTIES
+set_target_properties(mgrid_v2 PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
         CUDA_SEPARABLE_COMPILATION ON
 )
