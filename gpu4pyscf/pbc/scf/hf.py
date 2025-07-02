@@ -105,13 +105,14 @@ class SCF(mol_hf.SCF):
 
     _keys = hf_cpu.SCF._keys
 
-    def __init__(self, cell, kpt=np.zeros(3), exxdiv='ewald'):
+    def __init__(self, cell, kpt=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
         self.with_df = df.FFTDF(cell)
         # Range separation JK builder
         self.rsjk = None
         self.exxdiv = exxdiv
-        self.kpt = kpt
+        if kpt is not None:
+            self.kpt = kpt
         self.conv_tol = max(cell.precision * 10, 1e-8)
 
     def check_sanity(self):
@@ -216,6 +217,14 @@ class SCF(mol_hf.SCF):
     x2c = x2c1e = sfx2c1e = NotImplemented
     spin_square = NotImplemented
     dip_moment = NotImplemented
+    Gradients = NotImplemented
+
+    def nuc_grad_method(self):
+        return self.Gradients()
+
+    def multigrid_numint(self, mesh=None):
+        '''Apply the MultiGrid algorithm for XC numerical integartion'''
+        raise NotImplementedError
 
     def dump_chk(self, envs):
         mol_hf.SCF.dump_chk(self, envs)
@@ -246,6 +255,10 @@ class RHF(SCF):
         mf = density_fit(self, auxbasis, with_df)
         mf.with_df.is_gamma_point = (mf.kpt == 0).all()
         return mf
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.rhf import Gradients
+        return Gradients(self)
 
     def to_cpu(self):
         mf = hf_cpu.RHF(self.cell)

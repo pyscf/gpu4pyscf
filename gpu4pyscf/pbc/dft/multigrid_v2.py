@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -701,6 +701,7 @@ def convert_xc_on_g_mesh_to_fock(
         n_k_points = 1
         at_gamma_point = True
     else:
+        assert kpts.ndim == 2
         n_k_points = len(kpts)
         at_gamma_point = multigrid.gamma_point(kpts)
 
@@ -920,11 +921,8 @@ def get_nuc(ni, kpts=None):
     cell = ni.cell
     mesh = ni.mesh
     vneG = multigrid_v1.eval_nucG(cell, mesh)
-    Gv = pbc_tools._get_Gv(cell, mesh)
-    vneG *= pbc_tools.get_coulG(cell, mesh=mesh, Gv=Gv)
     hermi = 1
     vne = convert_xc_on_g_mesh_to_fock(ni, vneG, hermi, kpts)[0]
-
     if is_single_kpt:
         vne = vne[0]
     return vne
@@ -942,8 +940,7 @@ def get_pp(ni, kpts=None):
     mesh = ni.mesh
     # Compute the vpplocG as
     # -einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), cell.get_SI(Gv))
-    vpplocG, vpplocG_part1 = multigrid_v1.eval_vpplocG(cell, mesh, cache_part1=True)
-    ni.vpplocG_part1 = vpplocG_part1
+    vpplocG = multigrid_v1.eval_vpplocG(cell, mesh)
     vpp = convert_xc_on_g_mesh_to_fock(ni, vpplocG, hermi=1, kpts=kpts)[0]
     t1 = log.timer_debug1("vpploc", *t0)
 
@@ -1033,6 +1030,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
+    assert kpts is None or is_gamma_point(kpts)
     cell = ni.cell
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
@@ -1071,13 +1069,15 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density[0], deriv=1, xctype=xc_type
         )[:2]
-    else:
+    elif xc_type == 'GGA' or xc_type == 'MGGA':
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density, deriv=1, xctype=xc_type
         )[:2]
+    else:
+        raise NotImplementedError(f'XC functional {xc_code}')
 
     rho_sf = density[0].real
-    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel())) * weight
+    xc_energy_sum = rho_sf.dot(xc_for_energy.ravel()).get()[()] * weight
 
     # To reduce the memory usage, we reuse the xc_for_fock name.
     # Now xc_for_fock represents xc on G space
@@ -1127,6 +1127,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
+    assert kpts is None or is_gamma_point(kpts)
     cell = ni.cell
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
@@ -1156,7 +1157,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     density = density.reshape(-1, *mesh)
     density = ifft_in_place(density).real.reshape(nset, -1, ngrids)
-    n_electrons = density[:, 0].sum()
+    n_electrons = density[:, 0].sum(axis=-1).get()
     density /= weight
 
     # eval_xc_eff supports float64 only
@@ -1165,13 +1166,15 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density[:,0], deriv=1, xctype=xc_type
         )[:2]
-    else:
+    elif xc_type == 'GGA' or xc_type == 'MGGA':
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density, deriv=1, xctype=xc_type
         )[:2]
+    else:
+        raise NotImplementedError(f'XC functional {xc_code}')
 
     rho_sf = (density[0, 0] + density[1, 0]).real
-    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel())) * weight
+    xc_energy_sum = rho_sf.dot(xc_for_energy.ravel()).get()[()] * weight
 
     # To reduce the memory usage, we reuse the xc_for_fock name.
     # Now xc_for_fock represents xc on G space
@@ -1210,9 +1213,93 @@ def get_rho(ni, dm, kpts=None):
     rhoR = ifft_in_place(density.reshape(-1, *mesh)).real / weight
     return rhoR.reshape(-1, ngrids)
 
+def get_veff_ip1(
+    ni,
+    xc_code,
+    dm_kpts,
+    hermi=1,
+    kpts=None,
+    kpts_band=None,
+    with_j=True,
+    verbose=None,
+):
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    log = logger.new_logger(ni, verbose)
+    t0 = log.init_timer()
+    cell = ni.cell
+    dm_kpts = cp.asarray(dm_kpts, order="C")
+    dms = _format_dms(dm_kpts, kpts)
+    nset = dms.shape[0]
+    kpts_band = _format_kpts_band(kpts_band, kpts)
+
+    xc_type = ni._xc_type(xc_code)
+
+    if xc_type == "LDA":
+        derivative_order = 0
+    elif xc_type == 'GGA' or xc_type == 'MGGA':
+        derivative_order = 1
+    else:
+        raise NotImplementedError
+
+    mesh = ni.mesh
+    ngrids = np.prod(mesh)
+    density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
+
+    Gv = pbc_tools._get_Gv(cell, mesh)
+    coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
+    coulomb_on_g_mesh = cp.einsum(
+        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
+    )
+
+    weight = cell.vol / ngrids
+
+    # *(1./weight) because rhoR is scaled by weight in _eval_rhoG.  When
+    # computing rhoR with IFFT, the weight factor is not needed.
+    density = (
+        cp.asarray(
+            ifft_in_place(density.reshape(nset, -1, *mesh)).real,
+            order="C",
+        ).reshape(nset, -1, ngrids)
+        / weight
+    )
+
+    if nset == 1:
+        xc_for_fock = ni.eval_xc_eff(
+            xc_code, density[0], deriv=1, xctype=xc_type
+        )[1]
+    else:
+        xc_for_fock = ni.eval_xc_eff(
+            xc_code, density, deriv=1, xctype=xc_type
+        )[1]
+
+    xc_for_fock = xc_for_fock.reshape(nset, -1, *mesh) * weight
+    xc_for_fock = fft_in_place(xc_for_fock).reshape(nset, -1, ngrids)
+
+    if xc_type == "GGA":
+        xc_for_fock = (
+            xc_for_fock[:, 0]
+            - contract("ngp, pg -> p", xc_for_fock[:,1:4], Gv) * 1j
+        ).reshape((nset, -1, ngrids))
+    if with_j:
+        xc_for_fock[:, 0] += coulomb_on_g_mesh
+
+    if cell._pseudo:
+        xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG_part1(cell, mesh)
+
+    veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
+        ni, xc_for_fock, dm_kpts, hermi, kpts_band
+    )
+
+    t0 = log.timer("veff_gradient", *t0)
+
+    return veff_gradient
+
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     def __init__(self, cell):
         self.cell = cell
+        a = cell.lattice_vectors()
+        assert abs(a - np.diag(a.diagonal())).max() < 1e-9, 'Non-orthogonal lattice'
         self.mesh = cell.mesh
         self.tasks = None
         self.sorted_gaussian_pairs = None

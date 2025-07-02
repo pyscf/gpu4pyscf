@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright 2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,17 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80 --ptxas-options=-v")
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
+from gpu4pyscf.pbc.grad import uhf
 
-add_library(gpbc SHARED
-        multi_grid/drivers.cu
-        multi_grid/screen.cu
-        multi_grid/eval_xc.cu
-        multi_grid/eval_xc_grad.cu
-)
+__all__ = ['Gradients']
 
-set_target_properties(gpbc PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-        CUDA_SEPARABLE_COMPILATION ON
-)
+class Gradients(uhf.Gradients):
+    pass

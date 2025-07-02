@@ -181,6 +181,7 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
+    multigrid_numint = krks.KRKS.multigrid_numint
 
     def to_cpu(self):
         mf = kuks_cpu.KUKS(self.cell)

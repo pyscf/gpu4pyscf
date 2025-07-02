@@ -343,9 +343,7 @@ def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     return vk
 
 def _format_dms(dm_kpts, kpts):
-    if kpts is None:
-        nkpts = 1
-    elif kpts.ndim == 1:
+    if kpts is None or kpts.ndim == 1:
         nkpts = 1
     else:
         nkpts = len(kpts)
@@ -370,9 +368,7 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
             if dm_kpts.ndim < 3: # RHF dm
                 v_kpts = v_kpts[0]
         else:
-            if kpts is None:
-                nkpts = 1
-            elif kpts.ndim == 1:
+            if kpts is None or kpts.ndim == 1:
                 nkpts = 1
             else:
                 nkpts = len(kpts)

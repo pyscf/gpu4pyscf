@@ -203,6 +203,7 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
 
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
+    multigrid_numint = rks.RKS.multigrid_numint
 
     def to_cpu(self):
         mf = krks_cpu.KRKS(self.cell)

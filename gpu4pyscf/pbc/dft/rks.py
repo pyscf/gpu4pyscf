@@ -218,7 +218,16 @@ Tight basis functions are found in the system. It is recommended to use Becke gr
             self.check_sanity()
         return self
 
-    reset = rks_cpu.KohnShamDFT.reset
+    def reset(self, cell=None):
+        pbchf.SCF.reset(self, cell)
+        self.grids.reset(cell)
+        self.nlcgrids.reset(cell)
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+            self._numint.reset(cell)
+        if hasattr(self, 'cphf_grids'):
+            self.cphf_grids.reset(cell)
+        return self
+
     dump_flags = rks_cpu.KohnShamDFT.dump_flags
 
     get_veff = NotImplemented
@@ -306,9 +315,19 @@ class RKS(KohnShamDFT, pbchf.RHF):
     energy_elec = mol_ks.energy_elec
     get_rho = get_rho
     density_fit = pbchf.RHF.density_fit
-
-    nuc_grad_method = NotImplemented
     to_hf = NotImplemented
+
+    def multigrid_numint(self, mesh=None):
+        '''Apply the MultiGrid algorithm for XC numerical integartion'''
+        mf = self.copy()
+        mf._numint = multigrid.MultiGridNumInt(self.cell)
+        if mesh is not None:
+            mf._numint.mesh = mesh
+        return mf
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.rks import Gradients
+        return Gradients(self)
 
     def to_cpu(self):
         mf = rks_cpu.RKS(self.cell)
