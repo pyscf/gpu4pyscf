@@ -38,7 +38,7 @@ import gpu4pyscf.mpi as mpi
 
 __all__ = ['MultiGridNumInt']
 
-libgpbc = load_library("libgpbc")
+libgpbc = load_library("libmgrid_v2")
 libgpbc.evaluate_density_driver.restype = ctypes.c_int
 libgpbc.evaluate_xc_driver.restype = ctypes.c_int
 libgpbc.evaluate_xc_gradient_driver.restype = ctypes.c_int

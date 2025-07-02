@@ -12,3 +12,15 @@ set_target_properties(mgrid PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON)
 
 #target_link_libraries(ft_ao OpenMP::OpenMP_C)
+
+add_library(mgrid_v2 SHARED
+        multigrid_v2/drivers.cu
+        multigrid_v2/screen.cu
+        multigrid_v2/eval_xc.cu
+        multigrid_v2/eval_xc_grad.cu
+)
+
+set_target_properties(gpbc PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+        CUDA_SEPARABLE_COMPILATION ON
+)
