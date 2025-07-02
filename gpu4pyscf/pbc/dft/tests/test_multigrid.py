@@ -16,6 +16,7 @@
 import unittest
 import numpy as np
 import cupy as cp
+import pyscf
 from pyscf import lib
 from pyscf.pbc import gto
 from pyscf.pbc.gto import pseudo

@@ -34,7 +34,6 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.pbc.tools import pbc as pbc_tools
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, load_library
-import gpu4pyscf.mpi as mpi
 
 __all__ = ['MultiGridNumInt']
 
@@ -240,11 +239,6 @@ def assign_pairs_to_blocks(
         ctypes.c_int(n_contributing_blocks),
         ctypes.c_int(n_pairs),
     )
-
-    if mpi.comm.size > 1:
-        sorted_block_index = sorted_block_index[
-            cp.arange(mpi.comm.rank, n_contributing_blocks, mpi.comm.size)
-        ]
 
     return (
         pairs_on_blocks,
@@ -529,9 +523,6 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True):
         if err != 0:
             raise RuntimeError(f'evaluate_density_driver for li={i_angular} lj={j_angular} failed')
 
-    if mpi.comm.size > 1:
-        mpi.comm.reduce(density, in_place=True)
-
     return density
 
 def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
@@ -763,9 +754,6 @@ def convert_xc_on_g_mesh_to_fock(
         else:
             raise NotImplementedError
 
-    if mpi.comm.size > 1:
-        mpi.comm.reduce(fock, in_place=True)
-
     return fock
 
 
@@ -907,9 +895,6 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             img_phase,
             ignore_imag=True,
         )
-
-    if mpi.comm.size > 1:
-        mpi.comm.reduce(gradient, in_place=True)
 
     return gradient
 
@@ -1234,14 +1219,6 @@ def get_veff_ip1(
     kpts_band = _format_kpts_band(kpts_band, kpts)
 
     xc_type = ni._xc_type(xc_code)
-
-    if xc_type == "LDA":
-        derivative_order = 0
-    elif xc_type == 'GGA' or xc_type == 'MGGA':
-        derivative_order = 1
-    else:
-        raise NotImplementedError
-
     mesh = ni.mesh
     ngrids = np.prod(mesh)
     density = evaluate_density_on_g_mesh(ni, dm_kpts, kpts, xc_type)
