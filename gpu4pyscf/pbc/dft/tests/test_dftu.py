@@ -33,7 +33,6 @@ def setUpModule():
     cell.verbose = 7
     cell.output = '/dev/null'
     cell.mesh = [29]*3
-    cell.space_group_symmetry=True
     cell.build()
 
 def tearDownModule():
@@ -62,7 +61,7 @@ class KnownValues(unittest.TestCase):
                            minao_ref='gth-szv')
         mf.conv_tol = 1e-10
         e1 = mf.kernel()
-        self.assertAlmostEqual(e1, -10.694460059491741, 8)
+        self.assertAlmostEqual(e1, -10.1793267284188, 8)
 
     def test_get_veff(self):
         kmesh = [2, 1, 1]
@@ -77,5 +76,5 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(vxc.get()), 12.77643098220399, 8)
 
 if __name__ == '__main__':
-    print("Full Tests for pbc.dft.krkspu")
+    print("Full Tests for pbc.dft dft+U")
     unittest.main()

@@ -100,7 +100,7 @@ def _add_Vhubbard(vxc, ks, dm, kpts):
                 logger.info(ks, "spin %s\n%s\n%s", s, lab_string, P_loc)
             logger.info(ks, "-" * 79)
 
-    E_U = E_U.get()
+    E_U = E_U.get()[()]
     if E_U.real < 0.0 and all(np.asarray(ks.U_val) > 0):
         logger.warn(ks, "E_U (%g) is negative...", E_U.real)
     vxc = tag_array(vxc, E_U=E_U.real)
@@ -117,8 +117,7 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
 
     weight = getattr(mf.kpts, "weights_ibz",
                      np.array([1.0/len(h1e_kpts),]*len(h1e_kpts)))
-    e1 = (cp.einsum('k,kij,kji', weight, h1e_kpts, dm_kpts[0]) +
-          cp.einsum('k,kij,kji', weight, h1e_kpts, dm_kpts[1]))
+    e1 = cp.einsum('k,kij,nkji->', weight, h1e_kpts, dm_kpts).get()[()]
     tot_e = e1 + vhf.ecoul + vhf.exc + vhf.E_U
     mf.scf_summary['e1'] = e1.real
     mf.scf_summary['coul'] = vhf.ecoul.real
