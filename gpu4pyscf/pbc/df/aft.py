@@ -204,7 +204,7 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 def _check_kpts(mydf, kpts):
     '''Check if the argument kpts is a single k-point'''
     if kpts is None:
-        kpts = mydf.kpts
+        kpts = getattr(mydf, 'kpts', None)
     if kpts is None:
         kpts = np.zeros((1, 3))
         is_single_kpt = True

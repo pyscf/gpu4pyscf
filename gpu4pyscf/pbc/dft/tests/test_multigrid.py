@@ -38,7 +38,7 @@ C     0.      1.7834  1.7834
 C     0.8917  2.6751  2.6751'''
 
 def setUpModule():
-    global cell_orth
+    global cell_orth, cell_nonorth
     global kpts, dm, dm1
     np.random.seed(2)
     cell_orth = gto.M(
@@ -60,9 +60,20 @@ def setUpModule():
     dm1 = dm + np.eye(nao)
     dm = dm1 + dm1.transpose(0,2,1)
 
+    cell_nonorth = pyscf.M(
+        atom = [['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391]]],
+        a = '''
+        0.000000000, 3.370137329, 3.370137329
+        3.370137329, 0.000000000, 3.370137329
+        3.370137329, 3.370137329, 0.000000000''',
+        basis = [[0, [1.3, 1]], [1, [0.8, 1]]],
+        pseudo = 'gth-pade',
+        unit = 'bohr',
+        mesh = [13] * 3)
+
 def tearDownModule():
-    global cell_orth
-    del cell_orth
+    global cell_orth, cell_nonorth
+    del cell_orth, cell_nonorth
 
 class KnownValues(unittest.TestCase):
     def test_get_pp(self):
@@ -84,12 +95,25 @@ class KnownValues(unittest.TestCase):
         dat = multigrid.eval_nucG(cell_orth, mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
+        cell = cell_nonorth
+        SI = cell.get_SI()
+        ref = np.einsum('i,ij->j', -cell.atom_charges(), SI)
+        dat = multigrid.eval_nucG(cell, cell.mesh)
+        self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
+
     def test_eval_vpplocG(self):
         mesh = cell_orth.mesh
         Gv = cell_orth.get_Gv(mesh)
         SI = cell_orth.get_SI(Gv)
         ref = -np.einsum('ij,ij->j', pseudo.get_vlocG(cell_orth, Gv), SI)
         dat = multigrid.eval_vpplocG(cell_orth, mesh)
+        self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
+
+        cell = cell_nonorth
+        Gv = cell.get_Gv()
+        SI = cell.get_SI(Gv)
+        ref = -np.einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), SI)
+        dat = multigrid.eval_vpplocG(cell, cell.mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
     @unittest.skip('MultiGrid for kpts not implemented')

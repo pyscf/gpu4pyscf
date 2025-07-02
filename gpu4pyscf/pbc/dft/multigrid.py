@@ -510,6 +510,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         nvar = 4
     elif xctype == 'MGGA':
         nvar = 5
+    else:
+        raise NotImplementedError(f'XC functional {xc_code}')
 
     vol = cell.vol
     mesh = ni.mesh
@@ -534,14 +536,14 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
     rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
-    nelec = float(rhoR[0].sum()) * weight
+    nelec = rhoR[0].sum().get()[()] * weight
 
     excsum = 0
     if xctype == 'LDA':
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum += float(rhoR[0].dot(exc[:,0])) * weight
+    excsum += rhoR[0].dot(exc[:,0]).get()[()] * weight
     wv = weight * vxc
     wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -608,6 +610,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         nvar = 4
     elif xctype == 'MGGA':
         nvar = 5
+    else:
+        raise NotImplementedError(f'XC functional {xc_code}')
 
     vol = cell.vol
     mesh = ni.mesh
@@ -635,13 +639,12 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     rhoR = cp.asarray(rhoR.reshape(2,nvar,ngrids), order='C')
     nelec = rhoR[:,0].sum(axis=-1).get() * weight
 
-    excsum = 0
     if xctype == 'LDA':
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    den = rhoR[:,0].sum(axis=0)
-    excsum += float(den.dot(exc[:,0])) * weight
+    den = rhoR[:,0].sum(axis=-1)
+    excsum = den.dot(exc[:,0]).sum().get()[()] * weight
     wv = (weight * vxc).reshape(2*nvar,ngrids)
     wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
     rhoR = rhoG = den = exc = vxc = wv = None
@@ -684,7 +687,8 @@ def get_rho(ni, dm, kpts=None):
     return rhoR
 
 def eval_nucG(cell, mesh):
-    basex, basey, basez = cell.get_Gv_weights(mesh)[1]
+    '''Nuclear attraction potential on Gv'''
+    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
     basex = cp.asarray(basex)
     basey = cp.asarray(basey)
     basez = cp.asarray(basez)
@@ -696,55 +700,44 @@ def eval_nucG(cell, mesh):
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
     SIx *= cp.asarray(-cell.atom_charges())[:,None]
     rho_xy = SIx[:,:,None] * SIy[:,None,:]
-    nucG = contract('qxy,qz->xyz', rho_xy, SIz)
-    return nucG.ravel()
+    nucG = contract('qxy,qz->xyz', rho_xy, SIz).ravel()
+    nucG *= tools.get_coulG(cell, mesh=mesh, Gv=Gv)
+    return nucG
 
 def get_nuc(ni, kpts=None):
     assert kpts is None or all(kpts == 0)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
     kpts = np.zeros((1, 3))
-
     cell = ni.cell
     mesh = ni.mesh
-
     # Compute the density of nuclear charges in reciprocal space
     # charge.dot(cell.get_SI(mesh=mesh))
     vneG = eval_nucG(cell, mesh)
-    Gv = cell.get_Gv(mesh)
-    vneG *= tools.get_coulG(cell, mesh=mesh, Gv=Gv)
     hermi = 1
     vne = _get_j_pass2(ni, vneG[None,:], hermi, kpts)[0]
     if is_single_kpt:
         vne = vne[0]
     return vne
 
-def eval_vpplocG(cell, mesh, cache_part1=False):
+def eval_vpplocG(cell, mesh):
     '''PRB, 58, 3641 Eq (5) first term
     '''
     assert cell.dimension != 2
-    basex, basey, basez = cell.get_Gv_weights(mesh)[1]
+    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
     basex = cp.asarray(basex)
     basey = cp.asarray(basey)
     basez = cp.asarray(basez)
     b = cell.reciprocal_vectors()
-    assert abs(b - np.diag(b.diagonal())).max() < 1e-8
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
     SIx = cp.exp(-1j*rb[:,0,None] * basex)
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
-    Gx2 = (basex * b[0,0])**2
-    Gy2 = (basey * b[1,1])**2
-    Gz2 = (basez * b[2,2])**2
-    #Gx = basex[:,None] * b[0]
-    #Gy = basey[:,None] * b[1]
-    #Gz = basez[:,None] * b[2]
-    #Gv = (Gx[:,None,None] + Gy[:,None] + Gz).reshape(-1,3)
-    #G2 = contract('px,px->p', Gv, Gv)
-    G2 = (Gx2[:,None,None] + Gy2[:,None] + Gz2).ravel()
-
+    G2 = contract('px,px->p', Gv, Gv)
     charges = cell.atom_charges()
+
+    coulG = tools.get_coulG(cell, Gv=Gv)
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
     vlocG0 = 0
     for ia in range(cell.natm):
@@ -754,17 +747,16 @@ def eval_vpplocG(cell, mesh, cache_part1=False):
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-        SIx[ia] *= cp.exp(-.5*rloc**2 * Gx2)
-        SIy[ia] *= cp.exp(-.5*rloc**2 * Gy2)
-        SIz[ia] *= cp.exp(-.5*rloc**2 * Gz2)
-
-        # alpha parameters from the non-divergent Hartree+Vloc G=0 term.
-        vlocG0 += -2*np.pi*charges[ia]*rloc**2
-
         if nexp == 0:
             continue
-        # Add the C1, C2, C3, C4 contributions
+
+        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
         G2_red = G2 * rloc**2
+        SI *= cp.exp(-0.5*G2_red)
+        vlocG0 += 2*np.pi*charges[ia]*rloc**2
+        vlocG -= charges[ia] * coulG * SI
+
+        # Add the C1, C2, C3, C4 contributions
         cfacs = 0
         if nexp >= 1:
             cfacs += cexp[0]
@@ -775,22 +767,46 @@ def eval_vpplocG(cell, mesh, cache_part1=False):
         if nexp >= 4:
             cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
 
-        xyz_exp = ((2*np.pi)**(3/2.)*rloc**3 * SIx[ia,:,None,None] *
-                   SIy[ia,:,None] * SIz[ia]).ravel()
-        xyz_exp *= cfacs
-        vlocG += xyz_exp
+        vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
 
-    SIx *= cp.asarray(-charges)[:,None]
-    rho_xy = SIx[:,:,None] * SIy[:,None,:]
-    vlocG_part1 = contract('qxy,qz->xyz', rho_xy, SIz).ravel()
-    Gv = cell.get_Gv(mesh)
-    vlocG_part1 *= tools.get_coulG(cell, Gv=Gv)
-    vlocG_part1[0] -= vlocG0
-    vlocG += vlocG_part1
-    if cache_part1:
-        return vlocG, vlocG_part1
-    else:
-        return vlocG
+    vlocG[0] += vlocG0
+    return vlocG
+
+def eval_vpplocG_part1(cell, mesh):
+    assert cell.dimension != 2
+    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
+    basex = cp.asarray(basex)
+    basey = cp.asarray(basey)
+    basez = cp.asarray(basez)
+    b = cell.reciprocal_vectors()
+    coords = cell.atom_coords()
+    rb = cp.asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    G2 = contract('px,px->p', Gv, Gv)
+    charges = cell.atom_charges()
+
+    coulG = tools.get_coulG(cell, Gv=Gv)
+    vlocG = cp.zeros(len(G2), dtype=np.complex128)
+    vlocG0 = 0
+    for ia in range(cell.natm):
+        symb = cell.atom_symbol(ia)
+        if symb not in cell._pseudo:
+            continue
+
+        pp = cell._pseudo[symb]
+        rloc, nexp, cexp = pp[1:3+1]
+        if nexp == 0:
+            continue
+
+        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
+        G2_red = G2 * rloc**2
+        SI *= cp.exp(-0.5*G2_red)
+        vlocG0 += 2*np.pi*charges[ia]*rloc**2
+        vlocG -= charges[ia] * coulG * SI
+    vlocG[0] += vlocG0
+    return vlocG
 
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
@@ -1274,9 +1290,8 @@ class MGridEnvVars(ctypes.Structure):
 
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
-    def __init__(self, cell, kpts=None):
+    def __init__(self, cell):
         self.cell = cell
-        self.kpts = kpts
         self.mesh = cell.mesh
         # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
         # primitive GTOs in the super-mole.

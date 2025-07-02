@@ -509,7 +509,7 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
             dm0 = None
         else:
             dm0 = None
-            if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
+            if np.array_equal(self._last_mol_fp, mol.ao_loc):
                 dm0 = self.make_rdm1()
             elif self.chkfile and h5py.is_hdf5(self.chkfile):
                 dm0 = self.from_chk(self.chkfile)
