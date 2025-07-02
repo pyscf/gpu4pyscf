@@ -646,7 +646,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     excsum = rhoR[:,0].dot(exc[:,0]).sum().get()[()] * weight
     wv = (weight * vxc).reshape(2*nvar,ngrids)
     wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
-    rhoR = rhoG = den = exc = vxc = wv = None
+    rhoR = rhoG = exc = vxc = wv = None
     log.debug('Multigrid exc %s  nelec %s', excsum, nelec)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
