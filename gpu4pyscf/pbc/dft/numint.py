@@ -234,7 +234,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
     den = rho[0] * grids.weights
     nelec = den.sum()
-    excsum = den.dot(exc[:,0])
+    excsum = den.dot(exc[:,0]).get()[()]
 
     wv = vxc * grids.weights
     # *.5 for v+v.conj().T at the end
@@ -315,7 +315,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
     den = rho[:,0] * grids.weights
     nelec = den.sum(axis=1)
-    excsum = float(den.dot(exc[:,0]).sum())
+    excsum = den.dot(exc[:,0]).sum().get()[()]
 
     wv = vxc * grids.weights
     # *.5 for v+v.conj().T at the end

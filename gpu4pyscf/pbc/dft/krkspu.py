@@ -103,8 +103,11 @@ def _add_Vhubbard(vxc, ks, dm, kpts):
                     # the local density.
                     E_U += weight[k] * alpha * P_k.trace()
                     vhub_loc += cp.eye(P_k.shape[-1]) * alpha
+                vhub_loc = SC.dot(vhub_loc).dot(SC.conj().T)
                 SC = S_k.dot(C_k)
-                vxc[k] += SC.dot(vhub_loc).dot(SC.conj().T).astype(vxc[k].dtype,copy=False)
+                if vxc.dtype == np.float64:
+                    vhub_loc = vhub_loc.real
+                vxc[k] += vhub_loc
                 if not is_ibz:
                     P_loc += P_k
             if is_ibz:
