@@ -138,7 +138,9 @@ int evaluate_density_driver(
     int err;
     while (n_channels > 0) {
       if (is_non_orthogonal) {
-        if (n_channels == 1 || i_angular + j_angular >= 6) {
+        if (n_channels == 1 ||
+            // two channels requires too many registers for high orders.
+            i_angular + j_angular >= 6) {
           err = gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 1, true>(
               (double *)density, (double *)density_matrices, i_angular, j_angular,
               non_trivial_pairs, i_shells, j_shells, n_j_shells,
@@ -148,8 +150,8 @@ int evaluate_density_driver(
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
               env);
-          density -= ngrids;
-          density_matrices -= size_dm;
+          density += ngrids;
+          density_matrices += size_dm;
           n_channels -= 1;
         } else {
           err = gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, true>(
@@ -161,8 +163,8 @@ int evaluate_density_driver(
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
               env);
-          density -= ngrids * 2;
-          density_matrices -= size_dm * 2;
+          density += ngrids * 2;
+          density_matrices += size_dm * 2;
           n_channels -= 2;
         }
       } else {
@@ -176,8 +178,8 @@ int evaluate_density_driver(
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
               env);
-          density -= ngrids;
-          density_matrices -= size_dm;
+          density += ngrids;
+          density_matrices += size_dm;
           n_channels -= 1;
         } else {
           err = gpu4pyscf::gpbc::multi_grid::evaluate_density_driver<double, 2, false>(
@@ -189,8 +191,8 @@ int evaluate_density_driver(
               vectors_to_neighboring_images, n_images,
               image_pair_difference_index, n_difference_images, mesh, atm, bas,
               env);
-          density -= ngrids * 2;
-          density_matrices -= size_dm * 2;
+          density += ngrids * 2;
+          density_matrices += size_dm * 2;
           n_channels -= 2;
         }
       }
