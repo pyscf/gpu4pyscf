@@ -214,9 +214,11 @@ class KnownValues(unittest.TestCase):
             test_value = test_eda_result[key]
 
             if type(reference_value) is str:
-                assert reference_value == test_value
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 2e-3
+                assert abs(test_value - reference_value) < 2e-3, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
 
     def test_almo_eda_2_hf_svp_df(self):
         ### This is a consistent test, if you put these additional keywords into Q-Chem 6.1,
@@ -247,9 +249,11 @@ class KnownValues(unittest.TestCase):
             test_value = test_eda_result[key]
 
             if type(reference_value) is str:
-                assert reference_value == test_value
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 2e-3
+                assert abs(test_value - reference_value) < 2e-3, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
 
     def test_almo_eda_2_wb97xv_svp(self):
         ### Q-Chem input difference
@@ -276,9 +280,11 @@ class KnownValues(unittest.TestCase):
             test_value = test_eda_result[key]
 
             if type(reference_value) is str:
-                assert reference_value == test_value
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 2e-3
+                assert abs(test_value - reference_value) < 2e-3, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
 
     def test_almo_eda_2_wb97xv_svp_df(self):
         ### All density fitting tests are consistent tests, see comment above
@@ -301,66 +307,219 @@ class KnownValues(unittest.TestCase):
             test_value = test_eda_result[key]
 
             if type(reference_value) is str:
-                assert reference_value == test_value
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 2e-3
+                assert abs(test_value - reference_value) < 2e-3, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
 
-    # def test_almo_eda_2_hf_tzvpp(self):
-    #     ### Q-Chem input difference
-    #     # $molecule
-    #     # -1 1
-    #     # --
-    #     # 0 1
-    #     #             C     -0.072852   -0.328834    0.654799
-    #     #             H      0.403601   -0.466284    1.618541
-    #     #             H      0.553011   -0.581815   -0.192581
-    #     #             H     -1.081982   -0.721916    0.596137
-    #     #             H     -0.213445    0.912668    0.560567
-    #     # --
-    #     # -1 1
-    #     #             O     -0.414478    2.335424    0.468285
-    #     #             H     -1.320507    2.431870    0.784608
-    #     # --
-    #     # 0 1
-    #     #             F      0.250406   -4.009722    0.855334
-    #     #             H      0.435881   -3.016345    0.778319
-    #     # $end
-    #     #
-    #     # $rem
-    #     # BASIS                       def2-tzvpp
-    #     # $end
+    def test_almo_eda_2_hf_tzvpp(self):
+        ### Q-Chem input difference
+        # $molecule
+        # -1 1
+        # --
+        # 0 1
+        #             C     -0.072852   -0.328834    0.654799
+        #             H      0.403601   -0.466284    1.618541
+        #             H      0.553011   -0.581815   -0.192581
+        #             H     -1.081982   -0.721916    0.596137
+        #             H     -0.213445    0.912668    0.560567
+        # --
+        # -1 1
+        #             O     -0.414478    2.335424    0.468285
+        #             H     -1.320507    2.431870    0.784608
+        # --
+        # 0 1
+        #             F      0.250406   -4.009722    0.855334
+        #             H      0.435881   -3.016345    0.778319
+        # $end
+        #
+        # $rem
+        # BASIS                       def2-tzvpp
+        # $end
 
-    #     reference_eda_result = {
-    #         "total"           :  -62.8865,
-    #         "frozen"          :  132.6279,
-    #         "electrostatic"   : -228.7827,
-    #         "dispersion"      :    0.0000,
-    #         "pauli"           :  361.4106,
-    #         "polarization"    : -116.6104,
-    #         "charge transfer" :  -78.9040,
-    #         "unit"            : "kJ/mol",
-    #     }
+        reference_eda_result = {
+            "total"           :  -62.8865,
+            "frozen"          :  132.6279,
+            "electrostatic"   : -228.7827,
+            "dispersion"      :    0.0000,
+            "pauli"           :  361.4106,
+            "polarization"    : -116.6104,
+            "charge transfer" :  -78.9040,
+            "unit"            : "kJ/mol",
+        }
 
-    #     test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF")
+        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF")
 
-    #     for key in reference_eda_result.keys():
-    #         assert key in test_eda_result
-    #         reference_value = reference_eda_result[key]
-    #         test_value = test_eda_result[key]
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
 
-    #         if type(reference_value) is str:
-    #             assert reference_value == test_value
-    #         if type(reference_value) is float:
-    #             assert abs(test_value - reference_value) < 2e-3
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            if type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-2, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
 
-    # TODO
-    # def test_almo_eda_2_hf_tzvpp_df(self):
-    # def test_almo_eda_2_wb97xv_tzvpp(self):
-    # def test_almo_eda_2_wb97xv_tzvpp_df(self):
+    def test_almo_eda_2_hf_tzvpp_df(self):
+        ### All density fitting tests are consistent tests, see comment above
+        reference_eda_result = {
+            "total"           :  -62.86023730675086,
+            "frozen"          :  132.66000202363256,
+            "electrostatic"   : -228.79472188795418,
+            "dispersion"      :    0.0,
+            "pauli"           :  361.45472391158677,
+            "polarization"    : -116.62119992580904,
+            "charge transfer" :  -78.89903940457438,
+            "unit"            : "kJ/mol",
+        }
 
-    # def test_almo_eda_2_pbe0_charged(self):
-    # def test_almo_eda_2_pbe0_charged(self):
+        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF", auxbasis = "def2-universal-jkfit")
 
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            if type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-2, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+
+    def test_almo_eda_2_wb97xv_tzvpp(self):
+        ### Q-Chem input difference
+        # $rem
+        # METHOD                      wB97X-V
+        # BASIS                       def2-tzvpp
+        # $end
+
+        reference_eda_result = {
+            "total"           : -106.4940,
+            "frozen"          :   99.5674,
+            "electrostatic"   : -236.6728,
+            "dispersion"      :  -25.6342,
+            "pauli"           :  361.8743,
+            "polarization"    : -103.7696,
+            "charge transfer" : -102.2918,
+            "unit"            : "kJ/mol",
+        }
+
+        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp)
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            if type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-2, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+
+    def test_almo_eda_2_wb97xv_tzvpp_df(self):
+        ### All density fitting tests are consistent tests, see comment above
+        reference_eda_result = {
+            "total"           : -106.4673627872119,
+            "frozen"          :   99.60213546985209,
+            "electrostatic"   : -236.66357537867634,
+            "dispersion"      :  -25.672944475878136,
+            "pauli"           :  361.93865532440657,
+            "polarization"    : -103.763200520556,
+            "charge transfer" : -102.306297736508,
+            "unit"            : "kJ/mol",
+        }
+
+        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, auxbasis = "def2-universal-jkfit")
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            if type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-2, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+
+    def test_almo_eda_2_pbe0_charged(self):
+        ### Q-Chem input difference
+        # $molecule
+        # 0 1
+        # --
+        # 1 1
+        # O      0.199968    0.000000    0.000006
+        # H      1.174548   -0.000000   -0.000001
+        # H     -0.287258    0.844506   -0.000003
+        # H     -0.287258   -0.844506   -0.000003
+        # --
+        # -1 1
+        # O     -0.414478    3.335424    0.468285
+        # H     -1.320507    3.431870    0.784608
+        # $end
+        # $rem
+        # METHOD                      PBE0
+        # BASIS                       def2-tzvpp
+        # $end
+
+        reference_eda_result = {
+            "total"           : -536.3337,
+            "frozen"          : -438.8586,
+            "electrostatic"   : -445.0982,
+            "dispersion"      :   -1.5747,
+            "pauli"           :    7.8144,
+            "polarization"    :  -15.5046,
+            "charge transfer" :  -81.9705,
+            "unit"            : "kJ/mol",
+        }
+
+        test_eda_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0")
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            if type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-2, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+
+    def test_almo_eda_2_pbe0_charged_df(self):
+        ### All density fitting tests are consistent tests, see comment above
+        reference_eda_result = {
+            "total"           : -536.3265135788014,
+            "frozen"          : -438.8503695025353,
+            "electrostatic"   : -445.0953698654425,
+            "dispersion"      :   -1.5794393738524033,
+            "pauli"           :    7.824439736759638,
+            "polarization"    :  -15.504103411878171,
+            "charge transfer" :  -81.97204066438793,
+            "unit"            : "kJ/mol",
+        }
+
+        test_eda_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0", auxbasis = "def2-universal-jkfit")
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            if type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-2, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
 
 if __name__ == "__main__":
     print("Full Tests for ALMO EDA 2 energies")

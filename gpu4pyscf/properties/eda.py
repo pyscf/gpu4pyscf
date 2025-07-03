@@ -546,7 +546,13 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
     return E_dispersion
 
 def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
-                                field_order = 2, virtual_singular_value_threshold = 1e-7, uncoupled_ferf = False):
+                                field_order = 2, virtual_singular_value_threshold = 1e-5, uncoupled_ferf = False):
+    """
+    Attention: The result is very sensetive to virtual_singular_value_threshold!
+               If a near-zero singular vector that does not belong to FERF virtual space
+               is mixed into the FERF virtual space, the result can be off by 1 kJ/mol!
+    """
+
     n_frag = len(mf_list)
     assert n_frag >= 1
 
@@ -675,12 +681,15 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
             C_kappa_pi = None
         kappa_ai = None
 
-        polarization_subspace_Q, polarization_subspace_R = cp.linalg.qr(polarization_subspace)
-        polarization_subspace_Q = polarization_subspace_Q[:, cp.abs(cp.diag(polarization_subspace_R)) > virtual_singular_value_threshold]
-        polarization_subspace_R = None
-        polarization_subspace = None
-        G = polarization_subspace_Q
-        polarization_subspace_Q = None
+        ### Don't use QR, it makes the result unstable.
+        polarization_subspace_singularvector_left, polarization_subspace_singularvalue, polarization_subspace_singularvector_right =  \
+            cp.linalg.svd(polarization_subspace, full_matrices = False)
+        polarization_subspace_singularvector_right = None
+        print(f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
+              f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}")
+        G = polarization_subspace_singularvector_left[:, polarization_subspace_singularvalue > virtual_singular_value_threshold]
+        polarization_subspace_singularvalue = None
+        polarization_subspace_singularvector_left = None
 
         G_projector_list.append(G)
 
