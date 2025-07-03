@@ -300,6 +300,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                     iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
                 }
             }
+            __syncthreads();
 
             Rt = Rt_buf;
             int kl_loc0 = pair_kl_loc[task_kl];
@@ -621,6 +622,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                         iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
                     }
                 }
+                __syncthreads();
 
                 Rt = Rt_buf;
                 int sq_kl1 = sq_kl + nf3kl * bsizey;
