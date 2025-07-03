@@ -538,12 +538,11 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
     nelec = rhoR[0].sum().get()[()] * weight
 
-    excsum = 0
     if xctype == 'LDA':
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum += rhoR[0].dot(exc[:,0]).get()[()] * weight
+    excsum = rhoR[0].dot(exc[:,0]).get()[()] * weight
     wv = weight * vxc
     wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
