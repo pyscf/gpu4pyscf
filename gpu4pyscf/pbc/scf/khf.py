@@ -231,13 +231,14 @@ class KSCF(pbchf.SCF):
 
     _keys = khf_cpu.KSCF._keys
 
-    def __init__(self, cell, kpts=np.zeros((1,3)), exxdiv='ewald'):
+    def __init__(self, cell, kpts=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
         self.with_df = df.FFTDF(cell)
         # Range separation JK builder
         self.rsjk = None
         self.exxdiv = exxdiv
-        self.kpts = kpts
+        if kpts is not None:
+            self.kpts = kpts
         self.conv_tol = max(cell.precision * 10, 1e-8)
         self.exx_built = False
 

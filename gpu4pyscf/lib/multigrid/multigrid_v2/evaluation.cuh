@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 The PySCF Developers. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include "cartesian.cuh"
@@ -15,7 +31,7 @@ namespace gpu4pyscf::gpbc::multi_grid {
 
 template <typename KernelType, int n_channels,
           int i_angular, int j_angular, bool is_non_orthogonal>
-__global__ void evaluate_density_kernel(
+__global__ static void evaluate_density_kernel(
     KernelType *density, const KernelType *density_matrices,
     const int *non_trivial_pairs, const int *i_shells, const int *j_shells,
     const int n_j_shells, const int *shell_to_ao_indices,
@@ -318,7 +334,7 @@ __global__ void evaluate_density_kernel(
     break
 
 template <typename KernelType, int n_channels, bool is_non_orthogonal>
-void evaluate_density_driver(
+int evaluate_density_driver(
     KernelType *density, const KernelType *density_matrices, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
@@ -366,14 +382,15 @@ void evaluate_density_driver(
             "angular momentum pair %d, %d is not supported in "
             "evaluate_density_driver\n",
             i_angular, j_angular);
+    return 1;
   }
 
-  checkCudaErrors(cudaPeekAtLastError());
+  return checkCudaErrors(cudaPeekAtLastError());
 }
 
 template <typename KernelType, int n_channels, int i_angular, int j_angular,
           bool is_non_orthogonal>
-__global__ void evaluate_xc_kernel(
+__global__ static void evaluate_xc_kernel(
     KernelType *fock, const KernelType *xc_weights, const int *non_trivial_pairs,
     const int *i_shells, const int *j_shells, const int n_j_shells,
     const int *shell_to_ao_indices, const int n_i_functions,
@@ -671,7 +688,7 @@ __global__ void evaluate_xc_kernel(
     break
 
 template <typename KernelType, int n_channels, bool is_non_orthogonal>
-void evaluate_xc_driver(
+int evaluate_xc_driver(
     KernelType *fock, const KernelType *xc_weights, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
@@ -720,9 +737,10 @@ void evaluate_xc_driver(
             "angular momentum pair %d, %d is not supported in "
             "evaluate_xc_driver\n",
             i_angular, j_angular);
+    return 1;
   }
 
-  checkCudaErrors(cudaPeekAtLastError());
+  return checkCudaErrors(cudaPeekAtLastError());
 }
 
 } // namespace gpu4pyscf::gpbc::multi_grid
@@ -1025,7 +1043,7 @@ __global__ void evaluate_density_kernel(
     break
 
 template <typename KernelType, bool is_non_orthogonal>
-void evaluate_density_driver(
+int evaluate_density_driver(
     KernelType *density, const KernelType *density_matrices, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
@@ -1073,9 +1091,10 @@ void evaluate_density_driver(
             "angular momentum pair %d, %d is not supported in "
             "evaluate_density_driver\n",
             i_angular, j_angular);
+    return 1;
   }
 
-  checkCudaErrors(cudaPeekAtLastError());
+  return checkCudaErrors(cudaPeekAtLastError());
 }
 
 template <typename KernelType, int i_angular, int j_angular,
@@ -1360,7 +1379,7 @@ __global__ void evaluate_xc_kernel(
     break
 
 template <typename KernelType, bool is_non_orthogonal>
-void evaluate_xc_driver(
+int evaluate_xc_driver(
     KernelType *fock, const KernelType *xc_weights, const int i_angular,
     const int j_angular, const int *non_trivial_pairs, const int *i_shells,
     const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
@@ -1409,9 +1428,10 @@ void evaluate_xc_driver(
             "angular momentum pair %d, %d is not supported in "
             "evaluate_xc_driver\n",
             i_angular, j_angular);
+    return 1;
   }
 
-  checkCudaErrors(cudaPeekAtLastError());
+  return checkCudaErrors(cudaPeekAtLastError());
 }
 
 } // namespace gpu4pyscf::gpbc::multi_grid::runtime_channel
