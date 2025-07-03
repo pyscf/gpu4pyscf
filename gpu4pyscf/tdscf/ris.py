@@ -700,6 +700,36 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
 
     return a.get(), b.get()
 
+
+def as_scanner(td):
+    if isinstance(td, lib.SinglePointScanner):
+        return td
+
+    logger.info(td, 'Set %s as a scanner', td.__class__)
+    name = td.__class__.__name__ + TD_Scanner.__name_mixin__
+    return lib.set_class(TD_Scanner(td), (TD_Scanner, td.__class__), name)
+
+
+class TD_Scanner(lib.SinglePointScanner):
+    def __init__(self, td):
+        self.__dict__.update(td.__dict__)
+        self._scf = td._scf.as_scanner()
+
+    def __call__(self, mol_or_geom, **kwargs):
+        assert self.device == 'gpu'
+        if isinstance(mol_or_geom, gto.MoleBase):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+
+        mf_scanner = self._scf
+        mf_e = mf_scanner(mol)
+        self.kernel(**kwargs)
+        return mf_e + self.energies/HARTREE2EV
+
+
 class RisBase(lib.StreamObject):
     def __init__(self,
                 mf,
@@ -728,7 +758,6 @@ class RisBase(lib.StreamObject):
             mf = mf.copy()
             mf.mo_coeff = cp.asarray(mf.mo_coeff, dtype=cp.float32)
 
-        self.mf = mf
         self._scf = mf
         self.chkfile = mf.chkfile
         self.singlet = True # TODO: add R-T excitation.
@@ -756,13 +785,19 @@ class RisBase(lib.StreamObject):
 
         self.verbose = mf.verbose
         self.device = mf.device
+        self.converged = None
 
         logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
 
+    @property
+    def e_tot(self):
+        '''Excited state energies'''
+        return self._scf.e_tot + self.energies/HARTREE2EV
+
     def get_ab(self, mf=None):
         if mf is None:
-            mf = self.mf
+            mf = self._scf
         J_fit = self.J_fit
         K_fit = self.K_fit
         theta = self.theta
@@ -796,7 +831,7 @@ class RisBase(lib.StreamObject):
                 note: the definition of a_x, α and β is kind of weird in pyscf/libxc
             '''
 
-            omega, alpha_libxc, hyb_libxc = self.mf._numint.rsh_and_hybrid_coeff(self.mf.xc, spin=self.mf.mol.spin)
+            omega, alpha_libxc, hyb_libxc = self._scf._numint.rsh_and_hybrid_coeff(self._scf.xc, spin=self._scf.mol.spin)
             log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
 
             if omega > 0:
@@ -836,17 +871,17 @@ class RisBase(lib.StreamObject):
             self.eri_tag = '_sph'
         log.info(f'cartesian or spherical electron integral = {self.eri_tag}')
 
-        if self.mf.mo_coeff.ndim == 2:
+        if self._scf.mo_coeff.ndim == 2:
             self.RKS = True
             self.UKS = False
-            n_occ = int(sum(self.mf.mo_occ>0))
-            n_vir = int(sum(self.mf.mo_occ==0))
+            n_occ = int(sum(self._scf.mo_occ>0))
+            n_vir = int(sum(self._scf.mo_occ==0))
             self.n_occ = n_occ
             self.n_vir = n_vir
 
-            self.C_occ_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,:n_occ])
-            self.C_vir_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:])
-            mo_energy = self.mf.mo_energy
+            self.C_occ_notrunc = cp.asfortranarray(self._scf.mo_coeff[:,:n_occ])
+            self.C_vir_notrunc = cp.asfortranarray(self._scf.mo_coeff[:,n_occ:])
+            mo_energy = self._scf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
             vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
             occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
@@ -878,20 +913,20 @@ class RisBase(lib.StreamObject):
             log.info(f'rest_occ = {rest_occ}')
             log.info(f'rest_vir = {rest_vir}')
 
-            self.C_occ_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ-rest_occ:n_occ])
-            self.C_vir_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:n_occ+rest_vir])
+            self.C_occ_Ktrunc = cp.asfortranarray(self._scf.mo_coeff[:,n_occ-rest_occ:n_occ])
+            self.C_vir_Ktrunc = cp.asfortranarray(self._scf.mo_coeff[:,n_occ:n_occ+rest_vir])
 
             self.rest_occ = rest_occ
             self.rest_vir = rest_vir
 
-        elif self.mf.mo_coeff.ndim == 3:
+        elif self._scf.mo_coeff.ndim == 3:
             ''' TODO UKS method '''
             self.RKS = False
             self.UKS = True
-            self.n_occ_a = sum(self.mf.mo_occ[0]>0)
-            self.n_vir_a = sum(self.mf.mo_occ[0]==0)
-            self.n_occ_b = sum(self.mf.mo_occ[1]>0)
-            self.n_vir_b = sum(self.mf.mo_occ[1]==0)
+            self.n_occ_a = sum(self._scf.mo_occ[0]>0)
+            self.n_vir_a = sum(self._scf.mo_occ[0]==0)
+            self.n_occ_b = sum(self._scf.mo_occ[1]>0)
+            self.n_vir_b = sum(self._scf.mo_occ[1]==0)
             log.info('n_occ for alpha spin = {self.n_occ_a}')
             log.info('n_vir for alpha spin = {self.n_vir_a}')
             log.info('n_occ for beta spin = {self.n_occ_b}')
@@ -933,6 +968,14 @@ class RisBase(lib.StreamObject):
     def nuc_grad_method(self):
         from gpu4pyscf.grad import tdrks_ris
         return tdrks_ris.Gradients(self)
+
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self._scf.reset(mol)
+        return self
+
+    as_scanner = as_scanner
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
@@ -1129,8 +1172,8 @@ class TDA(RisBase):
         A_aa_size = n_occ_a * n_vir_a
         A_bb_size = n_occ_b * n_vir_b
 
-        mo_coeff = self.mf.mo_coeff
-        mo_energy = self.mf.mo_energy
+        mo_coeff = self._scf.mo_coeff
+        mo_energy = self._scf.mo_energy
 
         mol = self.mol
         auxmol = self.get_auxmol(theta=self.theta, add_p=self.add_p)
@@ -1262,7 +1305,7 @@ class TDA(RisBase):
             TDA_MVP, hdiag = self.get_UKS_TDA_MVP()
 
 
-        energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP,
+        conv, energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP,
                                             hdiag=hdiag,
                                             N_states=self.nstates,
                                             conv_tol=self.conv_tol,
@@ -1271,6 +1314,10 @@ class TDA(RisBase):
                                             single=self.single,
                                             verbose=log)
 
+        self.converged = conv
+        if not all(self.converged):
+            log.info('TD-SCF states %s not converged.',
+                        [i for i, x in enumerate(self.converged) if not x])
         log.debug(f'check orthonormal of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
         P = self.get_P()
@@ -1528,8 +1575,8 @@ class TDDFT(RisBase):
         A_aa_size = n_occ_a * n_vir_a
         A_bb_size = n_occ_b * n_vir_b
 
-        mo_coeff = self.mf.mo_coeff
-        mo_energy = self.mf.mo_energy
+        mo_coeff = self._scf.mo_coeff
+        mo_energy = self._scf.mo_energy
 
         '''
         the 2c2e and 3c2e integrals with/without RSH
@@ -1753,7 +1800,7 @@ class TDDFT(RisBase):
             elif self.UKS:
                 TDDFT_hybrid_MVP, hdiag = self.get_UKS_TDDFT_MVP()
 
-            energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP,
+            conv, energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP,
                                                             hdiag=hdiag,
                                                             N_states=self.nstates,
                                                             conv_tol=self.conv_tol,
@@ -1761,6 +1808,10 @@ class TDDFT(RisBase):
                                                             GS=self.GS,
                                                             single=self.single,
                                                             verbose=self.verbose)
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
 
         elif self.a_x == 0:
             '''pure TDDFT'''
@@ -1769,7 +1820,7 @@ class TDDFT(RisBase):
 
             elif self.UKS:
                 TDDFT_pure_MVP, hdiag_sq = self.get_UKS_TDDFT_pure_MVP()
-            energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP,
+            conv, energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP,
                                                 hdiag=hdiag_sq,
                                                 N_states=self.nstates,
                                                 conv_tol=self.conv_tol,
@@ -1777,7 +1828,10 @@ class TDDFT(RisBase):
                                                 GS=self.GS,
                                                 single=self.single,
                                                 verbose=self.verbose)
-
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
             energies = energies_sq**0.5
             Z = (energies**0.5).reshape(-1,1) * Z
 
