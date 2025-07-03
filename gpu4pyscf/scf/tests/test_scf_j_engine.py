@@ -167,3 +167,48 @@ H  -5.8042 -1.0067 12.1503
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
     assert abs(vj1 - ref).max() < 1e-9
+
+def test_sparse_dm():
+    basis = ([[0,[2**x,1]] for x in range(-1, 5)] +
+             [[1,[2**x,1]] for x in range(-1, 3)] +
+             [[3,[2**x,1]] for x in range(-1, 3)]
+            )
+    mol = pyscf.M(
+        atom = '''
+O  -9.2037 -0.1259  6.4262
+H -11.7768  0.2184  7.9561
+H -11.7819 -1.0073  7.9636
+H -11.2190 -0.1224  5.3389
+N  -9.2130 -0.1182  8.6103
+C  -7.7662 -0.1219  8.6103
+C  -7.2447 -0.1180 10.0438
+O  -7.9744 -0.1125 11.0321
+H  -7.4164 -1.0206  8.0911
+H  -7.4110  0.2317  8.0835
+H  -9.6852 -0.1162  9.5099
+N  -5.9251 -0.1205 10.2766
+C  -5.4305 -0.1166 11.6362
+C  -3.9051 -0.1205 11.6362
+O  -3.2258 -0.1262 10.6126
+H  -5.7987  0.2177 12.1423
+H  -5.8042 -1.0067 12.1503
+        ''',
+        basis=basis,
+        unit='B',)
+
+    dm = np.eye(mol.nao)
+    ref = jk.get_j(mol, dm).get()
+
+    vj = j_engine.get_j(mol, dm)
+    vj1 = vj.get()
+    assert abs(vj1 - ref).max() < 1e-9
+
+    mol.cart = True
+    mol.build(0, 0)
+    dm = np.eye(mol.nao)
+    ref = jk.get_j(mol, dm).get()
+    #ref = get_jk(mol, dm, with_k=False)[0]
+
+    vj = j_engine.get_j(mol, dm)
+    vj1 = vj.get()
+    assert abs(vj1 - ref).max() < 1e-9

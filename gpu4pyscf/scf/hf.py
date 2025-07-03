@@ -692,16 +692,17 @@ class SCF(pyscf_lib.StreamObject):
                 cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
                 cupy.asnumpy(envs['mo_occ']), overwrite_mol=False)
 
-    def get_j(self, mol=None, dm=None, hermi=1, omega=None):
-        if mol is None:
-            mol = self.mol
+    def get_j(self, mol, dm, hermi=1, omega=None):
         if omega is None:
             omega = mol.omega
         if omega not in self._opt_jengine:
             jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
             self._opt_jengine[omega] = jopt
         jopt = self._opt_jengine[omega]
-        return j_engine.get_j(mol, dm, hermi, jopt)
+        vj = j_engine.get_j(mol, dm, hermi, jopt)
+        if not isinstance(dm, cupy.ndarray):
+            vj = vj.get()
+        return vj
 
     def get_k(self, mol=None, dm=None, hermi=1, omega=None):
         return self.get_jk(mol, dm, hermi, with_j=False, omega=omega)[1]
