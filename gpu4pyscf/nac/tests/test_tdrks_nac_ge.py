@@ -210,5 +210,5 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
 if __name__ == "__main__":
-    print("Full Tests for TD-RKS nonadiabatic coupling vectors")
+    print("Full Tests for TD-RKS nonadiabatic coupling vectors between ground and excited state.")
     unittest.main()
