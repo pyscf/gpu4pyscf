@@ -1,0 +1,992 @@
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from pyscf import gto
+from gpu4pyscf.dft import rks
+from gpu4pyscf.scf import hf as rhf
+import numpy as np
+import cupy as cp
+from pyscf.data import nist
+from pyscf.gto.mole import conc_mol
+from gpu4pyscf.scf import j_engine
+from gpu4pyscf.gto.int3c1e import int1e_grids
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import eigh as generalized_eigh
+from cupyx.scipy.linalg import expm as matrix_exp
+from gpu4pyscf.scf import cphf
+from gpu4pyscf.lib.cupy_helper import pack_tril, unpack_tril
+from gpu4pyscf.lib.diis import DIIS
+
+# np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
+
+def merge_mol(mol_list):
+    n_frag = len(mol_list)
+    assert n_frag >= 1
+    merged = mol_list[0]
+    for i in range(1, n_frag):
+        merged = conc_mol(merged, mol_list[i])
+    return merged
+
+def _get_total_system_energy(mf_sum, dm):
+    return float(mf_sum.energy_elec(dm = dm)[0] + mf_sum.energy_nuc())
+
+def _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum):
+    n_frag = len(mf_list)
+    E_sum = 0
+    for i_frag in range(n_frag):
+        mf_i = mf_list[i_frag]
+        assert not mf_i.do_disp()
+
+        H1e_i = H1e_list[i_frag]
+        mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+        D_i = 2 * mocc_i @ mocc_i.T
+        E_i = mf_sum.energy_elec(dm = D_i, h1e = H1e_i)[0] + mf_i.energy_nuc()
+        if mf_i.do_disp():
+            E_i += mf_i.get_dispersion()
+        D_i = None
+        E_sum += E_i
+    return E_sum
+
+def _get_total_system_xc_energy(mf_sum, dm):
+    E_j_plus_xc = mf_sum.energy_elec(dm = dm, h1e = dm * 0)[0]
+    J = mf_sum.get_j(mf_sum.mol, dm, hermi = 1)
+    E_j = 0.5 * cp.einsum('ij,ji->', J, dm)
+    return float(E_j_plus_xc - E_j)
+
+def _get_fragment_xc_energy_sum(mf_list, mf_sum, nocc_offsets, mocc_sum):
+    n_frag = len(mf_list)
+    E_sum = 0
+    for i_frag in range(n_frag):
+        mf_i = mf_list[i_frag]
+
+        mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+        D_i = 2 * mocc_i @ mocc_i.T
+        E_j_plus_xc_i = mf_sum.energy_elec(dm = D_i, h1e = D_i * 0)[0]
+        J_i = mf_sum.get_j(mf_sum.mol, D_i, hermi = 1)
+        E_j_i = 0.5 * cp.einsum('ij,ji->', J_i, D_i)
+        D_i = None
+        E_sum += E_j_plus_xc_i - E_j_i
+    return E_sum
+
+def get_eda_classical_electrostatic_energy(mf_list, _make_mf, eda_cache):
+    n_frag = len(mf_list)
+    assert n_frag >= 1
+    classical_electrostatic_energy_pair = np.zeros((n_frag, n_frag))
+
+    for i_frag in range(n_frag):
+        for j_frag in range(i_frag + 1, n_frag):
+            mf_i = mf_list[i_frag]
+            mf_j = mf_list[j_frag]
+
+            nao_i = mf_i.mol.nao
+            nao_j = mf_j.mol.nao
+            dm_i = mf_i.make_rdm1()
+            dm_j = mf_j.make_rdm1()
+
+            dm_i_resized = cp.zeros([nao_i + nao_j, nao_i + nao_j])
+            dm_i_resized[0 : nao_i, 0 : nao_i] = dm_i
+            dm_j_resized = cp.zeros([nao_i + nao_j, nao_i + nao_j])
+            dm_j_resized[nao_i : nao_i+nao_j, nao_i : nao_i+nao_j] = dm_j
+
+            mol_merged = conc_mol(mf_i.mol, mf_j.mol)
+            J_j = j_engine.get_j(mol_merged, dm_i_resized)
+            E_ee_ij = contract('ij,ij->', dm_j_resized, J_j)
+            dm_i_resized = None
+            dm_j_resized = None
+
+            nucleus_position_i = mf_i.mol.atom_coords(unit = "B")
+            nucleus_charge_i = mf_i.mol.atom_charges()
+            nucleus_position_j = mf_j.mol.atom_coords(unit = "B")
+            nucleus_charge_j = mf_j.mol.atom_charges()
+
+            nucleus_position_i = cp.asarray(nucleus_position_i)
+            nucleus_charge_i = cp.asarray(nucleus_charge_i)
+            nucleus_position_j = cp.asarray(nucleus_position_j)
+            nucleus_charge_j = cp.asarray(nucleus_charge_j)
+
+            V1e_j = int1e_grids(mf_i.mol, nucleus_position_j, dm = dm_i)
+            E_en_ij = V1e_j.T @ nucleus_charge_j
+            V1e_i = int1e_grids(mf_j.mol, nucleus_position_i, dm = dm_j)
+            E_en_ji = V1e_i.T @ nucleus_charge_i
+            dm_i = None
+            dm_j = None
+
+            E_nn_ij = mol_merged.enuc - mf_i.mol.enuc - mf_j.mol.enuc
+
+            classical_electrostatic_energy_pair[i_frag, j_frag] = E_ee_ij - E_en_ij - E_en_ji + E_nn_ij
+
+    classical_electrostatic_energy = float(np.sum(classical_electrostatic_energy_pair))
+    eda_cache["classical_electrostatic_energy_pair"] = classical_electrostatic_energy_pair
+    eda_cache["classical_electrostatic_energy"] = classical_electrostatic_energy
+    return classical_electrostatic_energy
+
+def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hessian = False):
+    n_frag = len(mf_list)
+    assert n_frag >= 1
+
+    mocc_list = []
+    for i_frag in range(n_frag):
+        mf_i = mf_list[i_frag]
+        mo_coeff_i = mf_i.mo_coeff
+        assert mo_coeff_i.ndim == 2
+        mo_occ_i = mf_i.mo_occ
+        assert mo_occ_i.ndim == 1
+        mocc_i = mo_coeff_i[:, mo_occ_i > 0]
+        mocc_list.append(mocc_i)
+    nao_offsets  = np.cumsum([0] + [mocc.shape[0] for mocc in mocc_list])
+    nocc_offsets = np.cumsum([0] + [mocc.shape[1] for mocc in mocc_list])
+    nao_sum  =  nao_offsets[-1]
+    nocc_sum = nocc_offsets[-1]
+
+    mocc_sum = cp.zeros([nao_sum, nocc_sum])
+    for i_frag in range(n_frag):
+        mocc_i = mocc_list[i_frag]
+        mocc_i = cp.asarray(mocc_i)
+        nao_i, nocc_i = mocc_i.shape
+        i_ao_offset, i_occ_offset = nao_offsets[i_frag], nocc_offsets[i_frag]
+        mocc_sum[i_ao_offset : i_ao_offset + nao_i, i_occ_offset : i_occ_offset + nocc_i] = mocc_i
+
+    mol_sum = merge_mol([mf.mol for mf in mf_list])
+    S = mol_sum.intor_symmetric('int1e_ovlp')
+    S = cp.asarray(S)
+
+    CTSC = mocc_sum.T @ S @ mocc_sum
+    # D_frozen = 2 * mocc_sum @ cp.linalg.solve(CTSC, mocc_sum.T)
+
+    ### Note: The (C^T S C)^-1/2 result must be near identity
+    CTSC_eigenvalues, CTSC_eigenvectors = cp.linalg.eigh(CTSC)
+    assert cp.min(CTSC_eigenvalues) > 1e-6
+    CTSC_minus_half = CTSC_eigenvectors @ cp.diag(CTSC_eigenvalues**-0.5) @ CTSC_eigenvectors.T
+
+    mocc_renormalized = mocc_sum @ CTSC_minus_half
+    mocc_sum = mocc_renormalized
+    # D_frozen = 2 * mocc_renormalized @ mocc_renormalized.T
+    # print(cp.max(cp.abs(mocc_renormalized.T @ S @ mocc_renormalized - cp.eye(nocc_sum))))
+    # print(cp.max(cp.abs(2 * mocc_renormalized @ mocc_renormalized.T - D_frozen)))
+
+    K1e = cp.asarray(mol_sum.intor_symmetric('int1e_kin'))
+    H1e_list = []
+    for i_frag in range(n_frag):
+        assert not mol_sum._pseudo, "Pseudo potential not implemented for EDA"
+        assert not mol_sum.nucmod
+        assert len(mol_sum._ecpbas) == 0, "ECP not implemented for EDA"
+        mf_i = mf_list[i_frag]
+        H1e_i = K1e + int1e_grids(mol_sum, mf_i.mol.atom_coords(unit = "B"), charges = -mf_i.mol.atom_charges())
+        H1e_list.append(H1e_i)
+    K1e = None
+
+    mf_sum = _make_mf(mol_sum, if_kernel = False)
+
+    print("Orthogonal Decomposition of the Initial Supersystem Wavefunction")
+    energy_sum = _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
+    print(f"Cycle {0:2d}: energy = {energy_sum}")
+    energy_unrelaxed = energy_sum
+    scf_conv = False
+
+    for cycle in range(mf_sum.max_cycle):
+        Fock_list = []
+        for i_frag in range(n_frag):
+            mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+
+            D_i = 2 * mocc_i @ mocc_i.T
+            H1e_i = H1e_list[i_frag]
+            F_i = mf_sum.get_fock(h1e = H1e_i, dm = D_i)
+            Fock_list.append(F_i)
+
+        def upper_trinagular_to_pair_index(i, j, n):
+            return (2 * n - 2 - i) * (i - 1) // 2 + n - 1 + j - i - 1
+        nocc_count = nocc_offsets[1:] - nocc_offsets[:-1]
+        nocc_frag_pair_count = [int(nocc_count[i] * nocc_count[j]) for i in range(n_frag) for j in range(i+1, n_frag)]
+        nocc_frag_pair_offsets = np.cumsum([0] + nocc_frag_pair_count)
+        nocc_frag_pair_sum = nocc_frag_pair_offsets[-1]
+
+        orbital_gradient = cp.zeros(nocc_frag_pair_sum)
+        for i_frag in range(n_frag):
+            mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+            F_i = Fock_list[i_frag]
+
+            for j_frag in range(i_frag + 1, n_frag):
+                mocc_j = mocc_sum[:, nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]]
+                F_j = Fock_list[j_frag]
+
+                orbital_gradient_ij = 2 * mocc_i.T @ (F_j - F_i) @ mocc_j
+                ij_frag_pair = upper_trinagular_to_pair_index(i_frag, j_frag, n_frag)
+                orbital_gradient[nocc_frag_pair_offsets[ij_frag_pair] : nocc_frag_pair_offsets[ij_frag_pair + 1]] = \
+                    orbital_gradient_ij.reshape(nocc_count[i_frag] * nocc_count[j_frag])
+                orbital_gradient_ij = None
+
+        if build_orbital_hessian:
+            orbital_hessian = cp.zeros([nocc_frag_pair_sum, nocc_frag_pair_sum])
+            for i_frag in range(n_frag):
+                mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+                F_i = Fock_list[i_frag]
+
+                for j_frag in range(i_frag + 1, n_frag):
+                    mocc_j = mocc_sum[:, nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]]
+                    F_j = Fock_list[j_frag]
+
+                    ij_frag_pair = upper_trinagular_to_pair_index(i_frag, j_frag, n_frag)
+
+                    for k_frag in range(0, n_frag):
+                        mocc_k = mocc_sum[:, nocc_offsets[k_frag] : nocc_offsets[k_frag + 1]]
+                        F_k = Fock_list[k_frag]
+
+                        for l_frag in range(k_frag + 1, n_frag):
+                            mocc_l = mocc_sum[:, nocc_offsets[l_frag] : nocc_offsets[l_frag + 1]]
+                            F_l = Fock_list[l_frag]
+
+                            kl_frag_pair = upper_trinagular_to_pair_index(k_frag, l_frag, n_frag)
+                            orbital_hessian_ijkl = cp.zeros([nocc_count[i_frag], nocc_count[j_frag], nocc_count[k_frag], nocc_count[l_frag]])
+
+                            if k_frag == j_frag:
+                                orbital_hessian_il = mocc_i.T @ (F_l - 2 * F_k + F_i) @ mocc_l
+                                for i_occ in range(nocc_count[j_frag]):
+                                    orbital_hessian_ijkl[:, i_occ, i_occ, :] += orbital_hessian_il
+                                orbital_hessian_il = None
+                            if l_frag == j_frag:
+                                orbital_hessian_ik = - mocc_i.T @ (F_k - 2 * F_l + F_i) @ mocc_k
+                                for i_occ in range(nocc_count[j_frag]):
+                                    orbital_hessian_ijkl[:, i_occ, :, i_occ] += orbital_hessian_ik
+                                orbital_hessian_ik = None
+                            if l_frag == i_frag:
+                                orbital_hessian_jk = mocc_j.T @ (F_k - 2 * F_l + F_j) @ mocc_k
+                                for i_occ in range(nocc_count[i_frag]):
+                                    orbital_hessian_ijkl[i_occ, :, :, i_occ] += orbital_hessian_jk
+                                orbital_hessian_jk = None
+                            if k_frag == i_frag:
+                                orbital_hessian_jl = - mocc_j.T @ (F_l - 2 * F_k + F_j) @ mocc_l
+                                for i_occ in range(nocc_count[i_frag]):
+                                    orbital_hessian_ijkl[i_occ, :, i_occ, :] += orbital_hessian_jl
+                                orbital_hessian_jl = None
+
+                            orbital_hessian[nocc_frag_pair_offsets[ij_frag_pair] : nocc_frag_pair_offsets[ij_frag_pair + 1],
+                                            nocc_frag_pair_offsets[kl_frag_pair] : nocc_frag_pair_offsets[kl_frag_pair + 1]] = \
+                                orbital_hessian_ijkl.reshape([nocc_count[i_frag] * nocc_count[j_frag], nocc_count[k_frag] * nocc_count[l_frag]])
+                            orbital_hessian_ijkl = None
+            F_i = None
+            F_j = None
+            F_k = None
+            F_l = None
+
+            newton_direction = -cp.linalg.solve(orbital_hessian, orbital_gradient)
+            assert not np.isnan(newton_direction).any()
+            orbital_hessian = None
+
+        else:
+            conjugate_gradient_initial_guess = cp.zeros(nocc_frag_pair_sum)
+            for i_frag in range(n_frag):
+                mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+                F_i = Fock_list[i_frag]
+
+                for j_frag in range(i_frag + 1, n_frag):
+                    mocc_j = mocc_sum[:, nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]]
+                    F_j = Fock_list[j_frag]
+
+                    preconditioner_ii = 2 * mocc_i.T @ (F_j - F_i) @ mocc_i
+                    preconditioner_jj = 2 * mocc_j.T @ (F_i - F_j) @ mocc_j
+
+                    preconditioner_ii_eigenvalues, preconditioner_ii_eigenvectors = cp.linalg.eigh(preconditioner_ii)
+                    preconditioner_jj_eigenvalues, preconditioner_jj_eigenvectors = cp.linalg.eigh(preconditioner_jj)
+
+                    preconditioner_ijij_diagonal = preconditioner_ii_eigenvalues[:, cp.newaxis] + preconditioner_jj_eigenvalues[cp.newaxis, :]
+                    preconditioner_ijij_diagonal_inv = preconditioner_ijij_diagonal**-1
+                    preconditioner_ijij_diagonal_inv[cp.abs(preconditioner_ijij_diagonal) < 1e-14] = 0
+                    preconditioner_ijij_diagonal = None
+                    preconditioner_ii_eigenvalues = None
+                    preconditioner_jj_eigenvalues = None
+
+                    ij_frag_pair = upper_trinagular_to_pair_index(i_frag, j_frag, n_frag)
+                    orbital_gradient_ij = orbital_gradient[nocc_frag_pair_offsets[ij_frag_pair] : nocc_frag_pair_offsets[ij_frag_pair + 1]]
+                    orbital_gradient_ij = orbital_gradient_ij.reshape(nocc_count[i_frag], nocc_count[j_frag])
+
+                    conjugate_gradient_initial_guess_ij = preconditioner_ii_eigenvectors.T @ orbital_gradient_ij @ preconditioner_jj_eigenvectors
+                    conjugate_gradient_initial_guess_ij = preconditioner_ijij_diagonal_inv * conjugate_gradient_initial_guess_ij
+                    conjugate_gradient_initial_guess_ij = preconditioner_ii_eigenvectors @ conjugate_gradient_initial_guess_ij @ preconditioner_jj_eigenvectors.T
+                    orbital_gradient_ij = None
+                    preconditioner_ii_eigenvectors = None
+                    preconditioner_jj_eigenvectors = None
+                    preconditioner_ijij_diagonal_inv = None
+
+                    conjugate_gradient_initial_guess[nocc_frag_pair_offsets[ij_frag_pair] : nocc_frag_pair_offsets[ij_frag_pair + 1]] = \
+                        conjugate_gradient_initial_guess_ij.reshape(nocc_count[i_frag] * nocc_count[j_frag])
+                    conjugate_gradient_initial_guess_ij = None
+            F_i = None
+            F_j = None
+
+            def left_multiple_orbital_hessian(x):
+                y = cp.zeros_like(x)
+                for i_frag in range(n_frag):
+                    mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+                    F_i = Fock_list[i_frag]
+
+                    for j_frag in range(i_frag + 1, n_frag):
+                        mocc_j = mocc_sum[:, nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]]
+                        F_j = Fock_list[j_frag]
+
+                        ij_frag_pair = upper_trinagular_to_pair_index(i_frag, j_frag, n_frag)
+                        x_ij = x[nocc_frag_pair_offsets[ij_frag_pair] : nocc_frag_pair_offsets[ij_frag_pair + 1]]
+                        x_ij = x_ij.reshape(nocc_count[i_frag], nocc_count[j_frag])
+
+                        for k_frag in range(0, n_frag):
+                            mocc_k = mocc_sum[:, nocc_offsets[k_frag] : nocc_offsets[k_frag + 1]]
+                            F_k = Fock_list[k_frag]
+
+                            for l_frag in range(k_frag + 1, n_frag):
+                                mocc_l = mocc_sum[:, nocc_offsets[l_frag] : nocc_offsets[l_frag + 1]]
+                                F_l = Fock_list[l_frag]
+
+                                kl_frag_pair = upper_trinagular_to_pair_index(k_frag, l_frag, n_frag)
+                                y_kl = cp.zeros([nocc_count[k_frag], nocc_count[l_frag]])
+
+                                if k_frag == j_frag:
+                                    orbital_hessian_il = mocc_i.T @ (F_l - 2 * F_k + F_i) @ mocc_l
+                                    y_kl += (orbital_hessian_il.T @ x_ij).T
+                                    orbital_hessian_il = None
+                                if l_frag == j_frag:
+                                    orbital_hessian_ik = - mocc_i.T @ (F_k - 2 * F_l + F_i) @ mocc_k
+                                    y_kl += orbital_hessian_ik.T @ x_ij
+                                    orbital_hessian_ik = None
+                                if l_frag == i_frag:
+                                    orbital_hessian_jk = mocc_j.T @ (F_k - 2 * F_l + F_j) @ mocc_k
+                                    y_kl += (x_ij @ orbital_hessian_jk).T
+                                    orbital_hessian_jk = None
+                                if k_frag == i_frag:
+                                    orbital_hessian_jl = - mocc_j.T @ (F_l - 2 * F_k + F_j) @ mocc_l
+                                    y_kl += x_ij @ orbital_hessian_jl
+                                    orbital_hessian_jl = None
+
+                                y[nocc_frag_pair_offsets[kl_frag_pair] : nocc_frag_pair_offsets[kl_frag_pair + 1]] += \
+                                    y_kl.reshape(nocc_count[k_frag] * nocc_count[l_frag])
+                                y_kl = None
+
+                        x_ij = None
+
+                F_i = None
+                F_j = None
+                F_k = None
+                F_l = None
+
+                return y
+
+            def conjugate_gradient(A_operator, b, x0, tol, maxiter = None):
+                n = len(b)
+                if maxiter is None:
+                    maxiter = n
+
+                x = x0
+                r = b - A_operator(x)
+                r_dot_r = float(r.T @ r)
+                r_norm = np.sqrt(r_dot_r)
+                if r_norm < tol:
+                    return x
+                p = r.copy()
+
+                for k in range(maxiter):
+                    Ap = A_operator(p)
+                    alpha = r_dot_r / float(p.T @ Ap)
+                    x = x + alpha * p
+                    r = r - alpha * Ap
+
+                    r_dot_r_new = np.dot(r, r)
+                    r_norm = np.sqrt(r_dot_r_new)
+                    if r_norm < tol:
+                        return x
+
+                    beta = r_dot_r_new / r_dot_r
+                    p = r + beta * p
+                    r_dot_r = r_dot_r_new
+
+                raise RuntimeError("Conjugate gradient for orbital hessian inverse in EDA orthogonal decomposition not converged!")
+
+            conjugate_gradient_threshold = 1e-14
+            newton_direction = -conjugate_gradient(left_multiple_orbital_hessian,
+                                                   orbital_gradient,
+                                                   conjugate_gradient_initial_guess,
+                                                   conjugate_gradient_threshold)
+            conjugate_gradient_initial_guess = None
+
+        Fock_list = None
+        orbital_gradient = None
+
+        orbital_rotation = cp.zeros([nocc_sum, nocc_sum])
+        for i_frag in range(n_frag):
+            for j_frag in range(i_frag + 1, n_frag):
+                ij_frag_pair = upper_trinagular_to_pair_index(i_frag, j_frag, n_frag)
+
+                orbital_rotation_ij = newton_direction[nocc_frag_pair_offsets[ij_frag_pair] : nocc_frag_pair_offsets[ij_frag_pair + 1]]
+                orbital_rotation_ij = orbital_rotation_ij.reshape([nocc_count[i_frag], nocc_count[j_frag]])
+                orbital_rotation[nocc_offsets[i_frag] : nocc_offsets[i_frag + 1],
+                                 nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]] = orbital_rotation_ij
+                orbital_rotation[nocc_offsets[j_frag] : nocc_offsets[j_frag + 1],
+                                 nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]] = -orbital_rotation_ij.T
+        newton_direction = None
+
+        U = matrix_exp(orbital_rotation)
+        orbital_rotation = None
+
+        mocc_sum = mocc_sum @ U
+        U = None
+
+        energy_previous = energy_sum
+        energy_sum = _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
+        delta_energy = energy_sum - energy_previous
+        print(f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
+        if (abs(delta_energy) < mf_sum.conv_tol):
+            scf_conv = True
+            break
+
+    if not scf_conv:
+        raise RuntimeError("Orthogonal decomposition not converged!")
+
+    electrostatic_energy_pair = np.zeros((n_frag, n_frag))
+
+    for i_frag in range(n_frag):
+        mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+        D_i = 2 * mocc_i @ mocc_i.T
+
+        for j_frag in range(i_frag + 1, n_frag):
+            mocc_j = mocc_sum[:, nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]]
+            D_j = 2 * mocc_j @ mocc_j.T
+
+            J_j = j_engine.get_j(mol_sum, D_i)
+            E_ee_ij = contract('ij,ij->', D_j, J_j)
+
+            mf_i = mf_list[i_frag]
+            mf_j = mf_list[j_frag]
+            nucleus_position_i = mf_i.mol.atom_coords(unit = "B")
+            nucleus_charge_i = mf_i.mol.atom_charges()
+            nucleus_position_j = mf_j.mol.atom_coords(unit = "B")
+            nucleus_charge_j = mf_j.mol.atom_charges()
+
+            nucleus_position_i = cp.asarray(nucleus_position_i)
+            nucleus_charge_i = cp.asarray(nucleus_charge_i)
+            nucleus_position_j = cp.asarray(nucleus_position_j)
+            nucleus_charge_j = cp.asarray(nucleus_charge_j)
+
+            V1e_j = int1e_grids(mol_sum, nucleus_position_j, dm = D_i)
+            E_en_ij = V1e_j.T @ nucleus_charge_j
+            V1e_i = int1e_grids(mol_sum, nucleus_position_i, dm = D_j)
+            E_en_ji = V1e_i.T @ nucleus_charge_i
+
+            nucleus_rij = nucleus_position_i[:, np.newaxis, :] - nucleus_position_j[np.newaxis, :, :]
+            nucleus_rij = np.linalg.norm(nucleus_rij, axis = -1)
+            nucleus_qiqj_rij = nucleus_charge_i[:, np.newaxis] * nucleus_charge_j[np.newaxis, :] / nucleus_rij
+            E_nn_ij = cp.sum(nucleus_qiqj_rij)
+
+            electrostatic_energy_pair[i_frag, j_frag] = E_ee_ij - E_en_ij - E_en_ji + E_nn_ij
+        D_i = None
+        D_j = None
+
+    electrostatic_energy = float(np.sum(electrostatic_energy_pair))
+    eda_cache["electrostatic_energy_pair"] = electrostatic_energy_pair
+    eda_cache["electrostatic_energy"] = electrostatic_energy
+    eda_cache["kinetic_energy_pressure"] = energy_sum - energy_unrelaxed
+    eda_cache["mocc_pauli"] = mocc_sum
+    return electrostatic_energy
+
+def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
+    n_frag = len(mf_list)
+    assert n_frag >= 1
+
+    assert "mocc_pauli" in eda_cache
+
+    mol_sum = merge_mol([mf.mol for mf in mf_list])
+    S = mol_sum.intor_symmetric('int1e_ovlp')
+    S = cp.asarray(S)
+
+    mocc_list = []
+    for i_frag in range(n_frag):
+        mf_i = mf_list[i_frag]
+        mo_coeff_i = mf_i.mo_coeff
+        assert mo_coeff_i.ndim == 2
+        mo_occ_i = mf_i.mo_occ
+        assert mo_occ_i.ndim == 1
+        mocc_i = mo_coeff_i[:, mo_occ_i >  0]
+
+        mocc_list.append(mocc_i)
+
+    nao_offsets  = np.cumsum([0] + [mocc.shape[0] for mocc in mocc_list])
+    nocc_offsets = np.cumsum([0] + [mocc.shape[1] for mocc in mocc_list])
+    nao_sum  =  nao_offsets[-1]
+    nocc_sum = nocc_offsets[-1]
+    mocc_list = None
+
+    mocc_sum = eda_cache["mocc_pauli"]
+    CTSC = mocc_sum.T @ S @ mocc_sum
+    D_frozen = 2 * mocc_sum @ cp.linalg.solve(CTSC, mocc_sum.T)
+
+    mf_sum = _make_mf(mol_sum, if_kernel = False)
+    mf_dispersion_free_list = []
+    for i_frag in range(n_frag):
+        mf_i = mf_list[i_frag]
+        mf_dispersion_free_i = _make_mf(mf_i.mol, if_kernel = False, dispersion_free_xc = "HF")
+        mf_dispersion_free_list.append(mf_dispersion_free_i)
+    mf_dispersion_free_sum = _make_mf(mol_sum, dispersion_free_xc = "HF", if_kernel = False)
+
+    E_frozen = _get_total_system_xc_energy(mf_sum, D_frozen)
+    E_fragment_sum = _get_fragment_xc_energy_sum(mf_list, mf_sum, nocc_offsets, mocc_sum)
+
+    E_dispersion_free_frozen = _get_total_system_xc_energy(mf_dispersion_free_sum, D_frozen)
+    E_dispersion_free_fragment_sum = _get_fragment_xc_energy_sum(mf_dispersion_free_list, mf_dispersion_free_sum, nocc_offsets, mocc_sum)
+
+    E_dispersion = (E_frozen - E_fragment_sum) - (E_dispersion_free_frozen - E_dispersion_free_fragment_sum)
+    eda_cache["dispersion_energy"] = E_dispersion
+    eda_cache["interfragment_dfxc_energy"] = E_dispersion_free_frozen - E_dispersion_free_fragment_sum
+    return E_dispersion
+
+def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
+                                field_order = 2, virtual_singular_value_threshold = 1e-7, uncoupled_ferf = False):
+    n_frag = len(mf_list)
+    assert n_frag >= 1
+
+    assert type(field_order) is int
+    match field_order:
+        case 1: print("Dipole response included for FERF (nD)")
+        case 2: print("Dipole and quadrupole response included for FERF (nDQ)")
+        case 3: print("Dipole, quadrupole and octupole response included for FERF (nDQO)")
+        case _:
+            raise ValueError(f"Incorrect field_order ({field_order}) specified for get_eda_polarization_energy()")
+
+    print("FERF Constrained Virtual Space Construction")
+    G_projector_list = []
+    mocc_list = []
+    for i_frag in range(n_frag):
+        mf_i = mf_list[i_frag]
+        mo_coeff_i = mf_i.mo_coeff
+        assert mo_coeff_i.ndim == 2
+        mo_occ_i = mf_i.mo_occ
+        assert mo_occ_i.ndim == 1
+        mocc_i = mo_coeff_i[:, mo_occ_i >  0]
+        mvir_i = mo_coeff_i[:, mo_occ_i == 0]
+        mo_energy_i = mf_i.mo_energy
+
+        mocc_list.append(mocc_i)
+
+        mass_i = mf_i.mol.atom_mass_list()
+        mass_i = np.asarray(mass_i, dtype = np.float32)
+        coords_i = mf_i.mol.atom_coords(unit = "B")
+        center_of_mass_i = (mass_i @ coords_i) / mass_i.sum()
+
+        with mf_i.mol.with_common_orig(center_of_mass_i):
+            assert field_order >= 1
+            dipole_integral = mf_i.mol.intor('int1e_r')
+            dipole_integral = cp.asarray(dipole_integral)
+            dipole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, dipole_integral @ mocc_i)
+            dipole_integral = None
+            multipole_integral_ai = dipole_integral_ai
+            dipole_integral_ai = None
+            if field_order >= 2:
+                quadrupole_integral = mf_i.mol.intor('int1e_rr')
+
+                quadrupole_integral_trace = quadrupole_integral[0] + quadrupole_integral[4] + quadrupole_integral[8]
+                quadrupole_integral[0] = quadrupole_integral[0] - quadrupole_integral_trace / 3
+                quadrupole_integral[4] = quadrupole_integral[4] - quadrupole_integral_trace / 3
+                quadrupole_integral[8] = quadrupole_integral[8] - quadrupole_integral_trace / 3
+                quadrupole_integral_trace = None
+                quadrupole_integral *= 1.5
+
+                quadrupole_integral_spherical = np.zeros([5, mf_i.mol.nao, mf_i.mol.nao])
+                quadrupole_integral_spherical[0] = (2.0/np.sqrt(3.0)) * quadrupole_integral[1] # xy
+                quadrupole_integral_spherical[1] = (2.0/np.sqrt(3.0)) * quadrupole_integral[5] # yz
+                quadrupole_integral_spherical[2] = quadrupole_integral[8] # z^2
+                quadrupole_integral_spherical[3] = (2.0/np.sqrt(3.0)) * quadrupole_integral[2] # xz
+                quadrupole_integral_spherical[4] = (1.0/np.sqrt(3.0)) * (quadrupole_integral[0] - quadrupole_integral[4]) # x^2 - y^2
+                quadrupole_integral = quadrupole_integral_spherical
+                quadrupole_integral_spherical = None
+
+                quadrupole_integral = cp.asarray(quadrupole_integral)
+                quadrupole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, quadrupole_integral @ mocc_i)
+                quadrupole_integral = None
+                multipole_integral_ai = cp.concatenate([multipole_integral_ai, quadrupole_integral_ai], axis=0)
+                quadrupole_integral_ai = None
+            if field_order >= 3:
+                raise NotImplementedError("EDA polarization term field response with octupole is not tested")
+                octupole_integral = mf_i.mol.intor('int1e_rrr')
+
+                octupole_integral_trace = octupole_integral[0] + octupole_integral[4] + octupole_integral[8] # xr^2
+                octupole_integral[0] -= octupole_integral_trace / 5
+                octupole_integral[4] -= octupole_integral_trace / 5
+                octupole_integral[8] -= octupole_integral_trace / 5
+                octupole_integral_trace = octupole_integral[1] + octupole_integral[13] + octupole_integral[17] # yr^2
+                octupole_integral[1] -= octupole_integral_trace / 5
+                octupole_integral[13] -= octupole_integral_trace / 5
+                octupole_integral[17] -= octupole_integral_trace / 5
+                octupole_integral_trace = octupole_integral[2] + octupole_integral[14] + octupole_integral[26] # zr^2
+                octupole_integral[2] -= octupole_integral_trace / 5
+                octupole_integral[14] -= octupole_integral_trace / 5
+                octupole_integral[26] -= octupole_integral_trace / 5
+                octupole_integral_trace = None
+                quadrupole_integral *= 2.5
+
+                octupole_integral_spherical = np.zeros([7, mf_i.mol.nao, mf_i.mol.nao])
+                octupole_integral_spherical[0] = (1.0/np.sqrt(10.0)) * (3 * octupole_integral[1] - octupole_integral[13]) # 3x^2y - y^3
+                octupole_integral_spherical[1] = (2.0*np.sqrt(3.0/5.0)) * octupole_integral[5] # xyz
+                octupole_integral_spherical[2] = np.sqrt(3.0/2.0) * octupole_integral[17] # yz^2
+                octupole_integral_spherical[3] = octupole_integral[26] # z^3
+                octupole_integral_spherical[4] = np.sqrt(3.0/2.0) * octupole_integral[8] # xz^2
+                octupole_integral_spherical[5] = np.sqrt(3.0/5.0) * (octupole_integral[2] - octupole_integral[14]) # x^2z - y^2z
+                octupole_integral_spherical[6] = (1.0/np.sqrt(10.0)) * (octupole_integral[0] - 3 * octupole_integral[4]) # x^3 - 3xy^2
+                octupole_integral = octupole_integral_spherical
+                octupole_integral_spherical = None
+
+                octupole_integral = cp.asarray(octupole_integral)
+                octupole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, octupole_integral @ mocc_i)
+                octupole_integral = None
+                multipole_integral_ai = cp.concatenate([multipole_integral_ai, octupole_integral_ai], axis=0)
+                octupole_integral_ai = None
+            if field_order >= 4:
+                raise NotImplementedError("EDA polarization term field response higher than 3rd order (octupole) is not implemented")
+
+        if not uncoupled_ferf:
+            from gpu4pyscf.properties.polarizability import gen_vind
+            fx = gen_vind(mf_i, mo_coeff_i, mo_occ_i, with_nlc = True)
+            kappa_ai, _ = cphf.solve(fx, mo_energy_i, mo_occ_i, multipole_integral_ai, max_cycle = mf_i.max_cycle, tol = mf_i.conv_tol_cpscf)
+        else:
+            nocc_i = mocc_i.shape[1]
+            epsilon_a = mo_energy_i[nocc_i:]
+            epsilon_i = mo_energy_i[:nocc_i]
+            epsilon_ai = 1.0 / (epsilon_a[:, cp.newaxis] - epsilon_i[cp.newaxis, :])
+            kappa_ai = multipole_integral_ai * -epsilon_ai
+            epsilon_ai = None
+        multipole_integral_ai = None
+
+        polarization_subspace = mocc_i.copy()
+        n_field = kappa_ai.shape[0]
+        for i_field in range(n_field):
+            kappa_ai_singularvector_left, kappa_ai_singularvalue, kappa_ai_singularvector_right = \
+                cp.linalg.svd(kappa_ai[i_field, :, :], full_matrices = False)
+            kappa_ai_singularvector_right = None
+            kappa_ai_singularvector_left = kappa_ai_singularvector_left[:, kappa_ai_singularvalue > virtual_singular_value_threshold]
+            kappa_ai_singularvalue = None
+            C_kappa_pi = mvir_i @ kappa_ai_singularvector_left
+            kappa_ai_singularvector_left = None
+            polarization_subspace = cp.concatenate([polarization_subspace, C_kappa_pi], axis=1)
+            C_kappa_pi = None
+        kappa_ai = None
+
+        polarization_subspace_Q, polarization_subspace_R = cp.linalg.qr(polarization_subspace)
+        polarization_subspace_Q = polarization_subspace_Q[:, cp.abs(cp.diag(polarization_subspace_R)) > virtual_singular_value_threshold]
+        polarization_subspace_R = None
+        polarization_subspace = None
+        G = polarization_subspace_Q
+        polarization_subspace_Q = None
+
+        G_projector_list.append(G)
+
+    nao_offsets        = np.cumsum([0] + [G.shape[0] for G in G_projector_list])
+    nprojector_offsets = np.cumsum([0] + [G.shape[1] for G in G_projector_list])
+    nao_sum        =        nao_offsets[-1]
+    nprojector_sum = nprojector_offsets[-1]
+
+    G = cp.zeros([nao_sum, nprojector_sum])
+    for i_frag in range(n_frag):
+        G[nao_offsets[i_frag] : nao_offsets[i_frag + 1],
+          nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]] = G_projector_list[i_frag]
+    G_projector_list = None
+
+    nocc_offsets = np.cumsum([0] + [mocc.shape[1] for mocc in mocc_list])
+    nocc_sum = nocc_offsets[-1]
+
+    mocc_sum = cp.zeros([nao_sum, nocc_sum])
+    for i_frag in range(n_frag):
+        mocc_i = mocc_list[i_frag]
+        mocc_i = cp.asarray(mocc_i)
+        mocc_sum[nao_offsets[i_frag] : nao_offsets[i_frag + 1],
+                 nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]] = mocc_i
+    mocc_list = None
+
+    print("SCF-MI for the Polarized Fragment Wavefunction")
+
+    mol_sum = merge_mol([mf.mol for mf in mf_list])
+    S = mol_sum.intor_symmetric('int1e_ovlp')
+    S = cp.asarray(S)
+    gamma = G.T @ S @ G
+    mf_sum = _make_mf(mol_sum, if_kernel = False)
+
+    def get_full_density(mocc_sum_projected, inv_sigma):
+        D = cp.zeros([nao_sum, nao_sum])
+        for i_frag in range(n_frag):
+            for j_frag in range(n_frag):
+                D += G[:, nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]] @ \
+                     mocc_sum_projected[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+                                        nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]] @ \
+                     inv_sigma[nocc_offsets[i_frag] : nocc_offsets[i_frag + 1],
+                               nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]] @ \
+                     mocc_sum_projected[nprojector_offsets[j_frag] : nprojector_offsets[j_frag + 1],
+                                        nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]].T @ \
+                     G[:, nprojector_offsets[j_frag] : nprojector_offsets[j_frag + 1]].T
+        D *= 2
+        ### The expression above is identical to
+        # D = 2 * G @ mocc_sum_projected @ inv_sigma @ mocc_sum_projected.T @ G.T
+        ### If G is full rank orthogonal matrix, then the expression above is identical to
+        # D = 2 * mocc_sum @ cp.linalg.inv(mocc_sum.T @ S @ mocc_sum) @ mocc_sum.T
+        return D
+
+    def get_Stoll_density(i_frag, mocc_sum_projected, inv_sigma):
+        D_stoll_i = cp.zeros([nao_sum, nao_sum])
+        for j_frag in range(n_frag):
+            D_stoll_i += G[:, nprojector_offsets[j_frag] : nprojector_offsets[j_frag + 1]] @ \
+                         mocc_sum_projected[nprojector_offsets[j_frag] : nprojector_offsets[j_frag + 1],
+                                            nocc_offsets[j_frag] : nocc_offsets[j_frag + 1]] @ \
+                         inv_sigma[nocc_offsets[j_frag] : nocc_offsets[j_frag + 1],
+                                   nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]] @ \
+                         mocc_sum_projected[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+                                            nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]].T @ \
+                         G[:, nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]].T
+        D_stoll_i *= 2
+        ### The expression above is identical to
+        # D_stoll_i = 2 * G @ mocc_sum_projected @ inv_sigma[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]] @ \
+        #             mocc_sum_projected[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+        #                                nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]].T @ \
+        #             G[:, nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]].T
+        return D_stoll_i
+
+    print("Stoll algorithm is used for fragment constrained SCF")
+
+    diis_list = []
+    for i_frag in range(n_frag):
+        diis_i = DIIS(mf_list[i_frag])
+        diis_list.append(diis_i)
+
+    # Initial guess
+    mocc_sum_projected = G.T @ mocc_sum
+
+    # Step 0
+    sigma = mocc_sum_projected.T @ gamma @ mocc_sum_projected
+    inv_sigma = cp.linalg.inv(sigma)
+    D = get_full_density(mocc_sum_projected, inv_sigma)
+    energy_sum = _get_total_system_energy(mf_sum, D)
+    print(f"Cycle {0:2d}: energy = {energy_sum}")
+    energy_frozen = energy_sum
+    scf_conv = False
+
+    F = mf_sum.get_fock(dm = D)
+
+    for cycle in range(mf_sum.max_cycle):
+
+        F_S_list = []
+        new_mocc_sum = cp.zeros_like(mocc_sum_projected)
+        for i_frag in range(n_frag):
+            D_stoll_i = get_Stoll_density(i_frag, mocc_sum_projected, inv_sigma)
+            F_stoll_i = G.T @ (cp.eye(nao_sum)*2 - S @ D + S @ D_stoll_i.T) @ F @ (cp.eye(nao_sum)*2 - D @ S + D_stoll_i @ S) @ G
+            S_stoll_i = gamma
+            D_stoll_i = None
+
+            F_stoll_i_ii = F_stoll_i[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+                                     nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]]
+            S_stoll_i_ii = S_stoll_i[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+                                     nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]]
+            F_stoll_i = None
+            S_stoll_i = None
+
+            F_S_list.append((F_stoll_i_ii, S_stoll_i_ii))
+            F_stoll_i_ii = None
+            S_stoll_i_ii = None
+
+        Err = cp.linalg.solve(gamma, G.T @ S @ D @ F @ (D @ S - cp.eye(nao_sum)*2) @ G) / 4
+
+        new_mocc_sum = cp.zeros_like(mocc_sum_projected)
+        for i_frag in range(n_frag):
+            gamma_ii = gamma[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+                             nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]]
+            Err_ii = Err[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+                         nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]]
+            Err_ii = gamma_ii @ Err_ii - Err_ii.T @ gamma_ii.T
+            F_ii, S_ii = F_S_list[i_frag]
+
+            nprojector_i = nprojector_offsets[i_frag + 1] - nprojector_offsets[i_frag]
+            Err_tril = pack_tril(Err_ii.reshape(-1, nprojector_i, nprojector_i))
+            F_tril = pack_tril(F_ii.reshape(-1, nprojector_i, nprojector_i))
+            F_new_tril = diis_list[i_frag].update(F_tril, xerr = Err_tril)
+            F_new = unpack_tril(F_new_tril).reshape(F_ii.shape)
+            Err_tril = None
+            F_tril = None
+            F_new_tril = None
+            F_ii = None
+
+            epsilon_i, C_ii = generalized_eigh(F_new, S_ii)
+            assert all(epsilon_i[i] <= epsilon_i[i+1] for i in range(len(epsilon_i)-1))
+            epsilon_i = None
+            F_new = None
+            S_ii = None
+
+            nocc_i = nocc_offsets[i_frag + 1] - nocc_offsets[i_frag]
+            new_mocc_sum[nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1],
+                         nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]] = C_ii[:, 0 : nocc_i]
+            C_ii = None
+
+        F_S_list = None
+
+        mocc_sum_projected = new_mocc_sum
+        new_mocc_sum = None
+
+        sigma = mocc_sum_projected.T @ gamma @ mocc_sum_projected
+        inv_sigma = cp.linalg.inv(sigma)
+        D = get_full_density(mocc_sum_projected, inv_sigma)
+        F = mf_sum.get_fock(dm = D)
+
+        energy_previous = energy_sum
+        energy_sum = _get_total_system_energy(mf_sum, D)
+        delta_energy = energy_sum - energy_previous
+        print(f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
+        if (abs(delta_energy) < mf_sum.conv_tol):
+            scf_conv = True
+            break
+
+    if not scf_conv:
+        raise RuntimeError("FERF subspace SCF-MI not converged!")
+
+    eda_cache["total_frozen_energy"] = energy_frozen
+    eda_cache["polarization_energy"] = energy_sum - energy_frozen
+    eda_cache["mocc_polarized"] = G @ mocc_sum_projected
+    return energy_sum - energy_frozen
+
+def get_eda_charge_transfer_energy(mf_list, _make_mf, eda_cache):
+    n_frag = len(mf_list)
+    assert n_frag >= 1
+
+    assert "mocc_polarized" in eda_cache
+    assert "total_frozen_energy" in eda_cache
+    assert "polarization_energy" in eda_cache
+
+    mol_sum = merge_mol([mf.mol for mf in mf_list])
+    S = mol_sum.intor_symmetric('int1e_ovlp')
+    S = cp.asarray(S)
+    mocc_sum = eda_cache["mocc_polarized"]
+
+    dm_polarized = 2 * mocc_sum @ cp.linalg.solve(mocc_sum.T @ S @ mocc_sum, mocc_sum.T)
+    sum_mf, sum_energy = _make_mf(mol_sum, guess_dm = dm_polarized)
+
+    charge_transfer_energy = sum_energy - eda_cache["polarization_energy"] - eda_cache["total_frozen_energy"]
+    eda_cache["total_system_energy"] = sum_energy
+    eda_cache["charge_transfer_energy"] = charge_transfer_energy
+    return charge_transfer_energy
+
+def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_grid = (50,194), auxbasis = None,
+                             conv_tol = 1e-10, conv_tol_cpscf = 1e-8, max_cycle = 100, verbose = 4):
+    """
+    Main driver of absolutely localized molecular orbital (ALMO) energy decomposition analysis (EDA) version 2
+
+    Args:
+        mol_list: a list of pyscf.gto.mole.Mole objects, each mol is a fragment with atoms and basis functions specified
+        other: specification of SCF
+
+    Returns:
+        a dict with EDA components in kJ/mol
+
+    Computation cost:
+        n fragment SCF + 1 second order SCF for frozen terms + 1 constrained SCF for polarization term + 1 total SCF
+
+    Reference:
+        - Not-so-clear definition of FERF and polarization energy:
+        Horn, P. R.; Head-Gordon, M. Polarization contributions to intermolecular interactions revisited
+        with fragment electric-field response functions. The Journal of Chemical Physics 2015, 143.
+        doi: https://doi.org/10.1063/1.4930534
+
+        - Clear definition of electrostatic and dispersion energy:
+        Horn, P. R.; Mao, Y.; Head-Gordon, M. Defining the contributions of permanent electrostatics, Pauli repulsion,
+        and dispersion in density functional theory calculations of intermolecular interaction energies.
+        The Journal of chemical physics 2016, 144.
+        doi: https://doi.org/10.1063/1.4942921
+
+        - Clear definition of frozen density:
+        Horn, P. R.; Head-Gordon, M. Alternative definitions of the frozen energy in energy decomposition analysis
+        of density functional theory calculations. The Journal of chemical physics 2016, 144.
+        doi: https://doi.org/10.1063/1.4941849
+
+        - Overall procedure, with clear definition of Pauli and charge transfer terms:
+        Horn, P. R.; Mao, Y.; Head-Gordon, M. Probing non-covalent interactions with a second generation
+        energy decomposition analysis using absolutely localized molecular orbitals.
+        Physical Chemistry Chemical Physics 2016, 18, 23067-23079.
+        doi: https://doi.org/10.1039/C6CP03784D
+
+        - An approximation to FERF:
+        Aldossary, A.; Shen, H.; Wang, Z.; Head-Gordon, M. Uncoupled fragment electric-field response functions:
+        An accelerated model for the polarization energy in energy decomposition analysis of intermolecular interactions.
+        Chemical Physics Letters 2025, 862, 141825.
+        doi: https://doi.org/10.1016/j.cplett.2024.141825
+
+        - TODO: Gradient of each EDA term (some terms are missing in this paper):
+        Mao, Y.; Horn, P. R.; Head-Gordon, M. Energy decomposition analysis in an adiabatic picture.
+        Physical Chemistry Chemical Physics 2017, 19, 5944-5958.
+        doi: https://doi.org/10.1039/C6CP08039A
+    """
+
+    def _make_mf(mol, if_kernel = True, dispersion_free_xc = None, guess_dm = None):
+        _xc = xc if dispersion_free_xc is None else dispersion_free_xc
+        if _xc is None or _xc.upper() == "HF":
+            mf = rhf.RHF(mol)
+        else:
+            mf = rks.RKS(mol, xc = _xc)
+            mf.grids.atom_grid = xc_grid
+            mf.nlcgrids.atom_grid = nlc_grid
+        mf.conv_tol = conv_tol
+        mf.conv_tol_cpscf = conv_tol_cpscf
+        mf.max_cycle = max_cycle
+        mf.verbose = verbose
+        if auxbasis is not None:
+            mf = mf.density_fit(auxbasis = auxbasis)
+        mf.direct_scf_tol = 1e-16
+        if if_kernel:
+            energy = mf.kernel(dm0 = guess_dm)
+            assert mf.converged
+            return mf, energy
+        else:
+            return mf
+
+    n_frag = len(mol_list)
+    mf_list = []
+    frag_energy_list = []
+    for i_frag in range(n_frag):
+        frag_i_mf, frag_i_energy = _make_mf(mol_list[i_frag])
+        mf_list.append(frag_i_mf)
+        frag_energy_list.append(frag_i_energy)
+
+    eda_cache = {}
+    eda_classical_electrostatic = get_eda_classical_electrostatic_energy(mf_list, _make_mf, eda_cache)
+    eda_electrostatic = get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache)
+    eda_dispersion = get_eda_dispersion_energy(mf_list, _make_mf, eda_cache)
+    eda_pauli = eda_cache["kinetic_energy_pressure"] + eda_cache["interfragment_dfxc_energy"]
+    eda_polarization = get_eda_polarization_energy(mf_list, _make_mf, eda_cache)
+    eda_charge_transfer = get_eda_charge_transfer_energy(mf_list, _make_mf, eda_cache)
+    eda_frozen = eda_cache["total_frozen_energy"] - sum(frag_energy_list)
+    eda_frozen_reminder = eda_frozen - eda_dispersion - eda_electrostatic
+
+    hartree_to_kjmol = 10**-3 * nist.HARTREE2J * nist.AVOGADRO
+
+    for i_frag in range(len(frag_energy_list)):
+        print(f"Fragment {i_frag} energy = {frag_energy_list[i_frag]:.10f} Hartree")
+    print(f"Total system energy = {eda_cache["total_system_energy"]:.10f} Hartree")
+    eda_total = eda_cache["total_system_energy"] - sum(frag_energy_list)
+    print(f"EDA frozen energy = {eda_frozen:.10f} Hartree = {eda_frozen * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA total = {eda_total:.10f} Hartree = {eda_total * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA classical electrostatic = {eda_classical_electrostatic:.10f} Hartree = {eda_classical_electrostatic * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA electrostatic = {eda_electrostatic:.10f} Hartree = {eda_electrostatic * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA dispersion = {eda_dispersion:.10f} Hartree = {eda_dispersion * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA Pauli (kinetic energy pressure + interfragment exchange) = {eda_pauli:.10f} Hartree = {eda_pauli * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA Pauli (frozen - electrostatic - dispersion) = {eda_frozen_reminder:.10f} Hartree = {eda_frozen_reminder * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA polarization = {eda_polarization:.10f} Hartree = {eda_polarization * hartree_to_kjmol:.10f} kJ/mol")
+    print(f"EDA charge transfer = {eda_charge_transfer:.10f} Hartree = {eda_charge_transfer * hartree_to_kjmol:.10f} kJ/mol")
+
+    eda_result = {
+        "total"           : float(eda_total          ) * hartree_to_kjmol,
+        "frozen"          : float(eda_frozen         ) * hartree_to_kjmol,
+        "electrostatic"   : float(eda_electrostatic  ) * hartree_to_kjmol,
+        "dispersion"      : float(eda_dispersion     ) * hartree_to_kjmol,
+        "pauli"           : float(eda_frozen_reminder) * hartree_to_kjmol,
+        "polarization"    : float(eda_polarization   ) * hartree_to_kjmol,
+        "charge transfer" : float(eda_charge_transfer) * hartree_to_kjmol,
+        "unit"            : "kJ/mol",
+    }
+    return eda_result

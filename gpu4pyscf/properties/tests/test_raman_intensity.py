@@ -49,7 +49,7 @@ def make_mf(mol, xc = None, if_density_fitting = False, pcm = None):
         mf.nlcgrids.atom_grid = (50,194)
     else:
         mf = rhf.RHF(mol)
-    mf.conv_tol = 1e-15
+    mf.conv_tol = 1e-14
     mf.conv_tol_cpscf = 1e-10
     mf.direct_scf_tol = 1e-16
     mf.verbose = 0
