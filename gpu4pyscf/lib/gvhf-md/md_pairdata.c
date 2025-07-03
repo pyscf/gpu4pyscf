@@ -140,6 +140,9 @@ void Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                 int ctr_jsh = p2c_mapping[jsh];
                 int li = bas[ish*BAS_SLOTS+ANG_OF];
                 int lj = bas[jsh*BAS_SLOTS+ANG_OF];
+                if (li > LMAX || lj > LMAX) {
+                        continue;
+                }
                 double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
                 double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
                 double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
@@ -197,6 +200,9 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                         int ctr_jsh = p2c_mapping[jsh];
                         int li = bas[ish*BAS_SLOTS+ANG_OF];
                         int lj = bas[jsh*BAS_SLOTS+ANG_OF];
+                        if (li > LMAX || lj > LMAX) {
+                                continue;
+                        }
                         double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
                         double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
                         double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];

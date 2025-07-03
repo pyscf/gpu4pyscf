@@ -22,9 +22,6 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/md_j.cuh"
 
-__constant__ Fold2Index c_i_in_fold2idx[165];
-__constant__ Fold3Index c_i_in_fold3idx[495];
-
 extern __global__ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                                    int threadsx, int threadsy, int tilex, int tiley);
 extern __global__ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
@@ -110,26 +107,6 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
 
 int init_mdj_constant(int shm_size)
 {
-    Fold2Index i_in_fold2idx[165];
-    Fold3Index i_in_fold3idx[495];
-    int n2 = 0;
-    int n3 = 0;
-    for (int l = 0; l <= LMAX*2; ++l) {
-        for (int i = 0, ijk = 0; i <= l; ++i) {
-        for (int j = 0; j <= l-i; ++j, ++n2) {
-            i_in_fold2idx[n2].x = i;
-            i_in_fold2idx[n2].y = j;
-            i_in_fold2idx[n2].fold3offset = ijk;
-            for (int k = 0; k <= l-i-j; ++k, ++n3, ++ijk) {
-                i_in_fold3idx[n3].x = i;
-                i_in_fold3idx[n3].y = j;
-                i_in_fold3idx[n3].z = k;
-                i_in_fold3idx[n3].fold2yz = (l+1)*(l+2)/2 - (l-j+1)*(l-j+2)/2 + k;
-            }
-        } }
-    }
-    cudaMemcpyToSymbol(c_i_in_fold2idx, i_in_fold2idx, 165*sizeof(Fold2Index));
-    cudaMemcpyToSymbol(c_i_in_fold3idx, i_in_fold3idx, 495*sizeof(Fold3Index));
     cudaFuncSetAttribute(md_j_1dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(md_j_4dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();

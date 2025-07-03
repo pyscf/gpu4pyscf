@@ -180,7 +180,7 @@ class _VHFOpt(jk._VHFOpt):
         q_cutoff = log_cutoff - log_max_dm
         dm_cond = dm_cond[p2c_mapping[:,None],p2c_mapping]
 
-        l_counts = np.bincount(prim_mol._bas[:,ANG_OF])
+        l_counts = np.bincount(prim_mol._bas[:,ANG_OF])[:LMAX+1]
         n_groups = len(l_counts)
         l_ctr_bas_loc = np.cumsum(np.append(0, l_counts))
         l_symb = lib.param.ANGULAR
@@ -352,7 +352,7 @@ class _VHFOpt(jk._VHFOpt):
             mol = self.sorted_mol
             log.debug3('Integrals for %s functions on CPU',
                        lib.param.ANGULAR[LMAX+1])
-            scripts = ['ji->s2kl']
+            scripts = 'ji->s2kl'
             shls_excludes = [0, h_shls[0]] * 4
             vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                      dms, 1, mol._atm, mol._bas, mol._env,

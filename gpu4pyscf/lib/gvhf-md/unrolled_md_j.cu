@@ -4703,7 +4703,7 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, doubl
     int ll = bounds->ll;
     int lij = li + lj;
     int lkl = lk + ll;
-    int ijkl = lij*9 + lkl;
+    int ijkl = lij*11 + lkl;
     int npairs_ij = bounds->npairs_ij;
     int npairs_kl = bounds->npairs_kl;
     int addition_buf = 0;
@@ -4716,64 +4716,64 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, doubl
         dim3 blocks((npairs_ij + 495) / 496, (npairs_kl + 495) / 496, 1);
         md_j_0_0<<<blocks, threads, (3072+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 9: { // lij=1, lkl=0, tilex=48, tiley=24
+    case 11: { // lij=1, lkl=0, tilex=48, tiley=24
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 383) / 384, 1);
         md_j_1_0<<<blocks, threads, (3072+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 10: { // lij=1, lkl=1, tilex=11, tiley=11
+    case 12: { // lij=1, lkl=1, tilex=11, tiley=11
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 175) / 176, (npairs_kl + 175) / 176, 1);
         md_j_1_1<<<blocks, threads, (3072+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 18: { // lij=2, lkl=0, tilex=48, tiley=16
+    case 22: { // lij=2, lkl=0, tilex=48, tiley=16
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 255) / 256, 1);
         md_j_2_0<<<blocks, threads, (3040+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 19: { // lij=2, lkl=1, tilex=48, tiley=30
+    case 23: { // lij=2, lkl=1, tilex=48, tiley=30
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 479) / 480, 1);
         cudaFuncSetAttribute(md_j_2_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
         md_j_2_1<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 20: { // lij=2, lkl=2, tilex=15, tiley=15
+    case 24: { // lij=2, lkl=2, tilex=15, tiley=15
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 239) / 240, (npairs_kl + 239) / 240, 1);
         cudaFuncSetAttribute(md_j_2_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (6144+addition_buf)*sizeof(double));
         md_j_2_2<<<blocks, threads, (6144+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 27: { // lij=3, lkl=0, tilex=48, tiley=46
+    case 33: { // lij=3, lkl=0, tilex=48, tiley=46
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 735) / 736, 1);
         cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
         md_j_3_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 28: { // lij=3, lkl=1, tilex=48, tiley=25
+    case 34: { // lij=3, lkl=1, tilex=48, tiley=25
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 399) / 400, 1);
         cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6144+addition_buf)*sizeof(double));
         md_j_3_1<<<blocks, threads, (6144+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 29: { // lij=3, lkl=2, tilex=48, tiley=12
+    case 35: { // lij=3, lkl=2, tilex=48, tiley=12
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 191) / 192, 1);
         cudaFuncSetAttribute(md_j_3_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (6144+addition_buf)*sizeof(double));
         md_j_3_2<<<blocks, threads, (6144+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 36: { // lij=4, lkl=0, tilex=48, tiley=37
+    case 44: { // lij=4, lkl=0, tilex=48, tiley=37
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 591) / 592, 1);
         cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6144+addition_buf)*sizeof(double));
         md_j_4_0<<<blocks, threads, (6144+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 37: { // lij=4, lkl=1, tilex=48, tiley=19
+    case 45: { // lij=4, lkl=1, tilex=48, tiley=19
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 303) / 304, 1);
         cudaFuncSetAttribute(md_j_4_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6128+addition_buf)*sizeof(double));
         md_j_4_1<<<blocks, threads, (6128+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
-    case 45: { // lij=5, lkl=0, tilex=48, tiley=26
+    case 55: { // lij=5, lkl=0, tilex=48, tiley=26
         dim3 threads(16, 16);
         dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 415) / 416, 1);
         cudaFuncSetAttribute(md_j_5_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
