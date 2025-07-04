@@ -240,24 +240,6 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
-def eval_nucG(cell, mesh):
-    '''Nuclear attraction potential on Gv'''
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
-    b = cell.reciprocal_vectors()
-    coords = cell.atom_coords()
-    rb = cp.asarray(coords.dot(b.T))
-    SIx = cp.exp(-1j*rb[:,0,None] * basex)
-    SIy = cp.exp(-1j*rb[:,1,None] * basey)
-    SIz = cp.exp(-1j*rb[:,2,None] * basez)
-    SIx *= cp.asarray(-cell.atom_charges())[:,None]
-    rho_xy = SIx[:,:,None] * SIy[:,None,:]
-    nucG = contract('qxy,qz->xyz', rho_xy, SIz).ravel()
-    nucG *= tools.get_coulG(cell, Gv=Gv)
-    return nucG
-
 def _weighted_coulG_LR(cell, Gv, omega, kws, kpt=np.zeros(3)):
     coulG = pbctools.get_coulG(cell, kpt, exx=False, Gv=Gv, omega=abs(omega))
     coulG *= kws
