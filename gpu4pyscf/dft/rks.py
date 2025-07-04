@@ -178,15 +178,13 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     if dm is None: dm = ks.make_rdm1()
     if h1e is None: h1e = ks.get_hcore()
     if vhf is None: vhf = ks.get_veff(ks.mol, dm)
-    e1 = cupy.einsum('ij,ji->', h1e, dm).real
+    e1 = cupy.einsum('ij,ji->', h1e, dm).get()[()].real
     ecoul = vhf.ecoul.real
     exc = vhf.exc.real
     if isinstance(ecoul, cupy.ndarray):
         ecoul = ecoul.get()[()]
     if isinstance(exc, cupy.ndarray):
         exc = exc.get()[()]
-    if isinstance(e1, cupy.ndarray):
-        e1 = e1.get()[()]
     e2 = ecoul + exc
     ks.scf_summary['e1'] = e1
     ks.scf_summary['coul'] = ecoul

@@ -69,8 +69,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                 vklr *= (alpha - hyb)
                 vk += vklr
             vxc -= vk
-            exc -= (cp.einsum('Kij,Kji->', dm[0], vk[0]) +
-                    cp.einsum('Kij,Kji->', dm[1], vk[1])).real * .5 * weight
+            exc -= cp.einsum('nKij,nKji->', dm, vk).get()[()] * .5 * weight
         log.timer('veff', *t0)
         return vxc
 
@@ -126,11 +125,10 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         vxc -= vk
 
         if ground_state:
-            exc -= (cp.einsum('Kij,Kji->', dm[0], vk[0]) +
-                    cp.einsum('Kij,Kji->', dm[1], vk[1])).real * .5 * weight
+            exc -= cp.einsum('nKij,nKji->', dm, vk).get()[()] * .5 * weight
 
     if ground_state:
-        ecoul = cp.einsum('nKij,Kji->', dm, vj) * .5 * weight
+        ecoul = cp.einsum('nKij,Kji->', dm, vj).get()[()] * .5 * weight
     else:
         ecoul = None
 
@@ -145,8 +143,7 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
         vhf = mf.get_veff(mf.cell, dm_kpts)
 
     weight = 1./len(h1e_kpts)
-    e1 = weight *(cp.einsum('kij,kji', h1e_kpts, dm_kpts[0]) +
-                  cp.einsum('kij,kji', h1e_kpts, dm_kpts[1]))
+    e1 = weight * cp.einsum('kij,nkji->', h1e_kpts, dm_kpts).get()[()]
     ecoul = vhf.ecoul
     exc = vhf.exc
     tot_e = e1 + ecoul + exc

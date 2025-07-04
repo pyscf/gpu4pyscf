@@ -145,8 +145,8 @@ class KnownValues(unittest.TestCase):
     def test_lda_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
-        k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='lda,vwn', kpt=k).run()
+        k = np.random.random((1, 3))
+        mf = pbcdft.KRKS(cell, xc='lda,vwn', kpts=k).run()
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -161,8 +161,8 @@ class KnownValues(unittest.TestCase):
     def test_gga_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
-        k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='pbe0', kpt=k).run(conv_tol=1e-10)
+        k = np.random.random((1, 3))
+        mf = pbcdft.KRKS(cell, xc='pbe0', kpts=k).run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -177,8 +177,8 @@ class KnownValues(unittest.TestCase):
     def test_rsh_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
-        k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='camb3lyp', kpt=k).run(conv_tol=1e-10)
+        k = np.random.random((1, 3))
+        mf = pbcdft.KRKS(cell, xc='camb3lyp', kpts=k).run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 

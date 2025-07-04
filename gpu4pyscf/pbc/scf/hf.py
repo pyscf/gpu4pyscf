@@ -123,7 +123,21 @@ class SCF(mol_hf.SCF):
             mol_hf.SCF.check_sanity(self)
         return self
 
-    kpt = hf_cpu.SCF.kpt
+    @property
+    def kpt(self):
+        if 'kpt' in self.__dict__:
+            # To handle the attribute kpt loaded from chkfile
+            self.kpt = self.__dict__.pop('kpt')
+        return self.with_df.kpts.reshape(3)
+    @kpt.setter
+    def kpt(self, x):
+        kpts = np.reshape(x, (1, 3))
+        if np.any(kpts != 0):
+            raise NotImplementedError('single kpt SCF not available')
+        self.with_df.kpts = kpts
+        if self.rsjk:
+            self.rsjk.kpts = kpts
+
     kpts = hf_cpu.SCF.kpts
     mol = hf_cpu.SCF.mol # required by the hf.kernel
 

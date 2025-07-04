@@ -73,7 +73,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                 vk += vklr
             vxc -= vk
             exc -=(cp.einsum('ij,ji->', dm[0], vk[0]) +
-                   cp.einsum('ij,ji->', dm[1], vk[1])).real * .5
+                   cp.einsum('ij,ji->', dm[1], vk[1])).get()[()] * .5
         log.timer('veff', *t0)
         return vxc
 
@@ -131,10 +131,10 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
 
         if ground_state:
             exc -=(cp.einsum('ij,ji->', dm[0], vk[0]) +
-                   cp.einsum('ij,ji->', dm[1], vk[1])).real * .5
+                   cp.einsum('ij,ji->', dm[1], vk[1])).get()[()] * .5
 
     if ground_state:
-        ecoul = cp.einsum('nij,ji->', dm, vj).real * .5
+        ecoul = cp.einsum('nij,ji->', dm, vj).get()[()] * .5
     else:
         ecoul = None
 
