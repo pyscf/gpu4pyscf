@@ -1045,7 +1045,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     weight = cell.vol / ngrids
 
     density = ifft_in_place(density.reshape(-1, *mesh)).real.reshape(-1, ngrids)
-    n_electrons = density[0].sum()
+    n_electrons = density[0].sum().get()[()]
     density /= weight
 
     # eval_xc_eff supports float64 only

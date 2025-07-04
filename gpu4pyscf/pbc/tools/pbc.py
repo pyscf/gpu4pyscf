@@ -149,6 +149,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         mesh = cell.mesh
     if Gv is None:
         Gv = _get_Gv(cell, mesh)
+    Gv = asarray(Gv)
 
     if omega is None:
         _omega = cell.omega
@@ -184,7 +185,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         return coulG
 
     if abs(k).sum() > 1e-9:
-        kG = k + Gv
+        kG = asarray(k) + Gv
     else:
         kG = Gv
 

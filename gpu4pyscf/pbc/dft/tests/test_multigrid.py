@@ -99,9 +99,9 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
         cell = cell_nonorth
-        SI = cell.get_SI()
+        SI = cell.get_SI(mesh=cell.mesh)
         ref = np.einsum('i,ij->j', -cell.atom_charges(), SI)
-        ref *= tools.get_coulG(cell, mesh=mesh)
+        ref *= tools.get_coulG(cell, mesh=cell.mesh)
         dat = multigrid.eval_nucG(cell, cell.mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
@@ -331,4 +331,22 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")
-    unittest.main()
+    #unittest.main()
+    if 1:
+        setUpModule()
+        mesh = cell_orth.mesh
+        SI = cell_orth.get_SI(mesh=mesh)
+        ref = np.einsum('i,ij->j', -cell_orth.atom_charges(), SI)
+        ref *= tools.get_coulG(cell_orth, mesh=mesh)
+        dat = multigrid.eval_nucG(cell_orth, mesh)
+        print(abs(ref - dat.get()).max(), 0, 12)
+
+        cell = cell_nonorth
+        SI = cell.get_SI(mesh=cell.mesh)
+        ref = np.einsum('i,ij->j', -cell.atom_charges(), SI)
+        ref *= tools.get_coulG(cell, mesh=cell.mesh)
+        dat = multigrid.eval_nucG(cell, cell.mesh)
+        print(cell.mesh)
+        print(ref.shape)
+        print(dat.shape)
+        print(abs(ref - dat.get()).max(), 0, 12)

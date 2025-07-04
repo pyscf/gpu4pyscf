@@ -132,15 +132,15 @@ class KnownValues(unittest.TestCase):
         dm = np.random.random((nao,nao)) - .5
         dm = dm.dot(dm.T)
         pcell = cell_orth.copy()
-        pcell.precision = 1e-10
+        pcell.precision = 1e-11
         if hasattr(multigrid_cpu, 'nr_rks'):
             n0, exc0, ref = multigrid_cpu.nr_rks(MultiGridNumInt_cpu(pcell), xc, dm, with_j=True)
         else:
             n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_rks(pcell, None, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
         xc = 'lda,'
         dm = np.array([dm, dm])
@@ -149,9 +149,9 @@ class KnownValues(unittest.TestCase):
         vj = mf.with_df.get_jk(dm, with_k=False)[0]
         ref += vj[0] + vj[1]
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
     @unittest.skip('kpts not supported')
     def test_get_vxc_lda_kpts(self):
@@ -172,9 +172,9 @@ class KnownValues(unittest.TestCase):
                 pcell, None, xc, dm, kpts=kpts)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(
             cell_orth, None, xc, dm, with_j=True, kpts=kpts)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
     def test_get_vxc_gga(self):
         nao = cell_orth.nao
@@ -183,15 +183,15 @@ class KnownValues(unittest.TestCase):
         dm = np.random.random((nao,nao)) - .5
         dm = dm.dot(dm.T)
         pcell = cell_orth.copy()
-        pcell.precision = 1e-10
+        pcell.precision = 1e-11
         if hasattr(multigrid_cpu, 'nr_rks'):
             n0, exc0, ref = multigrid_cpu.nr_rks(MultiGridNumInt_cpu(pcell), xc, dm, with_j=True)
         else:
             n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_rks(pcell, None, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
         xc = 'pbe,'
         dm = np.array([dm, dm])
@@ -200,9 +200,9 @@ class KnownValues(unittest.TestCase):
         vj = mf.with_df.get_jk(dm, with_k=False)[0]
         ref += vj[0] + vj[1]
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
     @unittest.skip('Bugs for non-orthogonal lattice')
     def test_get_vxc_gga_nonorth(self):
@@ -218,9 +218,9 @@ class KnownValues(unittest.TestCase):
         else:
             n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_rks(pcell, None, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_nonorth).nr_rks(cell_nonorth, None, xc, dm, with_j=True)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
     @unittest.skip('kpts not supported')
     def test_get_vxc_gga_kpts(self):
@@ -239,9 +239,9 @@ class KnownValues(unittest.TestCase):
         ref += vj[0] + vj[1]
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(
             cell_orth, None, xc, dm, with_j=True, kpts=kpts)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
     @unittest.skip('kpts not supported')
     def test_get_vxc_gga_kpts_nonorth(self):
@@ -260,9 +260,9 @@ class KnownValues(unittest.TestCase):
                 pcell, None, xc, dm, kpts=kpts)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_nonorth).nr_rks(
             cell_nonorth, None, xc, dm, with_j=True, kpts=kpts)
-        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
-        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
-        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-8
+        assert abs(ref-vxc.get()).max() < 1e-8
 
     def test_rks_lda(self):
         cell = gto.M(
