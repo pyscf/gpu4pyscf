@@ -277,6 +277,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # using Ewald probe charge (the function madelung below)
     if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
         if hasattr(mf, 'kpts'):
+            kpts = mf.kpts
             assert isinstance(kpts, np.ndarray)
             Nk = len(kpts)
         else:
