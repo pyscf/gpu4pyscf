@@ -325,6 +325,23 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.7542917283246, 8)
 
+    def test_compact_basis_functions(self):
+        cell = gto.M(
+            a = np.diag([4., 8., 7.]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = [[0, [2e4, 1.]], [0, [1e2, 1.]], [0, [2., 1.]],
+                     [1, [2e2, 1.]], [1, [1., 1.]]],
+            mesh = [7, 7, 7],
+        )
+        np.random.seed(2)
+        nao = cell.nao
+        dm = np.random.random((nao,nao)) - .5
+        dm = dm.dot(dm.T)
+        ref = cell.RKS().get_rho(dm)
+        out = multigrid.MultiGridNumInt(cell).get_rho(dm).get()
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
+
 if __name__ == '__main__':
     print("Full Tests for multigrid")
     unittest.main()

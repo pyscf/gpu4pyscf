@@ -189,13 +189,39 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     else:
         kG = Gv
 
+    equal2boundary = None
+    if wrap_around and abs(k).sum() > 1e-9:
+        equal2boundary = cp.zeros(Gv.shape[0], dtype=bool)
+        # Here we 'wrap around' the high frequency k+G vectors into their lower
+        # frequency counterparts.  Important if you want the gamma point and k-point
+        # answers to agree
+        b = cell.reciprocal_vectors()
+        box_edge = np.einsum('i,ij->ij', np.asarray(mesh)//2+0.5, b)
+        assert all(np.rint(np.linalg.solve(box_edge.T, k))==0)
+        box_edge = asarray(box_edge)
+        reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
+        on_edge_p1 = abs(reduced_coords - 1) < 1e-9
+        on_edge_m1 = abs(reduced_coords + 1) < 1e-9
+        if cell.dimension >= 1:
+            equal2boundary |= on_edge_p1[:,0]
+            equal2boundary |= on_edge_m1[:,0]
+            kG[on_edge_p1[:,0]] -= 2 * box_edge[0]
+            kG[on_edge_m1[:,0]] += 2 * box_edge[0]
+        if cell.dimension >= 2:
+            equal2boundary |= on_edge_p1[:,1]
+            equal2boundary |= on_edge_m1[:,1]
+            kG[on_edge_p1[:,1]] -= 2 * box_edge[1]
+            kG[on_edge_m1[:,1]] += 2 * box_edge[1]
+        if cell.dimension == 3:
+            equal2boundary |= on_edge_p1[:,2]
+            equal2boundary |= on_edge_m1[:,2]
+            kG[on_edge_p1[:,2]] -= 2 * box_edge[2]
+            kG[on_edge_m1[:,2]] += 2 * box_edge[2]
+
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0
-
-    kpts = k.reshape(1,3)
-    if hasattr(mf, 'kpts'):
-        kpts = mf.kpts
-    Nk = len(kpts)
+    if abs(k).sum() > 1e-9:
+        G0_idx = None
 
     # Ewald probe charge method to get the leading term of the finite size
     # error in exchange integrals
@@ -203,7 +229,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     if cell.dimension == 3 or cell.low_dim_ft_type == 'inf_vacuum':
         with np.errstate(divide='ignore'):
             coulG = 4*np.pi/absG2
-            coulG[G0_idx] = 0
+            if G0_idx is not None:
+                coulG[G0_idx] = 0
 
     elif cell.dimension == 2:
         # The following 2D analytical fourier transform is taken from:
@@ -215,22 +242,14 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         weights = 1. - cp.cos(Gz*Ld2) * cp.exp(-Gp*Ld2)
         with np.errstate(divide='ignore', invalid='ignore'):
             coulG = weights*4*np.pi/absG2
-        if len(G0_idx) > 0:
+        if G0_idx is not None:
             coulG[G0_idx] = -2*np.pi*Ld2**2 #-pi*L_z^2/2
 
     else:
         raise NotImplementedError(f'dimension={cell.dimension}')
 
-    if wrap_around and abs(k).sum() > 1e-9:
-        # Here we 'wrap around' the high frequency k+G vectors into their lower
-        # frequency counterparts.  Important if you want the gamma point and k-point
-        # answers to agree
-        b = cell.reciprocal_vectors()
-        box_edge = np.einsum('i,ij->ij', np.asarray(mesh)//2+0.5, b)
-        assert (all(np.linalg.solve(box_edge.T, k).round(9).astype(int)==0))
-        reduced_coords = np.linalg.solve(box_edge.T, kG.T).T.round(9)
-        on_edge = abs(reduced_coords.astype(int)) == 1
-        coulG[on_edge[:,0] | on_edge[:,1] | on_edge[:,2]] = 0
+    if equal2boundary is not None:
+        coulG[equal2boundary] = 0
 
     # Scale the coulG kernel for attenuated Coulomb integrals.
     # * kwarg omega is used by RangeSeparatedJKBuilder which requires ewald probe charge
@@ -256,7 +275,12 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # interaction. The periodic part of (ii|ii) in exchange cannot be
     # cancelled out by Coulomb integrals. Its leading term is calculated
     # using Ewald probe charge (the function madelung below)
-    if cell.dimension > 0 and exxdiv == 'ewald':
+    if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
+        if hasattr(mf, 'kpts'):
+            assert isinstance(kpts, np.ndarray)
+            Nk = len(kpts)
+        else:
+            Nk = 1
         if omega is None: # Affects DFT-RSH
             coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
         else: # for RangeSeparatedJKBuilder

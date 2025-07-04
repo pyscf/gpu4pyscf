@@ -947,7 +947,7 @@ def to_primitive_bas(cell):
         # A quick estimation of diffuseness for each primitive GTO
         es = prim_env[prim_bas[:,PRIMBAS_EXP]]
         cs = prim_env[prim_bas[:,PRIMBAS_COEFF]]
-        ls = prim_env[prim_bas[:,ANG_OF]]
+        ls = prim_bas[:,ANG_OF]
         diffuseness = np.log(cs**2/cell.precision*10**ls + 1e-200) / es
         # Find the diffused functions on each atom
         diffuseness_order = np.argsort(-diffuseness)

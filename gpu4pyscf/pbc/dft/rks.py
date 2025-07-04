@@ -209,7 +209,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
                 ngrids = np.prod(cell.mesh)
                 if ngrids > 150000 * cell.natm:
                     logger.warn(cell, '''
-Tight basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
+Compact basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
     from gpu4pyscf.pbc.dft import BeckeGrids
     mf.grids = BeckeGrids(cell)
     mf.nlcgrids = BeckeGrids(cell).set(level=1)''')

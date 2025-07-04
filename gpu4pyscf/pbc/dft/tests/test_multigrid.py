@@ -329,24 +329,23 @@ class KnownValues(unittest.TestCase):
     def test_kuks_gga(self):
         pass
 
+    def test_compact_basis_functions(self):
+        cell = gto.M(
+            a = np.diag([4., 8., 7.]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = [[0, [2e4, 1.]], [0, [1e2, 1.]], [0, [2., 1.]],
+                     [1, [2e2, 1.]], [1, [1., 1.]]],
+            mesh = [7, 7, 7],
+        )
+        np.random.seed(2)
+        nao = cell.nao
+        dm = np.random.random((nao,nao)) - .5
+        dm = dm.dot(dm.T)
+        ref = cell.RKS().get_rho(dm)
+        out = multigrid.MultiGridNumInt(cell).get_rho(dm).get()
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
+
 if __name__ == '__main__':
     print("Full Tests for multigrid")
-    #unittest.main()
-    if 1:
-        setUpModule()
-        mesh = cell_orth.mesh
-        SI = cell_orth.get_SI(mesh=mesh)
-        ref = np.einsum('i,ij->j', -cell_orth.atom_charges(), SI)
-        ref *= tools.get_coulG(cell_orth, mesh=mesh)
-        dat = multigrid.eval_nucG(cell_orth, mesh)
-        print(abs(ref - dat.get()).max(), 0, 12)
-
-        cell = cell_nonorth
-        SI = cell.get_SI(mesh=cell.mesh)
-        ref = np.einsum('i,ij->j', -cell.atom_charges(), SI)
-        ref *= tools.get_coulG(cell, mesh=cell.mesh)
-        dat = multigrid.eval_nucG(cell, cell.mesh)
-        print(cell.mesh)
-        print(ref.shape)
-        print(dat.shape)
-        print(abs(ref - dat.get()).max(), 0, 12)
+    unittest.main()
