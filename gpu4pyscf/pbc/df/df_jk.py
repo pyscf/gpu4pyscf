@@ -239,7 +239,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
 
     cell = mydf.cell
     dm = cp.asarray(dm, order='C')
-    dms = _format_dms(dm, [kpt])
+    dms = _format_dms(dm, kpt.reshape(1, 3))
     nset, _, nao = dms.shape[:3]
     dms = dms.reshape(nset,nao,nao)
     vj = vk = None

@@ -1542,7 +1542,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
     if not spin_polarized:
         assert rho.dtype == np.float64
         if xctype == 'LDA':
-            inp['rho'] = rho
+            inp['rho'] = rho.ravel()
         if xctype == 'GGA':
             inp['rho'] = rho[0]
             inp['sigma'] = batch_square(rho[1:4])

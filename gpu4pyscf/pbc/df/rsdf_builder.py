@@ -907,7 +907,6 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     return cderi, cderip, cderi_idx
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
-    from gpu4pyscf.pbc.dft.multigrid import eval_nucG, eval_vpplocG
     log = logger.new_logger(cell, verbose)
     cell_exps, cs = extract_pgto_params(cell, 'diffused')
     omega = 0.2
@@ -932,19 +931,28 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     mesh = cell.symmetrize_mesh(mesh)
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    Gv, (basex, basey, basez), kws = cell.get_Gv_weights(mesh)
     if with_pseudo:
         #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
         ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
         ZG = ZG.dot(charges)
         ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
-        if (with_pseudo and
-            (cell.dimension == 3 or
+        if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
             ZG[0] -= charges.dot(np.pi/exps) / cell.vol
     else:
-        ZG = eval_nucG(cell, mesh).conj()
+        basex = cp.asarray(basex)
+        basey = cp.asarray(basey)
+        basez = cp.asarray(basez)
+        b = cell.reciprocal_vectors()
+        coords = cell.atom_coords()
+        rb = cp.asarray(coords.dot(b.T))
+        SIx = cp.exp(-1j*rb[:,0,None] * basex)
+        SIy = cp.exp(-1j*rb[:,1,None] * basey)
+        SIz = cp.exp(-1j*rb[:,2,None] * basez)
+        SIx *= cp.asarray(-cell.atom_charges())[:,None]
+        ZG = cp.einsum('qx,qy,qz->xyz', SIx, SIy, SIz).ravel().conj()
         ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
 
     ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()

@@ -126,6 +126,10 @@ class UHF(pbchf.SCF):
 
     density_fit = pbchf.RHF.density_fit
 
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.uhf import Gradients
+        return Gradients(self)
+
     def to_cpu(self):
         mf = uhf_cpu.UHF(self.cell)
         utils.to_cpu(self, out=mf)
