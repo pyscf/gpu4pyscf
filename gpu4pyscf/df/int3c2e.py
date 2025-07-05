@@ -497,6 +497,7 @@ def loop_int3c2e_general(intopt, task_list=None, ip_type='', omega=None, stream=
 
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
+    assert omega >= 0
 
     nao = intopt._sorted_mol.nao
     naux = intopt._sorted_auxmol.nao
@@ -599,6 +600,7 @@ def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
 
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
+    assert omega >= 0
 
     nao = intopt.mol.nao
     nao_cart = intopt._sorted_mol.nao
@@ -1333,6 +1335,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
     if stream is None: stream = cupy.cuda.get_current_stream()
     if auxmol is None:
         auxmol = df.addons.make_auxmol(mol, auxbasis)
+    assert omega >= 0
 
     nao = mol.nao
     naux = auxmol.nao
@@ -1461,6 +1464,7 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
     '''
     if stream is None: stream = cupy.cuda.get_current_stream()
     if omega is None: omega = 0.0
+    assert omega >= 0
     nao_cart = intopt._sorted_mol.nao
     naux_cart = intopt._sorted_auxmol.nao
     norb_cart = nao_cart + naux_cart + 1

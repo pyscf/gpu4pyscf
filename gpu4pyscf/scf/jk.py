@@ -23,7 +23,6 @@ import numpy as np
 import cupy as cp
 import scipy.linalg
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
 from pyscf.scf import _vhf

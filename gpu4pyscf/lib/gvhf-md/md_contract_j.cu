@@ -21,11 +21,12 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf.cuh"
-#include "gvhf-rys/gamma_inc.cu"
+#include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
 #define RT2_MAX 9
-#define KL_SIZE 28
+#define IJ_SIZE 9
+#define DM_BLOCK 4
 
 extern __constant__ uint16_t c_Rt_idx[];
 extern __constant__ int8_t c_Rt_tuv_fac[];
@@ -68,8 +69,8 @@ inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, 
 }
 
 __global__
-void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                 int threadsx, int threadsy, int tilex, int tiley)
+void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     int threadsx, int threadsy, int tilex, int tiley)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -96,6 +97,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
     int nsq_per_block = blockDim.x;
+    //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
     int lane_id = t_id % 32;
     int group_id = lane_id / threadsx;
@@ -103,9 +105,7 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
-    int xslots = gout_stride * threadsx;
     int yslots = gout_stride * threadsy;
-    int xslot_id = gout_id * threadsx + tx;
     int yslot_id = gout_id * threadsy + ty;
     int li = bounds.li;
     int lj = bounds.lj;
@@ -127,20 +127,18 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;
-    extern __shared__ double gamma_inc[];
-    double *Rp_cache = gamma_inc + (order+1) * nsq_per_block;
-    double *Rq_cache = Rp_cache + threadsx*4;
-    double *dm_ij_cache = Rq_cache + bsizey*4;
-    double *dm_kl_cache = dm_ij_cache + nf3ij * threadsx;
-    double *vj_ij_cache = dm_kl_cache + nf3kl * threadsy;
-    double *vj_kl_cache = vj_ij_cache + nf3ij * threadsx;
-    double *Rt_buf = vj_kl_cache + nf3kl*threadsy;
+    extern __shared__ double vj_kl_cache[];
+    double *Rq_cache = vj_kl_cache + nf3kl*bsizey;
+    double *Rp_cache = Rq_cache + bsizey*4;
+    double *dm_ij_cache = Rp_cache + threadsx*4;
+    double *gamma_inc = dm_ij_cache + nf3ij * threadsx;
+    double *Rt_buf = gamma_inc + (order+1) * nsq_per_block;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
 
     // zero out all cache;
-    for (int n = t_id; n < (threadsx+bsizey)*4; n += threads) {
-        Rp_cache[n] = 0.;
+    for (int n = t_id; n < nf3kl*bsizey + (threadsx+bsizey)*4; n += threads) {
+        vj_kl_cache[n] = 0;
     }
     __syncthreads();
     for (int n = t_id; n < bsizey; n += threads) {
@@ -166,37 +164,14 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         }
     }
 
-#if 1
-    //register double vj_kl[KL_SIZE];
-    //for (int n = 0; n < KL_SIZE; ++n) {
-    //    vj_kl[n] = 0;
-    //}
-
-    int kl_counts = nf3kl * tiley;
-    register double dm_kl[KL_SIZE];
-    for (int n = 0; n < KL_SIZE; ++n) {
-        dm_kl[n] = 0;
-    }
-    for (int k = 0; k <= KL_SIZE; ++k) {
-        int n = k * xslots + xslot_id;
-        if (n >= kl_counts) break;
-        int tile = n / nf3kl;
-        int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
-        if (task_kl < npairs_kl) {
-            int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n % nf3kl;
-            dm_kl[k] = dm[kl_loc0+kl];
-        }
-    }
-#endif
     for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
         int task_ij0 = blockIdx.x * bsizex + batch_ij * threadsx;
         if (task_ij0 >= npairs_ij) {
             continue;
         }
         __syncthreads();
-        for (int n = t_id; n < threadsx; n += threads) {
-            int task_ij = task_ij0 + n;
+        if (t_id < threadsx) {
+            int task_ij = task_ij0 + t_id;
             if (task_ij < npairs_ij) {
                 int pair_ij = pair_ij_mapping[task_ij];
                 int ish = pair_ij / nbas;
@@ -209,12 +184,12 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 double xij = (ai * ri[0] + aj * rj[0]) / aij;
                 double yij = (ai * ri[1] + aj * rj[1]) / aij;
                 double zij = (ai * ri[2] + aj * rj[2]) / aij;
-                Rp_cache[n+0*threadsx] = xij;
-                Rp_cache[n+1*threadsx] = yij;
-                Rp_cache[n+2*threadsx] = zij;
-                Rp_cache[n+3*threadsx] = aij;
+                Rp_cache[t_id+0*threadsx] = xij;
+                Rp_cache[t_id+1*threadsx] = yij;
+                Rp_cache[t_id+2*threadsx] = zij;
+                Rp_cache[t_id+3*threadsx] = aij;
             } else {
-                Rp_cache[n+3*threadsx] = 1.;
+                Rp_cache[t_id+3*threadsx] = 1.; // aij
             }
         }
         double fac_sym = PI_FAC;
@@ -230,7 +205,11 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         int ij_loc0 = pair_ij_loc[task_ij];
         for (int n = yslot_id; n < nf3ij; n += yslots) {
             dm_ij_cache[tx+n*threadsx] = dm[ij_loc0+n];
-            vj_ij_cache[tx+n*threadsx] = 0;
+        }
+        double vj_ij[IJ_SIZE];
+#pragma unroll
+        for (int n = 0; n < IJ_SIZE; ++n) {
+            vj_ij[n] = 0.;
         }
         for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
             int task_kl0 = blockIdx.y * bsizey + batch_kl * threadsy;
@@ -263,258 +242,6 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
-#if 1
-            // load dm_kl_cache from dm_kl regisers of each thread
-            int addr0 = batch_kl * nf3kl;
-            int addr1 = addr0 + nf3kl;
-            for (int n = xslot_id; n < nf3kl; n += xslots) {
-                vj_kl_cache[ty+n*threadsy] = 0;
-            }
-            switch (addr0 / xslots) {
-            case 0:
-                for (int n = 0; n <  3; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 1:
-                for (int n = 1; n <= 4; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 2:
-                for (int n = 2; n <= 5; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 3:
-                for (int n = 3; n <= 6; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 4:
-                for (int n = 4; n <= 7; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 5:
-                for (int n = 5; n <= 8; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 6:
-                for (int n = 6; n <= 9; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 7:
-                for (int n = 7; n <= 10; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 8:
-                for (int n = 8; n <= 11; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 9:
-                for (int n = 9; n <= 12; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 10:
-                for (int n = 10; n <= 13; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 11:
-                for (int n = 11; n <= 14; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 12:
-                for (int n = 12; n <= 15; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 13:
-                for (int n = 13; n <= 16; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 14:
-                for (int n = 14; n <= 17; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 15:
-                for (int n = 15; n <= 18; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 16:
-                for (int n = 16; n <= 19; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 17:
-                for (int n = 17; n <= 20; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 18:
-                for (int n = 18; n <= 21; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 19:
-                for (int n = 19; n <= 22; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 20:
-                for (int n = 20; n <= 23; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 21:
-                for (int n = 21; n <= 24; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 22:
-                for (int n = 22; n <= 25; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 23:
-                for (int n = 23; n <= 26; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 24:
-                for (int n = 24; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 25:
-                for (int n = 25; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 26:
-                for (int n = 26; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 27:
-                {
-                    int n = 27;
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            default:
-                for (int n = xslot_id; n < nf3kl; n += xslots) {
-                    // Assign a special value to dm cache. When the output shows
-                    // values ~1e200, this indicates that tiley size is too big.
-                    // j_engine scheme function should be adjusted.
-                    dm_kl_cache[ty+n*threadsy] = -1e200;
-                }
-            }
-#else
-            {
-                int xslots = gout_stride * threadsx;
-                int xslot_id = gout_id * threadsx + tx;
-                int kl_loc0 = pair_kl_loc[task_kl];
-                for (int n = xslot_id; n < nf3kl; n += xslots) {
-                    dm_kl_cache[ty+n*threadsy] = dm[kl_loc0+n];
-                    vj_kl_cache[ty+n*threadsy] = 0;
-                }
-            }
-#endif
             double *Rt, *buf;
             if (order % 2 == 0) {
                 Rt = Rt_buf + sq_id;
@@ -536,16 +263,10 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             double zpq = zij - zkl;
             double rr = xpq*xpq + ypq*ypq + zpq*zpq;
             double theta = aij * akl / (aij + akl);
-            double theta_rr = theta * rr;
             if (gout_id == 0) {
-                eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
-                double a2 = -2. * theta;
-                fac /= aij*akl*sqrt(aij+akl);
-                gamma_inc[sq_id] *= fac;
-                for (int i = 1; i <= order; i++) {
-                    fac *= a2;
-                    gamma_inc[sq_id+i*nsq_per_block] *= fac;
-                }
+                double omega = env[PTR_RANGE_OMEGA];
+                boys_fn(gamma_inc, theta, rr, omega, fac/(aij*akl*sqrt(aij+akl)),
+                        order, sq_id, nsq_per_block);
                 Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
             }
             for (int n = 1; n <= order; ++n) {
@@ -557,15 +278,13 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 if (gout_id == 0) {
                     Rt[0] = gamma_inc[sq_id+(order-n)*nsq_per_block];
                 }
-                switch (n) {
-                case 1:
+                if (n == 1) {
                     if (gout_id == 0) {
                         Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
                         Rt[2*nsq_per_block] = ypq * buf[0*nsq_per_block];
                         Rt[3*nsq_per_block] = xpq * buf[0*nsq_per_block];
                     }
-                    break;
-                case 2:
+                } else if (n == 2) {
                     if (gout_id == 0) {
                         Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
                         Rt[2*nsq_per_block] = zpq * buf[1*nsq_per_block] + buf[0*nsq_per_block];
@@ -577,362 +296,87 @@ void md_j_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                         Rt[8*nsq_per_block] = xpq * buf[2*nsq_per_block];
                         Rt[9*nsq_per_block] = xpq * buf[3*nsq_per_block] + buf[0*nsq_per_block];
                     }
-                    break;
-                case 3:
-                    if (gout_id == 0) {
-                        Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
-                        Rt[2*nsq_per_block] = zpq * buf[1*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[3*nsq_per_block] = zpq * buf[2*nsq_per_block] + 2 * buf[1*nsq_per_block];
-                        Rt[4*nsq_per_block] = ypq * buf[0*nsq_per_block];
-                        Rt[5*nsq_per_block] = ypq * buf[1*nsq_per_block];
-                        Rt[6*nsq_per_block] = ypq * buf[2*nsq_per_block];
-                        Rt[7*nsq_per_block] = ypq * buf[3*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[8*nsq_per_block] = ypq * buf[4*nsq_per_block] + buf[1*nsq_per_block];
-                        Rt[9*nsq_per_block] = ypq * buf[5*nsq_per_block] + 2 * buf[3*nsq_per_block];
-                        Rt[10*nsq_per_block] = xpq * buf[0*nsq_per_block];
-                        Rt[11*nsq_per_block] = xpq * buf[1*nsq_per_block];
-                        Rt[12*nsq_per_block] = xpq * buf[2*nsq_per_block];
-                        Rt[13*nsq_per_block] = xpq * buf[3*nsq_per_block];
-                        Rt[14*nsq_per_block] = xpq * buf[4*nsq_per_block];
-                        Rt[15*nsq_per_block] = xpq * buf[5*nsq_per_block];
-                        Rt[16*nsq_per_block] = xpq * buf[6*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[17*nsq_per_block] = xpq * buf[7*nsq_per_block] + buf[1*nsq_per_block];
-                        Rt[18*nsq_per_block] = xpq * buf[8*nsq_per_block] + buf[3*nsq_per_block];
-                        Rt[19*nsq_per_block] = xpq * buf[9*nsq_per_block] + 2 * buf[6*nsq_per_block];
-                    }
-                    break;
-                default:
+                } else {
                     iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
                 }
             }
+            __syncthreads();
 
             Rt = Rt_buf;
-            double *vj_cache = Rt + nf3ijkl * nsq_per_block;
-            uint16_t *p1 = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lkl];
+            int kl_loc0 = pair_kl_loc[task_kl];
+            uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lkl];
+            uint16_t *p1_kl = Rt2_ij_kl + Rt2_idx_offsets[lij*RT2_MAX+lkl];
             int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lkl];
             for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
-                __syncthreads();
                 double val = 0.;
                 if (k < nf3kl) {
                     double phase = efg_phase[k];
                     int off = k * nf3ij;
                     for (int i = 0; i < nf3ij; ++i) {
-                        double s = Rt[sq_id+p1[off+i]*nsq_per_block];
+                        double s = Rt[sq_id+p1_ij[off+i]*nsq_per_block];
                         val += phase * s * dm_ij_cache[tx+i*threadsx];
                     }
                 }
-                //vj_cache[t_id] = val;
-                //for (int stride = threadsx/2; stride > 0; stride /= 2) {
-                //    __syncthreads();
-                //    if (tx < stride) {
-                //        vj_cache[t_id] += vj_cache[t_id + stride];
-                //    }
-                //}
-                //__syncthreads();
-                //if (tx == 0 && k < nf3kl) {
-                //    vj_kl_cache[ty+k*threadsy] += vj_cache[t_id];
-                //}
+                // reduce ij
                 for (int offset = threadsx/2; offset > 0; offset /= 2) {
                     val += __shfl_down_sync(mask, val, offset);
                 }
                 if (tx == 0 && k < nf3kl) {
-                    vj_kl_cache[ty+k*threadsy] += val;
+                    vj_kl_cache[sq_kl+k*bsizey] += val;
                 }
             }
 
-            p1 = Rt2_ij_kl + Rt2_idx_offsets[lij*RT2_MAX+lkl];
-            for (int i = gout_id; i < nf3ij+gout_id; i += gout_stride) {
-                __syncthreads();
-                double val = 0.;
-                if (i < nf3ij) {
+            for (int k = 0; k < nf3kl; ++k) {
+                double dm_kl = efg_phase[k] * dm[kl_loc0+k];
+#pragma unroll
+                for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                    if (i >= nf3ij) break;
                     int off = i * nf3kl;
-                    for (int k = 0; k < nf3kl; ++k) {
-                        double s = Rt[sq_id+p1[off+k]*nsq_per_block];
-                        val += efg_phase[k] * s * dm_kl_cache[ty+k*threadsy];
-                    }
+                    double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
+                    vj_ij[n] += s * dm_kl;
                 }
-                vj_cache[t_id] = val;
-                for (int stride = threadsy/2; stride > 0; stride /= 2) {
-                    __syncthreads();
-                    if (ty < stride) {
-                        vj_cache[t_id] += vj_cache[t_id + stride*threadsx];
-                    }
-                }
+            }
+        }
+        double *vj_cache = Rp_cache;
+#pragma unroll
+        for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+            if (i >= nf3ij+gout_id) break;
+            __syncthreads();
+            vj_cache[t_id] = vj_ij[n];
+            for (int stride = threadsy/2; stride > 0; stride /= 2) {
                 __syncthreads();
-                if (ty == 0 && i < nf3ij) {
-                    vj_ij_cache[tx+i*threadsx] += vj_cache[t_id];
+                if (ty < stride) {
+                    vj_cache[t_id] += vj_cache[t_id + stride*threadsx];
                 }
             }
             __syncthreads();
-#if 0
-            switch (addr0 / xslots) {
-            case 0:
-                for (int n = 0; n <  3; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 1:
-                for (int n = 1; n <= 4; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 2:
-                for (int n = 2; n <= 5; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 3:
-                for (int n = 3; n <= 6; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 4:
-                for (int n = 4; n <= 7; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 5:
-                for (int n = 5; n <= 8; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 6:
-                for (int n = 6; n <= 9; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 7:
-                for (int n = 7; n <= 10; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 8:
-                for (int n = 8; n <= 11; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 9:
-                for (int n = 9; n <= 12; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 10:
-                for (int n = 10; n <= 13; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 11:
-                for (int n = 11; n <= 14; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 12:
-                for (int n = 12; n <= 15; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 13:
-                for (int n = 13; n <= 16; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 14:
-                for (int n = 14; n <= 17; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 15:
-                for (int n = 15; n <= 18; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 16:
-                for (int n = 16; n <= 19; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 17:
-                for (int n = 17; n <= 20; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 18:
-                for (int n = 18; n <= 21; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 19:
-                for (int n = 19; n <= 22; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 20:
-                for (int n = 20; n <= 23; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 21:
-                for (int n = 21; n <= 24; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 22:
-                for (int n = 22; n <= 25; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 23:
-                for (int n = 23; n <= 26; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 24:
-                for (int n = 24; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 25:
-                for (int n = 25; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 26:
-                for (int n = 26; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            case 27:
-                {
-                    int n = 27;
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        vj_kl[n] += vj_kl_cache[ty+(addr-addr0)*threadsy];
-                    }
-                }
-                break;
-            default:
-                vj_kl[27] = 1e200;
-            }
-#else
-            if (task_kl0+ty < npairs_kl) {
-                int kl_loc0 = pair_kl_loc[task_kl];
-                for (int n = xslot_id; n < nf3kl; n += xslots) {
-                    atomicAdd(vj+kl_loc0+n, vj_kl_cache[ty+n*threadsy]);
-                }
-            }
-#endif
-        }
-        // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = yslot_id; n < nf3ij; n += yslots) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*threadsx]);
+            if (ty == 0 && i < nf3ij && task_ij0+tx < npairs_ij) {
+                atomicAdd(vj+ij_loc0+i, vj_cache[t_id]);
             }
         }
     }
-#if 0
+    __syncthreads();
     {
-        int kl_counts = nf3kl * tiley;
-        for (int k = 0; k <= KL_SIZE; ++k) {
-            int n = k * xslots + xslot_id;
-            if (n >= kl_counts) break;
-            int tile = n / nf3kl;
-            int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
+        int xslots = threadsx * gout_stride;
+        int xslot_id = t_id / threadsy;
+        int ty = t_id % threadsy;
+        for (int n = xslot_id; n < nf3kl * tiley; n += xslots) {
+            int kl = n / tiley;
+            int batch_kl = n  - kl * tiley;
+            int sq_kl = ty + batch_kl * threadsy;
+            int task_kl = blockIdx.y * bsizey + sq_kl;
             if (task_kl < npairs_kl) {
                 int kl_loc0 = pair_kl_loc[task_kl];
-                int kl = n % nf3kl;
-                atomicAdd(vj+kl_loc0+kl, vj_kl[k]);
+                atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*bsizey]);
             }
         }
     }
-#endif
 }
 
-// 4-fold permutation symmetry
 __global__
-void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                 int threadsx, int threadsy, int tilex, int tiley)
+void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     int threadsx, int threadsy, int tilex, int tiley,
+                     int dm_size)
 {
     int *pair_ij_mapping = bounds.pair_ij_mapping;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -946,18 +390,28 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
         return;
     }
+    if (pair_ij_mapping == pair_kl_mapping &&
+        // when ij pattern and kl pattern are identical, the 8-fold permutation
+        // symmetry can be utilized. Tiles on in the upper triangular part can
+        // be skipped. If the last ij task (task_ij0+bsizex-1) is greater than
+        // the first kl task (task_kl0), tile is completely inside the triu part.
+        task_ij0+bsizex <= task_kl0) {
+        return;
+    }
 
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
     int nsq_per_block = blockDim.x;
+    //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
+    int lane_id = t_id % 32;
+    int group_id = lane_id / threadsx;
+    unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
     int ty = sq_id / threadsx;
     int threads = nsq_per_block * gout_stride;
-    int xslots = gout_stride * threadsx;
     int yslots = gout_stride * threadsy;
-    int xslot_id = gout_id * threadsx + tx;
     int yslot_id = gout_id * threadsy + ty;
     int li = bounds.li;
     int lj = bounds.lj;
@@ -972,25 +426,25 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
-    double *vj = jk.vj;
     int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
     int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
 
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;
-    extern __shared__ double gamma_inc[];
-    double *Rp_cache = gamma_inc + (order+1) * nsq_per_block;
-    double *Rq_cache = Rp_cache + threadsx*4;
-    double *dm_kl_cache = Rq_cache + bsizey*4;
-    double *vj_ij_cache = dm_kl_cache + nf3kl * threadsy;
-    double *Rt_buf = vj_ij_cache + nf3ij * threadsx;
+    extern __shared__ double vj_kl_cache[];
+    double *Rq_cache = vj_kl_cache + nf3kl*bsizey * DM_BLOCK;
+    double *Rp_cache = Rq_cache + bsizey*4;
+    double *dm_ij_cache = Rp_cache + threadsx*4;
+    double *gamma_inc = dm_ij_cache + nf3ij * threadsx * DM_BLOCK;
+    double *Rt_buf = gamma_inc + (order+1) * nsq_per_block;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
+    double *dm_ij_cache1 = dm_ij_cache + nf3ij * threadsx;
+    double *dm_ij_cache2 = dm_ij_cache + nf3ij * threadsx*2;
+    double *dm_ij_cache3 = dm_ij_cache + nf3ij * threadsx*3;
 
-    // zero out all cache;
     for (int n = t_id; n < (threadsx+bsizey)*4; n += threads) {
-        Rp_cache[n] = 0.;
+        Rq_cache[n] = 0;
     }
     __syncthreads();
     for (int n = t_id; n < bsizey; n += threads) {
@@ -1016,451 +470,385 @@ void md_j_s4_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         }
     }
 
-    register double dm_kl[KL_SIZE];
-    for (int n = 0; n < KL_SIZE; ++n) {
-        dm_kl[n] = 0;
-    }
-
-    int kl_counts = nf3kl * tiley;
-    for (int k = 0; k <= KL_SIZE; ++k) {
-        int n = k * xslots + xslot_id;
-        if (n >= kl_counts) break;
-        int tile = n / nf3kl;
-        int task_kl = blockIdx.y * bsizey + tile * threadsy + ty;
-        if (task_kl < npairs_kl) {
-            int kl_loc0 = pair_kl_loc[task_kl];
-            int kl = n % nf3kl;
-            dm_kl[k] = dm[kl_loc0+kl];
+    for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += DM_BLOCK) {
+        int remaining_n_dm = jk.n_dm - dm_offset;
+        double *vj = jk.vj + dm_offset * dm_size;
+        double *dm = jk.dm + dm_offset * dm_size;
+        double *dm1 = dm + dm_size;
+        double *dm2 = dm + dm_size*2;
+        double *dm3 = dm + dm_size*3;
+        __syncthreads();
+        for (int n = t_id; n < nf3kl*bsizey*DM_BLOCK; n += threads) {
+            vj_kl_cache[n] = 0;
         }
-    }
 
-    for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
-        int task_ij0 = blockIdx.x * bsizex + batch_ij * threadsx;
-        if (task_ij0 >= npairs_ij) {
-            continue;
+        for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
+            int task_ij0 = blockIdx.x * bsizex + batch_ij * threadsx;
+            if (task_ij0 >= npairs_ij) {
+                continue;
+            }
+            __syncthreads();
+            for (int n = t_id; n < threadsx; n += threads) {
+                int task_ij = task_ij0 + n;
+                if (task_ij < npairs_ij) {
+                    int pair_ij = pair_ij_mapping[task_ij];
+                    int ish = pair_ij / nbas;
+                    int jsh = pair_ij % nbas;
+                    double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+                    double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+                    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+                    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+                    double aij = ai + aj;
+                    double xij = (ai * ri[0] + aj * rj[0]) / aij;
+                    double yij = (ai * ri[1] + aj * rj[1]) / aij;
+                    double zij = (ai * ri[2] + aj * rj[2]) / aij;
+                    Rp_cache[n+0*threadsx] = xij;
+                    Rp_cache[n+1*threadsx] = yij;
+                    Rp_cache[n+2*threadsx] = zij;
+                    Rp_cache[n+3*threadsx] = aij;
+                } else {
+                    Rp_cache[n+3*threadsx] = 1.;
+                }
+            }
+            double fac_sym = PI_FAC;
+            int task_ij = task_ij0 + tx;
+            if (task_ij >= npairs_ij) {
+                task_ij = task_ij0;
+                fac_sym = 0.;
+            }
+            int pair_ij = pair_ij_mapping[task_ij];
+            int ish = pair_ij / nbas;
+            int jsh = pair_ij % nbas;
+            if (ish == jsh) fac_sym *= .5;
+
+            int ij_loc0 = pair_ij_loc[task_ij];
+            int nf3ij_dm = nf3ij * min(remaining_n_dm, DM_BLOCK);
+            for (int n = yslot_id; n < nf3ij_dm; n += yslots) {
+                int i_dm = n / nf3ij;
+                int i = n - i_dm * nf3ij;
+                dm_ij_cache[tx+n*threadsx] = dm[i_dm*dm_size+ij_loc0+i];
+            }
+            double vj_ij[IJ_SIZE*DM_BLOCK];
+#pragma unroll
+            for (int n = 0; n < IJ_SIZE*DM_BLOCK; ++n) {
+                vj_ij[n] = 0.;
+            }
+            for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
+                int task_kl0 = blockIdx.y * bsizey + batch_kl * threadsy;
+                if (task_kl0 >= npairs_kl) {
+                    continue;
+                }
+                if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
+                    continue;
+                }
+                int pair_ij0 = pair_ij_mapping[task_ij0];
+                int pair_kl0 = pair_kl_mapping[task_kl0];
+                if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
+                    qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
+                    continue;
+                }
+
+                int sq_kl = ty + batch_kl * threadsy;
+                int task_kl = task_kl0 + ty;
+                double fac = fac_sym;
+                if (task_kl >= npairs_kl) {
+                    task_kl = task_kl0;
+                    fac = 0.;
+                }
+                int pair_kl = pair_kl_mapping[task_kl];
+                int ksh = pair_kl / nbas;
+                int lsh = pair_kl % nbas;
+                if (ksh == lsh) fac *= .5;
+                if (pair_ij_mapping == pair_kl_mapping) {
+                    if (task_ij == task_kl) fac *= .5;
+                    if (task_ij < task_kl) fac = 0.;
+                }
+                __syncthreads();
+                double *Rt, *buf;
+                if (order % 2 == 0) {
+                    Rt = Rt_buf + sq_id;
+                    buf = Rt + nf3ijkl * nsq_per_block;
+                } else {
+                    buf = Rt_buf + sq_id;
+                    Rt = buf + nf3ijkl * nsq_per_block;
+                }
+                double xij = Rp_cache[tx+0*threadsx];
+                double yij = Rp_cache[tx+1*threadsx];
+                double zij = Rp_cache[tx+2*threadsx];
+                double aij = Rp_cache[tx+3*threadsx];
+                double xkl = Rq_cache[sq_kl+0*bsizey];
+                double ykl = Rq_cache[sq_kl+1*bsizey];
+                double zkl = Rq_cache[sq_kl+2*bsizey];
+                double akl = Rq_cache[sq_kl+3*bsizey];
+                double xpq = xij - xkl;
+                double ypq = yij - ykl;
+                double zpq = zij - zkl;
+                double rr = xpq*xpq + ypq*ypq + zpq*zpq;
+                double theta = aij * akl / (aij + akl);
+                if (gout_id == 0) {
+                    double omega = env[PTR_RANGE_OMEGA];
+                    boys_fn(gamma_inc, theta, rr, omega, fac/(aij*akl*sqrt(aij+akl)),
+                            order, sq_id, nsq_per_block);
+                    Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
+                }
+                for (int n = 1; n <= order; ++n) {
+                    __syncthreads();
+                    // swap input and output
+                    double *tmp = buf;
+                    buf = Rt;
+                    Rt = tmp;
+                    if (gout_id == 0) {
+                        Rt[0] = gamma_inc[sq_id+(order-n)*nsq_per_block];
+                    }
+                    if (n == 1) {
+                        if (gout_id == 0) {
+                            Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
+                            Rt[2*nsq_per_block] = ypq * buf[0*nsq_per_block];
+                            Rt[3*nsq_per_block] = xpq * buf[0*nsq_per_block];
+                        }
+                    } else if (n == 2) {
+                        if (gout_id == 0) {
+                            Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
+                            Rt[2*nsq_per_block] = zpq * buf[1*nsq_per_block] + buf[0*nsq_per_block];
+                            Rt[3*nsq_per_block] = ypq * buf[0*nsq_per_block];
+                            Rt[4*nsq_per_block] = ypq * buf[1*nsq_per_block];
+                            Rt[5*nsq_per_block] = ypq * buf[2*nsq_per_block] + buf[0*nsq_per_block];
+                            Rt[6*nsq_per_block] = xpq * buf[0*nsq_per_block];
+                            Rt[7*nsq_per_block] = xpq * buf[1*nsq_per_block];
+                            Rt[8*nsq_per_block] = xpq * buf[2*nsq_per_block];
+                            Rt[9*nsq_per_block] = xpq * buf[3*nsq_per_block] + buf[0*nsq_per_block];
+                        }
+                    } else {
+                        iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
+                    }
+                }
+                __syncthreads();
+
+                Rt = Rt_buf;
+                int sq_kl1 = sq_kl + nf3kl * bsizey;
+                int sq_kl2 = sq_kl + nf3kl * bsizey*2;
+                int sq_kl3 = sq_kl + nf3kl * bsizey*3;
+                int kl_loc0 = pair_kl_loc[task_kl];
+                uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lkl];
+                uint16_t *p1_kl = Rt2_ij_kl + Rt2_idx_offsets[lij*RT2_MAX+lkl];
+                int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lkl];
+                if (remaining_n_dm == 1) {
+                    for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
+                        double val = 0.;
+                        if (k < nf3kl) {
+                            double phase = efg_phase[k];
+                            int off = k * nf3ij;
+                            for (int i = 0; i < nf3ij; ++i) {
+                                double s = Rt[sq_id+p1_ij[off+i]*nsq_per_block];
+                                val += phase * s * dm_ij_cache[tx+i*threadsx];
+                            }
+                        }
+                        for (int offset = threadsx/2; offset > 0; offset /= 2) {
+                            val += __shfl_down_sync(mask, val, offset);
+                        }
+                        if (tx == 0 && k < nf3kl) {
+                            vj_kl_cache[sq_kl+k*bsizey] += val;
+                        }
+                    }
+                    for (int k = 0; k < nf3kl; ++k) {
+                        double dm_kl = efg_phase[k] * dm[kl_loc0+k];
+#pragma unroll
+                        for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                            if (i >= nf3ij) break;
+                            int off = i * nf3kl;
+                            double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
+                            vj_ij[n] += s * dm_kl;
+                        }
+                    }
+                } else if (remaining_n_dm == 2) {
+                    for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
+                        double val0 = 0.;
+                        double val1 = 0.;
+                        if (k < nf3kl) {
+                            double phase = efg_phase[k];
+                            int off = k * nf3ij;
+                            for (int i = 0; i < nf3ij; ++i) {
+                                double s = Rt[sq_id+p1_ij[off+i]*nsq_per_block];
+                                double phase_s = phase * s;
+                                val0 += phase_s * dm_ij_cache [tx+i*threadsx];
+                                val1 += phase_s * dm_ij_cache1[tx+i*threadsx];
+                            }
+                        }
+                        for (int offset = threadsx/2; offset > 0; offset /= 2) {
+                            val0 += __shfl_down_sync(mask, val0, offset);
+                            val1 += __shfl_down_sync(mask, val1, offset);
+                        }
+                        if (tx == 0 && k < nf3kl) {
+                            vj_kl_cache[sq_kl +k*bsizey] += val0;
+                            vj_kl_cache[sq_kl1+k*bsizey] += val1;
+                        }
+                    }
+                    for (int k = 0; k < nf3kl; ++k) {
+                        double dm_kl  = efg_phase[k] * dm [kl_loc0+k];
+                        double dm_kl1 = efg_phase[k] * dm1[kl_loc0+k];
+#pragma unroll
+                        for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                            if (i >= nf3ij) break;
+                            int off = i * nf3kl;
+                            double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
+                            vj_ij[n        ] += s * dm_kl ;
+                            vj_ij[n+IJ_SIZE] += s * dm_kl1;
+                        }
+                    }
+                } else {
+                    if (remaining_n_dm == 3) dm3 = dm2;
+                    for (int k = gout_id; k < nf3kl+gout_id; k += gout_stride) {
+                        double val0 = 0.;
+                        double val1 = 0.;
+                        double val2 = 0.;
+                        double val3 = 0.;
+                        if (k < nf3kl) {
+                            double phase = efg_phase[k];
+                            int off = k * nf3ij;
+                            for (int i = 0; i < nf3ij; ++i) {
+                                double s = Rt[sq_id+p1_ij[off+i]*nsq_per_block];
+                                double phase_s = phase * s;
+                                val0 += phase_s * dm_ij_cache [tx+i*threadsx];
+                                val1 += phase_s * dm_ij_cache1[tx+i*threadsx];
+                                val2 += phase_s * dm_ij_cache2[tx+i*threadsx];
+                                val3 += phase_s * dm_ij_cache3[tx+i*threadsx];
+                            }
+                        }
+                        // reduce along ij
+                        for (int offset = threadsx/2; offset > 0; offset /= 2) {
+                            val0 += __shfl_down_sync(mask, val0, offset);
+                            val1 += __shfl_down_sync(mask, val1, offset);
+                            val2 += __shfl_down_sync(mask, val2, offset);
+                            val3 += __shfl_down_sync(mask, val3, offset);
+                        }
+                        if (tx == 0 && k < nf3kl) {
+                            vj_kl_cache[sq_kl +k*bsizey] += val0;
+                            vj_kl_cache[sq_kl1+k*bsizey] += val1;
+                            vj_kl_cache[sq_kl2+k*bsizey] += val2;
+                            vj_kl_cache[sq_kl3+k*bsizey] += val3;
+                        }
+                    }
+                    for (int k = 0; k < nf3kl; ++k) {
+                        double dm_kl0 = efg_phase[k] * dm [kl_loc0+k];
+                        double dm_kl1 = efg_phase[k] * dm1[kl_loc0+k];
+                        double dm_kl2 = efg_phase[k] * dm2[kl_loc0+k];
+                        double dm_kl3 = efg_phase[k] * dm3[kl_loc0+k];
+#pragma unroll
+                        for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                            if (i >= nf3ij) break;
+                            int off = i * nf3kl;
+                            double s = Rt[sq_id+p1_kl[off+k]*nsq_per_block];
+                            vj_ij[n+IJ_SIZE*0] += s * dm_kl0;
+                            vj_ij[n+IJ_SIZE*1] += s * dm_kl1;
+                            vj_ij[n+IJ_SIZE*2] += s * dm_kl2;
+                            vj_ij[n+IJ_SIZE*3] += s * dm_kl3;
+                        }
+                    }
+                }
+            }
+
+            double *vj_cache = Rp_cache;
+            if (remaining_n_dm == 1) {
+#pragma unroll
+                for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                    if (i >= nf3ij+gout_id) break;
+                    __syncthreads();
+                    vj_cache[t_id] = vj_ij[n];
+                    for (int stride = threadsy/2; stride > 0; stride /= 2) {
+                        __syncthreads();
+                        if (ty < stride) {
+                            vj_cache[t_id] += vj_cache[t_id + stride*threadsx];
+                        }
+                    }
+                    __syncthreads();
+                    if (ty == 0 && i < nf3ij && task_ij0+tx < npairs_ij) {
+                        atomicAdd(vj+ij_loc0+i, vj_cache[t_id]);
+                    }
+                }
+            } else if (remaining_n_dm == 2) {
+                double *vj_cache1 = vj_cache + threads;
+#pragma unroll
+                for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                    if (i >= nf3ij+gout_id) break;
+                    __syncthreads();
+                    vj_cache [t_id] = vj_ij[n];
+                    vj_cache1[t_id] = vj_ij[n+IJ_SIZE];
+                    for (int stride = threadsy/2; stride > 0; stride /= 2) {
+                        __syncthreads();
+                        if (ty < stride) {
+                            vj_cache [t_id] += vj_cache [t_id + stride*threadsx];
+                            vj_cache1[t_id] += vj_cache1[t_id + stride*threadsx];
+                        }
+                    }
+                    __syncthreads();
+                    if (ty == 0 && i < nf3ij && task_ij0+tx < npairs_ij) {
+                        atomicAdd(vj        +ij_loc0+i, vj_cache [t_id]);
+                        atomicAdd(vj+dm_size+ij_loc0+i, vj_cache1[t_id]);
+                    }
+                }
+            } else {
+#pragma unroll
+                for (int n = 0, i = gout_id; n < IJ_SIZE; ++n, i += gout_stride) {
+                    if (i >= nf3ij+gout_id) break;
+                    __syncthreads();
+                    for (int m = 0; m < DM_BLOCK; ++m) {
+                        vj_cache[t_id+threads*m] = vj_ij[n+IJ_SIZE*m];
+                    }
+                    for (int stride = threadsy/2; stride > 0; stride /= 2) {
+                        __syncthreads();
+                        if (ty < stride) {
+                            for (int m = 0; m < DM_BLOCK; ++m) {
+                                vj_cache[t_id+threads*m] += vj_cache[t_id+threads*m + stride*threadsx];
+                            }
+                        }
+                    }
+                    __syncthreads();
+                    if (ty == 0 && i < nf3ij && task_ij0+tx < npairs_ij) {
+                        for (int m = 0; m < min(remaining_n_dm, DM_BLOCK); ++m) {
+                            atomicAdd(vj+dm_size*m+ij_loc0+i, vj_cache[t_id+threads*m]);
+                        }
+                    }
+                }
+            }
         }
         __syncthreads();
-        for (int n = t_id; n < threadsx; n += threads) {
-            int task_ij = task_ij0 + n;
-            if (task_ij < npairs_ij) {
-                int pair_ij = pair_ij_mapping[task_ij];
-                int ish = pair_ij / nbas;
-                int jsh = pair_ij % nbas;
-                double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
-                double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
-                double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-                double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-                double aij = ai + aj;
-                double xij = (ai * ri[0] + aj * rj[0]) / aij;
-                double yij = (ai * ri[1] + aj * rj[1]) / aij;
-                double zij = (ai * ri[2] + aj * rj[2]) / aij;
-                Rp_cache[n+0*threadsx] = xij;
-                Rp_cache[n+1*threadsx] = yij;
-                Rp_cache[n+2*threadsx] = zij;
-                Rp_cache[n+3*threadsx] = aij;
-            } else {
-                Rp_cache[n+3*threadsx] = 1.;
-            }
-        }
-        double fac_sym = PI_FAC;
-        int task_ij = task_ij0 + tx;
-        if (task_ij >= npairs_ij) {
-            task_ij = task_ij0;
-            fac_sym = 0.;
-        }
-        int pair_ij = pair_ij_mapping[task_ij];
-        int ish = pair_ij / nbas;
-        int jsh = pair_ij % nbas;
-        if (ish == jsh) fac_sym *= .5;
-        for (int n = yslot_id; n < nf3ij; n += yslots) {
-            vj_ij_cache[tx+n*threadsx] = 0;
-        }
-        for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
-            int task_kl0 = blockIdx.y * bsizey + batch_kl * threadsy;
-            if (task_kl0 >= npairs_kl) {
-                continue;
-            }
-            int pair_ij0 = pair_ij_mapping[task_ij0];
-            int pair_kl0 = pair_kl_mapping[task_kl0];
-            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
-                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
-                continue;
-            }
-
-            int sq_kl = ty + batch_kl * threadsy;
-            int task_kl = task_kl0 + ty;
-            double fac = fac_sym;
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int pair_kl = pair_kl_mapping[task_kl];
-            int ksh = pair_kl / nbas;
-            int lsh = pair_kl % nbas;
-            if (ksh == lsh) fac *= .5;
-            __syncthreads();
-            // load dm_kl_cache from dm_kl regisers of each thread
-            int addr0 = batch_kl * nf3kl;
-            int addr1 = addr0 + nf3kl;
-            switch (addr0 / xslots) {
-            case 0:
-                for (int n = 0; n <  3; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
+        {
+            double *vj1 = vj + dm_size;
+            double *vj2 = vj + dm_size*2;
+            double *vj3 = vj + dm_size*3;
+            double *vj_kl_cache1 = vj_kl_cache + nf3kl * bsizey;
+            double *vj_kl_cache2 = vj_kl_cache + nf3kl * bsizey*2;
+            double *vj_kl_cache3 = vj_kl_cache + nf3kl * bsizey*3;
+            int xslots = threadsx * gout_stride;
+            int xslot_id = t_id / threadsy;
+            int ty = t_id % threadsy;
+            for (int n = xslot_id; n < nf3kl * tiley; n += xslots) {
+                int kl = n / tiley;
+                int batch_kl = n - kl * tiley;
+                int sq_kl = ty + batch_kl * threadsy;
+                int task_kl = blockIdx.y * bsizey + sq_kl;
+                if (task_kl < npairs_kl) {
+                    int kl_loc0 = pair_kl_loc[task_kl];
+                    switch (remaining_n_dm) {
+                    case 1:
+                        atomicAdd(vj+kl_loc0+kl, vj_kl_cache[sq_kl+kl*bsizey]);
+                        break;
+                    case 2:
+                        atomicAdd(vj +kl_loc0+kl, vj_kl_cache [sq_kl+kl*bsizey]);
+                        atomicAdd(vj1+kl_loc0+kl, vj_kl_cache1[sq_kl+kl*bsizey]);
+                        break;
+                    case 3:
+                        atomicAdd(vj +kl_loc0+kl, vj_kl_cache [sq_kl+kl*bsizey]);
+                        atomicAdd(vj1+kl_loc0+kl, vj_kl_cache1[sq_kl+kl*bsizey]);
+                        atomicAdd(vj2+kl_loc0+kl, vj_kl_cache2[sq_kl+kl*bsizey]);
+                        break;
+                    default:
+                        atomicAdd(vj +kl_loc0+kl, vj_kl_cache [sq_kl+kl*bsizey]);
+                        atomicAdd(vj1+kl_loc0+kl, vj_kl_cache1[sq_kl+kl*bsizey]);
+                        atomicAdd(vj2+kl_loc0+kl, vj_kl_cache2[sq_kl+kl*bsizey]);
+                        atomicAdd(vj3+kl_loc0+kl, vj_kl_cache3[sq_kl+kl*bsizey]);
                     }
                 }
-                break;
-            case 1:
-                for (int n = 1; n <= 4; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 2:
-                for (int n = 2; n <= 5; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 3:
-                for (int n = 3; n <= 6; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 4:
-                for (int n = 4; n <= 7; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 5:
-                for (int n = 5; n <= 8; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 6:
-                for (int n = 6; n <= 9; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 7:
-                for (int n = 7; n <= 10; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 8:
-                for (int n = 8; n <= 11; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 9:
-                for (int n = 9; n <= 12; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 10:
-                for (int n = 10; n <= 13; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 11:
-                for (int n = 11; n <= 14; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 12:
-                for (int n = 12; n <= 15; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 13:
-                for (int n = 13; n <= 16; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 14:
-                for (int n = 14; n <= 17; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 15:
-                for (int n = 15; n <= 18; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 16:
-                for (int n = 16; n <= 19; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 17:
-                for (int n = 17; n <= 20; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 18:
-                for (int n = 18; n <= 21; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 19:
-                for (int n = 19; n <= 22; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 20:
-                for (int n = 20; n <= 23; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 21:
-                for (int n = 21; n <= 24; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 22:
-                for (int n = 22; n <= 25; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 23:
-                for (int n = 23; n <= 26; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 24:
-                for (int n = 24; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 25:
-                for (int n = 25; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 26:
-                for (int n = 26; n <= 27; ++n) {
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            case 27:
-                {
-                    int n = 27;
-                    int addr = n * xslots + xslot_id;
-                    if (addr0 <= addr && addr < addr1) {
-                        dm_kl_cache[ty+(addr-addr0)*threadsy] = dm_kl[n];
-                    }
-                }
-                break;
-            default:
-                for (int n = xslot_id; n < nf3kl; n += xslots) {
-                    // Assign a special value to dm cache. When the output shows
-                    // values ~1e200, this indicates that tiley size is too big.
-                    // j_engine scheme function should be adjusted.
-                    dm_kl_cache[ty+n*threadsy] = -1e200;
-                }
-            }
-
-            double *Rt, *buf;
-            if (order % 2 == 0) {
-                Rt = Rt_buf + sq_id;
-                buf = Rt + nf3ijkl * nsq_per_block;
-            } else {
-                buf = Rt_buf + sq_id;
-                Rt = buf + nf3ijkl * nsq_per_block;
-            }
-            double xij = Rp_cache[tx+0*threadsx];
-            double yij = Rp_cache[tx+1*threadsx];
-            double zij = Rp_cache[tx+2*threadsx];
-            double aij = Rp_cache[tx+3*threadsx];
-            double xkl = Rq_cache[sq_kl+0*bsizey];
-            double ykl = Rq_cache[sq_kl+1*bsizey];
-            double zkl = Rq_cache[sq_kl+2*bsizey];
-            double akl = Rq_cache[sq_kl+3*bsizey];
-            double xpq = xij - xkl;
-            double ypq = yij - ykl;
-            double zpq = zij - zkl;
-            double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-            double theta = aij * akl / (aij + akl);
-            double theta_rr = theta * rr;
-            if (gout_id == 0) {
-                eval_gamma_inc_fn(gamma_inc, theta_rr, order, sq_id, nsq_per_block);
-                double a2 = -2. * theta;
-                fac /= aij*akl*sqrt(aij+akl);
-                gamma_inc[sq_id] *= fac;
-                for (int i = 1; i <= order; i++) {
-                    fac *= a2;
-                    gamma_inc[sq_id+i*nsq_per_block] *= fac;
-                }
-                Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
-            }
-            for (int n = 1; n <= order; ++n) {
-                __syncthreads();
-                // swap input and output
-                double *tmp = buf;
-                buf = Rt;
-                Rt = tmp;
-                if (gout_id == 0) {
-                    Rt[0] = gamma_inc[sq_id+(order-n)*nsq_per_block];
-                }
-                switch (n) {
-                case 1:
-                    if (gout_id == 0) {
-                        Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
-                        Rt[2*nsq_per_block] = ypq * buf[0*nsq_per_block];
-                        Rt[3*nsq_per_block] = xpq * buf[0*nsq_per_block];
-                    }
-                    break;
-                case 2:
-                    if (gout_id == 0) {
-                        Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
-                        Rt[2*nsq_per_block] = zpq * buf[1*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[3*nsq_per_block] = ypq * buf[0*nsq_per_block];
-                        Rt[4*nsq_per_block] = ypq * buf[1*nsq_per_block];
-                        Rt[5*nsq_per_block] = ypq * buf[2*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[6*nsq_per_block] = xpq * buf[0*nsq_per_block];
-                        Rt[7*nsq_per_block] = xpq * buf[1*nsq_per_block];
-                        Rt[8*nsq_per_block] = xpq * buf[2*nsq_per_block];
-                        Rt[9*nsq_per_block] = xpq * buf[3*nsq_per_block] + buf[0*nsq_per_block];
-                    }
-                    break;
-                case 3:
-                    if (gout_id == 0) {
-                        Rt[1*nsq_per_block] = zpq * buf[0*nsq_per_block];
-                        Rt[2*nsq_per_block] = zpq * buf[1*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[3*nsq_per_block] = zpq * buf[2*nsq_per_block] + 2 * buf[1*nsq_per_block];
-                        Rt[4*nsq_per_block] = ypq * buf[0*nsq_per_block];
-                        Rt[5*nsq_per_block] = ypq * buf[1*nsq_per_block];
-                        Rt[6*nsq_per_block] = ypq * buf[2*nsq_per_block];
-                        Rt[7*nsq_per_block] = ypq * buf[3*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[8*nsq_per_block] = ypq * buf[4*nsq_per_block] + buf[1*nsq_per_block];
-                        Rt[9*nsq_per_block] = ypq * buf[5*nsq_per_block] + 2 * buf[3*nsq_per_block];
-                        Rt[10*nsq_per_block] = xpq * buf[0*nsq_per_block];
-                        Rt[11*nsq_per_block] = xpq * buf[1*nsq_per_block];
-                        Rt[12*nsq_per_block] = xpq * buf[2*nsq_per_block];
-                        Rt[13*nsq_per_block] = xpq * buf[3*nsq_per_block];
-                        Rt[14*nsq_per_block] = xpq * buf[4*nsq_per_block];
-                        Rt[15*nsq_per_block] = xpq * buf[5*nsq_per_block];
-                        Rt[16*nsq_per_block] = xpq * buf[6*nsq_per_block] + buf[0*nsq_per_block];
-                        Rt[17*nsq_per_block] = xpq * buf[7*nsq_per_block] + buf[1*nsq_per_block];
-                        Rt[18*nsq_per_block] = xpq * buf[8*nsq_per_block] + buf[3*nsq_per_block];
-                        Rt[19*nsq_per_block] = xpq * buf[9*nsq_per_block] + 2 * buf[6*nsq_per_block];
-                    }
-                    break;
-                default:
-                    iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsq_per_block, gout_id, gout_stride);
-                }
-            }
-
-            Rt = Rt_buf;
-            double *vj_cache = Rt + nf3ijkl * nsq_per_block;
-            uint16_t *p1 = Rt2_ij_kl + Rt2_idx_offsets[lij*RT2_MAX+lkl];
-            int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lkl];
-            for (int i = gout_id; i < nf3ij+gout_id; i += gout_stride) {
-                __syncthreads();
-                double val = 0.;
-                if (i < nf3ij) {
-                    int off = i * nf3kl;
-                    for (int k = 0; k < nf3kl; ++k) {
-                        double s = Rt[sq_id+p1[off+k]*nsq_per_block];
-                        val += efg_phase[k] * s * dm_kl_cache[ty+k*threadsy];
-                    }
-                }
-                vj_cache[t_id] = val;
-                for (int stride = threadsy/2; stride > 0; stride /= 2) {
-                    __syncthreads();
-                    if (ty < stride) {
-                        vj_cache[t_id] += vj_cache[t_id + stride*threadsx];
-                    }
-                }
-                __syncthreads();
-                if (ty == 0 && i < nf3ij) {
-                    vj_ij_cache[tx+i*threadsx] += vj_cache[t_id];
-                }
-            }
-            __syncthreads();
-        }
-        // The last tile for ij
-        if (task_ij0+tx < npairs_ij) {
-            int ij_loc0 = pair_ij_loc[task_ij];
-            for (int n = yslot_id; n < nf3ij; n += yslots) {
-                atomicAdd(vj+ij_loc0+n, vj_ij_cache[tx+n*threadsx]);
             }
         }
     }

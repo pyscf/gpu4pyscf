@@ -395,7 +395,7 @@ void _rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 __global__
-void rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+static void rys_ejk_ip2_type12_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -1052,7 +1052,7 @@ void _rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 __global__
-void rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+static void rys_ejk_ip2_type12_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -2449,7 +2449,7 @@ void _rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 __global__
-void rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+static void rys_ejk_ip2_type12_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -4830,7 +4830,7 @@ void _rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 __global__
-void rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+static void rys_ejk_ip2_type12_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -6247,7 +6247,7 @@ void _rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 __global__
-void rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+static void rys_ejk_ip2_type12_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -8619,7 +8619,7 @@ void _rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 __global__
-void rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+static void rys_ejk_ip2_type12_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
@@ -14616,7 +14616,7 @@ void _rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 __global__
-void rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+static void rys_ejk_ip2_type12_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 ShellQuartet *pool, double *dd_pool, uint32_t *batch_head)
 {
     int b_id = blockIdx.x;
