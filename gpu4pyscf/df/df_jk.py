@@ -312,7 +312,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
             for i in range(nset):
                 occ_idx = mo_occ[i] > 0
                 occ_coeff[i] = mo_coeff[i][:,occ_idx] * mo_occ[i][occ_idx]**0.5
-                nocc += mo_occ[i].sum()
+                nocc += int(mo_occ[i].sum())
             blksize = dfobj.get_blksize(extra=nao*nocc)
             if with_j:
                 vj_packed = cupy.zeros_like(dm_sparse)
@@ -477,7 +477,6 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     intopt = dfobj.intopt
     dms = intopt.sort_orbitals(dms, axis=[1,2])
 
-    cupy.cuda.get_current_stream().synchronize()
     if getattr(dms_tag, 'mo_coeff', None) is not None:
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
@@ -485,6 +484,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         mo_coeff = mo_coeff.reshape(-1,nao,nmo)
         mo_occ   = mo_occ.reshape(-1,nmo)
         mo_coeff = intopt.sort_orbitals(mo_coeff, axis=[1])
+        cupy.cuda.get_current_stream().synchronize()
 
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -506,6 +506,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
             mo1s = [mo1s]
         occ_coeffs = [intopt.sort_orbitals(occ_coeff, axis=[0]) for occ_coeff in occ_coeffs]
         mo1s = [intopt.sort_orbitals(mo1, axis=[1]) for mo1 in mo1s]
+        cupy.cuda.get_current_stream().synchronize()
 
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -519,6 +520,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
     # general K matrix with density matrix
     else:
+        cupy.cuda.Stream.null.synchronize()
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
             for device_id in range(num_devices):

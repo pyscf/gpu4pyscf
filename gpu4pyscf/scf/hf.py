@@ -258,8 +258,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
-        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
-                 cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
+                 cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
         if dump_chk:
             mf.dump_chk(locals())
