@@ -82,13 +82,13 @@ class KnownValues(unittest.TestCase):
         ref = MultiGridNumInt_cpu(cell_orth).get_pp()
         out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
         self.assertEqual(out.shape, ref.shape)
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_nuc(self):
         ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
         self.assertEqual(out.shape, ref.shape)
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_eval_nucG(self):
         mesh = cell_orth.mesh
@@ -125,7 +125,7 @@ class KnownValues(unittest.TestCase):
         ref = MultiGridNumInt_cpu(cell_orth).get_nuc(kpts)
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc(kpts).get()
         self.assertEqual(out.shape, ref.shape)
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_rho(self):
         nao = cell_orth.nao
@@ -134,7 +134,7 @@ class KnownValues(unittest.TestCase):
         dm = dm.dot(dm.T)
         ref = MultiGridNumInt_cpu(cell_orth).get_rho(dm)
         out = multigrid.MultiGridNumInt(cell_orth).get_rho(dm).get()
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_j(self):
         nao = cell_orth.nao
@@ -142,7 +142,7 @@ class KnownValues(unittest.TestCase):
         dm = np.random.random((nao,nao)) - .5
         ref = MultiGridNumInt_cpu(cell_orth).get_jk(dm[None], with_k=False)[0]
         out = multigrid.MultiGridNumInt(cell_orth).get_j(dm).get()
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_vxc_lda(self):
         nao = cell_orth.nao
@@ -192,6 +192,16 @@ class KnownValues(unittest.TestCase):
         n0, exc0, ref = ni.nr_rks(pcell, grids, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(
             cell_orth, None, xc, dm, with_j=False)
+        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
+        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+
+        dm = np.array([dm, dm])
+        mf = pcell.RKS(xc=xc)
+        n0, exc0, ref = mf._numint.nr_uks(pcell, mf.grids, xc, dm)
+        vj = mf.with_df.get_jk(dm, with_k=False)[0]
+        ref += vj[0] + vj[1]
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True)
         self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
         self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
         self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
@@ -344,7 +354,7 @@ class KnownValues(unittest.TestCase):
         dm = dm.dot(dm.T)
         ref = cell.RKS().get_rho(dm)
         out = multigrid.MultiGridNumInt(cell).get_rho(dm).get()
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")

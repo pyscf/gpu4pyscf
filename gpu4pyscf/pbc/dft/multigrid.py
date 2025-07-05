@@ -554,7 +554,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if xctype == 'LDA':
         veff = _get_j_pass2(ni, wv_freq[None,0], hermi, kpts_band, verbose=log)
     else:
-        veff = _get_gga_pass2(ni, wv_freq[None,:4], hermi, kpts_band, verbose=log)
+        #veff = _get_gga_pass2(ni, wv_freq[None,:4], hermi, kpts_band, verbose=log)
+        wv_freq[0] -= contract('xg,gx->g', wv_freq[1:4], Gv) * 1j
+        veff = _get_j_pass2(ni, wv_freq[None,0], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
             veff += _get_tau_pass2(ni, wv_freq[None,4], hermi, kpts_band, verbose=log)
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
@@ -654,7 +656,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if xctype == 'LDA':
         veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
     else:
-        veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
+        #veff = _get_gga_pass2(ni, wv_freq[:,:4], hermi, kpts_band, verbose=log)
+        wv_freq[:,0] -= contract('nxg,gx->ng', wv_freq[:,1:4], Gv) * 1j
+        veff = _get_j_pass2(ni, wv_freq[:,0], hermi, kpts_band, verbose=log)
         if xctype == 'MGGA':
             veff += _get_tau_pass2(ni, wv_freq[:,4], hermi, kpts_band, verbose=log)
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
@@ -947,7 +951,7 @@ def to_primitive_bas(cell):
         # A quick estimation of diffuseness for each primitive GTO
         es = prim_env[prim_bas[:,PRIMBAS_EXP]]
         cs = prim_env[prim_bas[:,PRIMBAS_COEFF]]
-        ls = prim_bas[:,ANG_OF]
+        ls = prim_bas[:,PRIMBAS_ANG]
         diffuseness = np.log(cs**2/cell.precision*10**ls + 1e-200) / es
         # Find the diffused functions on each atom
         diffuseness_order = np.argsort(-diffuseness)
