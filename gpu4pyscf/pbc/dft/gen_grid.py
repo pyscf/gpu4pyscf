@@ -37,6 +37,14 @@ class UniformGrids(lib.StreamObject):
         self._coords = None
         self._weights = None
 
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
+        self.non0tab = None
+        self._coords = None
+        self._weights = None
+        return self
+
     @property
     def coords(self):
         if self._coords is not None:

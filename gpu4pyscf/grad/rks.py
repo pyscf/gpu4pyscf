@@ -357,17 +357,12 @@ def _make_dR_dao_w(ao, wv):
 
 def _d1_dot_(ao1, ao2, out=None):
     if out is None:
-        out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]])
-        out[0] = cupy.dot(ao1[0], ao2)
-        out[1] = cupy.dot(ao1[1], ao2)
-        out[2] = cupy.dot(ao1[2], ao2)
-        return out
-        #return cupy.stack([vmat0,vmat1,vmat2])
-    else:
-        cupy.dot(ao1[0], ao2, out=out[0])
-        cupy.dot(ao1[1], ao2, out=out[1])
-        cupy.dot(ao1[2], ao2, out=out[2])
-        return out
+        dtype = numpy.result_type(ao1, ao2)
+        out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]], dtype=dtype)
+    cupy.dot(ao1[0].conj(), ao2, out=out[0])
+    cupy.dot(ao1[1].conj(), ao2, out=out[1])
+    cupy.dot(ao1[2].conj(), ao2, out=out[2])
+    return out
 
 def _gga_grad_sum_(ao, wv):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])

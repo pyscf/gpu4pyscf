@@ -29,8 +29,6 @@ from gpu4pyscf.pbc.dft import multigrid_v2
 
 __all__ = ['Gradients']
 
-libgpbc = multigrid_v2.libgpbc
-
 class GradientsBase(mol_rhf.GradientsBase):
     get_ovlp = NotImplemented
     grad_nuc = cpu_rhf.GradientsBase.grad_nuc

@@ -65,7 +65,7 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
         ao_kpts: (nkpts, [comp], ngrids, nao) ndarray
             AO values at each k-point
     '''
-    return [cp.asarray(ao) for ao in numint_cpu.eval_ao_kpts(cell, coords.get(), kpts, deriv)]
+    return cp.asarray(numint_cpu.eval_ao_kpts(cell, coords.get(), kpts, deriv))
 
 
 def eval_rho(cell, ao, dm, non0tab=None, xctype='LDA', hermi=0, with_lapl=False,
