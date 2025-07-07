@@ -46,6 +46,9 @@ eda_result = eda.eval_ALMO_EDA_2_energies(mol_list, xc = "wB97M-V")
 print(f"EDA result in dict form: {eda_result}")
 
 ### Reference output:
+# Fragment 0 energy = -76.4334344665 Hartree
+# Fragment 1 energy = -460.2597922428 Hartree
+# Total system energy = -536.7128492630 Hartree
 # EDA frozen energy = -0.0139122432 Hartree = -36.5265895348 kJ/mol
 # EDA total = -0.0196225536 Hartree = -51.5190073780 kJ/mol
 # EDA classical electrostatic = -0.0196654385 Hartree = -51.6316017069 kJ/mol
