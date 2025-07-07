@@ -27,6 +27,7 @@ from cupyx.scipy.linalg import expm as matrix_exp
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import pack_tril, unpack_tril
 from gpu4pyscf.lib.diis import DIIS
+from gpu4pyscf.lib import logger
 
 # np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
 
@@ -68,7 +69,7 @@ def _get_fragment_xc_energy_sum(mf_list, mf_sum, nocc_offsets, mocc_sum):
     n_frag = len(mf_list)
     E_sum = 0
     for i_frag in range(n_frag):
-        mf_i = mf_list[i_frag]
+        # mf_i = mf_list[i_frag]
 
         mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
         D_i = 2 * mocc_i @ mocc_i.T
@@ -188,9 +189,9 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
 
     mf_sum = _make_mf(mol_sum, if_kernel = False)
 
-    print("Orthogonal Decomposition of the Initial Supersystem Wavefunction")
+    logger.info(mf_sum, "Orthogonal Decomposition of the Initial Supersystem Wavefunction")
     energy_sum = _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
-    print(f"Cycle {0:2d}: energy = {energy_sum}")
+    logger.info(mf_sum, f"Cycle {0:2d}: energy = {energy_sum}")
     energy_unrelaxed = energy_sum
     scf_conv = False
 
@@ -310,9 +311,12 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
                     orbital_gradient_ij = orbital_gradient[nocc_frag_pair_offsets[ij_frag_pair] : nocc_frag_pair_offsets[ij_frag_pair + 1]]
                     orbital_gradient_ij = orbital_gradient_ij.reshape(nocc_count[i_frag], nocc_count[j_frag])
 
-                    conjugate_gradient_initial_guess_ij = preconditioner_ii_eigenvectors.T @ orbital_gradient_ij @ preconditioner_jj_eigenvectors
-                    conjugate_gradient_initial_guess_ij = preconditioner_ijij_diagonal_inv * conjugate_gradient_initial_guess_ij
-                    conjugate_gradient_initial_guess_ij = preconditioner_ii_eigenvectors @ conjugate_gradient_initial_guess_ij @ preconditioner_jj_eigenvectors.T
+                    conjugate_gradient_initial_guess_ij = \
+                        preconditioner_ii_eigenvectors.T @ orbital_gradient_ij @ preconditioner_jj_eigenvectors
+                    conjugate_gradient_initial_guess_ij = \
+                        preconditioner_ijij_diagonal_inv * conjugate_gradient_initial_guess_ij
+                    conjugate_gradient_initial_guess_ij = \
+                        preconditioner_ii_eigenvectors @ conjugate_gradient_initial_guess_ij @ preconditioner_jj_eigenvectors.T
                     orbital_gradient_ij = None
                     preconditioner_ii_eigenvectors = None
                     preconditioner_jj_eigenvectors = None
@@ -393,6 +397,7 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
                 p = r.copy()
 
                 for k in range(maxiter):
+                    logger.debug1(mf_sum, f"EDA orthogonal decomposition conjugate gradient iteration {k}, residue norm = {r_norm}")
                     Ap = A_operator(p)
                     alpha = r_dot_r / float(p.T @ Ap)
                     x = x + alpha * p
@@ -441,7 +446,7 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
         energy_previous = energy_sum
         energy_sum = _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
         delta_energy = energy_sum - energy_previous
-        print(f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
+        logger.info(mf_sum, f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
         if (abs(delta_energy) < mf_sum.conv_tol):
             scf_conv = True
             break
@@ -516,10 +521,10 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
 
         mocc_list.append(mocc_i)
 
-    nao_offsets  = np.cumsum([0] + [mocc.shape[0] for mocc in mocc_list])
+    # nao_offsets  = np.cumsum([0] + [mocc.shape[0] for mocc in mocc_list])
     nocc_offsets = np.cumsum([0] + [mocc.shape[1] for mocc in mocc_list])
-    nao_sum  =  nao_offsets[-1]
-    nocc_sum = nocc_offsets[-1]
+    # nao_sum  =  nao_offsets[-1]
+    # nocc_sum = nocc_offsets[-1]
     mocc_list = None
 
     mocc_sum = eda_cache["mocc_pauli"]
@@ -527,6 +532,7 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
     D_frozen = 2 * mocc_sum @ cp.linalg.solve(CTSC, mocc_sum.T)
 
     mf_sum = _make_mf(mol_sum, if_kernel = False)
+    logger.info(mf_sum, "Using Hartree-Fock XC as dispersion-free XC in EDA dispersion energy calculation")
     mf_dispersion_free_list = []
     for i_frag in range(n_frag):
         mf_i = mf_list[i_frag]
@@ -556,15 +562,18 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
     n_frag = len(mf_list)
     assert n_frag >= 1
 
+    mol_sum = merge_mol([mf.mol for mf in mf_list])
+    mf_sum = _make_mf(mol_sum, if_kernel = False)
+
     assert type(field_order) is int
     match field_order:
-        case 1: print("Dipole response included for FERF (nD)")
-        case 2: print("Dipole and quadrupole response included for FERF (nDQ)")
-        case 3: print("Dipole, quadrupole and octupole response included for FERF (nDQO)")
+        case 1: logger.info(mf_sum, "Dipole response included for FERF (nD)")
+        case 2: logger.info(mf_sum, "Dipole and quadrupole response included for FERF (nDQ)")
+        case 3: logger.info(mf_sum, "Dipole, quadrupole and octupole response included for FERF (nDQO)")
         case _:
             raise ValueError(f"Incorrect field_order ({field_order}) specified for get_eda_polarization_energy()")
 
-    print("FERF Constrained Virtual Space Construction")
+    logger.info(mf_sum, "FERF Constrained Virtual Space Construction")
     G_projector_list = []
     mocc_list = []
     for i_frag in range(n_frag):
@@ -672,7 +681,7 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         for i_field in range(n_field):
             kappa_ai_singularvector_left, kappa_ai_singularvalue, kappa_ai_singularvector_right = \
                 cp.linalg.svd(kappa_ai[i_field, :, :], full_matrices = False)
-            kappa_ai_singularvector_right = None
+            del kappa_ai_singularvector_right
             kappa_ai_singularvector_left = kappa_ai_singularvector_left[:, kappa_ai_singularvalue > virtual_singular_value_threshold]
             kappa_ai_singularvalue = None
             C_kappa_pi = mvir_i @ kappa_ai_singularvector_left
@@ -684,9 +693,9 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         ### Don't use QR, it makes the result unstable.
         polarization_subspace_singularvector_left, polarization_subspace_singularvalue, polarization_subspace_singularvector_right =  \
             cp.linalg.svd(polarization_subspace, full_matrices = False)
-        polarization_subspace_singularvector_right = None
-        print(f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
-              f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}")
+        del polarization_subspace_singularvector_right
+        logger.info(mf_sum, f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
+                            f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}")
         G = polarization_subspace_singularvector_left[:, polarization_subspace_singularvalue > virtual_singular_value_threshold]
         polarization_subspace_singularvalue = None
         polarization_subspace_singularvector_left = None
@@ -715,13 +724,11 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
                  nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]] = mocc_i
     mocc_list = None
 
-    print("SCF-MI for the Polarized Fragment Wavefunction")
+    logger.info(mf_sum, "SCF-MI for the Polarized Fragment Wavefunction")
 
-    mol_sum = merge_mol([mf.mol for mf in mf_list])
     S = mol_sum.intor_symmetric('int1e_ovlp')
     S = cp.asarray(S)
     gamma = G.T @ S @ G
-    mf_sum = _make_mf(mol_sum, if_kernel = False)
 
     def get_full_density(mocc_sum_projected, inv_sigma):
         D = cp.zeros([nao_sum, nao_sum])
@@ -761,7 +768,7 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         #             G[:, nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]].T
         return D_stoll_i
 
-    print("Stoll algorithm is used for fragment constrained SCF")
+    logger.info(mf_sum, "Stoll algorithm is used for fragment constrained SCF")
 
     diis_list = []
     for i_frag in range(n_frag):
@@ -776,7 +783,7 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
     inv_sigma = cp.linalg.inv(sigma)
     D = get_full_density(mocc_sum_projected, inv_sigma)
     energy_sum = _get_total_system_energy(mf_sum, D)
-    print(f"Cycle {0:2d}: energy = {energy_sum}")
+    logger.info(mf_sum, f"Cycle {0:2d}: energy = {energy_sum}")
     energy_frozen = energy_sum
     scf_conv = False
 
@@ -848,7 +855,7 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         energy_previous = energy_sum
         energy_sum = _get_total_system_energy(mf_sum, D)
         delta_energy = energy_sum - energy_previous
-        print(f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
+        logger.info(mf_sum, f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
         if (abs(delta_energy) < mf_sum.conv_tol):
             scf_conv = True
             break
@@ -926,11 +933,19 @@ def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_g
         Chemical Physics Letters 2025, 862, 141825.
         doi: https://doi.org/10.1016/j.cplett.2024.141825
 
-        - TODO: Gradient of each EDA term (some terms are missing in this paper):
+        - TODO: Gradient of each EDA term, frozen and polarization terms:
         Mao, Y.; Horn, P. R.; Head-Gordon, M. Energy decomposition analysis in an adiabatic picture.
         Physical Chemistry Chemical Physics 2017, 19, 5944-5958.
         doi: https://doi.org/10.1039/C6CP08039A
+
+        - TODO: Gradient of each EDA term, classical electrostatic term:
+        Aldossary, A.; Gimferrer, M.; Mao, Y.; Hao, H.; Das, A. K.; Salvador, P.; Head-Gordon, T.; Head-Gordon, M.
+        Force Decomposition Analysis: A method to decompose intermolecular forces into physically relevant component contributions.
+        The Journal of Physical Chemistry A 2023, 127, 1760-1774.
+        doi: https://doi.org/10.1021/acs.jpca.2c08061
     """
+
+    assert len(mol_list) > 1
 
     def _make_mf(mol, if_kernel = True, dispersion_free_xc = None, guess_dm = None):
         _xc = xc if dispersion_free_xc is None else dispersion_free_xc
@@ -976,8 +991,9 @@ def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_g
 
     for i_frag in range(len(frag_energy_list)):
         print(f"Fragment {i_frag} energy = {frag_energy_list[i_frag]:.10f} Hartree")
-    print(f"Total system energy = {eda_cache["total_system_energy"]:.10f} Hartree")
-    eda_total = eda_cache["total_system_energy"] - sum(frag_energy_list)
+    total_system_energy = eda_cache["total_system_energy"]
+    print(f"Total system energy = {total_system_energy:.10f} Hartree")
+    eda_total = total_system_energy - sum(frag_energy_list)
     print(f"EDA frozen energy = {eda_frozen:.10f} Hartree = {eda_frozen * hartree_to_kjmol:.10f} kJ/mol")
     print(f"EDA total = {eda_total:.10f} Hartree = {eda_total * hartree_to_kjmol:.10f} kJ/mol")
     print(f"EDA classical electrostatic = {eda_classical_electrostatic:.10f} Hartree = {eda_classical_electrostatic * hartree_to_kjmol:.10f} kJ/mol")

@@ -390,6 +390,7 @@ class KnownValues(unittest.TestCase):
                 assert abs(test_value - reference_value) < 1e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
 
+    @pytest.mark.skip("Too slow, functionality roughly covered by corresponding density fitting test")
     def test_almo_eda_2_wb97xv_tzvpp(self):
         ### Q-Chem input difference
         # $rem
