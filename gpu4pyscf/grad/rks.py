@@ -337,7 +337,7 @@ def _make_dR_dao_w(ao, wv):
         aow[2] += numint._scale_ao(ao[6], wv[1])  # dZ nabla_x
         aow[2] += numint._scale_ao(ao[8], wv[2])  # dZ nabla_y
         aow[2] += numint._scale_ao(ao[9], wv[3])  # dZ nabla_z
-    return aow
+        return aow
 
     assert ao.flags.c_contiguous
     assert wv.flags.c_contiguous
