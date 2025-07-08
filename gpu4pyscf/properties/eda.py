@@ -23,6 +23,7 @@ from gpu4pyscf.scf import j_engine
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cupy_helper import eigh as generalized_eigh
+from cupyx.scipy.sparse.linalg import LinearOperator, cg
 from cupyx.scipy.linalg import expm as matrix_exp
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import pack_tril, unpack_tril
@@ -398,42 +399,17 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
 
                 return y
 
-            def conjugate_gradient(A_operator, b, x0, tol, maxiter = None):
-                n = len(b)
-                if maxiter is None:
-                    maxiter = n
-
-                x = x0
-                r = b - A_operator(x)
-                r_dot_r = float(r.T @ r)
-                r_norm = np.sqrt(r_dot_r)
-                if r_norm < tol:
-                    return x
-                p = r.copy()
-
-                for k in range(maxiter):
-                    logger.debug1(mf_sum, f"EDA orthogonal decomposition conjugate gradient iteration {k}, residue norm = {r_norm}")
-                    Ap = A_operator(p)
-                    alpha = r_dot_r / float(p.T @ Ap)
-                    x = x + alpha * p
-                    r = r - alpha * Ap
-
-                    r_dot_r_new = np.dot(r, r)
-                    r_norm = np.sqrt(r_dot_r_new)
-                    if r_norm < tol:
-                        return x
-
-                    beta = r_dot_r_new / r_dot_r
-                    p = r + beta * p
-                    r_dot_r = r_dot_r_new
-
-                raise RuntimeError("Conjugate gradient for orbital hessian inverse in EDA orthogonal decomposition not converged!")
-
             conjugate_gradient_threshold = 1e-14
-            newton_direction = -conjugate_gradient(left_multiple_orbital_hessian,
-                                                   orbital_gradient,
-                                                   conjugate_gradient_initial_guess,
-                                                   conjugate_gradient_threshold)
+            orbital_hessian = LinearOperator(shape = (nocc_frag_pair_sum, nocc_frag_pair_sum),
+                                             matvec = left_multiple_orbital_hessian,
+                                             dtype = orbital_gradient.dtype)
+            newton_direction, conjugate_gradient_info = cg(orbital_hessian,
+                                                           orbital_gradient,
+                                                           conjugate_gradient_initial_guess,
+                                                           conjugate_gradient_threshold)
+            newton_direction *= -1
+            assert conjugate_gradient_info == 0, "Conjugate gradient for orbital hessian inverse " \
+                                                 "in EDA orthogonal decomposition not converged!"
             conjugate_gradient_initial_guess = None
 
         Fock_list = None
