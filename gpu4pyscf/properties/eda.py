@@ -72,12 +72,19 @@ def _get_fragment_Fock_and_energy(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_
     return Fock_list, energy_list
 
 def _get_total_system_xc_energy(mf_sum, dm):
+    # This function computes the K+XC energy of the given functional (specified in mf_sum)
+    # and the given density matrix.
+    # The algorithm is: First compute J+K+XC energy, then subtract J energy.
+    # This is a hacky way to make it compatible with both HF and KS objects,
+    # because in both cases the J,K,XC matrices are summed into one vhf matrix,
+    # it is hard to extract the K+XC component, especially for HF (in KS, K+XC energy is stored in exc).
     E_j_plus_xc = mf_sum.energy_elec(dm = dm, h1e = dm * 0)[0]
     J = mf_sum.get_j(mf_sum.mol, dm, hermi = 1)
     E_j = 0.5 * cp.einsum('ij,ji->', J, dm)
     return float(E_j_plus_xc - E_j)
 
 def _get_fragment_xc_energy_sum(mf_list, mf_sum, nocc_offsets, mocc_sum):
+    # See comments in the above function.
     n_frag = len(mf_list)
     E_sum = 0
     for i_frag in range(n_frag):
