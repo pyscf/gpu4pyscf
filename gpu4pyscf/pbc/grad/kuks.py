@@ -14,15 +14,16 @@
 # limitations under the License.
 
 '''
-Analytical nuclear gradients for RKS with kpoints sampling
+Analytical nuclear gradients for UKS with kpoints sampling
 '''
 
 import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.pbc.grad import krhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
+from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
+from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.lib.cupy_helper import contract
 
 __all__ = ['Gradients']
@@ -43,53 +44,61 @@ def get_veff(ks_grad, dm=None, kpts=None):
         grids = ks_grad.grids
     else:
         grids = mf.grids
-
     if grids.coords is None:
         grids.build()
 
     exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
     t0 = log.timer('vxc', *t0)
     if not ni.libxc.is_hybrid_xc(mf.xc):
-        ej = ks_grad.get_j(dm, kpts)
+        ej = ks_grad.get_j(dm[0]+dm[1], kpts)
         exc += ej
     else:
         raise NotImplementedError
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=cell.spin)
-        ej, ek = ks_grad.get_jk(dm, kpts)
+        ej = mf.get_j(dm[0]+dm[1], kpts)
+        ek = mf.get_k(dm, kpts)
         ek *= hyb
         if omega != 0:
             with cell.with_range_coulomb(omega):
                 ek += ks_grad.get_k(dm, kpts) * (alpha - hyb)
-        exc += ej - ek * .5
+        exc += ej - ek
+
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
-    assert dm_kpts.ndim == 3
+    assert dm_kpts.ndim == 4
     xctype = ni._xc_type(xc_code)
     nao = cell.nao
     nkpts = len(kpts)
-    vmat = cp.zeros((nkpts,3,nao,nao), dtype=dm_kpts.dtype)
+    vmat = cp.zeros((2,nkpts,3,nao,nao), dtype=dm_kpts.dtype)
     if xctype == 'LDA':
         ao_deriv = 1
         for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
-            rho = ni.eval_rho(cell, ao_ks[:,0], dm_kpts, xctype=xctype, hermi=hermi)
+            rho_a = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[0], xctype=xctype, hermi=hermi)
+            rho_b = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[1], xctype=xctype, hermi=hermi)
+            rho = cp.stack([rho_a, rho_b], axis=0)
             vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
-            wv = weight * vxc[0]
-            aow = cp.einsum('kpi,p->kpi', ao_ks[:,0], wv)
+            wv = weight * vxc[:,0]
+            aowa = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[0])
+            aowb = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[1])
             ao_ks = cp.asarray(ao_ks.transpose(0,1,3,2), order='C')
             for kn in range(nkpts):
-                vmat[kn] += rks_grad._d1_dot_(ao_ks[kn,1:4], aow[kn])
+                vmat[0,kn] += rks_grad._d1_dot_(ao_ks[kn,1:4], aowa[kn])
+                vmat[1,kn] += rks_grad._d1_dot_(ao_ks[kn,1:4], aowb[kn])
 
-    elif xctype == 'GGA':
+    elif xctype=='GGA':
         ao_deriv = 2
         for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
-            rho = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts, xctype=xctype, hermi=hermi)
+            rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
+            rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
+            rho = cp.stack([rho_a, rho_b], axis=0)
             vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
             wv = weight * vxc
-            wv[0] *= .5
+            wv[:,0] *= .5
             ao_ks = cp.asarray(ao_ks.transpose(0,1,3,2), order='C')
             for kn in range(nkpts):
-                vmat[kn] += rks_grad._gga_grad_sum_(ao_ks[kn], wv)
+                vmat[0,kn] += rks_grad._gga_grad_sum_(ao_ks[kn], wv[0])
+                vmat[1,kn] += rks_grad._gga_grad_sum_(ao_ks[kn], wv[1])
 
     elif xctype == 'HF':
         pass
@@ -99,26 +108,20 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
         raise NotImplementedError("metaGGA")
 
     aoslices = cell.aoslice_by_atom()
-    exc = contract('kxij,kji->xi', vmat, dm_kpts).real.get()
+    exc = contract('skxij,skji->xi', vmat, dm_kpts).real.get()
     exc = np.array([exc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
     return -exc
 
-class Gradients(rhf_grad.Gradients):
+class Gradients(kuhf_grad.Gradients):
+    '''Non-relativistic restricted Hartree-Fock gradients'''
     _keys = {'grid_response', 'grids'}
 
     def __init__(self, mf):
-        rhf_grad.Gradients.__init__(self, mf)
+        kuhf_grad.Gradients.__init__(self, mf)
         self.grids = None
         self.grid_response = False
 
-    def reset(self, cell=None):
-        if self.grids is not None:
-            self.grids.reset(cell)
-        return rhf_grad.Gradients.reset(self, cell)
-
-    def dump_flags(self, verbose=None):
-        rhf_grad.Gradients.dump_flags(self, verbose)
-        logger.info(self, 'grid_response = %s', self.grid_response)
-        return self
+    reset = krks_grad.Gradients.reset
+    dump_flags = krks_grad.Gradients.dump_flags
 
     get_veff = get_veff

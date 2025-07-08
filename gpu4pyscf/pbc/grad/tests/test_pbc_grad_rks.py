@@ -17,7 +17,7 @@ import unittest
 import numpy as np
 import pyscf
 
-disp = 1e-2
+disp = 1e-3
 
 def setUpModule():
     global cell, cell_orth

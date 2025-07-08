@@ -199,13 +199,16 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
         t = cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpts))
         return nuc + t
 
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.krks import Gradients
+        return Gradients(self)
+
     dump_flags = krks_cpu.KRKS.dump_flags
     get_veff = get_veff
     energy_elec = energy_elec
     get_rho = get_rho
     density_fit = khf.KRHF.density_fit
 
-    nuc_grad_method = NotImplemented
     to_hf = NotImplemented
     multigrid_numint = rks.RKS.multigrid_numint
 

@@ -356,7 +356,6 @@ class KSCF(pbchf.SCF):
     spin_square = NotImplemented
     dip_moment = NotImplemented
     stability = NotImplemented
-    nuc_grad_method = NotImplemented
     to_rhf = NotImplemented
     to_uhf = NotImplemented
     to_ghf = NotImplemented

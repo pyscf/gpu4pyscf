@@ -19,18 +19,16 @@ Analytical nuclear gradients for RHF with kpoints sampling
 
 import numpy as np
 import cupy as cp
-from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.grad import krhf as krhf_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as molgrad
-from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, get_projG, projG_li, _qli
-from pyscf.pbc.dft.numint import eval_ao_kpts
-#from gpu4pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, get_projG, projG_li, _qli
-#from gpu4pyscf.pbc.dft.numint import eval_ao_kpts
+from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
+from gpu4pyscf.pbc.dft.numint import eval_ao_kpts
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.lib.cupy_helper import contract
 
+__all__ = ['Gradients']
 
 def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     '''
@@ -53,8 +51,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     log = logger.new_logger(mf_grad)
     t0 = log.init_timer()
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
-    #?hcore_deriv = mf_grad.hcore_generator(cell, kpts)
-    hcore_deriv = krhf_cpu.hcore_generator(mf, cell, kpts)
+    hcore_deriv = mf_grad.hcore_generator(cell, kpts)
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dvhf = mf_grad.get_veff(dm0, kpts)
@@ -69,7 +66,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
         dh1e[ia] = cp.einsum('xkij,kji->x', h1ao, dm0).real
         extra_force[ia] = mf_grad.extra_force(ia, locals())
 
-    # nabla was applied on bra in vhf, *2 for the contributions of nabla|ket>
+    # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     ds = contract('kxij,kji->xi', s1, dme0).real
     ds = (-2 * ds).get()
     ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
@@ -83,29 +80,30 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 def get_hcore(cell, kpts):
     '''Part of the nuclear gradients of core Hamiltonian'''
     from pyscf.gto.mole import PTR_ENV_START, ANG_OF
-    h1 = np.asarray(cell.pbc_intor('int1e_ipkin', kpts=kpts))
+    h1 = cp.asarray(cell.pbc_intor('int1e_ipkin', kpts=kpts))
     dtype = h1.dtype
     if cell._pseudo:
         SI=cell.get_SI()
         Gv = cell.Gv
         natom = cell.natm
-        coords = cell.get_uniform_grids()
+        coords = cp.asarray(cell.get_uniform_grids())
         ngrids = len(coords)
         vlocG = get_vlocG(cell)
-        vpplocG = -np.einsum('ij,ij->j', SI, vlocG)
-        vpplocG[0] = np.sum(get_alphas(cell))
+        vpplocG = -cp.einsum('ij,ij->j', SI, vlocG)
+        vpplocG[0] = cp.sum(get_alphas(cell))
         vpplocR = tools.ifft(vpplocG, cell.mesh).real
         fakemol = krhf_cpu._make_fakemol()
+        nao = cell.nao
         ptr = PTR_ENV_START
         for kn, kpt in enumerate(kpts):
             aos = eval_ao_kpts(cell, coords, kpt, deriv=1)[0]
-            vloc = np.einsum('agi,g,gj->aij', aos[1:].conj(), vpplocR, aos[0])
-            expir = np.exp(-1j*np.dot(coords, kpt))
-            aokG = np.asarray([tools.fftk(np.asarray(ao.T, order='C'),
-                              cell.mesh, expir).T for ao in aos])
+            vloc = cp.einsum('agi,g,gj->aij', aos[1:].conj(), vpplocR, aos[0])
+            expir = cp.exp(-1j*cp.dot(coords, cp.asarray(kpt)))
+            aokG = tools.fftk(aos.transpose(0,2,1).reshape(-1,ngrids), cell.mesh, expir)
+            aokG = aokG.reshape(4,nao,ngrids)
             Gk = Gv + kpt
-            G_rad = lib.norm(Gk, axis=1)
-            vnl = np.zeros(vloc.shape, dtype=np.complex128)
+            G_rad = np.linalg.norm(Gk, axis=1)
+            vnl = cp.zeros(vloc.shape, dtype=np.complex128)
             for ia in range(natom):
                 symb = cell.atom_symbol(ia)
                 if symb not in cell._pseudo:
@@ -114,19 +112,19 @@ def get_hcore(cell, kpts):
                 for l, proj in enumerate(pp[5:]):
                     rl, nl, hl = proj
                     if nl >0:
-                        hl = np.asarray(hl)
+                        hl = cp.asarray(hl)
                         fakemol._bas[0,ANG_OF] = l
                         fakemol._env[ptr+3] = .5*rl**2
                         fakemol._env[ptr+4] = rl**(l+1.5)*np.pi**1.25
                         pYlm_part = fakemol.eval_gto('GTOval', Gk)
-                        pYlm = np.empty((nl,l*2+1,ngrids))
+                        pYlm = cp.empty((nl,l*2+1,ngrids))
                         for k in range(nl):
                             qkl = _qli(G_rad*rl, l, k)
-                            pYlm[k] = pYlm_part.T * qkl
-                        SPG_lmi = np.einsum('g,nmg->nmg', SI[ia].conj(), pYlm)
-                        SPG_lm_aoG = np.einsum('nmg,agp->anmp', SPG_lmi, aokG)
-                        tmp = np.einsum('ij,ajmp->aimp', hl, SPG_lm_aoG[1:])
-                        vnl += np.einsum('aimp,imq->apq', tmp.conj(), SPG_lm_aoG[0])
+                            pYlm[k] = cp.asarray(pYlm_part.T * qkl)
+                        SPG_lmi = cp.einsum('g,nmg->nmg', SI[ia].conj(), pYlm)
+                        SPG_lm_aoG = cp.einsum('nmg,apg->anmp', SPG_lmi, aokG)
+                        tmp = cp.einsum('ij,ajmp->aimp', hl, SPG_lm_aoG[1:])
+                        vnl += cp.einsum('aimp,imq->apq', tmp.conj(), SPG_lm_aoG[0])
             vnl  *= (1./ngrids**2)
             if dtype == np.float64:
                 h1[kn,:] += vloc.real + vnl.real
@@ -144,58 +142,59 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     dtype = h1.dtype
 
     aoslices = cell.aoslice_by_atom()
-    SI=cell.get_SI()  ##[natom ,grid]
+    SI = cp.asarray(cell.get_SI())
     mesh = cell.mesh
-    Gv = cell.Gv    ##[grid, 3]
+    Gv_cpu = cell.Gv
+    Gv = cp.asarray(Gv_cpu)
     ngrids = len(Gv)
-    coords = cell.get_uniform_grids()
-    vlocG = get_vlocG(cell)  ###[natom, grid]
+    coords = cp.asarray(cell.get_uniform_grids())
+    vlocG = cp.asarray(get_vlocG(cell))
     ptr = PTR_ENV_START
     def hcore_deriv(atm_id):
         shl0, shl1, p0, p1 = aoslices[atm_id]
         symb = cell.atom_symbol(atm_id)
         fakemol = krhf_cpu._make_fakemol()
-        vloc_g = 1j * np.einsum('ga,g->ag', Gv, SI[atm_id]*vlocG[atm_id])
+        vloc_g = cp.einsum('ga,g,g->ag', Gv, 1j * SI[atm_id], vlocG[atm_id])
         nkpts, nao = h1.shape[0], h1.shape[2]
-        hcore = np.zeros([3,nkpts,nao,nao], dtype=h1.dtype)
+        hcore = cp.zeros([3,nkpts,nao,nao], dtype=h1.dtype)
         for kn, kpt in enumerate(kpts):
 
             ao = eval_ao_kpts(cell, coords, kpt)[0]
-            rho = np.einsum('gi,gj->gij',ao.conj(),ao)
+            rho = cp.einsum('gi,gj->gij',ao.conj(), ao)
             for ax in range(3):
                 vloc_R = tools.ifft(vloc_g[ax], mesh).real
-                vloc = np.einsum('gij,g->ij', rho, vloc_R)
+                vloc = cp.einsum('gij,g->ij', rho, vloc_R)
                 hcore[ax,kn] += vloc
             rho = None
-            aokG= tools.fftk(np.asarray(ao.T, order='C'),
-                              mesh, np.exp(-1j*np.dot(coords, kpt))).T
+            expir = cp.exp(-1j*cp.dot(coords, cp.asarray(kpt)))
+            aokG = tools.fftk(ao.T, mesh, expir)
             ao = None
-            Gk = Gv + kpt
+            Gk = Gv_cpu + kpt
             G_rad = lib.norm(Gk, axis=1)
             if symb not in cell._pseudo: continue
             pp = cell._pseudo[symb]
             for l, proj in enumerate(pp[5:]):
                 rl, nl, hl = proj
                 if nl >0:
-                    hl = np.asarray(hl)
+                    hl = cp.asarray(hl)
                     fakemol._bas[0,ANG_OF] = l
                     fakemol._env[ptr+3] = .5*rl**2
                     fakemol._env[ptr+4] = rl**(l+1.5)*np.pi**1.25
                     pYlm_part = fakemol.eval_gto('GTOval', Gk)
-                    pYlm = np.empty((nl,l*2+1,ngrids))
+                    pYlm = cp.empty((nl,l*2+1,ngrids))
                     for k in range(nl):
                         qkl = _qli(G_rad*rl, l, k)
-                        pYlm[k] = pYlm_part.T * qkl
-                    SPG_lmi = np.einsum('g,nmg->nmg', SI[atm_id].conj(), pYlm)
-                    SPG_lm_aoG = np.einsum('nmg,gp->nmp', SPG_lmi, aokG)
-                    SPG_lmi_G = 1j * np.einsum('nmg, ga->anmg', SPG_lmi, Gv)
-                    SPG_lm_G_aoG = np.einsum('anmg, gp->anmp', SPG_lmi_G, aokG)
-                    tmp_1 = np.einsum('ij,ajmp->aimp', hl, SPG_lm_G_aoG)
-                    tmp_2 = np.einsum('ij,jmp->imp', hl, SPG_lm_aoG)
-                    vppnl = (np.einsum('imp,aimq->apq', SPG_lm_aoG.conj(), tmp_1) +
-                             np.einsum('aimp,imq->apq', SPG_lm_G_aoG.conj(), tmp_2))
+                        pYlm[k] = cp.asarray(pYlm_part.T * qkl)
+                    SPG_lmi = cp.einsum('g,nmg->nmg', SI[atm_id].conj(), pYlm)
+                    SPG_lm_aoG = cp.einsum('nmg,pg->nmp', SPG_lmi, aokG)
+                    SPG_lmi_G = 1j * cp.einsum('nmg, ga->anmg', SPG_lmi, Gv)
+                    SPG_lm_G_aoG = cp.einsum('anmg, pg->anmp', SPG_lmi_G, aokG)
+                    tmp_1 = cp.einsum('ij,ajmp->aimp', hl, SPG_lm_G_aoG)
+                    tmp_2 = cp.einsum('ij,jmp->imp', hl, SPG_lm_aoG)
+                    vppnl = (cp.einsum('imp,aimq->apq', SPG_lm_aoG.conj(), tmp_1) +
+                             cp.einsum('aimp,imq->apq', SPG_lm_G_aoG.conj(), tmp_2))
                     vppnl *=(1./ngrids**2)
-                    if dtype==np.float64:
+                    if dtype == np.float64:
                         hcore[:,kn] += vppnl.real
                     else:
                         hcore[:,kn] += vppnl

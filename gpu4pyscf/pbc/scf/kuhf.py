@@ -309,7 +309,6 @@ class KUHF(khf.KSCF):
     dip_moment = NotImplemented
     spin_square = NotImplemented
     stability = NotImplemented
-    nuc_grad_method = NotImplemented
     to_ks = NotImplemented
     convert_from_ = NotImplemented
 
