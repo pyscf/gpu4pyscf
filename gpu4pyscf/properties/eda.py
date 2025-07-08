@@ -1068,13 +1068,14 @@ def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_g
     log.log(f"EDA charge transfer = {eda_charge_transfer:.10f} Hartree = {eda_charge_transfer * hartree_to_kjmol:.10f} kJ/mol")
 
     eda_result = {
-        "total"           : float(eda_total          ) * hartree_to_kjmol,
-        "frozen"          : float(eda_frozen         ) * hartree_to_kjmol,
-        "electrostatic"   : float(eda_electrostatic  ) * hartree_to_kjmol,
-        "dispersion"      : float(eda_dispersion     ) * hartree_to_kjmol,
-        "pauli"           : float(eda_frozen_reminder) * hartree_to_kjmol,
-        "polarization"    : float(eda_polarization   ) * hartree_to_kjmol,
-        "charge transfer" : float(eda_charge_transfer) * hartree_to_kjmol,
-        "unit"            : "kJ/mol",
+        "total"                   : float(eda_total                  ) * hartree_to_kjmol,
+        "frozen"                  : float(eda_frozen                 ) * hartree_to_kjmol,
+        "electrostatic"           : float(eda_electrostatic          ) * hartree_to_kjmol,
+        "classical electrostatic" : float(eda_classical_electrostatic) * hartree_to_kjmol,
+        "dispersion"              : float(eda_dispersion             ) * hartree_to_kjmol,
+        "pauli"                   : float(eda_frozen_reminder        ) * hartree_to_kjmol,
+        "polarization"            : float(eda_polarization           ) * hartree_to_kjmol,
+        "charge transfer"         : float(eda_charge_transfer        ) * hartree_to_kjmol,
+        "unit"                    : "kJ/mol",
     }
     return eda_result

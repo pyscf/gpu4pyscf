@@ -196,14 +196,15 @@ class KnownValues(unittest.TestCase):
         # $end
 
         reference_eda_result = {
-            "total"           : -29.5993,
-            "frozen"          :  -5.0756,
-            "electrostatic"   : -79.8476,
-            "dispersion"      :   0.0000,
-            "pauli"           :  74.7720,
-            "polarization"    :  -6.6736,
-            "charge transfer" : -17.8500,
-            "unit"            : "kJ/mol",
+            "total"                   : -29.5993,
+            "frozen"                  :  -5.0756,
+            "electrostatic"           : -79.8476,
+            "classical electrostatic" : -45.5569,
+            "dispersion"              :   0.0000,
+            "pauli"                   :  74.7720,
+            "polarization"            :  -6.6736,
+            "charge transfer"         : -17.8500,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_svp, xc = "HF")
@@ -216,9 +217,11 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-3, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_hf_svp_df(self):
         ### This is a consistent test, if you put these additional keywords into Q-Chem 6.1,
@@ -231,14 +234,15 @@ class KnownValues(unittest.TestCase):
         # $end
 
         reference_eda_result = {
-            "total"           : -29.495283227856994,
-            "frozen"          :  -4.97442204643555,
-            "electrostatic"   : -79.8561011797297,
-            "dispersion"      :   0.0,
-            "pauli"           :  74.88167913,
-            "polarization"    :  -6.673561913726887,
-            "charge transfer" : -17.847299267694556,
-            "unit"            : "kJ/mol",
+            "total"                   : -29.495283227856994,
+            "frozen"                  :  -4.97442204643555,
+            "electrostatic"           : -79.8561011797297,
+            "classical electrostatic" : -45.56384526017292,
+            "dispersion"              :   0.0,
+            "pauli"                   :  74.88167913,
+            "polarization"            :  -6.673561913726887,
+            "charge transfer"         : -17.847299267694556,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_svp, xc = "HF", auxbasis = "def2-universal-jkfit")
@@ -251,9 +255,11 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-3, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_wb97xv_svp(self):
         ### Q-Chem input difference
@@ -262,14 +268,15 @@ class KnownValues(unittest.TestCase):
         # $end
 
         reference_eda_result = {
-            "total"           : -52.5576,
-            "frozen"          : -14.6896,
-            "electrostatic"   : -78.1825,
-            "dispersion"      : -16.5685,
-            "pauli"           :  80.0614,
-            "polarization"    :  -5.6167,
-            "charge transfer" : -32.2513,
-            "unit"            : "kJ/mol",
+            "total"                   : -52.5576,
+            "frozen"                  : -14.6896,
+            "electrostatic"           : -78.1825,
+            "classical electrostatic" : -41.5678,
+            "dispersion"              : -16.5685,
+            "pauli"                   :  80.0614,
+            "polarization"            :  -5.6167,
+            "charge transfer"         : -32.2513,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_svp)
@@ -282,21 +289,24 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-3, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_wb97xv_svp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
-            "total"           : -52.53194727429772,
-            "frozen"          : -14.669063810976995,
-            "electrostatic"   : -78.18252068636505,
-            "dispersion"      : -16.678265350380972,
-            "pauli"           :  80.19172222576903,
-            "polarization"    :  -5.6144614956538925,
-            "charge transfer" : -32.24842196766683,
-            "unit"            : "kJ/mol",
+            "total"                   : -52.53194727429772,
+            "frozen"                  : -14.669063810976995,
+            "electrostatic"           : -78.18252068636505,
+            "classical electrostatic" : -41.56883257185022,
+            "dispersion"              : -16.678265350380972,
+            "pauli"                   :  80.19172222576903,
+            "polarization"            :  -5.6144614956538925,
+            "charge transfer"         : -32.24842196766683,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_svp, auxbasis = "def2-universal-jkfit")
@@ -309,9 +319,11 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-3, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_hf_tzvpp(self):
         ### Q-Chem input difference
@@ -339,14 +351,15 @@ class KnownValues(unittest.TestCase):
         # $end
 
         reference_eda_result = {
-            "total"           :  -62.8865,
-            "frozen"          :  132.6279,
-            "electrostatic"   : -228.7827,
-            "dispersion"      :    0.0000,
-            "pauli"           :  361.4106,
-            "polarization"    : -116.6104,
-            "charge transfer" :  -78.9040,
-            "unit"            : "kJ/mol",
+            "total"                   :  -62.8865,
+            "frozen"                  :  132.6279,
+            "electrostatic"           : -228.7827,
+            "classical electrostatic" : -171.9995,
+            "dispersion"              :    0.0000,
+            "pauli"                   :  361.4106,
+            "polarization"            : -116.6104,
+            "charge transfer"         :  -78.9040,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF")
@@ -359,21 +372,24 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_hf_tzvpp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
-            "total"           :  -62.86023730675086,
-            "frozen"          :  132.66000202363256,
-            "electrostatic"   : -228.79472188795418,
-            "dispersion"      :    0.0,
-            "pauli"           :  361.45472391158677,
-            "polarization"    : -116.62119992580904,
-            "charge transfer" :  -78.89903940457438,
-            "unit"            : "kJ/mol",
+            "total"                   :  -62.86023730675086,
+            "frozen"                  :  132.66000202363256,
+            "electrostatic"           : -228.79472188795418,
+            "classical electrostatic" : -172.01193829823262,
+            "dispersion"              :    0.0,
+            "pauli"                   :  361.45472391158677,
+            "polarization"            : -116.62119992580904,
+            "charge transfer"         :  -78.89903940457438,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF", auxbasis = "def2-universal-jkfit")
@@ -386,9 +402,11 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     @pytest.mark.skip("Too slow, functionality roughly covered by corresponding density fitting test")
     def test_almo_eda_2_wb97xv_tzvpp(self):
@@ -399,14 +417,15 @@ class KnownValues(unittest.TestCase):
         # $end
 
         reference_eda_result = {
-            "total"           : -106.4940,
-            "frozen"          :   99.5674,
-            "electrostatic"   : -236.6728,
-            "dispersion"      :  -25.6342,
-            "pauli"           :  361.8743,
-            "polarization"    : -103.7696,
-            "charge transfer" : -102.2918,
-            "unit"            : "kJ/mol",
+            "total"                   : -106.4940,
+            "frozen"                  :   99.5674,
+            "electrostatic"           : -236.6728,
+            "classical electrostatic" : -175.7119,
+            "dispersion"              :  -25.6342,
+            "pauli"                   :  361.8743,
+            "polarization"            : -103.7696,
+            "charge transfer"         : -102.2918,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp)
@@ -419,21 +438,24 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_wb97xv_tzvpp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
-            "total"           : -106.4673627872119,
-            "frozen"          :   99.60213546985209,
-            "electrostatic"   : -236.66357537867634,
-            "dispersion"      :  -25.672944475878136,
-            "pauli"           :  361.93865532440657,
-            "polarization"    : -103.763200520556,
-            "charge transfer" : -102.306297736508,
-            "unit"            : "kJ/mol",
+            "total"                   : -106.4673627872119,
+            "frozen"                  :   99.60213546985209,
+            "electrostatic"           : -236.66357537867634,
+            "classical electrostatic" : -175.71752464306817,
+            "dispersion"              :  -25.672944475878136,
+            "pauli"                   :  361.93865532440657,
+            "polarization"            : -103.763200520556,
+            "charge transfer"         : -102.306297736508,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, auxbasis = "def2-universal-jkfit")
@@ -446,9 +468,11 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_pbe0_charged(self):
         ### Q-Chem input difference
@@ -471,14 +495,15 @@ class KnownValues(unittest.TestCase):
         # $end
 
         reference_eda_result = {
-            "total"           : -536.3337,
-            "frozen"          : -438.8586,
-            "electrostatic"   : -445.0982,
-            "dispersion"      :   -1.5747,
-            "pauli"           :    7.8144,
-            "polarization"    :  -15.5046,
-            "charge transfer" :  -81.9705,
-            "unit"            : "kJ/mol",
+            "total"                   : -536.3337,
+            "frozen"                  : -438.8586,
+            "electrostatic"           : -445.0982,
+            "classical electrostatic" : -441.1186,
+            "dispersion"              :   -1.5747,
+            "pauli"                   :    7.8144,
+            "polarization"            :  -15.5046,
+            "charge transfer"         :  -81.9705,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0")
@@ -491,21 +516,24 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 1e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
     def test_almo_eda_2_pbe0_charged_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
-            "total"           : -536.3265135788014,
-            "frozen"          : -438.8503695025353,
-            "electrostatic"   : -445.0953698654425,
-            "dispersion"      :   -1.5794393738524033,
-            "pauli"           :    7.824439736759638,
-            "polarization"    :  -15.504103411878171,
-            "charge transfer" :  -81.97204066438793,
-            "unit"            : "kJ/mol",
+            "total"                   : -536.3265135788014,
+            "frozen"                  : -438.8503695025353,
+            "electrostatic"           : -445.0953698654425,
+            "classical electrostatic" : -441.1164867420546,
+            "dispersion"              :   -1.5794393738524033,
+            "pauli"                   :    7.824439736759638,
+            "polarization"            :  -15.504103411878171,
+            "charge transfer"         :  -81.97204066438793,
+            "unit"                    : "kJ/mol",
         }
 
         test_eda_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0", auxbasis = "def2-universal-jkfit")
@@ -518,9 +546,11 @@ class KnownValues(unittest.TestCase):
             if type(reference_value) is str:
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
-            if type(reference_value) is float:
+            elif type(reference_value) is float:
                 assert abs(test_value - reference_value) < 1e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
 if __name__ == "__main__":
     print("Full Tests for ALMO EDA 2 energies")
