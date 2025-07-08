@@ -26,6 +26,8 @@ from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from pyscf import ao2mo
+from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
+from functools import reduce
 
 
 CITATION_INFO = """
@@ -60,6 +62,43 @@ def get_memory_info(words):
     used_mem = total_mem - free_mem
     memory_info = f"{words} memory usage: {used_mem / 1024**3:.2f} GB / {total_mem / 1024**3:.2f} GB"
     return memory_info
+
+
+def _gen_ks_response(mf, mo_coeff=None, mo_occ=None,
+                      singlet=None, hermi=0, grids=None, max_memory=None, with_nlc=True):
+    if mo_coeff is None: mo_coeff = mf.mo_coeff
+    if mo_occ is None: mo_occ = mf.mo_occ
+    mol = mf.mol
+    
+    if grids is None:
+        grids = mf.grids
+    if grids and grids.coords is None:
+        grids.build(mol=mol, with_non0tab=False, sort_grids=True)
+    ni = mf._numint
+    ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+
+    spin = 1
+    rho0, vxc, fxc = ni.cache_xc_kernel(
+        mol, grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
+    dm0 = None
+
+    fxc *= .5
+    def vind(dm1):
+        if hermi == 2:
+            v1 = cp.zeros_like(dm1)
+        else:
+            # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+            v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, True,
+                                  rho0, vxc, fxc, max_memory=max_memory)
+            if mf.do_nlc():
+                if with_nlc:
+                    v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
+                else:
+                    logger.warn(mf, "NLC contribution in gen_response is NOT included")
+        return v1
+    return vind
 
 
 def release_memory():
@@ -125,7 +164,8 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
                     parse_arg=False,
                     spin=mol.spin,
                     charge=mol.charge,
-                    cart=mol.cart)
+                    cart=mol.cart,
+                    unit=mol.unit)
 
     auxmol_basis_keys = mol._basis.keys()
     auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
@@ -597,7 +637,7 @@ def get_ibja_MVP(T_ia):
 
     return ibja_MVP
 
-def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
+def get_ab(td, mf, J_fit, K_fit, theta, with_xc = False, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     r'''A and B matrices for TDDFT response function.
 
     A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
@@ -690,6 +730,95 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
             k_fac = alpha - hyb
             a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
             b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
+        if with_xc:
+            xctype = ni._xc_type(mf.xc)
+            grids = mf.grids
+            opt = getattr(ni, 'gdftopt', None)
+            if opt is None:
+                ni.build(mol, grids.coords)
+                opt = ni.gdftopt
+            _sorted_mol = opt._sorted_mol
+            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+            orbo = opt.sort_orbitals(orbo, axis=[0])
+            orbv = opt.sort_orbitals(orbv, axis=[0])
+            if xctype == 'LDA':
+                ao_deriv = 0
+                for ao, mask, weight, coords \
+                        in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                    mo_coeff_mask = mo_coeff[mask]
+                    rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                        mo_occ, mask, xctype, with_lapl=False)
+                    if singlet or singlet is None:
+                        fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                        wfxc = fxc[0,0] * weight
+                    else:
+                        fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                        wfxc = (fxc[0, 0, 0, 0] - fxc[1, 0, 0, 0]) * 0.5 * weight
+                    orbo_mask = orbo[mask]
+                    orbv_mask = orbv[mask]
+                    rho_o = contract('pr,pi->ri', ao, orbo_mask)
+                    rho_v = contract('pr,pi->ri', ao, orbv_mask)
+                    rho_ov = contract('ri,ra->ria', rho_o, rho_v)
+                    w_ov = contract('ria,r->ria', rho_ov, wfxc)
+                    iajb = contract('ria,rjb->iajb', rho_ov, w_ov) * 2
+                    a += iajb
+                    b += iajb
+
+            elif xctype == 'GGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                    mo_coeff_mask = mo_coeff[mask]
+                    rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                    mo_occ, mask, xctype, with_lapl=False)
+                    if singlet or singlet is None:
+                        fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                        wfxc = fxc * weight
+                    else:
+                        fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                        wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
+                    orbo_mask = orbo[mask]
+                    orbv_mask = orbv[mask]
+                    rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                    rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                    rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                    rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                    w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                    a += iajb
+                    b += iajb
+
+            elif xctype == 'HF':
+                pass
+
+            elif xctype == 'NLC':
+                pass # Processed later
+
+            elif xctype == 'MGGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                    mo_coeff_mask = mo_coeff[mask]
+                    rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                    mo_occ, mask, xctype, with_lapl=False)
+                    if singlet or singlet is None:
+                        fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                        wfxc = fxc * weight
+                    else:
+                        fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho))*0.5, deriv=2, xctype=xctype)[2]
+                        wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
+                    orbo_mask = orbo[mask]
+                    orbv_mask = orbv[mask]
+                    rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                    rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                    rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                    rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                    tau_ov = contract('xri,xra->ria', rho_o[1:4], rho_v[1:4]) * .5
+                    rho_ov = cp.vstack([rho_ov, tau_ov[cp.newaxis]])
+                    w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                    a += iajb
+                    b += iajb
 
         if mf.do_nlc():
             raise NotImplementedError('vv10 nlc not implemented in get_ab(). '
@@ -765,6 +894,8 @@ class RisBase(lib.StreamObject):
         self.theta = theta
         self.J_fit = J_fit
         self.K_fit = K_fit
+        self.with_xc = False
+        self.without_ris_approx = False
         self.xy = None
 
         self.Ktrunc = Ktrunc
@@ -801,7 +932,8 @@ class RisBase(lib.StreamObject):
         J_fit = self.J_fit
         K_fit = self.K_fit
         theta = self.theta
-        return get_ab(self, mf, J_fit, K_fit, theta, singlet=True)
+        with_xc = self.with_xc
+        return get_ab(self, mf, J_fit, K_fit, theta, with_xc=with_xc, singlet=True)
 
     def build(self):
         log = self.log
@@ -1079,6 +1211,10 @@ class TDA(RisBase):
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
         ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K,   T_ab=T_ab_K)
 
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
+
         def RKS_TDA_hybrid_MVP(X):
             ''' hybrid or range-sparated hybrid, a_x > 0
                 return AX
@@ -1090,9 +1226,24 @@ class TDA(RisBase):
             nstates = X.shape[0]
             X = X.reshape(nstates, n_occ, n_vir)
             AX = hdiag_MVP(X)
-            AX += 2 * iajb_MVP(X)
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vj, vk = self._scf.get_jk(mol, X_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vj, C_vir_notrunc)
+                vk_ijab = cp.einsum('ui,xvu,va->xia', C_occ_notrunc, vk, C_vir_notrunc)
+                AX += vj_iajb * 1.0
+                AX[:,n_occ-rest_occ:,:rest_vir] -= a_x*vk_ijab* 0.5
+            else:
+                AX += 2 * iajb_MVP(X)
+                AX[:,n_occ-rest_occ:,:rest_vir] -= a_x * ijab_MVP(X[:,n_occ-rest_occ:,:rest_vir])
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(X_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                AX += vind_xc_mo * 1.0
 
-            AX[:,n_occ-rest_occ:,:rest_vir] -= a_x * ijab_MVP(X[:,n_occ-rest_occ:,:rest_vir])
             AX = AX.reshape(nstates, n_occ*n_vir)
 
             return AX
@@ -1448,6 +1599,9 @@ class TDDFT(RisBase):
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
         ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K,   T_ab=T_ab_K)
         ibja_MVP = get_ibja_MVP(T_ia=T_ia_K)
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
 
         def RKS_TDDFT_hybrid_MVP(X, Y):
             '''
@@ -1472,17 +1626,41 @@ class TDDFT(RisBase):
             XpY = X + Y
             XmY = X - Y
             ApB_XpY = hdiag_MVP(XpY)
-
-            ApB_XpY += 4*iajb_MVP(XpY)
-
-            ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
-
-            ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
-
             AmB_XmY = hdiag_MVP(XmY)
-            AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
 
-            AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', XpY, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                tmp = cp.einsum('xov,pv->xpo', XmY, C_vir_notrunc)
+                XmY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vjP, vkP = self._scf.get_jk(mol, XpY_ao, hermi=0)
+                vjM, vkM = self._scf.get_jk(mol, XmY_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vjP, C_vir_notrunc)
+                vkP_ibja = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vkP, C_vir_notrunc)
+                vkP_ijab = cp.einsum('ui,xvu,va->xia', C_occ_notrunc, vkP, C_vir_notrunc)
+                vkM_ibja = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vkM, C_vir_notrunc)
+                vkM_ijab = cp.einsum('ui,xvu,va->xia', C_occ_notrunc, vkM, C_vir_notrunc)
+                ApB_XpY += vj_iajb*2 
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*vkP_ijab* 0.5
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*vkP_ibja* 0.5
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*vkM_ijab* 0.5
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += a_x*vkM_ibja* 0.5
+
+            else:
+                ApB_XpY += 4*iajb_MVP(XpY)
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
+
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
+
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', XpY, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(XpY_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                ApB_XpY += vind_xc_mo * 2
 
             ''' (A+B)(X+Y) = AX + BY + AY + BX   (1)
                 (A-B)(X-Y) = AX + BY - AY - BX   (2)
