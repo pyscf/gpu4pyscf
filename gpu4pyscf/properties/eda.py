@@ -28,6 +28,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib.cupy_helper import pack_tril, unpack_tril
 from gpu4pyscf.lib.diis import DIIS
 from gpu4pyscf.lib import logger
+import time
 
 # np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
 
@@ -39,25 +40,35 @@ def merge_mol(mol_list):
         merged = conc_mol(merged, mol_list[i])
     return merged
 
-def _get_total_system_energy(mf_sum, dm):
-    return float(mf_sum.energy_elec(dm = dm)[0] + mf_sum.energy_nuc())
+def _get_total_system_Fock_and_energy(mf_sum, dm, H1e):
+    vhf = mf_sum.get_veff(mf_sum.mol, dm)
+    F = mf_sum.get_fock(h1e = H1e, dm = dm, vhf = vhf)
+    E = mf_sum.energy_elec(dm = dm, h1e = H1e, vhf = vhf)[0] + mf_sum.energy_nuc()
+    return F, E
 
-def _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum):
+def _get_fragment_Fock_and_energy(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum):
     n_frag = len(mf_list)
-    E_sum = 0
+
+    Fock_list = []
+    energy_list = []
     for i_frag in range(n_frag):
         mf_i = mf_list[i_frag]
-        assert not mf_i.do_disp()
 
         H1e_i = H1e_list[i_frag]
         mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
-        D_i = 2 * mocc_i @ mocc_i.T
-        E_i = mf_sum.energy_elec(dm = D_i, h1e = H1e_i)[0] + mf_i.energy_nuc()
+        dm_i = 2 * mocc_i @ mocc_i.T
+        vhf_i = mf_sum.get_veff(mf_sum.mol, dm_i)
+        F_i = mf_sum.get_fock(h1e = H1e_i, dm = dm_i, vhf = vhf_i)
+        E_i = mf_sum.energy_elec(dm = dm_i, h1e = H1e_i, vhf = vhf_i)[0] + mf_i.energy_nuc()
         if mf_i.do_disp():
             E_i += mf_i.get_dispersion()
-        D_i = None
-        E_sum += E_i
-    return E_sum
+
+        dm_i = None
+        vhf_i = None
+        Fock_list.append(F_i)
+        energy_list.append(E_i)
+
+    return Fock_list, energy_list
 
 def _get_total_system_xc_energy(mf_sum, dm):
     E_j_plus_xc = mf_sum.energy_elec(dm = dm, h1e = dm * 0)[0]
@@ -126,6 +137,8 @@ def get_eda_classical_electrostatic_energy(mf_list, _make_mf, eda_cache):
             E_nn_ij = mol_merged.enuc - mf_i.mol.enuc - mf_j.mol.enuc
 
             classical_electrostatic_energy_pair[i_frag, j_frag] = E_ee_ij - E_en_ij - E_en_ji + E_nn_ij
+            logger.debug(mf_i, f"Classical electrostatic energy between fragment {i_frag} and {j_frag} is "
+                               f"{classical_electrostatic_energy_pair[i_frag, j_frag]} Hartree")
 
     classical_electrostatic_energy = float(np.sum(classical_electrostatic_energy_pair))
     eda_cache["classical_electrostatic_energy_pair"] = classical_electrostatic_energy_pair
@@ -135,6 +148,9 @@ def get_eda_classical_electrostatic_energy(mf_list, _make_mf, eda_cache):
 def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hessian = False):
     n_frag = len(mf_list)
     assert n_frag >= 1
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_electrostatic_start = time.time()
 
     mocc_list = []
     for i_frag in range(n_frag):
@@ -190,20 +206,19 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
     mf_sum = _make_mf(mol_sum, if_kernel = False)
 
     logger.info(mf_sum, "Orthogonal Decomposition of the Initial Supersystem Wavefunction")
-    energy_sum = _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
+    Fock_list, energy_list = _get_fragment_Fock_and_energy(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
+    energy_sum = float(sum(energy_list))
     logger.info(mf_sum, f"Cycle {0:2d}: energy = {energy_sum}")
     energy_unrelaxed = energy_sum
     scf_conv = False
 
-    for cycle in range(mf_sum.max_cycle):
-        Fock_list = []
-        for i_frag in range(n_frag):
-            mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
+    cp.cuda.runtime.deviceSynchronize()
+    time_electrostatic_before_scf = time.time()
+    logger.debug(mf_sum, f"EDA electrostatic time: before SCF = {time_electrostatic_before_scf - time_electrostatic_start} s")
 
-            D_i = 2 * mocc_i @ mocc_i.T
-            H1e_i = H1e_list[i_frag]
-            F_i = mf_sum.get_fock(h1e = H1e_i, dm = D_i)
-            Fock_list.append(F_i)
+    for cycle in range(mf_sum.max_cycle):
+        cp.cuda.runtime.deviceSynchronize()
+        time_electrostatic_scf_start = time.time()
 
         def upper_trinagular_to_pair_index(i, j, n):
             return (2 * n - 2 - i) * (i - 1) // 2 + n - 1 + j - i - 1
@@ -443,16 +458,30 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
         mocc_sum = mocc_sum @ U
         U = None
 
+        cp.cuda.runtime.deviceSynchronize()
+        time_electrostatic_scf_mo = time.time()
+        logger.debug(mf_sum, f"EDA electrostatic time: SCF update MO = {time_electrostatic_scf_mo - time_electrostatic_scf_start} s")
+
         energy_previous = energy_sum
-        energy_sum = _get_fragment_energy_sum(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
+        Fock_list, energy_list = _get_fragment_Fock_and_energy(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum)
+        energy_sum = float(sum(energy_list))
         delta_energy = energy_sum - energy_previous
         logger.info(mf_sum, f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
+
+        cp.cuda.runtime.deviceSynchronize()
+        time_electrostatic_scf_fock = time.time()
+        logger.debug(mf_sum, f"EDA electrostatic time: SCF update Fock = {time_electrostatic_scf_fock - time_electrostatic_scf_mo} s")
+
         if (abs(delta_energy) < mf_sum.conv_tol):
             scf_conv = True
             break
 
     if not scf_conv:
         raise RuntimeError("Orthogonal decomposition not converged!")
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_electrostatic_after_scf = time.time()
+    logger.debug(mf_sum, f"EDA electrostatic time: SCF total = {time_electrostatic_after_scf - time_electrostatic_before_scf} s")
 
     electrostatic_energy_pair = np.zeros((n_frag, n_frag))
 
@@ -490,8 +519,16 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
             E_nn_ij = cp.sum(nucleus_qiqj_rij)
 
             electrostatic_energy_pair[i_frag, j_frag] = E_ee_ij - E_en_ij - E_en_ji + E_nn_ij
+            logger.debug(mf_sum, f"Electrostatic energy between fragment {i_frag} and {j_frag} is "
+                                 f"{electrostatic_energy_pair[i_frag, j_frag]} Hartree")
+
         D_i = None
         D_j = None
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_electrostatic_end = time.time()
+    logger.debug(mf_sum, f"EDA electrostatic time: after SCF = {time_electrostatic_end - time_electrostatic_after_scf} s")
+    logger.debug(mf_sum, f"EDA electrostatic time: total = {time_electrostatic_end - time_electrostatic_start} s")
 
     electrostatic_energy = float(np.sum(electrostatic_energy_pair))
     eda_cache["electrostatic_energy_pair"] = electrostatic_energy_pair
@@ -503,6 +540,9 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
 def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
     n_frag = len(mf_list)
     assert n_frag >= 1
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_dispersion_start = time.time()
 
     assert "mocc_pauli" in eda_cache
 
@@ -546,6 +586,10 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
     E_dispersion_free_frozen = _get_total_system_xc_energy(mf_dispersion_free_sum, D_frozen)
     E_dispersion_free_fragment_sum = _get_fragment_xc_energy_sum(mf_dispersion_free_list, mf_dispersion_free_sum, nocc_offsets, mocc_sum)
 
+    cp.cuda.runtime.deviceSynchronize()
+    time_dispersion_end = time.time()
+    logger.debug(mf_sum, f"EDA dispersion time: total = {time_dispersion_end - time_dispersion_start} s")
+
     E_dispersion = (E_frozen - E_fragment_sum) - (E_dispersion_free_frozen - E_dispersion_free_fragment_sum)
     eda_cache["dispersion_energy"] = E_dispersion
     eda_cache["interfragment_dfxc_energy"] = E_dispersion_free_frozen - E_dispersion_free_fragment_sum
@@ -561,6 +605,9 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
 
     n_frag = len(mf_list)
     assert n_frag >= 1
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_polarization_start = time.time()
 
     mol_sum = merge_mol([mf.mol for mf in mf_list])
     mf_sum = _make_mf(mol_sum, if_kernel = False)
@@ -579,6 +626,9 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
     G_projector_list = []
     mocc_list = []
     for i_frag in range(n_frag):
+        cp.cuda.runtime.deviceSynchronize()
+        time_polarization_ferf_i_start = time.time()
+
         mf_i = mf_list[i_frag]
         mo_coeff_i = mf_i.mo_coeff
         assert mo_coeff_i.ndim == 2
@@ -696,13 +746,18 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         polarization_subspace_singularvector_left, polarization_subspace_singularvalue, polarization_subspace_singularvector_right =  \
             cp.linalg.svd(polarization_subspace, full_matrices = False)
         del polarization_subspace_singularvector_right
-        logger.info(mf_sum, f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
-                            f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}")
         G = polarization_subspace_singularvector_left[:, polarization_subspace_singularvalue > virtual_singular_value_threshold]
+        logger.info(mf_sum, f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
+                            f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}, "
+                            f"the last {G.shape[1] - polarization_subspace_singularvalue.shape[0]} singular vectors are discarded.")
         polarization_subspace_singularvalue = None
         polarization_subspace_singularvector_left = None
 
         G_projector_list.append(G)
+
+        cp.cuda.runtime.deviceSynchronize()
+        time_polarization_ferf_i_end = time.time()
+        logger.debug(mf_sum, f"EDA polarization time: fragment {i_frag} FERF construction = {time_polarization_ferf_i_end - time_polarization_ferf_i_start} s")
 
     nao_offsets        = np.cumsum([0] + [G.shape[0] for G in G_projector_list])
     nprojector_offsets = np.cumsum([0] + [G.shape[1] for G in G_projector_list])
@@ -714,6 +769,10 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         G[nao_offsets[i_frag] : nao_offsets[i_frag + 1],
           nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]] = G_projector_list[i_frag]
     G_projector_list = None
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_polarization_ferf_end = time.time()
+    logger.debug(mf_sum, f"EDA polarization time: FERF construction total = {time_polarization_ferf_end - time_polarization_start} s")
 
     nocc_offsets = np.cumsum([0] + [mocc.shape[1] for mocc in mocc_list])
     nocc_sum = nocc_offsets[-1]
@@ -784,14 +843,20 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
     sigma = mocc_sum_projected.T @ gamma @ mocc_sum_projected
     inv_sigma = cp.linalg.inv(sigma)
     D = get_full_density(mocc_sum_projected, inv_sigma)
-    energy_sum = _get_total_system_energy(mf_sum, D)
+
+    H1e = mf_sum.get_hcore()
+    F, energy_sum = _get_total_system_Fock_and_energy(mf_sum, D, H1e)
     logger.info(mf_sum, f"Cycle {0:2d}: energy = {energy_sum}")
     energy_frozen = energy_sum
     scf_conv = False
 
-    F = mf_sum.get_fock(dm = D)
+    cp.cuda.runtime.deviceSynchronize()
+    time_polarization_before_scf = time.time()
+    logger.debug(mf_sum, f"EDA polarization time: SCF preparation = {time_polarization_before_scf - time_polarization_ferf_end} s")
 
     for cycle in range(mf_sum.max_cycle):
+        cp.cuda.runtime.deviceSynchronize()
+        time_polarization_scf_start = time.time()
 
         F_S_list = []
         new_mocc_sum = cp.zeros_like(mocc_sum_projected)
@@ -849,21 +914,33 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         mocc_sum_projected = new_mocc_sum
         new_mocc_sum = None
 
+        cp.cuda.runtime.deviceSynchronize()
+        time_polarization_scf_mo = time.time()
+        logger.debug(mf_sum, f"EDA polarization time: SCF update MO = {time_polarization_scf_mo - time_polarization_scf_start} s")
+
         sigma = mocc_sum_projected.T @ gamma @ mocc_sum_projected
         inv_sigma = cp.linalg.inv(sigma)
         D = get_full_density(mocc_sum_projected, inv_sigma)
-        F = mf_sum.get_fock(dm = D)
 
         energy_previous = energy_sum
-        energy_sum = _get_total_system_energy(mf_sum, D)
+        F, energy_sum = _get_total_system_Fock_and_energy(mf_sum, D, H1e)
         delta_energy = energy_sum - energy_previous
         logger.info(mf_sum, f"Cycle {cycle + 1:2d}: energy = {energy_sum}, delta energy = {delta_energy}")
+
+        cp.cuda.runtime.deviceSynchronize()
+        time_polarization_scf_fock = time.time()
+        logger.debug(mf_sum, f"EDA polarization time: SCF update Fock = {time_polarization_scf_fock - time_polarization_scf_mo} s")
+
         if (abs(delta_energy) < mf_sum.conv_tol):
             scf_conv = True
             break
 
     if not scf_conv:
         raise RuntimeError("FERF subspace SCF-MI not converged!")
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_polarization_end = time.time()
+    logger.debug(mf_sum, f"EDA polarization time: total = {time_polarization_end - time_polarization_start} s")
 
     eda_cache["total_frozen_energy"] = energy_frozen
     eda_cache["polarization_energy"] = energy_sum - energy_frozen
@@ -991,20 +1068,21 @@ def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_g
 
     hartree_to_kjmol = 10**-3 * nist.HARTREE2J * nist.AVOGADRO
 
+    log = logger.new_logger(mf_list[0], verbose)
     for i_frag in range(len(frag_energy_list)):
-        print(f"Fragment {i_frag} energy = {frag_energy_list[i_frag]:.10f} Hartree")
+        log.log(f"Fragment {i_frag} energy = {frag_energy_list[i_frag]:.10f} Hartree")
     total_system_energy = eda_cache["total_system_energy"]
-    print(f"Total system energy = {total_system_energy:.10f} Hartree")
+    log.log(f"Total system energy = {total_system_energy:.10f} Hartree")
     eda_total = total_system_energy - sum(frag_energy_list)
-    print(f"EDA frozen energy = {eda_frozen:.10f} Hartree = {eda_frozen * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA total = {eda_total:.10f} Hartree = {eda_total * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA classical electrostatic = {eda_classical_electrostatic:.10f} Hartree = {eda_classical_electrostatic * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA electrostatic = {eda_electrostatic:.10f} Hartree = {eda_electrostatic * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA dispersion = {eda_dispersion:.10f} Hartree = {eda_dispersion * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA Pauli (kinetic energy pressure + interfragment exchange) = {eda_pauli:.10f} Hartree = {eda_pauli * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA Pauli (frozen - electrostatic - dispersion) = {eda_frozen_reminder:.10f} Hartree = {eda_frozen_reminder * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA polarization = {eda_polarization:.10f} Hartree = {eda_polarization * hartree_to_kjmol:.10f} kJ/mol")
-    print(f"EDA charge transfer = {eda_charge_transfer:.10f} Hartree = {eda_charge_transfer * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA frozen energy = {eda_frozen:.10f} Hartree = {eda_frozen * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA total = {eda_total:.10f} Hartree = {eda_total * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA classical electrostatic = {eda_classical_electrostatic:.10f} Hartree = {eda_classical_electrostatic * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA electrostatic = {eda_electrostatic:.10f} Hartree = {eda_electrostatic * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA dispersion = {eda_dispersion:.10f} Hartree = {eda_dispersion * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA Pauli (kinetic energy pressure + interfragment exchange) = {eda_pauli:.10f} Hartree = {eda_pauli * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA Pauli (frozen - electrostatic - dispersion) = {eda_frozen_reminder:.10f} Hartree = {eda_frozen_reminder * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA polarization = {eda_polarization:.10f} Hartree = {eda_polarization * hartree_to_kjmol:.10f} kJ/mol")
+    log.log(f"EDA charge transfer = {eda_charge_transfer:.10f} Hartree = {eda_charge_transfer * hartree_to_kjmol:.10f} kJ/mol")
 
     eda_result = {
         "total"           : float(eda_total          ) * hartree_to_kjmol,
