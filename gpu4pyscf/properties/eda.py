@@ -566,12 +566,14 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
     mf_sum = _make_mf(mol_sum, if_kernel = False)
 
     assert type(field_order) is int
-    match field_order:
-        case 1: logger.info(mf_sum, "Dipole response included for FERF (nD)")
-        case 2: logger.info(mf_sum, "Dipole and quadrupole response included for FERF (nDQ)")
-        case 3: logger.info(mf_sum, "Dipole, quadrupole and octupole response included for FERF (nDQO)")
-        case _:
-            raise ValueError(f"Incorrect field_order ({field_order}) specified for get_eda_polarization_energy()")
+    if field_order == 1:
+        logger.info(mf_sum, "Dipole response included for FERF (nD)")
+    elif field_order == 2:
+        logger.info(mf_sum, "Dipole and quadrupole response included for FERF (nDQ)")
+    elif field_order == 3:
+        logger.info(mf_sum, "Dipole, quadrupole and octupole response included for FERF (nDQO)")
+    else:
+        raise ValueError(f"Incorrect field_order ({field_order}) specified for get_eda_polarization_energy()")
 
     logger.info(mf_sum, "FERF Constrained Virtual Space Construction")
     G_projector_list = []

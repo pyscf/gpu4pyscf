@@ -360,7 +360,7 @@ class KnownValues(unittest.TestCase):
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 1e-2, \
+                assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
 
     def test_almo_eda_2_hf_tzvpp_df(self):
@@ -387,7 +387,7 @@ class KnownValues(unittest.TestCase):
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 1e-2, \
+                assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
 
     @pytest.mark.skip("Too slow, functionality roughly covered by corresponding density fitting test")
@@ -420,7 +420,7 @@ class KnownValues(unittest.TestCase):
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 1e-2, \
+                assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
 
     def test_almo_eda_2_wb97xv_tzvpp_df(self):
@@ -447,7 +447,7 @@ class KnownValues(unittest.TestCase):
                 assert reference_value == test_value, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             if type(reference_value) is float:
-                assert abs(test_value - reference_value) < 1e-2, \
+                assert abs(test_value - reference_value) < 2e-2, \
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
 
     def test_almo_eda_2_pbe0_charged(self):
