@@ -76,8 +76,6 @@ def _gen_ks_response(mf, mo_coeff=None, mo_occ=None,
         grids.build(mol=mol, with_non0tab=False, sort_grids=True)
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
-    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
     spin = 1
     rho0, vxc, fxc = ni.cache_xc_kernel(
