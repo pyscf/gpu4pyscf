@@ -708,9 +708,40 @@ def get_ab(td, mf, J_fit, K_fit, theta, with_xc = False, mo_energy=None, mo_coef
         eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
         eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
         return eri_mo
+    def get_erimo_ori():
+        eri = mol.intor('int2e_sph', aosym='s8')
+        eri= ao2mo.restore(1, eri, nao)
+        eri = cp.asarray(eri)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+        return eri_mo
+    def get_erimo_omega_ori(omega):
+        with mol.with_range_coulomb(omega):
+            eri = mol.intor('int2e_sph', aosym='s8')
+            eri= ao2mo.restore(1, eri, nao)
+            eri = cp.asarray(eri)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
     def add_hf_(a, b, hyb=1):
         eri_mo_J = get_erimo(auxmol_J)
         eri_mo_K = get_erimo(auxmol_K)
+        if singlet:
+            a += cp.einsum('iabj->iajb', eri_mo_J[:nocc,nocc:,nocc:,:nocc]) * 2
+            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b += cp.einsum('iajb->iajb', eri_mo_J[:nocc,nocc:,:nocc,nocc:]) * 2
+            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * hyb
+        else:
+            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * hyb
+    def add_hf_ori_(a, b, hyb=1):
+        eri_mo_J = get_erimo_ori()
+        eri_mo_K = get_erimo_ori()
         if singlet:
             a += cp.einsum('iabj->iajb', eri_mo_J[:nocc,nocc:,nocc:,:nocc]) * 2
             a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
@@ -724,12 +755,20 @@ def get_ab(td, mf, J_fit, K_fit, theta, with_xc = False, mo_energy=None, mo_coef
         raise NotImplementedError("PCM TDDFT RIS is not supported")
 
     if isinstance(mf, scf.hf.KohnShamDFT):
-        add_hf_(a, b, hyb)
-        if omega != 0:  # For RSH
-            eri_mo_K = get_erimo_omega(auxmol_K, omega)
-            k_fac = alpha - hyb
-            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
-            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
+        if td.without_ris_approx:
+            add_hf_ori_(a, b, hyb)
+            if omega != 0:  # For RSH
+                eri_mo_K = get_erimo_omega_ori(omega)
+                k_fac = alpha - hyb
+                a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
+                b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
+        else:
+            add_hf_(a, b, hyb)
+            if omega != 0:  # For RSH
+                eri_mo_K = get_erimo_omega(auxmol_K, omega)
+                k_fac = alpha - hyb
+                a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
+                b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
         if with_xc:
             xctype = ni._xc_type(mf.xc)
             grids = mf.grids
@@ -1297,6 +1336,11 @@ class TDA(RisBase):
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=hdiag, n_occ=n_occ, n_vir=n_vir)
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
+
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
+
         def RKS_TDA_pure_MVP(X):
             ''' pure functional, a_x = 0
                 return AX
@@ -1305,7 +1349,21 @@ class TDA(RisBase):
             nstates = X.shape[0]
             X = X.reshape(nstates, n_occ, n_vir)
             AX = hdiag_MVP(X)
-            AX += 2 * iajb_MVP(X)
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vj= self._scf.get_j(mol, X_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vj, C_vir_notrunc)
+                AX += vj_iajb * 1.0
+            else:
+                AX += 2 * iajb_MVP(X)
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(X_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                AX += vind_xc_mo * 1.0
+
             AX = AX.reshape(nstates, n_occ*n_vir)
             return AX
 
@@ -1721,6 +1779,11 @@ class TDDFT(RisBase):
         hdiag_MVP = gen_hdiag_MVP(hdiag=hdiag, n_occ=n_occ, n_vir=n_vir)
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
         hdiag_sq = hdiag**2
+
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
+
         def RKS_TDDFT_pure_MVP(Z):
             '''(A-B)^1/2(A+B)(A-B)^1/2 Z = Z w^2
                                     MZ = Z w^2
@@ -1733,7 +1796,21 @@ class TDDFT(RisBase):
             nstates = Z.shape[0]
             Z = Z.reshape(nstates, n_occ, n_vir)
             AmB_sqrt_V = hdiag_sqrt_MVP(Z)
-            ApB_AmB_sqrt_V = hdiag_MVP(AmB_sqrt_V) + 4*iajb_MVP(AmB_sqrt_V)
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', AmB_sqrt_V, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vjP = self._scf.get_j(mol, XpY_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vjP, C_vir_notrunc)
+                ApB_AmB_sqrt_V = hdiag_MVP(AmB_sqrt_V) + vj_iajb*2 
+            else:
+                ApB_AmB_sqrt_V = hdiag_MVP(AmB_sqrt_V) + 4*iajb_MVP(AmB_sqrt_V)
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', AmB_sqrt_V, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(XpY_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                ApB_AmB_sqrt_V += vind_xc_mo * 2
+            
             MZ = hdiag_sqrt_MVP(ApB_AmB_sqrt_V)
             MZ = MZ.reshape(nstates, n_occ*n_vir)
             return MZ

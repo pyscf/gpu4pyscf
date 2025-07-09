@@ -429,6 +429,54 @@ class Gradients(tdrhf.Gradients):
 
     as_scanner = as_scanner
 
+class Gradients_ris(tdrhf.Gradients):
+    def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
+        """
+        Args:
+            state : int
+                Excited state ID.  state = 1 means the first excited state.
+        """
+        verbose = self.verbose
+        log = logger.new_logger(self, verbose)
+        warn_message = "TDDFT-ris gradient is still in the experimental stage, \n" +\
+            "and its APIs are subject to change in future releases."
+        log.warn(warn_message)
+        if xy is None:
+            if state is None:
+                state = self.state
+            else:
+                self.state = state
+
+            if state == 0:
+                log.warn(
+                    "state=0 found in the input. Gradients of ground state is computed.",
+                )
+                return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
+            xy = self.base.xy[state - 1]
+
+        if singlet is None:
+            singlet = self.base.singlet
+        if atmlst is None:
+            atmlst = self.atmlst
+        else:
+            self.atmlst = atmlst
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        if self.verbose >= logger.INFO:
+            self.dump_flags()
+        theta = self.base.theta
+        de = self.grad_elec(xy, theta, singlet, atmlst, verbose=self.verbose)
+        self.de = de = de + self.grad_nuc(atmlst=atmlst)
+        if self.mol.symmetry:
+            self.de = self.symmetrize(self.de, atmlst)
+        self._finalize()
+        return self.de
+    @lib.with_doc(grad_elec.__doc__)
+    def grad_elec(self, xy, theta, singlet, atmlst=None, verbose=logger.info):
+        return grad_elec(self, xy, theta, singlet=singlet, atmlst=atmlst, verbose=self.verbose)
+
+    as_scanner = as_scanner
 
 Grad = Gradients
 
