@@ -367,7 +367,6 @@ def _d1_dot_(ao1, ao2, out=None):
 def _gga_grad_sum_(ao, wv):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
     aow = numint._scale_ao(ao[:4], wv[:4])
-    _aow = cupy.einsum('nip,np->pi', ao[:4], wv[:4])
     vmat = _d1_dot_(ao[1:4], aow.T)
     aow = _make_dR_dao_w(ao, wv[:4])
     vmat += _d1_dot_(aow, ao[0].T)

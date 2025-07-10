@@ -71,7 +71,8 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     vmat = cp.zeros((nkpts,3,nao,nao), dtype=dm_kpts.dtype)
     if xctype == 'LDA':
         ao_deriv = 1
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                                   sort_grids=True):
             rho = ni.eval_rho(cell, ao_ks[:,0], dm_kpts, xctype=xctype, hermi=hermi)
             vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
             wv = weight * vxc[0]
@@ -81,7 +82,8 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
 
     elif xctype == 'GGA':
         ao_deriv = 2
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                                   sort_grids=True):
             rho = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts, xctype=xctype, hermi=hermi)
             vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
             wv = weight * vxc
@@ -91,7 +93,8 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
 
     elif xctype == 'MGGA':
         ao_deriv = 2
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                                   sort_grids=True):
             rho = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts, xctype=xctype, hermi=hermi)
             vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
             wv = weight * vxc

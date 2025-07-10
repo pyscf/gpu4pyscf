@@ -29,6 +29,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, extract_pgto_params
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (
@@ -387,7 +388,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     rho = cp.empty([nvar,ngrids])
     p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                               sort_grids=True):
         p0, p1 = p1, p1 + weight.size
         rho[:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts, xctype=xctype, hermi=hermi)
 
@@ -405,7 +407,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     v_hermi = 1  # the output matrix must be hermitian
     p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band):
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band,
+                                               sort_grids=True):
         p0, p1 = p1, p1 + weight.size
         for k, ao in enumerate(ao_ks):
             if xctype == 'LDA':
@@ -467,7 +470,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     rho = cp.empty([2,nvar,ngrids])
     p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                               sort_grids=True):
         p0, p1 = p1, p1 + weight.size
         rho[0,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[0], xctype=xctype, hermi=hermi)
         rho[1,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[1], xctype=xctype, hermi=hermi)
@@ -486,7 +490,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     v_hermi = 1  # the output matrix must be hermitian
     p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band):
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band,
+                                               sort_grids=True):
         p0, p1 = p1, p1 + weight.size
         for k, ao in enumerate(ao_ks):
             if xctype == 'LDA':
@@ -551,7 +556,8 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         assert dm.ndim == 2 or len(dm) == len(kpts)
         rho = cp.empty(grids.size)
         p1 = 0
-        for ao_ks, weight, coords in self.block_loop(cell, grids, 0, kpts):
+        for ao_ks, weight, coords in self.block_loop(cell, grids, 0, kpts,
+                                                     sort_grids=True):
             p0, p1 = p1, p1 + weight.size
             rho[p0:p1] = self.eval_rho(cell, ao_ks, dm, xctype='LDA', hermi=1)
         return rho
@@ -583,7 +589,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         rho *= 1./nkpts
         return rho
 
-    def block_loop(self, cell, grids, deriv=0, kpts=None):
+    def block_loop(self, cell, grids, deriv=0, kpts=None, sort_grids=False):
         '''Define this macro to loop over grids by blocks.
         '''
         nao = cell.nao
@@ -591,6 +597,11 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         grids_weights = grids.weights
         ngrids = grids_coords.shape[0]
         comp = (deriv+1)*(deriv+2)*(deriv+3)//6
+
+        if sort_grids and isinstance(grids, UniformGrids):
+            idx = grids.argsort(tile=8)
+            grids_coords = grids_coords[idx]
+            grids_weights = grids_weights[idx]
 
         #cupy.get_default_memory_pool().free_all_blocks()
         mem_avail = get_avail_mem()

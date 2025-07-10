@@ -72,7 +72,32 @@ class UniformGrids(lib.StreamObject):
     def size(self):
         return np.prod(self.mesh)
 
-    reset = gen_grid_cpu.UniformGrids.reset
+    def argsort(self, tile=8):
+        '''Return the indices that would group the grids in space.
+        '''
+        mx, my, mz = self.mesh
+        nx = (mx + tile-1) // tile
+        ny = (my + tile-1) // tile
+        nz = (mz + tile-1) // tile
+
+        _idx = np.arange(tile)
+        idx_in_tile = _idx[:,None,None] * (my*mz) + _idx[:,None] * mz + _idx
+
+        zigzag_xy = np.arange(nx*ny).reshape(nx, ny)
+        zigzag_xy[1::2] = zigzag_xy[1::2,::-1]
+        zigzag_xyz = nx*ny * np.arange(nz)[:,None] + zigzag_xy.ravel()
+        zigzag_xyz[1::2] = zigzag_xyz[1::2,::-1]
+
+        xs, ys, zs = np.unravel_index(zigzag_xyz.ravel(), (nx, ny, nz))
+        xs *= tile
+        ys *= tile
+        zs *= tile
+        idx = []
+        for xi, yi, zi in zip(xs, ys, zs):
+            offset = (xi * my + yi) * mz + zi
+            idx.append(offset + idx_in_tile[:mx-xi,:my-yi,:mz-zi].ravel())
+        return np.hstack(idx)
+
     build = gen_grid_cpu.UniformGrids.build
     dump_flags = gen_grid_cpu.UniformGrids.dump_flags
     kernel = gen_grid_cpu.UniformGrids.kernel

@@ -73,7 +73,8 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     vmat = cp.zeros((2,nkpts,3,nao,nao), dtype=dm_kpts.dtype)
     if xctype == 'LDA':
         ao_deriv = 1
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                                   sort_grids=True):
             rho_a = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,0], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
@@ -87,7 +88,8 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
 
     elif xctype == 'GGA':
         ao_deriv = 2
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                                   sort_grids=True):
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)
@@ -100,7 +102,8 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
 
     elif xctype == 'MGGA':
         ao_deriv = 2
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
+                                                   sort_grids=True):
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
             rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
             rho = cp.stack([rho_a, rho_b], axis=0)

@@ -158,7 +158,6 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     Gv = cp.asarray(Gv_cpu)
     ngrids = len(Gv)
     grids = UniformGrids(cell)
-    coords = grids.coords
     vlocG = cp.asarray(get_vlocG(cell))
     ptr = PTR_ENV_START
     def hcore_deriv(atm_id):
@@ -171,7 +170,8 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         vloc_g = None
         deriv = 0
         grid0 = grid1 = 0
-        for ao_ks, weight, coords in ni.block_loop(cell, grids, deriv, kpts):
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, deriv, kpts,
+                                                   sort_grids=True):
             ao_ks = ao_ks.transpose(0,2,1) # [nk,nao,nGv]
             grid0, grid1 = grid1, grid1 + len(weight)
             aow = ao_ks[:,None,:,:] * vloc_R[:,None,grid0:grid1]
