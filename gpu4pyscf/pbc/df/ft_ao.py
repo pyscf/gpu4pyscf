@@ -94,8 +94,9 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         sorted_cell.natm, sorted_cell.nbas, 1, 1, _atm.data.ptr,
         _bas.data.ptr, _env.data.ptr, ao_loc_gpu.data.ptr, 0,
     )
-    GvT = asarray(np.append((Gv.T + kpt[:,None]).ravel(), np.zeros(THREADS)))
     ngrids = len(Gv)
+    GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
+    GvT = cp.append(GvT, cp.zeros(THREADS))
     nao_cart = ao_loc_cpu[-1]
     out = cp.empty((nao_cart, ngrids), dtype=np.complex128)
     libpbc.build_ft_ao(

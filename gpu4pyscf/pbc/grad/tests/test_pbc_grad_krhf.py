@@ -15,7 +15,10 @@
 
 import unittest
 from pyscf import lib
-from pyscf.pbc import scf, gto, grad
+from pyscf.pbc import gto
+from pyscf.pbc.grad import krhf as krhf_cpu
+from gpu4pyscf.pbc.grad import krhf as krhf_gpu
+from gpu4pyscf.pbc.dft import numint
 import numpy as np
 
 disp = 1e-3
@@ -34,6 +37,7 @@ def setUpModule():
     cell.unit = 'bohr'
     cell.mesh = [13] * 3
     cell.output = '/dev/null'
+    cell.precision = 1e-9
     cell.build()
 
     kpts = cell.make_kpts([1,1,2])
@@ -58,6 +62,21 @@ class KnownValues(unittest.TestCase):
         e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391+disp/2.0]]])
         e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
+    def test_hcore(self):
+        with lib.temporary_env(numint, MIN_BLK_SIZE=1024):
+            dat = krhf_gpu.get_hcore(cell, kpts)
+            ref = krhf_cpu.get_hcore(cell, kpts)
+            assert abs(dat.get() - ref).max() < 1e-9
+
+            hcore_generator_gpu = krhf_gpu.Gradients(cell.KRHF(kpts=kpts)).hcore_generator()
+            hcore_generator_cpu = krhf_cpu.Gradients(cell.KRHF(kpts=kpts)).hcore_generator()
+            dat = hcore_generator_gpu(0)
+            ref = hcore_generator_cpu(0)
+            assert abs(dat.get() - ref.transpose(1,0,2,3)).max() < 1e-8
+            dat = hcore_generator_gpu(1)
+            ref = hcore_generator_cpu(1)
+            assert abs(dat.get() - ref.transpose(1,0,2,3)).max() < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for KRHF Gradients")

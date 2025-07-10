@@ -37,12 +37,12 @@ from gpu4pyscf.lib import utils
 
 __all__ = ['NumInt', 'KNumInt']
 
-MIN_BLK_SIZE = numint.MIN_BLK_SIZE
-ALIGNED = numint.ALIGNED
+MIN_BLK_SIZE = 8192
+ALIGNED = 256
 LMAX = 4
 
 def eval_ao(cell, coords, kpt=np.zeros(3), deriv=0, relativity=0, shls_slice=None,
-            non0tab=None, cutoff=None, out=None, verbose=None):
+            non0tab=None, cutoff=None, out=None, verbose=None, opt=None):
     '''Collocate AO crystal orbitals (opt. gradients) on the real-space grid.
 
     Args:
@@ -69,11 +69,13 @@ def eval_ao(cell, coords, kpt=np.zeros(3), deriv=0, relativity=0, shls_slice=Non
             depending on the kpt argument.  If kpt is not given (gamma point),
             aoR is a float array.
     '''
-    ao_kpts = eval_ao_kpts(cell, coords, np.reshape(kpt, (-1,3)), deriv)
+    ao_kpts = eval_ao_kpts(cell, coords, np.reshape(kpt, (-1,3)), deriv,
+                           out=out, verbose=verbose, opt=opt)
     return ao_kpts[0]
 
-def eval_ao_kpts(cell, coords, kpts=None, deriv=0, opt=None, out=None,
-                 verbose=None):
+def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
+                 shls_slice=None, non0tab=None, cutoff=None, out=None,
+                 verbose=None, opt=None):
     '''
     Returns:
         ao_kpts: (nkpts, [comp], ngrids, nao) ndarray
@@ -115,7 +117,7 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, opt=None, out=None,
 
     if deriv == 0:
         out = out[:,0]
-    log.timer_debug1('eval_ao_kpts', *t0)
+    log.timer_debug2('eval_ao_kpts', *t0)
     return out
 
 class _GTOvalOpt:
@@ -169,7 +171,7 @@ class _GTOvalOpt:
         Ls = _get_bvkcell_lattice_Ls(cell, bvkcell, rcut)
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        logger.debug(cell, 'rcut=%g nimgs=%d', rcut, nimgs)
+        logger.debug1(cell, 'eval_ao_kpts rcut=%g nimgs=%d', rcut, nimgs)
         _atm = cp.array(bvkcell._atm, dtype=np.int32)
         _bas = cp.array(bvkcell._bas, dtype=np.int32)
         _env = cp.array(_scale_sp_ctr_coeff(bvkcell), dtype=np.float64)
@@ -597,13 +599,14 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         if blksize < ALIGNED:
             raise RuntimeError('Not enough GPU memory')
 
-        if kpts is None:
-            kpts = np.zeros((1, 3))
+        if kpts is not None:
+            kpts = kpts.reshape(-1, 3)
 
+        eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=deriv).build()
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids_coords[ip0:ip1]
             weight = grids_weights[ip0:ip1]
-            ao_ks = self.eval_ao(cell, coords, kpts, deriv=deriv)
+            ao_ks = self.eval_ao(cell, coords, kpts, deriv=deriv, opt=eval_gto_opt)
             yield ao_ks, weight, coords
             ao_ks = None
 

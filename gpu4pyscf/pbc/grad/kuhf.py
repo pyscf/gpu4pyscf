@@ -46,7 +46,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dvhf = mf_grad.get_veff(dm0, kpts)
-    log.timer('gradients of 2e part', *t0)
+    t1 = log.timer('gradients of 2e part', *t0)
 
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dm0_sf = dm0[0] + dm0[1]
@@ -55,9 +55,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     extra_force = np.empty([natm, 3])
     dh1e = cp.empty([natm, 3])
     for ia in range(natm):
-        h1ao = cp.asarray(hcore_deriv(ia))
-        dh1e[ia] = cp.einsum('xkij,kji->x', h1ao, dm0_sf).real
+        h1ao = hcore_deriv(ia)
+        dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0_sf).real
         extra_force[ia] = mf_grad.extra_force(ia, locals())
+    log.timer('gradients of 1e part', *t1)
 
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     ds = contract('kxij,kji->xi', s1, dme0_sf).real
@@ -67,7 +68,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
-        mf_grad._write(log, cell, de, atmlst)
+        mf_grad._write(cell, de, atmlst)
     return de
 
 class Gradients(krhf_grad.GradientsBase):
