@@ -34,6 +34,8 @@ def run(func, args=(), kwargs={}, non_blocking=False):
     if num_devices == 1:
         return [func(*args, *kwargs)]
 
+    cp.cuda.Stream.null.synchronize()
+
     def proc(device_id):
         with cp.cuda.Device(device_id):
             return func(*args, **kwargs)

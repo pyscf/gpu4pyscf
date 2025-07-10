@@ -137,6 +137,7 @@ class DF(lib.StreamObject):
         assert omega >= 0.0
 
         # A temporary treatment for RSH-DF integrals
+        # TODO: use the range_coulomb context from pyscf
         key = '%.6f' % omega
         if key in self._rsh_df:
             rsh_df = self._rsh_df[key]
