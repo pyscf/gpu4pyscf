@@ -113,6 +113,9 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         out = out.T
     return out
 
+def ft_ao_ip1(cell, Gv, kpt=np.zeros(3), verbose=None, sort_cell=True):
+    raise NotImplementedError
+
 def gen_ft_kernel(cell, kpts=None, verbose=None):
     r'''
     Generate the analytical fourier transform kernel for AO products

@@ -28,7 +28,7 @@ def setUpModule():
     3.370137329, 0.000000000, 3.370137329
     3.370137329, 3.370137329, 0.000000000'''
     cell.basis = [[0, [1.3, 1]], [1, [0.8, 1]]]
-    cell.verbose = 5
+    cell.verbose = 6
     cell.pseudo = 'gth-pade'
     cell.unit = 'bohr'
     cell.mesh = [13] * 3
@@ -66,6 +66,19 @@ class KnownValues(unittest.TestCase):
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(lib.fp(g), -0.21844074846755882, 6)
+
+        mfs = g_scan.base.as_scanner()
+        e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391+disp/2.0]]])
+        e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
+    def test_mgga_grad(self):
+        mf = cell.KUKS(xc='r2scan', kpts=kpts).to_gpu()
+        mf.conv_tol = 1e-10
+        mf.conv_tol_grad = 1e-6
+        g_scan = mf.nuc_grad_method().as_scanner()
+        g = g_scan(cell)[1]
+        self.assertAlmostEqual(lib.fp(g), -0.2090262545991935, 6)
 
         mfs = g_scan.base.as_scanner()
         e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391+disp/2.0]]])

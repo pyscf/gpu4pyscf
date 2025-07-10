@@ -81,12 +81,11 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
             wv = weight * vxc[:,0]
             aowa = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[0])
             aowb = cp.einsum('xpi,p->xpi', ao_ks[:,0], wv[1])
-            ao_ks = cp.asarray(ao_ks.transpose(0,1,3,2), order='C')
             for kn in range(nkpts):
-                vmat[0,kn] += rks_grad._d1_dot_(ao_ks[kn,1:4], aowa[kn])
-                vmat[1,kn] += rks_grad._d1_dot_(ao_ks[kn,1:4], aowb[kn])
+                vmat[0,kn] += krks_grad._d1_dot_(ao_ks[kn,1:4], aowa[kn])
+                vmat[1,kn] += krks_grad._d1_dot_(ao_ks[kn,1:4], aowb[kn])
 
-    elif xctype=='GGA':
+    elif xctype == 'GGA':
         ao_deriv = 2
         for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
             rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
@@ -95,17 +94,32 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
             vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
             wv = weight * vxc
             wv[:,0] *= .5
-            ao_ks = cp.asarray(ao_ks.transpose(0,1,3,2), order='C')
             for kn in range(nkpts):
-                vmat[0,kn] += rks_grad._gga_grad_sum_(ao_ks[kn], wv[0])
-                vmat[1,kn] += rks_grad._gga_grad_sum_(ao_ks[kn], wv[1])
+                vmat[0,kn] += krks_grad._gga_grad_sum_(ao_ks[kn], wv[0])
+                vmat[1,kn] += krks_grad._gga_grad_sum_(ao_ks[kn], wv[1])
+
+    elif xctype == 'MGGA':
+        ao_deriv = 2
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+            rho_a = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[0], xctype=xctype, hermi=hermi)
+            rho_b = ni.eval_rho(cell, ao_ks[:,:4], dm_kpts[1], xctype=xctype, hermi=hermi)
+            rho = cp.stack([rho_a, rho_b], axis=0)
+            vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[1]
+            wv = weight * vxc
+            wv[:,0] *= .5
+            wv[:,4] *= .5  # for the factor 1/2 in tau
+            for kn in range(nkpts):
+                vmat[0,kn] += krks_grad._gga_grad_sum_(ao_ks[kn], wv[0,:4])
+                vmat[1,kn] += krks_grad._gga_grad_sum_(ao_ks[kn], wv[1,:4])
+                vmat[0,kn] += krks_grad._tau_grad_dot_(ao_ks[kn], wv[0,4])
+                vmat[1,kn] += krks_grad._tau_grad_dot_(ao_ks[kn], wv[1,4])
 
     elif xctype == 'HF':
         pass
     elif xctype == 'NLC':
         raise NotImplementedError("NLC")
     else:
-        raise NotImplementedError("metaGGA")
+        raise NotImplementedError(xc_code)
 
     aoslices = cell.aoslice_by_atom()
     exc = contract('skxij,skji->xi', vmat, dm_kpts).real.get()
