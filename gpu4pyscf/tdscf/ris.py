@@ -120,13 +120,8 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
     parse_arg = False
     turns off PySCF built-in parsing function
     '''
-    auxmol = gto.M(atom=mol.atom,
-                    basis=mol.basis,
-                    parse_arg=False,
-                    spin=mol.spin,
-                    charge=mol.charge,
-                    cart=mol.cart)
-
+    auxmol = mol.copy()
+    auxmol.parse_arg = False
     auxmol_basis_keys = mol._basis.keys()
     auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
     auxmol.build(dump_input=False)
