@@ -24,7 +24,7 @@ from pyscf.pbc.grad import krhf as krhf_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as molgrad
 from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
-from gpu4pyscf.pbc.dft.numint import eval_ao_kpts
+from gpu4pyscf.pbc.dft.numint import eval_ao
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.lib.cupy_helper import contract
 
@@ -96,7 +96,7 @@ def get_hcore(cell, kpts):
         nao = cell.nao
         ptr = PTR_ENV_START
         for kn, kpt in enumerate(kpts):
-            aos = eval_ao_kpts(cell, coords, kpt, deriv=1)[0]
+            aos = eval_ao(cell, coords, kpt, deriv=1)
             vloc = cp.einsum('agi,g,gj->aij', aos[1:].conj(), vpplocR, aos[0])
             expir = cp.exp(-1j*cp.dot(coords, cp.asarray(kpt)))
             aokG = tools.fftk(aos.transpose(0,2,1).reshape(-1,ngrids), cell.mesh, expir)
@@ -159,7 +159,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         hcore = cp.zeros([3,nkpts,nao,nao], dtype=h1.dtype)
         for kn, kpt in enumerate(kpts):
 
-            ao = eval_ao_kpts(cell, coords, kpt)[0]
+            ao = eval_ao(cell, coords, kpt)
             rho = cp.einsum('gi,gj->gij',ao.conj(), ao)
             for ax in range(3):
                 vloc_R = tools.ifft(vloc_g[ax], mesh).real

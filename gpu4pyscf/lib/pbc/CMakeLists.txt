@@ -5,6 +5,7 @@ add_library(pbc SHARED
   fill_int3c2e.cu unrolled_int3c2e.cu fill_int2c2e.cu
   estimator.cu
   rys_roots_dat.cu
+  nr_eval_gto.cu
   sorting.c
 )
 

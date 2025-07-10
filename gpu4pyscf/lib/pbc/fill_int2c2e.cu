@@ -19,9 +19,8 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
+#include "pbc.cuh"
 #include "int3c2e.cuh"
 
 typedef struct {
@@ -34,7 +33,7 @@ typedef struct {
 #define GOUT_WIDTH      43
 
 __global__
-void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bounds)
+void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
