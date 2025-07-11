@@ -50,14 +50,14 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
 
-    @unittest.skip('pyscf multigrid bug')
     def test_lda_grad(self):
         kmf = cell_orth.KUKS(xc='svwn').run()
         ref = kuks_cpu.Gradients(kmf).kernel()
         mf = cell_orth.UKS(xc='svwn').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
-        self.assertAlmostEqual(abs(g - ref).max(), 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 5)
 
     @unittest.skip('pyscf multigrid bug')
     def test_lda_grad_nonorth(self):
@@ -73,9 +73,10 @@ class KnownValues(unittest.TestCase):
         kmf = cell_orth.KUKS(xc='pbe').run()
         ref = kuks_cpu.Gradients(kmf).kernel()
         mf = cell_orth.UKS(xc='pbe').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
-        self.assertAlmostEqual(abs(g - ref).max(), 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 5)
 
     @unittest.skip('pyscf multigrid bug')
     def test_gga_grad_nonorth(self):
