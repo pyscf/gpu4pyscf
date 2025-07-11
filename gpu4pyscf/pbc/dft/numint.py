@@ -150,6 +150,7 @@ class _GTOvalOpt:
                 bvk_kmesh = np.ones(3, dtype=np.int32)
             else:
                 bvk_kmesh = kpts_to_kmesh(cell, kpts)
+            self.bvk_kmesh = bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)
         if bvk_ncells == 1:
             bvkcell = sorted_cell

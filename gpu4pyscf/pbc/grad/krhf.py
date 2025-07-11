@@ -88,7 +88,8 @@ def get_hcore(cell, kpts):
     dtype = h1.dtype
     if cell._pseudo:
         SI = cell.get_SI()
-        Gv = cell.Gv
+        Gv_cpu = cell.Gv
+        Gv = cp.asarray(Gv_cpu)
         natom = cell.natm
         coords = cp.asarray(cell.get_uniform_grids())
         ngrids = len(coords)
@@ -96,18 +97,37 @@ def get_hcore(cell, kpts):
         vpplocG = -cp.einsum('ij,ij->j', SI, vlocG)
         vpplocG[0] = cp.sum(get_alphas(cell))
         vpplocR = tools.ifft(vpplocG, cell.mesh).real
+        ni = pbc_numint.KNumInt()
+        grids = UniformGrids(cell)
+        # block_loop(sort_grids=True) would reorder the grids. Sorting vpplocR
+        # accordingly
+        vpplocR = vpplocR[grids.argsort()]
+        deriv = 1
+        grid0 = grid1 = 0
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, deriv, kpts,
+                                                   sort_grids=True):
+            ao_ks = ao_ks.transpose(0,1,3,2) # [nk,comp,nao,nGv]
+            grid0, grid1 = grid1, grid1 + len(weight)
+            aow = ao_ks[:,0] * vpplocR[grid0:grid1]
+            #:h1 += cp.einsum('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow)
+            contract('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow, beta=1, out=h1)
+
         fakemol = krhf_cpu._make_fakemol()
-        nao = cell.nao
         ptr = PTR_ENV_START
+        ft_weight = 1. / cell.vol
         for kn, kpt in enumerate(kpts):
-            aos = pbc_numint.eval_ao(cell, coords, kpt, deriv=1)
-            vloc = cp.einsum('agi,g,gj->aij', aos[1:].conj(), vpplocR, aos[0])
-            expir = cp.exp(-1j*cp.dot(coords, cp.asarray(kpt)))
-            aokG = tools.fftk(aos.transpose(0,2,1).reshape(-1,ngrids), cell.mesh, expir)
-            aokG = aokG.reshape(4,nao,ngrids)
-            Gk = Gv + kpt
+            # Compute aokG analytically. An error ~cell.precision may be
+            # encountered compared to the fftk results.
+            #:expir = cp.exp(-1j*cp.dot(coords, cp.asarray(kpt)))
+            #:aos = pbc_numint.eval_ao(cell, coords, kpt, deriv=1)
+            #:aokG = tools.fftk(aos.transpose(0,2,1).reshape(-1,ngrids),
+            #                   cell.mesh, expir).reshape(4,nao,ngrids)
+            #:aokG, aokG_ip1 = aokG[0], aokG[1:4]
+            aokG = ft_ao.ft_ao(cell, Gv, kpt=kpt).T
+            aokG *= ft_weight
+            Gk = Gv_cpu + kpt
+            aokG_ip1 = aokG * (cp.asarray(Gk).T[:,None,:]*1j)
             G_rad = np.linalg.norm(Gk, axis=1)
-            vnl = cp.zeros(vloc.shape, dtype=np.complex128)
             for ia in range(natom):
                 symb = cell.atom_symbol(ia)
                 if symb not in cell._pseudo:
@@ -126,14 +146,14 @@ def get_hcore(cell, kpts):
                             qkl = _qli(G_rad*rl, l, k)
                             pYlm[k].set(pYlm_part.T * qkl)
                         SPG_lmi = cp.einsum('g,nmg->nmg', SI[ia].conj(), pYlm)
-                        SPG_lm_aoG = cp.einsum('nmg,apg->anmp', SPG_lmi, aokG)
-                        tmp = cp.einsum('ij,ajmp->aimp', hl, SPG_lm_aoG[1:])
-                        vnl += cp.einsum('aimp,imq->apq', tmp.conj(), SPG_lm_aoG[0])
-            vnl  *= (1./ngrids**2)
-            if dtype == np.float64:
-                h1[kn,:] += vloc.real + vnl.real
-            else:
-                h1[kn,:] += vloc + vnl
+                        SPG_lm_aoG = contract('nmg,pg->nmp', SPG_lmi, aokG)
+                        SPG_lm_aoG_ip1 = contract('nmg,apg->anmp', SPG_lmi, aokG_ip1)
+                        tmp = contract('ij,jmp->imp', hl, SPG_lm_aoG)
+                        vnl = contract('aimp,imq->apq', SPG_lm_aoG_ip1.conj(), tmp)
+                        if dtype == np.float64:
+                            h1[kn,:] += vnl.real
+                        else:
+                            h1[kn,:] += vnl
     else:
         raise NotImplementedError
     return h1
@@ -145,10 +165,6 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     dtype = h1.dtype
 
     mf = mf_grad.base
-    if hasattr(mf, '_numint'):
-        ni = mf._numint
-    else:
-        ni = pbc_numint.KNumInt()
     kpts, is_single_kpt = _check_kpts(mf, kpts)
 
     aoslices = cell.aoslice_by_atom()
@@ -157,9 +173,11 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     Gv_cpu = cell.Gv
     Gv = cp.asarray(Gv_cpu)
     ngrids = len(Gv)
-    grids = UniformGrids(cell)
     vlocG = cp.asarray(get_vlocG(cell))
+    ni = pbc_numint.KNumInt()
+    grids = UniformGrids(cell)
     ptr = PTR_ENV_START
+
     def hcore_deriv(atm_id):
         hcore = cp.zeros_like(h1)
         symb = cell.atom_symbol(atm_id)
@@ -167,6 +185,8 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
             return hcore
         vloc_g = cp.einsum('ga,g,g->ag', Gv, 1j * SI[atm_id], vlocG[atm_id])
         vloc_R = tools.ifft(vloc_g, mesh).real
+        # block_loop(sort_grids=True) would reorder the grids.
+        vloc_R = vloc_R[:,grids.argsort()]
         vloc_g = None
         deriv = 0
         grid0 = grid1 = 0
@@ -175,16 +195,16 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
             ao_ks = ao_ks.transpose(0,2,1) # [nk,nao,nGv]
             grid0, grid1 = grid1, grid1 + len(weight)
             aow = ao_ks[:,None,:,:] * vloc_R[:,None,grid0:grid1]
-            #contract('kig,kxjg->kxij',ao_ks.conj(), aow, beta=1., out=hcore)
-            hcore += contract('kig,kxjg->kxij',ao_ks.conj(), aow)
+            #:hcore += contract('kig,kxjg->kxij',ao_ks.conj(), aow)
+            contract('kig,kxjg->kxij', ao_ks.conj(), aow, beta=1, out=hcore)
 
         fakemol = krhf_cpu._make_fakemol()
         shl0, shl1, p0, p1 = aoslices[atm_id]
-        ft_weight = ngrids / cell.vol
+        ft_weight = 1. / cell.vol
         for kn, kpt in enumerate(kpts):
             # Compute aokG analytically. An error ~cell.precision may be
             # encountered compared to the fftk results.
-            #:aokG = tools.fftk(ao.T, mesh, cp.exp(-1j*cp.dot(coords, cp.asarray(kpt))))
+            #:aokG = 1./ngrids*fftk(ao.T, mesh, exp(-1j*coords.dot(kpt)))
             aokG = ft_ao.ft_ao(cell, Gv, kpt=kpt).T
             aokG *= ft_weight
             Gk = Gv_cpu + kpt
@@ -207,14 +227,15 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
                     SPG_lmi_G = contract('nmg, ga->anmg', SPG_lmi, 1j*Gv)
                     SPG_lm_G_aoG = contract('anmg, pg->anmp', SPG_lmi_G, aokG)
                     tmp_1 = contract('ij,ajmp->aimp', hl, SPG_lm_G_aoG)
-                    tmp_2 = contract('ij,jmp->imp', hl, SPG_lm_aoG)
-                    vppnl = (contract('imp,aimq->apq', SPG_lm_aoG.conj(), tmp_1) +
-                             contract('aimp,imq->apq', SPG_lm_G_aoG.conj(), tmp_2))
-                    vppnl *= (1./ngrids**2)
+                    vppnl = contract('imp,aimq->apq', SPG_lm_aoG.conj(), tmp_1)
+                    tmp = contract('ij,jmp->imp', hl, SPG_lm_aoG)
+                    vppnl = contract('jmp,ajmq->apq', tmp.conj(), SPG_lm_G_aoG)
                     if dtype == np.float64:
                         hcore[kn] += vppnl.real
+                        hcore[kn] += vppnl.real.transpose(0,2,1)
                     else:
                         hcore[kn] += vppnl
+                        hcore[kn] += vppnl.conj().transpose(0,2,1)
         hcore[:,:,p0:p1] -= h1[:,:,p0:p1]
         hcore[:,:,:,p0:p1] -= h1[:,:,p0:p1].transpose(0,1,3,2).conj()
         return hcore

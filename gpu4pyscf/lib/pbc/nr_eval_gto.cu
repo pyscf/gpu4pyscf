@@ -67,7 +67,7 @@ void _cart_gto_ip2(double gto[], double gx[], double gy[], double gz[],
 
 __global__
 static void _cart_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
-                                int ngrids, int nao, double *rcut)
+                                size_t ngrids, int nao, double *rcut)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (grid_id >= ngrids) {
@@ -167,7 +167,7 @@ static void _cart_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
 
 __global__
 static void _cart_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
-                                int ngrids, int nao, double *rcut)
+                                size_t ngrids, int nao, double *rcut)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (grid_id >= ngrids) {
@@ -409,7 +409,7 @@ static void _cart_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
 
 __global__
 static void _cart_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
-                             int ngrids, int nao, double *rcut)
+                             size_t ngrids, int nao, double *rcut)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (grid_id >= ngrids) {
@@ -503,14 +503,14 @@ static void _cart_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
     for (int n = 0; n < n_cart_max; ++n) {
         if (n >= nf) break;
         for (int ix = 0; ix < 6; ++ix) {
-            out_x[ix*nao*ngrids+n*ngrids] = gto[n*6+ix];
+            out_x[(ix*nao+n)*ngrids] = gto[n*6+ix];
         }
     }
 }
 
 __global__
 static void _sph_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
-                               int ngrids, int nao, double *rcut)
+                               size_t ngrids, int nao, double *rcut)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (grid_id >= ngrids) {
@@ -642,7 +642,7 @@ static void _sph_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
 
 __global__
 static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
-                               int ngrids, int nao, double *rcut)
+                               size_t ngrids, int nao, double *rcut)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (grid_id >= ngrids) {
@@ -914,7 +914,7 @@ static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
 
 __global__
 static void _sph_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
-                            int ngrids, int nao, double *rcut)
+                            size_t ngrids, int nao, double *rcut)
 {
     int grid_id = blockIdx.x * blockDim.x + threadIdx.x;
     if (grid_id >= ngrids) {

@@ -67,7 +67,7 @@ class KnownValues(unittest.TestCase):
         with lib.temporary_env(numint, MIN_BLK_SIZE=1024):
             dat = krhf_gpu.get_hcore(cell, kpts)
             ref = krhf_cpu.get_hcore(cell, kpts)
-            assert abs(dat.get() - ref).max() < 1e-9
+            assert abs(dat.get() - ref).max() < 1e-8
 
             hcore_generator_gpu = krhf_gpu.Gradients(cell.KRHF(kpts=kpts)).hcore_generator()
             hcore_generator_cpu = krhf_cpu.Gradients(cell.KRHF(kpts=kpts)).hcore_generator()
