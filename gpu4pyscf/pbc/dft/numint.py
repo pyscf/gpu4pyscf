@@ -86,7 +86,7 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
     t0 = log.init_timer()
     assert deriv <= 2
     if opt is None:
-        opt = _GTOvalOpt(cell, kpts, deriv=deriv).build()
+        opt = _GTOvalOpt(cell, kpts, deriv=deriv)
     else:
         assert kpts is opt.kpts
     bvkcell = opt.bvkcell
@@ -129,9 +129,6 @@ class _GTOvalOpt:
         self.bvk_kmesh = bvk_kmesh
         self.deriv = deriv
 
-    def build(self):
-        cell = self.cell
-        kpts = self.kpts
         sorted_cell, ao_idx, _, uniq_l_ctr, _, bas_mapping = group_basis(
             cell, tile=1, return_bas_mapping=True, sparse_coeff=True)
         uniq_l = uniq_l_ctr[:,0]
@@ -141,10 +138,9 @@ class _GTOvalOpt:
         self.sorted_cell = sorted_cell
         self.ao_idx = ao_idx
         self.bas_mapping = bas_mapping
-        rcut = _estimate_rcut(sorted_cell, self.deriv)
+        rcut = _estimate_rcut(sorted_cell, deriv)
         self.bas_rcut = cp.asarray(rcut)
 
-        bvk_kmesh = self.bvk_kmesh
         if bvk_kmesh is None:
             if kpts is None:
                 bvk_kmesh = np.ones(3, dtype=np.int32)
@@ -614,7 +610,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         if kpts is not None:
             kpts = kpts.reshape(-1, 3)
 
-        eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=deriv).build()
+        eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=deriv)
         for ip0, ip1 in lib.prange(0, ngrids, blksize):
             coords = grids_coords[ip0:ip1]
             weight = grids_weights[ip0:ip1]

@@ -57,7 +57,7 @@ class KnownValues(unittest.TestCase):
         mf._numint = multigrid.MultiGridNumInt(cell_orth)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
-        self.assertAlmostEqual(abs(g - ref).max(), 5)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
     @unittest.skip('pyscf multigrid bug')
     def test_lda_grad_nonorth(self):
@@ -76,7 +76,7 @@ class KnownValues(unittest.TestCase):
         mf._numint = multigrid.MultiGridNumInt(cell_orth)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
-        self.assertAlmostEqual(abs(g - ref).max(), 5)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
     @unittest.skip('pyscf multigrid bug')
     def test_gga_grad_nonorth(self):
