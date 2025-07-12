@@ -609,3 +609,33 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
 
     return output
 
+def example_krylov_solver():
+
+    cp.random.seed(42)
+    A_size = 1000
+    n_vec = 5
+    A = cp.random.rand(A_size,A_size)*0.01
+    A = A + A.T
+    scaling = 30
+    cp.fill_diagonal(A, (cp.random.rand(A_size)+2) * scaling)
+    omega_shift = (cp.random.rand(n_vec)+2) * scaling
+    rhs = cp.random.rand(n_vec, A_size) * scaling
+
+    def matrix_vector_product(x):
+        return x.dot(A)
+
+    hdiag = cp.diag(A)
+
+    eigenvalues, eigenvecters = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+                            problem_type='eigenvalue', n_states=5,
+                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
+
+    solution_vectors = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+                            problem_type='linear', rhs=rhs,
+                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
+    
+    solution_vectors_shifted = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+                            problem_type='shifted_linear', rhs=rhs, omega_shift=omega_shift,
+                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
+    
+    return eigenvalues, eigenvecters, solution_vectors, solution_vectors_shifted
