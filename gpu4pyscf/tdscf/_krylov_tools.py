@@ -17,7 +17,7 @@ import sys
 import scipy.linalg
 
 from gpu4pyscf.tdscf import math_helper
-from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import logger, cusolver
 from functools import partial
 from pyscf.data.nist import HARTREE2EV
 
@@ -34,6 +34,15 @@ def _time_add(log, t_total, t_start):
 
 def _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_precond, t_fill_holder, t_total):
     '''
+    This function prints out the time and percentage of each submodule
+
+    Args:
+    t_xxxx: 3-element list, [<cpu time>, <wall time>, <gpu time>]
+            each t_xxxx is a timer, the time profiling for each submodule in krylov_solver
+            for example, t_mvp is the time profiling for matrix vector product
+
+    example output:
+
     Timing breakdown:
                             CPU(sec)  wall(sec)    GPU(ms) | Percentage 
     mat vec product            3.61       3.67    8035.68    42.9   42.7   93.6
@@ -54,7 +63,7 @@ def _time_profiling(log, t_mvp, t_subgen, t_solve_sub, t_sub2full, t_precond, t_
 
     t_sum = [t_mvp[i] + t_subgen[i] + t_solve_sub[i] + t_sub2full[i] + t_precond[i] + t_fill_holder[i] for i in range(len(t_total))] 
 
-    # 计算并打印各计时器
+    ''' also calculate the time percentage for each timer '''
     timers = {
         'mat vec product':t_mvp,
         'proj subspace':  t_subgen,
@@ -154,7 +163,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                     AX = XΩ 
         or linear system, return X
                     AX = rhs.
-        or shifted linear system, return X
+        or shifted linear system (Green's function), return X
                  AX - XΩ = rhs, where Ω is a diagonal matrix. 
 
     Theory:
@@ -185,12 +194,19 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             function to generate initial guess
         precond_fn: function
             function to apply preconditioner
-        rhs: 2D array
-            right hand side of the linear system
-        omega_shift: 1D array
-            diagonal of the shift matrix
-        n_states: int
-            number of states to be solved
+
+        -- for eigenvalue problem:
+            n_states: int
+                number of states to be solved, required, default 20
+
+        -- for linear and shifted_linear problem:
+            rhs: 2D array
+                right hand side of the linear system, required 
+
+        -- for shifted_linear problem:
+            omega_shift: 1D array
+                diagonal of the shift matrix, required 
+
         conv_tol: float
             convergence tolerance
         max_iter: int
@@ -367,8 +383,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 omega, x = cp.linalg.eigh(sub_A)
             else:
                 ''' solve ax=sxΩ 
-                TODO need precondition step: s/d first'''
+                # TODO need precondition step: s/d first'''
                 omega, x = scipy.linalg.eigh(sub_A.get(), overlap_s.get())
+                # omega, x = cusolver.eigh(sub_A, overlap_s)
                 omega = cp.asarray(omega)
                 x = cp.asarray(x)
 
