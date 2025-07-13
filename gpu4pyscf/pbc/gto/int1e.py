@@ -30,163 +30,46 @@ from gpu4pyscf.pbc.df.int3c2e import (
 
 __all__ = [
     'int1e_ovlp',
-    'int1e_ipovlp',
     'int1e_kin',
+    'int1e_ipovlp',
     'int1e_ipkin',
 ]
 
 libpbc.PBCint1e_ovlp.restype = ctypes.c_int
+libpbc.PBCint1e_kin.restype = ctypes.c_int
+libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
+libpbc.PBCint1e_ipkin.restype = ctypes.c_int
 
 def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
-    if opt is None:
-        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
-    else:
-        assert kpts is opt.kpts
-
-    sorted_cell = opt.sorted_cell
-    int1e_envs = opt.int1e_envs
-    nao_cart, nao = opt.coeff.shape
-    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs()
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table()
-    bvk_kmesh = opt.bvk_kmesh
-    bvk_ncells = np.prod(bvk_kmesh)
-    out = cp.empty((bvk_ncells, nao_cart, nao_cart))
-    err = libpbc.PBCint1e_ovlp(
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-        sorted_cell._env.ctypes)
-    if err != 0:
-        raise RuntimeError('int1e_ovlp failed')
-
-    out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
-    out = sandwich_dot(out, asarray(opt.coeff))
-
-    if kpts is not None:
-        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-        expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
-        out = contract('lk,lpq->kpq', expLk, out)
-    return out
+    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
+    out = opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
+    return out[:,0]
 
 def int1e_kin(cell, kpts=None, bvk_kmesh=None, opt=None):
-    if opt is None:
-        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
-    else:
-        assert kpts is opt.kpts
-
-    sorted_cell = opt.sorted_cell
-    int1e_envs = opt.int1e_envs
-    nao_cart, nao = opt.coeff.shape
-    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs()
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table(deriv=(2,0))
-    bvk_kmesh = opt.bvk_kmesh
-    bvk_ncells = np.prod(bvk_kmesh)
-    out = cp.empty((bvk_ncells, nao_cart, nao_cart))
-    err = libpbc.PBCint1e_kin(
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-        sorted_cell._env.ctypes)
-    if err != 0:
-        raise RuntimeError('int1e_kin failed')
-
-    out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
-    out = sandwich_dot(out, asarray(opt.coeff))
-
-    if kpts is not None:
-        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-        expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
-        out = contract('lk,lpq->kpq', expLk, out)
-    return out
+    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
+    out = opt.intor('PBCint1e_kin', 1, 1, (2, 0))
+    return out[:,0]
 
 def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
-    if opt is None:
-        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
-    else:
-        assert kpts is opt.kpts
-
-    sorted_cell = opt.sorted_cell
-    int1e_envs = opt.int1e_envs
-    nao_cart, nao = opt.coeff.shape
-    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs(hermi=0)
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table((1,0), 18)
-    bvk_kmesh = opt.bvk_kmesh
-    bvk_ncells = np.prod(bvk_kmesh)
-    out = cp.empty((bvk_ncells, 3, nao_cart, nao_cart))
-    err = libpbc.PBCint1e_ipovlp(
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-        sorted_cell._env.ctypes)
-    if err != 0:
-        raise RuntimeError('int1e_ipovlp failed')
-
-    out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), asarray(opt.coeff))
-    out = out.reshape(bvk_ncells, 3, nao, nao)
-
-    if kpts is not None:
-        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-        expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
-        out = contract('lk,lxpq->kxpq', expLk, out)
+    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
+    out = opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
     return out
 
 def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, opt=None):
+    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
+    out = opt.intor('PBCint1e_ipkin', 0, 3, (3, 0))
+    return out
+
+def _check_opt(cell, kpts, bvk_kmesh, opt):
     if opt is None:
         opt = _Int1eOpt(cell, kpts, bvk_kmesh)
     else:
         assert kpts is opt.kpts
-
-    sorted_cell = opt.sorted_cell
-    int1e_envs = opt.int1e_envs
-    nao_cart, nao = opt.coeff.shape
-    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs(hermi=0)
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table((3,0), 18)
-    bvk_kmesh = opt.bvk_kmesh
-    bvk_ncells = np.prod(bvk_kmesh)
-    out = cp.empty((bvk_ncells, 3, nao_cart, nao_cart))
-    err = libpbc.PBCint1e_ipkin(
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-        sorted_cell._env.ctypes)
-    if err != 0:
-        raise RuntimeError('int1e_ipkin failed')
-
-    out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), asarray(opt.coeff))
-    out = out.reshape(bvk_ncells, 3, nao, nao)
-
-    if kpts is not None:
-        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
-        expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
-        out = contract('lk,lxpq->kxpq', expLk, out)
-    return out
+    return opt
 
 class _Int1eOpt:
     def __init__(self, cell, kpts=None, bvk_kmesh=None):
+        self.cell = cell
         sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
         uniq_l = uniq_l_ctr[:,0]
         lmax = uniq_l.max()
@@ -298,3 +181,45 @@ class _Int1eOpt:
                 gout_stride_lookup[li, lj] = THREADS // nsp_per_block
                 max_shm_size = max(max_shm_size, nsp_per_block*unit*8)
         return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
+
+    def intor(self, kern, hermi, comp, deriv_ij):
+        if comp == 1:
+            gout_width = 36
+        else:
+            gout_width = 18
+
+        sorted_cell = self.sorted_cell
+        int1e_envs = self.int1e_envs
+        nao_cart, nao = self.coeff.shape
+        bas_ij_idx, shl_pair_offsets = self.generate_shl_pairs(hermi)
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        gout_stride_lookup, shm_size = self.create_gout_stride_lookup_table(
+            deriv_ij, gout_width)
+        bvk_kmesh = self.bvk_kmesh
+        bvk_ncells = np.prod(bvk_kmesh)
+        out = cp.empty((bvk_ncells, comp, nao_cart, nao_cart))
+        drv = getattr(libpbc, kern)
+        err = drv(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
+            ctypes.c_int(nbatches_shl_pair),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
+            sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
+            sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
+            sorted_cell._env.ctypes)
+        if err != 0:
+            raise RuntimeError(f'{kern} failed')
+
+        if hermi == 1:
+            assert comp == 1
+            out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
+        out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), self.coeff)
+        out = out.reshape(bvk_ncells, comp, nao, nao)
+
+        if self.kpts is not None:
+            bvkmesh_Ls = translation_vectors_for_kmesh(self.cell, bvk_kmesh, True)
+            expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(self.kpts.T)))
+            out = contract('lk,lxpq->kxpq', expLk, out)
+        return out
