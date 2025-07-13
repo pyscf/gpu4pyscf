@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+import pytest
 import numpy as np
 import cupy as cp
 import pyscf

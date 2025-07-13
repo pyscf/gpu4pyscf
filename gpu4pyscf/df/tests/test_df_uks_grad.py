@@ -16,6 +16,7 @@ import pyscf
 import cupy
 import numpy as np
 import unittest
+import pytest
 from gpu4pyscf.dft import uks
 
 '''
