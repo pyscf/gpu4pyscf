@@ -125,7 +125,7 @@ def benchmark_with_cpu(mol, xc, nstates=3, lindep=1.0e-12, tda=False):
 
 def benchmark_with_finite_diff(
         mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False):
-    
+
     mol = mol_input.copy()
     mf = dft.RKS(mol, xc=xc).to_gpu()
     mf.grids.level = 9
@@ -249,6 +249,7 @@ class KnownValues(unittest.TestCase):
                         [-2.9109356350014e-16, -7.2934178436021e-02, -5.6911794009284e-02]]),
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @pytest.mark.slow
     def test_grad_camb3lyp_tddft_singlet_numerical(self):
         _check_grad(mol, xc="camb3lyp", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 

@@ -247,6 +247,7 @@ class KnownValues(unittest.TestCase):
                         [ 1.2985251627181e-15, -7.0426620850669e-02, 3.2232412031018e-02]])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @pytest.mark.slow
     def test_grad_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, tda=True, method="numerical")
 

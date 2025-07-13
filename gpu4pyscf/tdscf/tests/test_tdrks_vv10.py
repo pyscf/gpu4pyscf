@@ -184,6 +184,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
 
+    @pytest.mark.slow
     def test_wb97xv_unrestricted_tddft(self):
         ### Q-Chem input
         # $rem
