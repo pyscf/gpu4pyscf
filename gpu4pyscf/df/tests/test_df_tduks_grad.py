@@ -233,6 +233,7 @@ def _check_grad(mol, tol=1e-6, xc="b3lyp", disp=None, tda=False, method="cpu"):
 
 
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_grad_svwn_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="svwn", tda=True, method="numerical")
     # def test_grad_svwn_tdhf_spinconserve_numerical(self):
