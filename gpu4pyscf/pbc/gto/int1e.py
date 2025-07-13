@@ -25,7 +25,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
 from gpu4pyscf.pbc.df.int3c2e import (
-    _estimate_shl_pairs_per_block, fill_triu_bvk_conj
+    _estimate_shl_pairs_per_block, fill_triu_bvk_conj, LMAX, L_AUX_MAX, THREADS
 )
 
 __all__ = [
@@ -37,23 +37,17 @@ __all__ = [
 
 libpbc.PBCint1e_ovlp.restype = ctypes.c_int
 
-LMAX = 4
-THREADS = 256
-GOUT_WIDTH = 43
-
 def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
-    '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     if opt is None:
-        opt = _Int1eOpt(cell, kpts, bvk_kmesh, hermi=1)
+        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
     else:
         assert kpts is opt.kpts
 
     sorted_cell = opt.sorted_cell
     int1e_envs = opt.int1e_envs
-    shl_pair_offsets = opt.shl_pair_offsets
-    bas_ij_idx = opt.bas_ij_idx
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
     nao_cart, nao = opt.coeff.shape
+    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs()
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
     gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table()
     bvk_kmesh = opt.bvk_kmesh
     bvk_ncells = np.prod(bvk_kmesh)
@@ -69,7 +63,7 @@ def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
         sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
         sorted_cell._env.ctypes)
     if err != 0:
-        raise RuntimeError('fill_int2c2e failed')
+        raise RuntimeError('int1e_ovlp failed')
 
     out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
     out = sandwich_dot(out, asarray(opt.coeff))
@@ -80,19 +74,120 @@ def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
         out = contract('lk,lpq->kpq', expLk, out)
     return out
 
-def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None):
-    pass
+def int1e_kin(cell, kpts=None, bvk_kmesh=None, opt=None):
+    if opt is None:
+        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
+    else:
+        assert kpts is opt.kpts
 
-def int1e_kin(cell, kpts=None, bvk_kmesh=None):
-    pass
+    sorted_cell = opt.sorted_cell
+    int1e_envs = opt.int1e_envs
+    nao_cart, nao = opt.coeff.shape
+    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs()
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table(deriv=(2,0))
+    bvk_kmesh = opt.bvk_kmesh
+    bvk_ncells = np.prod(bvk_kmesh)
+    out = cp.empty((bvk_ncells, nao_cart, nao_cart))
+    err = libpbc.PBCint1e_kin(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
+        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
+        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
+        sorted_cell._env.ctypes)
+    if err != 0:
+        raise RuntimeError('int1e_kin failed')
 
-def int1e_ipkin(cell, kpts=None, bvk_kmesh=None):
-    pass
+    out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
+    out = sandwich_dot(out, asarray(opt.coeff))
+
+    if kpts is not None:
+        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+        expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
+        out = contract('lk,lpq->kpq', expLk, out)
+    return out
+
+def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
+    if opt is None:
+        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
+    else:
+        assert kpts is opt.kpts
+
+    sorted_cell = opt.sorted_cell
+    int1e_envs = opt.int1e_envs
+    nao_cart, nao = opt.coeff.shape
+    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs(hermi=0)
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table((1,0), 18)
+    bvk_kmesh = opt.bvk_kmesh
+    bvk_ncells = np.prod(bvk_kmesh)
+    out = cp.empty((bvk_ncells, 3, nao_cart, nao_cart))
+    err = libpbc.PBCint1e_ipovlp(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
+        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
+        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
+        sorted_cell._env.ctypes)
+    if err != 0:
+        raise RuntimeError('int1e_ipovlp failed')
+
+    out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), asarray(opt.coeff))
+    out = out.reshape(bvk_ncells, 3, nao, nao)
+
+    if kpts is not None:
+        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+        expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
+        out = contract('lk,lxpq->kxpq', expLk, out)
+    return out
+
+def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, opt=None):
+    if opt is None:
+        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
+    else:
+        assert kpts is opt.kpts
+
+    sorted_cell = opt.sorted_cell
+    int1e_envs = opt.int1e_envs
+    nao_cart, nao = opt.coeff.shape
+    bas_ij_idx, shl_pair_offsets = opt.generate_shl_pairs(hermi=0)
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    gout_stride_lookup, shm_size = opt.create_gout_stride_lookup_table((3,0), 18)
+    bvk_kmesh = opt.bvk_kmesh
+    bvk_ncells = np.prod(bvk_kmesh)
+    out = cp.empty((bvk_ncells, 3, nao_cart, nao_cart))
+    err = libpbc.PBCint1e_ipkin(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
+        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
+        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
+        sorted_cell._env.ctypes)
+    if err != 0:
+        raise RuntimeError('int1e_ipkin failed')
+
+    out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), asarray(opt.coeff))
+    out = out.reshape(bvk_ncells, 3, nao, nao)
+
+    if kpts is not None:
+        bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+        expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
+        out = contract('lk,lxpq->kxpq', expLk, out)
+    return out
 
 class _Int1eOpt:
-    def __init__(self, cell, kpts=None, bvk_kmesh=None, hermi=1):
+    def __init__(self, cell, kpts=None, bvk_kmesh=None):
         sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
-        l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         uniq_l = uniq_l_ctr[:,0]
         lmax = uniq_l.max()
         assert lmax <= LMAX
@@ -106,6 +201,7 @@ class _Int1eOpt:
                 bvk_kmesh = np.ones(3, dtype=np.int32)
             else:
                 bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        self.kpts = kpts
         self.bvk_kmesh = bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)
         if bvk_ncells == 1:
@@ -116,7 +212,10 @@ class _Int1eOpt:
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
 
-        Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
+        pcell = cell.copy()
+        pcell.a = bvkcell.lattice_vectors()
+        pcell.unit = 'Bohr'
+        Ls = asarray(pcell.get_lattice_Ls(rcut=cell.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
 
@@ -130,9 +229,13 @@ class _Int1eOpt:
             _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
             ao_loc_gpu.data.ptr, Ls.data.ptr,
         )
-        int1e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
+        int1e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc_gpu, Ls)
         self.int1e_envs = int1e_envs
 
+    def generate_shl_pairs(self, hermi=1):
+        sorted_cell = self.sorted_cell
+        l_ctr_offsets = np.append(0, np.cumsum(self.l_ctr_counts))
+        uniq_l = self.uniq_l_ctr[:,0]
         bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
         shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
         sp0 = sp1 = 0
@@ -142,6 +245,9 @@ class _Int1eOpt:
             ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
         else:
             ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
+        bvk_ncells = np.prod(self.bvk_kmesh)
+        img = cp.arange(bvk_ncells, dtype=np.int32)
+        img_offsets = img * nbas
         for i, j in ij_tasks:
             li = uniq_l[i]
             lj = uniq_l[j]
@@ -149,13 +255,12 @@ class _Int1eOpt:
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
             ish = cp.arange(ish0, ish1, dtype=np.int32)
             jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
-            img = cp.arange(bvk_ncells, dtype=np.int32)
             ijsh = ish[:,None] * (nbas*bvk_ncells) + jsh
             if hermi and i == j:
                 ijsh = ijsh[cp.tril_indices(ish1-ish0)]
             else:
                 ijsh = ijsh.ravel()
-            idx = (img[:,None] * nbas + ijsh).ravel()
+            idx = (img_offsets[:,None] + ijsh).ravel()
             nshl_pair = len(idx)
             bas_ij_idx.append(idx)
             sp0, sp1 = sp1, sp1 + nshl_pair
@@ -165,26 +270,25 @@ class _Int1eOpt:
         shl_pair_offsets.append(np.array([sp1], dtype=np.int32))
         shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
         bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
-        self.shl_pair_offsets = shl_pair_offsets
-        self.bas_ij_idx = bas_ij_idx
+        return bas_ij_idx, shl_pair_offsets
 
-    def create_gout_stride_lookup_table(self, lmax=None, deriv=None):
+    def create_gout_stride_lookup_table(self, deriv=None, gout_width=36):
+        # gout_width should be identical to the setting in cuda kernel
         # based on the shm_size, find optimal gout_stride for each (li,lj)
         # pattern, store them in the gout_stride_lookup
-        if lmax is None:
-            lmax = self.uniq_l_ctr[:,0].max()
         if deriv is None:
             deriv = (0, 0)
         i_inc, j_inc = deriv
-        gout_stride_lookup = np.empty([LMAX+1,LMAX+1], dtype=np.int32)
-        gout_width = GOUT_WIDTH # should be identical to the setting fill_int2c2e.cu
+        lmax = self.uniq_l_ctr[:,0].max()
+        gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
+        gout_width = gout_width
         shm_size = SHM_SIZE
         ls = np.arange(lmax+1)
         nf = (ls+1) * (ls+2) // 2
         max_shm_size = 0
         for li in range(lmax+1):
             for lj in range(lmax+1):
-                unit = (li+1+i_inc)*(lj+1+i_inc)*3
+                unit = (li+1+i_inc)*(lj+1+j_inc)*3 + 4
                 nsp_max = _nearest_power2(shm_size // (unit*8))
                 gout_size = nf[li] * nf[lj]
                 gout_stride = (gout_size+gout_width-1) / gout_width
@@ -194,30 +298,3 @@ class _Int1eOpt:
                 gout_stride_lookup[li, lj] = THREADS // nsp_per_block
                 max_shm_size = max(max_shm_size, nsp_per_block*unit*8)
         return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
-
-
-if __name__ == '__main__':
-    import pyscf
-    cell = pyscf.M(
-        atom='''C1  1.3    .2       .3
-                C2  .19   .1      1.1
-                C3  0.  0.  0.
-        ''',
-        precision = 1e-8,
-        a=np.diag([2.5, 1.9, 2.2])*3,
-        #basis='def2-tzvpp',
-        basis=[[0, [1,1]]],
-    )
-
-    kmesh = [6, 1, 1]
-    kpts = cell.make_kpts(kmesh)
-    pcell = cell.copy()
-    pcell.precision = 1e-14
-    pcell.rcut = 50
-    ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
-
-    dat = int1e_ovlp(cell).get()[0]
-    assert abs(dat - ref[0]).max() < 1e-10
-
-    dat = int1e_ovlp(cell, kpts=kpts).get()
-    assert abs(dat - ref).max() < 1e-10
