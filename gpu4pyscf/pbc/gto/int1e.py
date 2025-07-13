@@ -83,7 +83,7 @@ class _Int1eOpt:
             if kpts is None:
                 bvk_kmesh = np.ones(3, dtype=np.int32)
             else:
-                bvk_kmesh = kpts_to_kmesh(cell, kpts)
+                bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1, 3))
         self.kpts = kpts
         self.bvk_kmesh = bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)
@@ -220,6 +220,7 @@ class _Int1eOpt:
 
         if self.kpts is not None:
             bvkmesh_Ls = translation_vectors_for_kmesh(self.cell, bvk_kmesh, True)
-            expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(self.kpts.T)))
+            kpts = self.kpts.reshape(-1, 3)
+            expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
             out = contract('lk,lxpq->kxpq', expLk, out)
         return out
