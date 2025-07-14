@@ -126,6 +126,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
 
+    @pytest.mark.slow
     def test_nlc_dense_grid_with_response(self):
         mf = make_mf(mol, nlc_atom_grid_dense)
         dm = mf.make_rdm1()
@@ -176,6 +177,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-5
 
+    @pytest.mark.slow
     def test_wb97xv_dense_grid_with_response(self):
         mf = make_mf(mol, nlc_atom_grid_dense)
         grad_obj = mf.Gradients()

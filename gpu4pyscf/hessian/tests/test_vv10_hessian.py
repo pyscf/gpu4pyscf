@@ -16,6 +16,7 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
+import pytest
 from gpu4pyscf.dft import rks
 from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_vnlc_deriv1_numerical, \
                                   _get_enlc_deriv2, _get_enlc_deriv2_numerical, \
@@ -105,6 +106,7 @@ def analytical_d2enlc(mf):
     return analytical_hessian
 
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_vv10_only_hessian_direct(self):
         mf = make_mf(mol, vv10_only = True)
 
@@ -180,6 +182,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 1e-5
 
+    @pytest.mark.slow
     def test_vv10_only_hessian_density_fitting(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True)
 
@@ -255,6 +258,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 2e-5
 
+    @pytest.mark.slow
     def test_wb97xv_hessian(self):
         mf = make_mf(mol, vv10_only = False, density_fitting = True)
         # reference_hessian = numerical_d2enlc(mf)
@@ -409,6 +413,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 2e-4
 
+    @pytest.mark.slow
     def test_vv10_energy_second_derivative(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True)
         hess_obj = mf.Hessian()

@@ -261,6 +261,7 @@ class KnownValues(unittest.TestCase):
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
+    @pytest.mark.slow
     def test_almo_eda_2_wb97xv_svp(self):
         ### Q-Chem input difference
         # $rem
@@ -295,6 +296,7 @@ class KnownValues(unittest.TestCase):
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
+    @pytest.mark.slow
     def test_almo_eda_2_wb97xv_svp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
@@ -325,6 +327,7 @@ class KnownValues(unittest.TestCase):
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
+    @pytest.mark.slow
     def test_almo_eda_2_hf_tzvpp(self):
         ### Q-Chem input difference
         # $molecule
@@ -444,6 +447,7 @@ class KnownValues(unittest.TestCase):
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
+    @pytest.mark.slow
     def test_almo_eda_2_wb97xv_tzvpp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
