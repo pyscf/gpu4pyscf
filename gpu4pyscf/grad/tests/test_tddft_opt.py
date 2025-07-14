@@ -57,17 +57,21 @@ class KnownValues(unittest.TestCase):
         assert mf.converged
         td = mf.TDA().set(nstates=3)
         td.kernel()
+
+        # TODO: store CPU results for comparison
         td_cpu = td.to_cpu()
         mol_gpu = optimize(td)
         mol_cpu = optimize(td_cpu)
         assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
+    @pytest.mark.slow
     def test_opt_rks_tda(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         assert mf.converged
         td = mf.TDA().set(nstates=3)
         td.kernel()
+        # TODO: store CPU results for comparison
         td_cpu = td.to_cpu()
         mol_gpu = optimize(td)
         mol_cpu = optimize(td_cpu)

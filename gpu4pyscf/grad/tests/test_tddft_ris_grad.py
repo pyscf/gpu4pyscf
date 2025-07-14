@@ -186,7 +186,7 @@ def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False):
 
 
 class KnownValues(unittest.TestCase):
-
+    @pytest.mark.slow
     def test_grad_pbe_tddft_singlet_numerical(self):
         _check_grad(mol, xc="pbe", tol=1e-4, tda=False)
 

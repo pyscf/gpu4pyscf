@@ -182,6 +182,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 1e-5
 
+    @pytest.mark.slow
     def test_vv10_only_hessian_density_fitting(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True)
 
