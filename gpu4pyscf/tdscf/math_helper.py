@@ -91,9 +91,9 @@ def matrix_power(S,a, epsilon=None):
     s,ket = cp.linalg.eigh(S)
     # s = s**a
     if epsilon:
+        if s[0] < epsilon:
+            raise LinearDependencyError(f'Matrix is singular. Min eigen = {s[0]}')
         valid_indices = s >= epsilon
-        if len(valid_indices) != len(s):
-            pass
         s = s[valid_indices]
         ket = ket[:, valid_indices]
 
@@ -580,7 +580,7 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, k):
     B[half_size:,:half_size] = -pi[:,:]
     B[half_size:,half_size:] = -sigma[:,:]
     #A^-1/2
-    A_neg_tmp = matrix_power(A, -0.5)
+    A_neg_tmp = matrix_power(A, -0.5, 1e-14)
     M = cp.dot(A_neg_tmp, B)
     M = cp.dot(M,A_neg_tmp )
     omega, Z = cp.linalg.eigh(M)
@@ -684,3 +684,6 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
             pass
 
     return sub_A_holder
+
+class LinearDependencyError(RuntimeError):
+    pass

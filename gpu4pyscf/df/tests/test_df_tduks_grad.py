@@ -127,7 +127,7 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc_a, nvir_a, nocc_b, nvir_b, grad_
         y_bb = y_bb.reshape(nocc_b, nvir_b)
         x = (x_aa, x_bb)
         y = (y_aa, y_bb)
-    
+
         de_td = grad_elec(tdgrad, (x, y))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
@@ -233,6 +233,7 @@ def _check_grad(mol, tol=1e-6, xc="b3lyp", disp=None, tda=False, method="cpu"):
 
 
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_grad_svwn_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="svwn", tda=True, method="numerical")
     # def test_grad_svwn_tdhf_spinconserve_numerical(self):
@@ -243,6 +244,7 @@ class KnownValues(unittest.TestCase):
     # def test_grad_b3lyp_tdhf_spinconserve_numerical(self):
     #     _check_grad(mol, tol=1e-4, xc="b3lyp", tda=False, method="numerical")
 
+    @pytest.mark.slow
     def test_grad_camb3lyp_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="camb3lyp", tda=True, method="numerical")
     # def test_grad_camb3lyp_tdhf_spinconserve_numerical(self):
@@ -250,6 +252,8 @@ class KnownValues(unittest.TestCase):
 
     # def test_grad_tpss_tda_spinconserve_numerical(self):
     #     _check_grad(mol, tol=1e-4, xc="tpss", tda=True, method="numerical")
+
+    @pytest.mark.slow
     def test_grad_tpss_tdhf_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="tpss", tda=False, method="numerical")
 

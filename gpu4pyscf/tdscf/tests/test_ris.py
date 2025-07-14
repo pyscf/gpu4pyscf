@@ -51,9 +51,10 @@ class KnownValues(unittest.TestCase):
         H         -5.23998        4.31540        0.27138
         H         -3.22959        2.35981       -0.24953
         '''
-        mol = gto.M(atom=atom, basis='def2-svp', verbose=3)
-        mol.output = '/dev/null'  # Suppress excessive log output
-        cls.mol = mol.build()
+        mol = gto.M(atom=atom, basis='def2-svp',
+                    output = '/dev/null',  # Suppress excessive log output
+                    verbose=3)
+        cls.mol = mol
 
         # Initialize DFT calculations with different functionals
         cls.mf_pbe = rks.RKS(mol, xc='pbe').density_fit().to_gpu().run()
@@ -188,13 +189,13 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris get_ab method with wb97x functional"""
         mf = self.mf_wb97x
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=0, J_fit='sp', K_fit='sp', GS=False, single=False, conv_tol=1e-7)
+                      Ktrunc=0, J_fit='sp', K_fit='sp', GS=True, single=False, conv_tol=1e-7)
         td.kernel()  
         energies = td.energies.get()
         a,b = td.get_ab()
         e_ab = diagonalize(a, b, self.nstates)[0]*27.21138602
 
-        self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, 1) # TODO: change to PLACES
+        self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, 2) # TODO: change to PLACES
 
 
 if __name__ == "__main__":
