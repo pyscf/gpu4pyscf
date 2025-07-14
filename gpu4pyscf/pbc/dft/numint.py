@@ -188,7 +188,6 @@ class _GTOvalOpt:
         )
         gto_envs._env_ref_holder = (_atm, _bas, _env, ao_loc_gpu, Ls)
         self.gto_envs = gto_envs
-        return self
 
 def _estimate_rcut(cell, deriv=0):
     '''Analogous to pyscf.pbc.gto.eval_gto._estimate_rcut, improved value
