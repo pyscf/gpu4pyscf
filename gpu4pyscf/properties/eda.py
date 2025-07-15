@@ -998,17 +998,23 @@ def get_eda_charge_transfer_energy(mf_list, _make_mf, eda_cache):
     eda_cache["charge_transfer_energy"] = charge_transfer_energy
     return charge_transfer_energy
 
-def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_grid = (50,194), auxbasis = None,
-                             conv_tol = 1e-10, conv_tol_cpscf = 1e-8, max_cycle = 100, verbose = 4):
+def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
+                             xc = "wB97X-V", xc_grid = (99,590), nlc_grid = (50,194), auxbasis = None,
+                             conv_tol = 1e-10, conv_tol_cpscf = 1e-8, max_cycle = 100, verbose = 4,
+                             grid_response = False):
     """
     Main driver of absolutely localized molecular orbital (ALMO) energy decomposition analysis (EDA) version 2
 
     Args:
         mol_list: a list of pyscf.gto.mole.Mole objects, each mol is a fragment with atoms and basis functions specified
+        if_compute_gradient: whether to compute gradients of each fragment and the total system
         other: specification of SCF
 
     Returns:
-        a dict with EDA components in kJ/mol
+        (eda_result, dft_result)
+        eda_result: a dict with EDA components in kJ/mol
+        dft_result: a dict with field "energy", referring to fragments energies + total system energy (in order),
+                    and field "gradient", referring to corresponding gradients (in order), if if_compute_gradient is True
 
     Computation cost:
         n fragment SCF + 1 second order SCF for frozen terms + 1 constrained SCF for polarization term + 1 total SCF
@@ -1078,18 +1084,30 @@ def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_g
         else:
             return mf
 
+    def _get_gradient(mf):
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = grid_response
+        return grad_obj.kernel()
+
     n_frag = len(mol_list)
     mf_list = []
     frag_energy_list = []
+    frag_gradient_list = []
     for i_frag in range(n_frag):
         frag_i_mf, frag_i_energy = _make_mf(mol_list[i_frag])
+        mf_list.append(frag_i_mf)
+        frag_energy_list.append(float(frag_i_energy))
+        if if_compute_gradient:
+            frag_i_gradient = _get_gradient(frag_i_mf)
+            frag_gradient_list.append(frag_i_gradient)
 
         if hasattr(frag_i_mf, "with_df"):
             # This is a hack to save memory for df cderi, we will never need to build JK for fragments again
             frag_i_mf.with_df = None
 
-        mf_list.append(frag_i_mf)
-        frag_energy_list.append(frag_i_energy)
+    log = logger.new_logger(mf_list[0], verbose)
+    if if_compute_gradient:
+        log.note("Force decomposition analysis not supported, only fragment and total system force calculated.")
 
     eda_cache = {}
     eda_classical_electrostatic = get_eda_classical_electrostatic_energy(mf_list, _make_mf, eda_cache)
@@ -1101,12 +1119,17 @@ def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_g
     eda_frozen = eda_cache["total_frozen_energy"] - sum(frag_energy_list)
     eda_frozen_reminder = eda_frozen - eda_dispersion - eda_electrostatic
 
+    assert "mf_sum" in eda_cache
+    total_system_energy = float(eda_cache["total_system_energy"])
+    dft_result = { "energy" : frag_energy_list + [total_system_energy], "unit" : "au" }
+    if if_compute_gradient:
+        total_system_gradient = _get_gradient(eda_cache["mf_sum"])
+        dft_result["gradient"] = frag_gradient_list + [total_system_gradient]
+
     hartree_to_kjmol = 10**-3 * nist.HARTREE2J * nist.AVOGADRO
 
-    log = logger.new_logger(mf_list[0], verbose)
     for i_frag in range(len(frag_energy_list)):
         log.log(f"Fragment {i_frag} energy = {frag_energy_list[i_frag]:.10f} Hartree")
-    total_system_energy = eda_cache["total_system_energy"]
     log.log(f"Total system energy = {total_system_energy:.10f} Hartree")
     eda_total = total_system_energy - sum(frag_energy_list)
     log.log(f"EDA frozen energy = {eda_frozen:.10f} Hartree = {eda_frozen * hartree_to_kjmol:.10f} kJ/mol")
@@ -1130,4 +1153,4 @@ def eval_ALMO_EDA_2_energies(mol_list, xc = "wB97X-V", xc_grid = (99,590), nlc_g
         "charge transfer"         : float(eda_charge_transfer        ) * hartree_to_kjmol,
         "unit"                    : "kJ/mol",
     }
-    return eda_result
+    return eda_result, dft_result

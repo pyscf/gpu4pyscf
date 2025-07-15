@@ -206,8 +206,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         : -17.8500,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -150.6495465870, -114.9539939337, -128.3764068109, -393.9912209745 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_svp, xc = "HF")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_svp, xc = "HF")
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -222,6 +225,10 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
     def test_almo_eda_2_hf_svp_df(self):
         ### This is a consistent test, if you put these additional keywords into Q-Chem 6.1,
@@ -244,8 +251,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         : -17.847299267694556,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -150.64941120207857, -114.95392336587221, -128.3763244401833, -393.99089316822756 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_svp, xc = "HF", auxbasis = "def2-universal-jkfit")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_svp, xc = "HF", auxbasis = "def2-universal-jkfit")
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -260,6 +270,10 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
     def test_almo_eda_2_wb97xv_svp(self):
         ### Q-Chem input difference
@@ -278,8 +292,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         : -32.2513,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -151.3676763251, -115.5893121943, -128.7613734911, -395.7383799036 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_svp)
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_svp)
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -294,6 +311,11 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        print(test_dft_energies)
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
 
     def test_almo_eda_2_wb97xv_svp_df(self):
         ### All density fitting tests are consistent tests, see comment above
@@ -308,8 +330,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         : -32.24842196766683,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -151.36771262102798, -115.5893510822469, -128.76138318143654, -395.7384552467653 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_svp, auxbasis = "def2-universal-jkfit")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_svp, auxbasis = "def2-universal-jkfit")
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -324,6 +349,10 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
     def test_almo_eda_2_hf_tzvpp(self):
         ### Q-Chem input difference
@@ -361,8 +390,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         :  -78.9040,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -40.1985737780, -75.3997650604, -100.0524766223, -215.6747673743 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF")
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -377,6 +409,10 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
     def test_almo_eda_2_hf_tzvpp_df(self):
         ### All density fitting tests are consistent tests, see comment above
@@ -391,8 +427,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         :  -78.89903940457438,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -40.1985786985109, -75.39975636142482, -100.05247315769718, -215.67475041761023 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF", auxbasis = "def2-universal-jkfit")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_tzvpp, xc = "HF", auxbasis = "def2-universal-jkfit")
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -407,6 +446,10 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
 
     @pytest.mark.skip("Too slow, functionality roughly covered by corresponding density fitting test")
     def test_almo_eda_2_wb97xv_tzvpp(self):
@@ -427,8 +470,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         : -102.2918,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -40.5026792948, -75.7784565806, -100.4463700782, -216.7680668747 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp)
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_tzvpp)
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -443,6 +489,10 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
 
     def test_almo_eda_2_wb97xv_tzvpp_df(self):
         ### All density fitting tests are consistent tests, see comment above
@@ -457,8 +507,11 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         : -102.306297736508,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -40.502726568106056, -75.77847787861819, -100.44639685986992, -216.76815258352408 ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_tzvpp, auxbasis = "def2-universal-jkfit")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_tzvpp, auxbasis = "def2-universal-jkfit")
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -473,6 +526,10 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
     def test_almo_eda_2_pbe0_charged(self):
         ### Q-Chem input difference
@@ -505,8 +562,28 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         :  -81.9705,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -76.6561807725, -75.7235013652, -152.5839584027 ],
+            "gradient" : [
+                np.array([
+                    [ 0.0002753,   0.0041637,  -0.0022195,  -0.0022195],
+                    [ 0.0000000,  -0.0000000,   0.0039551,  -0.0039551],
+                    [-0.0000005,   0.0000002,   0.0000002,   0.0000002],
+                ]).T,
+                np.array([
+                    [ 0.0004203,  -0.0004203],
+                    [-0.0000452,   0.0000452],
+                    [-0.0001475,   0.0001475],
+                ]).T,
+                np.array([
+                    [-0.0104900,   0.0037940,   0.0139932,  -0.0037347,  -0.0004318,  -0.0031309],
+                    [ 0.0280038,  -0.0032517,  -0.0533465,  -0.0025257,   0.0287522,   0.0023679],
+                    [ 0.0014947,  -0.0009571,  -0.0065862,  -0.0001392,   0.0048620,   0.0013258],
+                ]).T,
+            ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0", if_compute_gradient = True)
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -521,6 +598,16 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-6
+
+        reference_dft_gradients = reference_dft_result["gradient"]
+        test_dft_gradients      = test_dft_result["gradient"]
+        assert len(reference_dft_gradients) == len(test_dft_gradients)
+        for reference_dft_gradient, test_dft_gradient in zip(reference_dft_gradients, test_dft_gradients):
+            assert np.max(np.abs(test_dft_gradient - reference_dft_gradient)) < 1e-6
 
     def test_almo_eda_2_pbe0_charged_df(self):
         ### All density fitting tests are consistent tests, see comment above
@@ -535,8 +622,32 @@ class KnownValues(unittest.TestCase):
             "charge transfer"         :  -81.97204066438793,
             "unit"                    : "kJ/mol",
         }
+        reference_dft_result = {
+            "energy" : [ -76.65622798813817, -75.72351533555, -152.5840193046801 ],
+            "gradient" : [
+                np.array([
+                    [ 2.74872178e-04, -8.17004852e-16, -4.69974993e-07],
+                    [ 4.18497282e-03, -2.21735663e-17,  1.64042142e-07],
+                    [-2.22999622e-03,  3.97325469e-03,  1.52931104e-07],
+                    [-2.22999622e-03, -3.97325469e-03,  1.52931104e-07],
+                ]),
+                np.array([
+                    [ 4.44095590e-04, -4.73412818e-05, -1.55244231e-04],
+                    [-4.44139825e-04,  4.72821205e-05,  1.55058695e-04],
+                ]),
+                np.array([
+                    [-0.01050011,  0.02803036,  0.00149239],
+                    [ 0.00381769, -0.00325474, -0.00095648],
+                    [ 0.01399252, -0.0533515 , -0.00658428],
+                    [-0.003747  , -0.00254602, -0.00013928],
+                    [-0.00040712,  0.02875082,  0.00485327],
+                    [-0.00315618,  0.00237103,  0.0013342 ],
+                ]),
+            ],
+        }
 
-        test_eda_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0", auxbasis = "def2-universal-jkfit")
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_charged, xc = "PBE0", auxbasis = "def2-universal-jkfit",
+                                                                    if_compute_gradient = True)
 
         for key in reference_eda_result.keys():
             assert key in test_eda_result
@@ -551,6 +662,16 @@ class KnownValues(unittest.TestCase):
                     f"term = {key}, ref = {reference_value}, test = {test_value}"
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
+
+        reference_dft_gradients = reference_dft_result["gradient"]
+        test_dft_gradients      = test_dft_result["gradient"]
+        assert len(reference_dft_gradients) == len(test_dft_gradients)
+        for reference_dft_gradient, test_dft_gradient in zip(reference_dft_gradients, test_dft_gradients):
+            assert np.max(np.abs(test_dft_gradient - reference_dft_gradient)) < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for ALMO EDA 2 energies")
