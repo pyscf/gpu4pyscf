@@ -26,6 +26,8 @@ from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from pyscf import ao2mo
+from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
+from functools import reduce
 
 
 CITATION_INFO = """
@@ -60,6 +62,41 @@ def get_memory_info(words):
     used_mem = total_mem - free_mem
     memory_info = f"{words} memory usage: {used_mem / 1024**3:.2f} GB / {total_mem / 1024**3:.2f} GB"
     return memory_info
+
+
+def _gen_ks_response(mf, mo_coeff=None, mo_occ=None,
+                      singlet=None, hermi=0, grids=None, max_memory=None, with_nlc=True):
+    if mo_coeff is None: mo_coeff = mf.mo_coeff
+    if mo_occ is None: mo_occ = mf.mo_occ
+    mol = mf.mol
+    
+    if grids is None:
+        grids = mf.grids
+    if grids and grids.coords is None:
+        grids.build(mol=mol, with_non0tab=False, sort_grids=True)
+    ni = mf._numint
+    ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
+
+    spin = 1
+    rho0, vxc, fxc = ni.cache_xc_kernel(
+        mol, grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
+    dm0 = None
+
+    fxc *= .5
+    def vind(dm1):
+        if hermi == 2:
+            v1 = cp.zeros_like(dm1)
+        else:
+            # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
+            v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, True,
+                                  rho0, vxc, fxc, max_memory=max_memory)
+            if mf.do_nlc():
+                if with_nlc:
+                    v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
+                else:
+                    logger.warn(mf, "NLC contribution in gen_response is NOT included")
+        return v1
+    return vind
 
 
 def release_memory():
@@ -125,7 +162,8 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
                     parse_arg=False,
                     spin=mol.spin,
                     charge=mol.charge,
-                    cart=mol.cart)
+                    cart=mol.cart,
+                    unit=mol.unit)
 
     auxmol_basis_keys = mol._basis.keys()
     auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
@@ -597,7 +635,7 @@ def get_ibja_MVP(T_ia):
 
     return ibja_MVP
 
-def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
+def get_ab(td, mf, J_fit, K_fit, theta, with_xc = False, mo_energy=None, mo_coeff=None, mo_occ=None, singlet=True):
     r'''A and B matrices for TDDFT response function.
 
     A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ai||jb)
@@ -668,9 +706,40 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
         eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
         eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
         return eri_mo
+    def get_erimo_ori():
+        eri = mol.intor('int2e_sph', aosym='s8')
+        eri= ao2mo.restore(1, eri, nao)
+        eri = cp.asarray(eri)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
+        return eri_mo
+    def get_erimo_omega_ori(omega):
+        with mol.with_range_coulomb(omega):
+            eri = mol.intor('int2e_sph', aosym='s8')
+            eri= ao2mo.restore(1, eri, nao)
+            eri = cp.asarray(eri)
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo.conj())
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo.conj())
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, mo)
+        eri_mo = eri_mo.reshape(nocc,nmo,nmo,nmo)
     def add_hf_(a, b, hyb=1):
         eri_mo_J = get_erimo(auxmol_J)
         eri_mo_K = get_erimo(auxmol_K)
+        if singlet:
+            a += cp.einsum('iabj->iajb', eri_mo_J[:nocc,nocc:,nocc:,:nocc]) * 2
+            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b += cp.einsum('iajb->iajb', eri_mo_J[:nocc,nocc:,:nocc,nocc:]) * 2
+            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * hyb
+        else:
+            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
+            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * hyb
+    def add_hf_ori_(a, b, hyb=1):
+        eri_mo_J = get_erimo_ori()
+        eri_mo_K = get_erimo_ori()
         if singlet:
             a += cp.einsum('iabj->iajb', eri_mo_J[:nocc,nocc:,nocc:,:nocc]) * 2
             a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * hyb
@@ -684,12 +753,109 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
         raise NotImplementedError("PCM TDDFT RIS is not supported")
 
     if isinstance(mf, scf.hf.KohnShamDFT):
-        add_hf_(a, b, hyb)
-        if omega != 0:  # For RSH
-            eri_mo_K = get_erimo_omega(auxmol_K, omega)
-            k_fac = alpha - hyb
-            a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
-            b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
+        if td.without_ris_approx:
+            add_hf_ori_(a, b, hyb)
+            if omega != 0:  # For RSH
+                eri_mo_K = get_erimo_omega_ori(omega)
+                k_fac = alpha - hyb
+                a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
+                b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
+        else:
+            add_hf_(a, b, hyb)
+            if omega != 0:  # For RSH
+                eri_mo_K = get_erimo_omega(auxmol_K, omega)
+                k_fac = alpha - hyb
+                a -= cp.einsum('ijba->iajb', eri_mo_K[:nocc,:nocc,nocc:,nocc:]) * k_fac
+                b -= cp.einsum('jaib->iajb', eri_mo_K[:nocc,nocc:,:nocc,nocc:]) * k_fac
+        if with_xc:
+            xctype = ni._xc_type(mf.xc)
+            grids = mf.grids
+            opt = getattr(ni, 'gdftopt', None)
+            if opt is None:
+                ni.build(mol, grids.coords)
+                opt = ni.gdftopt
+            _sorted_mol = opt._sorted_mol
+            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+            orbo = opt.sort_orbitals(orbo, axis=[0])
+            orbv = opt.sort_orbitals(orbv, axis=[0])
+            if xctype == 'LDA':
+                ao_deriv = 0
+                for ao, mask, weight, coords \
+                        in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                    mo_coeff_mask = mo_coeff[mask]
+                    rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                        mo_occ, mask, xctype, with_lapl=False)
+                    if singlet or singlet is None:
+                        fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                        wfxc = fxc[0,0] * weight
+                    else:
+                        fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                        wfxc = (fxc[0, 0, 0, 0] - fxc[1, 0, 0, 0]) * 0.5 * weight
+                    orbo_mask = orbo[mask]
+                    orbv_mask = orbv[mask]
+                    rho_o = contract('pr,pi->ri', ao, orbo_mask)
+                    rho_v = contract('pr,pi->ri', ao, orbv_mask)
+                    rho_ov = contract('ri,ra->ria', rho_o, rho_v)
+                    w_ov = contract('ria,r->ria', rho_ov, wfxc)
+                    iajb = contract('ria,rjb->iajb', rho_ov, w_ov) * 2
+                    a += iajb
+                    b += iajb
+
+            elif xctype == 'GGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                    mo_coeff_mask = mo_coeff[mask]
+                    rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                    mo_occ, mask, xctype, with_lapl=False)
+                    if singlet or singlet is None:
+                        fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                        wfxc = fxc * weight
+                    else:
+                        fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho)) * 0.5, deriv=2, xctype=xctype)[2]
+                        wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
+                    orbo_mask = orbo[mask]
+                    orbv_mask = orbv[mask]
+                    rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                    rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                    rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                    rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                    w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                    a += iajb
+                    b += iajb
+
+            elif xctype == 'HF':
+                pass
+
+            elif xctype == 'NLC':
+                pass # Processed later
+
+            elif xctype == 'MGGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+                    mo_coeff_mask = mo_coeff[mask]
+                    rho = ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask,
+                                    mo_occ, mask, xctype, with_lapl=False)
+                    if singlet or singlet is None:
+                        fxc = ni.eval_xc_eff(mf.xc, rho, deriv=2, xctype=xctype)[2]
+                        wfxc = fxc * weight
+                    else:
+                        fxc = ni.eval_xc_eff(mf.xc, cp.stack((rho, rho))*0.5, deriv=2, xctype=xctype)[2]
+                        wfxc = (fxc[0, :, 0, :] - fxc[1, :, 0, :]) * 0.5 * weight
+                    orbo_mask = orbo[mask]
+                    orbv_mask = orbv[mask]
+                    rho_o = contract('xpr,pi->xri', ao, orbo_mask)
+                    rho_v = contract('xpr,pi->xri', ao, orbv_mask)
+                    rho_ov = contract('xri,ra->xria', rho_o, rho_v[0])
+                    rho_ov[1:4] += contract('ri,xra->xria', rho_o[0], rho_v[1:4])
+                    tau_ov = contract('xri,xra->ria', rho_o[1:4], rho_v[1:4]) * .5
+                    rho_ov = cp.vstack([rho_ov, tau_ov[cp.newaxis]])
+                    w_ov = contract('xyr,xria->yria', wfxc, rho_ov)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov) * 2
+                    a += iajb
+                    b += iajb
 
         if mf.do_nlc():
             raise NotImplementedError('vv10 nlc not implemented in get_ab(). '
@@ -699,6 +865,36 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
         add_hf_(a, b)
 
     return a.get(), b.get()
+
+
+def as_scanner(td):
+    if isinstance(td, lib.SinglePointScanner):
+        return td
+
+    logger.info(td, 'Set %s as a scanner', td.__class__)
+    name = td.__class__.__name__ + TD_Scanner.__name_mixin__
+    return lib.set_class(TD_Scanner(td), (TD_Scanner, td.__class__), name)
+
+
+class TD_Scanner(lib.SinglePointScanner):
+    def __init__(self, td):
+        self.__dict__.update(td.__dict__)
+        self._scf = td._scf.as_scanner()
+
+    def __call__(self, mol_or_geom, **kwargs):
+        assert self.device == 'gpu'
+        if isinstance(mol_or_geom, gto.MoleBase):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+
+        mf_scanner = self._scf
+        mf_e = mf_scanner(mol)
+        self.kernel(**kwargs)
+        return mf_e + self.energies/HARTREE2EV
+
 
 class RisBase(lib.StreamObject):
     def __init__(self,
@@ -728,7 +924,6 @@ class RisBase(lib.StreamObject):
             mf = mf.copy()
             mf.mo_coeff = cp.asarray(mf.mo_coeff, dtype=cp.float32)
 
-        self.mf = mf
         self._scf = mf
         self.chkfile = mf.chkfile
         self.singlet = True # TODO: add R-T excitation.
@@ -736,6 +931,8 @@ class RisBase(lib.StreamObject):
         self.theta = theta
         self.J_fit = J_fit
         self.K_fit = K_fit
+        self.with_xc = False
+        self.without_ris_approx = False
         self.xy = None
 
         self.Ktrunc = Ktrunc
@@ -756,17 +953,24 @@ class RisBase(lib.StreamObject):
 
         self.verbose = mf.verbose
         self.device = mf.device
+        self.converged = None
 
         logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
 
+    @property
+    def e_tot(self):
+        '''Excited state energies'''
+        return self._scf.e_tot + self.energies/HARTREE2EV
+
     def get_ab(self, mf=None):
         if mf is None:
-            mf = self.mf
+            mf = self._scf
         J_fit = self.J_fit
         K_fit = self.K_fit
         theta = self.theta
-        return get_ab(self, mf, J_fit, K_fit, theta, singlet=True)
+        with_xc = self.with_xc
+        return get_ab(self, mf, J_fit, K_fit, theta, with_xc=with_xc, singlet=True)
 
     def build(self):
         log = self.log
@@ -796,7 +1000,7 @@ class RisBase(lib.StreamObject):
                 note: the definition of a_x, α and β is kind of weird in pyscf/libxc
             '''
 
-            omega, alpha_libxc, hyb_libxc = self.mf._numint.rsh_and_hybrid_coeff(self.mf.xc, spin=self.mf.mol.spin)
+            omega, alpha_libxc, hyb_libxc = self._scf._numint.rsh_and_hybrid_coeff(self._scf.xc, spin=self._scf.mol.spin)
             log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
 
             if omega > 0:
@@ -836,17 +1040,17 @@ class RisBase(lib.StreamObject):
             self.eri_tag = '_sph'
         log.info(f'cartesian or spherical electron integral = {self.eri_tag}')
 
-        if self.mf.mo_coeff.ndim == 2:
+        if self._scf.mo_coeff.ndim == 2:
             self.RKS = True
             self.UKS = False
-            n_occ = int(sum(self.mf.mo_occ>0))
-            n_vir = int(sum(self.mf.mo_occ==0))
+            n_occ = int(sum(self._scf.mo_occ>0))
+            n_vir = int(sum(self._scf.mo_occ==0))
             self.n_occ = n_occ
             self.n_vir = n_vir
 
-            self.C_occ_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,:n_occ])
-            self.C_vir_notrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:])
-            mo_energy = self.mf.mo_energy
+            self.C_occ_notrunc = cp.asfortranarray(self._scf.mo_coeff[:,:n_occ])
+            self.C_vir_notrunc = cp.asfortranarray(self._scf.mo_coeff[:,n_occ:])
+            mo_energy = self._scf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
             vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
             occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
@@ -878,20 +1082,20 @@ class RisBase(lib.StreamObject):
             log.info(f'rest_occ = {rest_occ}')
             log.info(f'rest_vir = {rest_vir}')
 
-            self.C_occ_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ-rest_occ:n_occ])
-            self.C_vir_Ktrunc = cp.asfortranarray(self.mf.mo_coeff[:,n_occ:n_occ+rest_vir])
+            self.C_occ_Ktrunc = cp.asfortranarray(self._scf.mo_coeff[:,n_occ-rest_occ:n_occ])
+            self.C_vir_Ktrunc = cp.asfortranarray(self._scf.mo_coeff[:,n_occ:n_occ+rest_vir])
 
             self.rest_occ = rest_occ
             self.rest_vir = rest_vir
 
-        elif self.mf.mo_coeff.ndim == 3:
+        elif self._scf.mo_coeff.ndim == 3:
             ''' TODO UKS method '''
             self.RKS = False
             self.UKS = True
-            self.n_occ_a = sum(self.mf.mo_occ[0]>0)
-            self.n_vir_a = sum(self.mf.mo_occ[0]==0)
-            self.n_occ_b = sum(self.mf.mo_occ[1]>0)
-            self.n_vir_b = sum(self.mf.mo_occ[1]==0)
+            self.n_occ_a = sum(self._scf.mo_occ[0]>0)
+            self.n_vir_a = sum(self._scf.mo_occ[0]==0)
+            self.n_occ_b = sum(self._scf.mo_occ[1]>0)
+            self.n_vir_b = sum(self._scf.mo_occ[1]==0)
             log.info('n_occ for alpha spin = {self.n_occ_a}')
             log.info('n_vir for alpha spin = {self.n_vir_a}')
             log.info('n_occ for beta spin = {self.n_occ_b}')
@@ -933,6 +1137,14 @@ class RisBase(lib.StreamObject):
     def nuc_grad_method(self):
         from gpu4pyscf.grad import tdrks_ris
         return tdrks_ris.Gradients(self)
+
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self._scf.reset(mol)
+        return self
+
+    as_scanner = as_scanner
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
@@ -1036,6 +1248,10 @@ class TDA(RisBase):
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
         ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K,   T_ab=T_ab_K)
 
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
+
         def RKS_TDA_hybrid_MVP(X):
             ''' hybrid or range-sparated hybrid, a_x > 0
                 return AX
@@ -1047,9 +1263,24 @@ class TDA(RisBase):
             nstates = X.shape[0]
             X = X.reshape(nstates, n_occ, n_vir)
             AX = hdiag_MVP(X)
-            AX += 2 * iajb_MVP(X)
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vj, vk = self._scf.get_jk(mol, X_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vj, C_vir_notrunc)
+                vk_ijab = cp.einsum('ui,xvu,va->xia', C_occ_notrunc, vk, C_vir_notrunc)
+                AX += vj_iajb * 1.0
+                AX[:,n_occ-rest_occ:,:rest_vir] -= a_x*vk_ijab* 0.5
+            else:
+                AX += 2 * iajb_MVP(X)
+                AX[:,n_occ-rest_occ:,:rest_vir] -= a_x * ijab_MVP(X[:,n_occ-rest_occ:,:rest_vir])
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(X_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                AX += vind_xc_mo * 1.0
 
-            AX[:,n_occ-rest_occ:,:rest_vir] -= a_x * ijab_MVP(X[:,n_occ-rest_occ:,:rest_vir])
             AX = AX.reshape(nstates, n_occ*n_vir)
 
             return AX
@@ -1103,6 +1334,11 @@ class TDA(RisBase):
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=hdiag, n_occ=n_occ, n_vir=n_vir)
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
+
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
+
         def RKS_TDA_pure_MVP(X):
             ''' pure functional, a_x = 0
                 return AX
@@ -1111,7 +1347,21 @@ class TDA(RisBase):
             nstates = X.shape[0]
             X = X.reshape(nstates, n_occ, n_vir)
             AX = hdiag_MVP(X)
-            AX += 2 * iajb_MVP(X)
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vj= self._scf.get_j(mol, X_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vj, C_vir_notrunc)
+                AX += vj_iajb * 1.0
+            else:
+                AX += 2 * iajb_MVP(X)
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', X, C_vir_notrunc)
+                X_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(X_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                AX += vind_xc_mo * 1.0
+
             AX = AX.reshape(nstates, n_occ*n_vir)
             return AX
 
@@ -1129,8 +1379,8 @@ class TDA(RisBase):
         A_aa_size = n_occ_a * n_vir_a
         A_bb_size = n_occ_b * n_vir_b
 
-        mo_coeff = self.mf.mo_coeff
-        mo_energy = self.mf.mo_energy
+        mo_coeff = self._scf.mo_coeff
+        mo_energy = self._scf.mo_energy
 
         mol = self.mol
         auxmol = self.get_auxmol(theta=self.theta, add_p=self.add_p)
@@ -1262,7 +1512,7 @@ class TDA(RisBase):
             TDA_MVP, hdiag = self.get_UKS_TDA_MVP()
 
 
-        energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP,
+        conv, energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP,
                                             hdiag=hdiag,
                                             N_states=self.nstates,
                                             conv_tol=self.conv_tol,
@@ -1271,6 +1521,10 @@ class TDA(RisBase):
                                             single=self.single,
                                             verbose=log)
 
+        self.converged = conv
+        if not all(self.converged):
+            log.info('TD-SCF states %s not converged.',
+                        [i for i, x in enumerate(self.converged) if not x])
         log.debug(f'check orthonormal of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
         P = self.get_P()
@@ -1401,6 +1655,9 @@ class TDDFT(RisBase):
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
         ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K,   T_ab=T_ab_K)
         ibja_MVP = get_ibja_MVP(T_ia=T_ia_K)
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
 
         def RKS_TDDFT_hybrid_MVP(X, Y):
             '''
@@ -1425,17 +1682,41 @@ class TDDFT(RisBase):
             XpY = X + Y
             XmY = X - Y
             ApB_XpY = hdiag_MVP(XpY)
-
-            ApB_XpY += 4*iajb_MVP(XpY)
-
-            ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
-
-            ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
-
             AmB_XmY = hdiag_MVP(XmY)
-            AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
 
-            AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', XpY, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                tmp = cp.einsum('xov,pv->xpo', XmY, C_vir_notrunc)
+                XmY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vjP, vkP = self._scf.get_jk(mol, XpY_ao, hermi=0)
+                vjM, vkM = self._scf.get_jk(mol, XmY_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vjP, C_vir_notrunc)
+                vkP_ibja = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vkP, C_vir_notrunc)
+                vkP_ijab = cp.einsum('ui,xvu,va->xia', C_occ_notrunc, vkP, C_vir_notrunc)
+                vkM_ibja = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vkM, C_vir_notrunc)
+                vkM_ijab = cp.einsum('ui,xvu,va->xia', C_occ_notrunc, vkM, C_vir_notrunc)
+                ApB_XpY += vj_iajb*2 
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*vkP_ijab* 0.5
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*vkP_ibja* 0.5
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*vkM_ijab* 0.5
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += a_x*vkM_ibja* 0.5
+
+            else:
+                ApB_XpY += 4*iajb_MVP(XpY)
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
+
+                ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
+
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+
+                AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', XpY, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(XpY_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                ApB_XpY += vind_xc_mo * 2
 
             ''' (A+B)(X+Y) = AX + BY + AY + BX   (1)
                 (A-B)(X-Y) = AX + BY - AY - BX   (2)
@@ -1496,6 +1777,11 @@ class TDDFT(RisBase):
         hdiag_MVP = gen_hdiag_MVP(hdiag=hdiag, n_occ=n_occ, n_vir=n_vir)
         iajb_MVP = gen_iajb_MVP(T_left=T_ia_J, T_right=T_ia_J)
         hdiag_sq = hdiag**2
+
+        if self.with_xc:
+            mf = self._scf
+            vind = _gen_ks_response(mf, hermi=0)
+
         def RKS_TDDFT_pure_MVP(Z):
             '''(A-B)^1/2(A+B)(A-B)^1/2 Z = Z w^2
                                     MZ = Z w^2
@@ -1508,7 +1794,21 @@ class TDDFT(RisBase):
             nstates = Z.shape[0]
             Z = Z.reshape(nstates, n_occ, n_vir)
             AmB_sqrt_V = hdiag_sqrt_MVP(Z)
-            ApB_AmB_sqrt_V = hdiag_MVP(AmB_sqrt_V) + 4*iajb_MVP(AmB_sqrt_V)
+            if self.without_ris_approx:
+                tmp = cp.einsum('xov,pv->xpo', AmB_sqrt_V, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vjP = self._scf.get_j(mol, XpY_ao, hermi=0)
+                vj_iajb = cp.einsum('ui,xuv,va->xia', C_occ_notrunc, vjP, C_vir_notrunc)
+                ApB_AmB_sqrt_V = hdiag_MVP(AmB_sqrt_V) + vj_iajb*2 
+            else:
+                ApB_AmB_sqrt_V = hdiag_MVP(AmB_sqrt_V) + 4*iajb_MVP(AmB_sqrt_V)
+            if self.with_xc:
+                tmp = cp.einsum('xov,pv->xpo', AmB_sqrt_V, C_vir_notrunc)
+                XpY_ao = cp.einsum('xpo,qo->xpq', tmp, C_occ_notrunc)*2.0
+                vind_xc = vind(XpY_ao)
+                vind_xc_mo = cp.einsum('xpq,qo,pv->xov', vind_xc, C_occ_notrunc, C_vir_notrunc)
+                ApB_AmB_sqrt_V += vind_xc_mo * 2
+            
             MZ = hdiag_sqrt_MVP(ApB_AmB_sqrt_V)
             MZ = MZ.reshape(nstates, n_occ*n_vir)
             return MZ
@@ -1528,8 +1828,8 @@ class TDDFT(RisBase):
         A_aa_size = n_occ_a * n_vir_a
         A_bb_size = n_occ_b * n_vir_b
 
-        mo_coeff = self.mf.mo_coeff
-        mo_energy = self.mf.mo_energy
+        mo_coeff = self._scf.mo_coeff
+        mo_energy = self._scf.mo_energy
 
         '''
         the 2c2e and 3c2e integrals with/without RSH
@@ -1753,7 +2053,7 @@ class TDDFT(RisBase):
             elif self.UKS:
                 TDDFT_hybrid_MVP, hdiag = self.get_UKS_TDDFT_MVP()
 
-            energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP,
+            conv, energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP,
                                                             hdiag=hdiag,
                                                             N_states=self.nstates,
                                                             conv_tol=self.conv_tol,
@@ -1761,6 +2061,10 @@ class TDDFT(RisBase):
                                                             GS=self.GS,
                                                             single=self.single,
                                                             verbose=self.verbose)
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
 
         elif self.a_x == 0:
             '''pure TDDFT'''
@@ -1769,7 +2073,7 @@ class TDDFT(RisBase):
 
             elif self.UKS:
                 TDDFT_pure_MVP, hdiag_sq = self.get_UKS_TDDFT_pure_MVP()
-            energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP,
+            conv, energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP,
                                                 hdiag=hdiag_sq,
                                                 N_states=self.nstates,
                                                 conv_tol=self.conv_tol,
@@ -1777,7 +2081,10 @@ class TDDFT(RisBase):
                                                 GS=self.GS,
                                                 single=self.single,
                                                 verbose=self.verbose)
-
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
             energies = energies_sq**0.5
             Z = (energies**0.5).reshape(-1,1) * Z
 

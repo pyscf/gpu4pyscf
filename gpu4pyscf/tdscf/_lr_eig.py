@@ -1274,6 +1274,7 @@ def Davidson(matrix_vector_product,
         residual = AV - omega.reshape(-1, 1) * full_X
 
         r_norms = cp.linalg.norm(residual, axis=1)
+        conv = r_norms[:N_states] <= conv_tol
         max_norm = cp.max(r_norms)
         log.info(f'iter: {ii+1:<3d}   max|R|: {max_norm:<12.2e}  subspace: {sub_A.shape[0]:<8d}')
         if max_norm < conv_tol or ii == (max_iter-1):
@@ -1312,7 +1313,7 @@ def Davidson(matrix_vector_product,
 
 
     log.info('========== Davidson Diagonalization Done ==========')
-    return omega, full_X
+    return conv, omega, full_X
 
 # TODO: merge with real_eig, write a Class of krylov method for Casida problem, allowing ris initial guess/preconditioner
 def Davidson_Casida(matrix_vector_product,
@@ -1509,7 +1510,7 @@ def Davidson_Casida(matrix_vector_product,
         r_norms = cp.linalg.norm(residual, axis=1)
 
         max_norm = cp.max(r_norms)
-
+        conv = r_norms[:N_states] <= conv_tol
         log.info(f'iter: {ii+1:<3d}, max|R|: {max_norm:<10.2e} subspace_size = {sub_A.shape[0]}')
 
         if max_norm < conv_tol or ii == (max_iter -1):
@@ -1560,5 +1561,5 @@ def Davidson_Casida(matrix_vector_product,
 
     log.info('======= TDDFT Eigen Solver Done =======' )
 
-    return omega, X_full, Y_full
+    return conv, omega, X_full, Y_full
 
