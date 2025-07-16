@@ -18,8 +18,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
-
-#include "gvhf-rys/vhf.cuh"
+#include "pbc.cuh"
 #include "ft_ao.cuh"
 
 #define GOUT_WIDTH      20
@@ -31,7 +30,7 @@
 #define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
 __global__
-void ft_ao_bdiv_kernel(double *out, AFTIntEnvVars envs, int nGv, double *grids)
+void ft_ao_bdiv_kernel(double *out, PBCIntEnvVars envs, int nGv, double *grids)
 {
     int sh_block_id = gridDim.x - blockIdx.x - 1;
     int Gv_block_id = blockIdx.y;

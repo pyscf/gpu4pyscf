@@ -316,8 +316,57 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
         vk = vk[0]
     return vk
 
-get_j_e1_kpts = NotImplemented
-get_k_e1_kpts = NotImplemented
+def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
+    '''Derivatives of Coulomb (J) AO matrix at sampled k-points.
+    '''
+    cell = mydf.cell
+    mesh = mydf.mesh
+    assert cell.low_dim_ft_type != 'inf_vacuum'
+    assert cell.dimension > 1
+
+    ni = mydf._numint
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+    ao_deriv = 0
+
+    grids = mydf.grids
+    coulG = tools.get_coulG(cell, mesh=mesh)
+    ngrids = len(coulG)
+
+    rhoR = cp.zeros((nset,ngrids), dtype=np.complex128)
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        p0, p1 = p1, p1 + len(weight)
+        for i in range(nset):
+            rho = ni.eval_rho(cell, ao_ks, dms[i], xctype='LDA', hermi=1)
+            rhoR[i,p0:p1] += rho
+    rhoG = tools.fft(rhoR, mesh)
+    vG = coulG * rhoG
+    vR = tools.ifft(vG, mesh)
+    if is_zero(kpts):
+        vR = vR.real
+    weight = cell.vol / ngrids
+    vR *= weight
+
+    ej = cp.zeros((nset,3,nao))
+    ao_deriv = 1
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
+        p0, p1 = p1, p1 + len(weight)
+        for i in range(nset):
+            for k in range(nkpts):
+                aow_dm = (ao_ks[k,0] * vR[i,p0:p1,None]).dot(dms[i,k])
+                ej[i] -= contract('xpi,pi->xi', ao_ks[k,1:4].conj(), aow_dm).real
+    aoslices = cell.aoslice_by_atom()
+    ej = ej.get()
+    ej = np.array([ej[:,:,p0:p1].sum(axis=2) for p0, p1 in aoslices[:,2:]])
+    if nset == 1:
+        ej = ej[:,0]
+    return ej
+
+def get_k_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3)), exxdiv=None):
+    raise NotImplementedError
 
 def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     from pyscf.pbc.tools.pbc import madelung

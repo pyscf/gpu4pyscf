@@ -97,7 +97,9 @@ class KnownValues(unittest.TestCase):
         np.random.seed(2)
         dm = np.random.random((2,nao,nao)) + .5j*np.random.random((2,nao,nao))
         dm = dm + dm.conj().transpose(0,2,1)
-        ref = pbchf_cpu.RHF(cell).get_jk(cell, dm)
+        pcell = cell.copy()
+        pcell.precision = 1e-10
+        ref = pbchf_cpu.RHF(pcell).get_jk(pcell, dm)
 
         dm = cp.asarray(dm)
         vj, vk = scf.RHF(cell).get_jk(cell, dm)

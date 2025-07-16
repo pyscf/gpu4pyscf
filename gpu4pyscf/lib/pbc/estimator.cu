@@ -19,8 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#include "gvhf-rys/vhf.cuh"
+#include "pbc.cuh"
 #include "int3c2e.cuh"
 
 #define REMOTE_THRESHOLD 50
@@ -28,7 +27,7 @@
 __global__ static
 void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
                                int ish0, int jsh0, int nish, int njsh,
-                               PBCInt3c2eEnvVars envs, float *exps,
+                               PBCIntEnvVars envs, float *exps,
                                float *log_coeff, float log_cutoff)
 {
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -109,7 +108,7 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
 __global__ static
 void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
                             int npairs, int ish0, int jsh0, int nish, int njsh,
-                            PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
+                            PBCIntEnvVars envs, float *exps, float *log_coeff,
                             float log_cutoff)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -192,7 +191,7 @@ __global__ static
 void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_mapping,
                            int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
                            int npairs, int ish0, int jsh0, int nish, int njsh,
-                           PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
+                           PBCIntEnvVars envs, float *exps, float *log_coeff,
                            float *atom_aux_exps, float log_cutoff)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -347,7 +346,7 @@ void conc_img_idx_kernel(int *output, int *offsets, int *idx_sparse,
 
 extern "C" {
 int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
-                           PBCInt3c2eEnvVars *envs, float *exps, float *log_coeff,
+                           PBCIntEnvVars *envs, float *exps, float *log_coeff,
                            float log_cutoff)
 {
     int ish0 = shls_slice[0];
@@ -371,7 +370,7 @@ int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
 }
 
 int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
-                        int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
+                        int npairs, int *shls_slice, PBCIntEnvVars *envs,
                         float *exps, float *log_coeff, float log_cutoff)
 {
     int ish0 = shls_slice[0];
@@ -394,7 +393,7 @@ int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
 }
 int sr_int3c2e_img_idx(int *img_idx, int *counts_or_offsets, int *bas_ij_mapping,
                        int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
-                       int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
+                       int npairs, int *shls_slice, PBCIntEnvVars *envs,
                        float *exps, float *log_coeff, float *atom_aux_exps,
                        float log_cutoff)
 {

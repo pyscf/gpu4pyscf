@@ -41,7 +41,7 @@ from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params, group_basis
 from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, estimate_rcut,
-    SRInt3c2eOpt, Int3c2eEnvVars)
+    SRInt3c2eOpt, PBCIntEnvVars)
 
 OMEGA_MIN = 0.25
 
@@ -413,7 +413,7 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     _atm = cp.array(pcell._atm)
     _bas = cp.array(pcell._bas)
     _env = cp.array(_scale_sp_ctr_coeff(pcell))
-    int3c2e_envs = Int3c2eEnvVars(
+    int3c2e_envs = PBCIntEnvVars(
         pcell.natm, p_nbas, 1, nimgs, _atm.data.ptr, _bas.data.ptr,
         _env.data.ptr, 0, Ls.data.ptr,
     )

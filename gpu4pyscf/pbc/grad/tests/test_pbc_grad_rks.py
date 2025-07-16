@@ -16,8 +16,10 @@
 import unittest
 import numpy as np
 import pyscf
+from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
+from pyscf.pbc.grad import krks as krks_cpu
 
-disp = 1e-2
+disp = 1e-3
 
 def setUpModule():
     global cell, cell_orth
@@ -48,19 +50,19 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
 
-    @unittest.skip('pyscf multigrid bug')
     def test_lda_grad(self):
-        mf = cell_orth.RKS(xc='lda,vwn').to_gpu()
+        kmf = cell_orth.KRKS(xc='svwn').run()
+        ref = krks_cpu.Gradients(kmf).kernel()
+        mf = cell_orth.RKS(xc='svwn').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
-        mfs = g_scan.base.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.,1.,1.+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.,1.,1.-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 4)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
     @unittest.skip('pyscf multigrid bug')
     def test_lda_grad_nonorth(self):
         mf = cell.RKS(xc='lda,vwn').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
         mfs = g_scan.base.as_scanner()
@@ -68,19 +70,19 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 4)
 
-    @unittest.skip('pyscf multigrid bug')
     def test_gga_grad(self):
-        mf = cell_orth.RKS(xc='pbe,pbe').to_gpu()
+        kmf = cell_orth.KRKS(xc='pbe').run()
+        ref = krks_cpu.Gradients(kmf).kernel()
+        mf = cell_orth.RKS(xc='pbe').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
-        mfs = g_scan.base.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.,1.,1.+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.,1.,1.-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 4)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
     @unittest.skip('pyscf multigrid bug')
     def test_gga_grad_nonorth(self):
         mf = cell.RKS(xc='pbe,pbe').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
         mfs = g_scan.base.as_scanner()

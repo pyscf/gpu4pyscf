@@ -90,12 +90,13 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     _env = cp.array(_scale_sp_ctr_coeff(sorted_cell))
     ao_loc_cpu = sorted_cell.ao_loc
     ao_loc_gpu = cp.array(ao_loc_cpu)
-    envs = AFTIntEnvVars(
+    envs = PBCIntEnvVars(
         sorted_cell.natm, sorted_cell.nbas, 1, 1, _atm.data.ptr,
         _bas.data.ptr, _env.data.ptr, ao_loc_gpu.data.ptr, 0,
     )
-    GvT = asarray(np.append((Gv.T + kpt[:,None]).ravel(), np.zeros(THREADS)))
     ngrids = len(Gv)
+    GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
+    GvT = cp.append(GvT, cp.zeros(THREADS))
     nao_cart = ao_loc_cpu[-1]
     out = cp.empty((nao_cart, ngrids), dtype=np.complex128)
     libpbc.build_ft_ao(
@@ -111,6 +112,9 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     else:
         out = out.T
     return out
+
+def ft_ao_ip1(cell, Gv, kpt=np.zeros(3), verbose=None, sort_cell=True):
+    raise NotImplementedError
 
 def gen_ft_kernel(cell, kpts=None, verbose=None):
     r'''
@@ -184,7 +188,7 @@ class FTOpt:
         _bas = cp.array(bvkcell._bas)
         _env = cp.array(_scale_sp_ctr_coeff(bvkcell))
         ao_loc = cp.array(bvkcell.ao_loc)
-        aft_envs = AFTIntEnvVars(
+        aft_envs = PBCIntEnvVars(
             cell.natm, cell.nbas, bvk_ncells, nimgs, _atm.data.ptr,
             _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
         )
@@ -458,10 +462,10 @@ def most_diffused_pgto(cell):
     idx = r2.argmax()
     return exps[idx], cs[idx], ls[idx]
 
-class AFTIntEnvVars(ctypes.Structure):
+class PBCIntEnvVars(ctypes.Structure):
     _fields_ = [
-        ('natm', ctypes.c_uint16),
-        ('nbas', ctypes.c_uint16),
+        ('cell0_natm', ctypes.c_uint16),
+        ('cell0_nbas', ctypes.c_uint16),
         ('bvk_ncells', ctypes.c_uint16),
         ('nimgs', ctypes.c_uint16),
         ('atm', ctypes.c_void_p),

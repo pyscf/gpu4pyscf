@@ -19,16 +19,15 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
+#include "pbc.cuh"
 #include "int3c2e.cuh"
 
 // TODO: benchmark performance for 32, 38, 40, 45, 54
 #define GOUT_WIDTH      45
 
 __global__
-void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int nksh_per_block = blockDim.x;
     int gout_stride = blockDim.y;
@@ -46,7 +45,7 @@ void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bo
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * nksh_per_block;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, nksh_per_block);
+    int nksh = min(bounds.nksh - ksh0_this_block, nksh_per_block);
     int ksh0 = ksh0_this_block + bounds.ksh0;
 
     int li = bounds.li;

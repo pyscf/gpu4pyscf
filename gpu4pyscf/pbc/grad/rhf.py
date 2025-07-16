@@ -29,8 +29,6 @@ from gpu4pyscf.pbc.dft import multigrid_v2
 
 __all__ = ['Gradients']
 
-libgpbc = multigrid_v2.libgpbc
-
 class GradientsBase(mol_rhf.GradientsBase):
     get_ovlp = NotImplemented
     grad_nuc = cpu_rhf.GradientsBase.grad_nuc
@@ -52,7 +50,6 @@ class Gradients(GradientsBase):
         mo_occ=None,
         atmlst=None,
     ):
-        raise RuntimeError('Unresolved bug in the Gradients code')
         mf = self.base
         cell = mf.cell
         assert hasattr(mf, '_numint')

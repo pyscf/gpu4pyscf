@@ -199,7 +199,7 @@ class KUKSpU(kuks.KUKS):
             _print_U_info(self, log)
         return self
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         raise NotImplementedError
 
 def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):

@@ -176,7 +176,10 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         if dm is None: dm = self.make_rdm1()
         return krks.get_rho(self, dm[0]+dm[1], grids, kpts)
 
-    nuc_grad_method = NotImplemented
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.kuks import Gradients
+        return Gradients(self)
+
     to_hf = NotImplemented
     multigrid_numint = krks.KRKS.multigrid_numint
 

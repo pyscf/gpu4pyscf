@@ -46,7 +46,6 @@ class Gradients(rhf.GradientsBase):
         mo_occ=None,
         atmlst=None,
     ):
-        raise RuntimeError('Unresolved bug in the Gradients code')
         mf = self.base
         cell = mf.cell
         assert hasattr(mf, '_numint')

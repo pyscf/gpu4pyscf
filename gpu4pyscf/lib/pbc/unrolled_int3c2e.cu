@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 #include <cuda.h>
-#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
+#include "pbc.cuh"
 #include "int3c2e.cuh"
 
 
@@ -13,7 +13,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_000(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -27,7 +27,7 @@ void int3c2e_000(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -145,7 +145,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_100(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -159,7 +159,7 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -288,7 +288,7 @@ void int3c2e_100(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_110(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -302,7 +302,7 @@ void int3c2e_110(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -463,7 +463,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_200(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -477,7 +477,7 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -619,7 +619,7 @@ void int3c2e_200(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_210(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -633,7 +633,7 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -823,7 +823,7 @@ void int3c2e_210(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_220(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -837,7 +837,7 @@ void int3c2e_220(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -1100,7 +1100,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_001(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -1114,7 +1114,7 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -1243,7 +1243,7 @@ void int3c2e_001(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_101(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -1257,7 +1257,7 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -1415,7 +1415,7 @@ void int3c2e_101(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_111(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -1429,7 +1429,7 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -1660,7 +1660,7 @@ void int3c2e_111(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_201(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -1674,7 +1674,7 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -1866,7 +1866,7 @@ void int3c2e_201(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_211(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -1880,7 +1880,7 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -2204,7 +2204,7 @@ void int3c2e_211(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_221(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -2219,7 +2219,7 @@ void int3c2e_221(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -2715,7 +2715,7 @@ __global__ __maxnreg__(128)
 #else
 __global__
 #endif
-void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_002(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -2729,7 +2729,7 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -2871,7 +2871,7 @@ void int3c2e_002(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_102(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -2885,7 +2885,7 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -3077,7 +3077,7 @@ void int3c2e_102(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_112(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -3091,7 +3091,7 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -3419,7 +3419,7 @@ void int3c2e_112(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_202(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int sp_id = threadIdx.z;
@@ -3433,7 +3433,7 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -3689,7 +3689,7 @@ void int3c2e_202(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
 }
 
 __global__
-void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
+void int3c2e_212(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
 {
     int ksh_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -3704,7 +3704,7 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
-    int nksh = MIN(bounds.nksh - ksh0_this_block, 32);
+    int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
     int kprim = bounds.kprim;
     int *bas = envs.bas;
@@ -4184,7 +4184,7 @@ void int3c2e_212(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds)
     }
 }
 
-int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds)
+int int3c2e_unrolled(double *out, PBCIntEnvVars *envs, PBCInt3c2eBounds *bounds)
 {
     int li = bounds->li;
     int lj = bounds->lj;

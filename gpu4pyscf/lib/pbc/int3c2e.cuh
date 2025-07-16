@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The PySCF Developers. All Rights Reserved.
+ * Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include <stdint.h>
 
 #define WARP_SIZE       32
@@ -25,20 +27,7 @@
 #define L_AUX1          7
 #define SPTAKS_PER_BLOCK        32
 #define IMG_BLOCK       16384
-
-#ifndef HAVE_DEFINED_PBCINT3CENVVAS_H
-#define HAVE_DEFINED_PBCINT3CENVVAS_H
-typedef struct {
-    uint16_t cell0_natm; // in the reference cell
-    uint16_t cell0_nbas; // in the reference cell
-    uint16_t bvk_ncells; // in bvk-cell
-    uint16_t nimgs; // number of images in lattice sum
-    int *atm;
-    int *bas;
-    double *env;
-    int *ao_loc; // in bvk-cell
-    double *img_coords; // vectors in lattice sum
-} PBCInt3c2eEnvVars;
+#define PI_FAC          34.98683665524972497
 
 typedef struct {
     uint8_t li;
@@ -69,9 +58,3 @@ typedef struct {
     // gout_stride for for each (li,lj) pattern
     int *gout_stride_lookup;
 } PBCInt2c2eBounds;
-
-#ifdef __CUDACC__
-extern __constant__ int16_t c_pair_idx[];
-extern __constant__ int c_pair_offsets[];
-#endif
-#endif
