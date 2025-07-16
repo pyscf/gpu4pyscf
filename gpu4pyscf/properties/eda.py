@@ -608,7 +608,7 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
     return E_dispersion
 
 def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
-                                field_order = 2, virtual_singular_value_threshold = 1e-5, uncoupled_ferf = False):
+                                field_order = 2, virtual_singular_value_threshold = 1e-4, uncoupled_ferf = False):
     """
     Attention: The result is very sensetive to virtual_singular_value_threshold!
                If a near-zero singular vector that does not belong to FERF virtual space
@@ -769,7 +769,7 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         G = polarization_subspace_singularvector_left[:, polarization_subspace_singularvalue > virtual_singular_value_threshold]
         logger.info(mf_sum, f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
                             f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}, "
-                            f"the last {G.shape[1] - polarization_subspace_singularvalue.shape[0]} singular vectors are discarded.")
+                            f"the last {polarization_subspace_singularvalue.shape[0] - G.shape[1]} singular vectors are discarded.")
         polarization_subspace_singularvalue = None
         polarization_subspace_singularvector_left = None
 

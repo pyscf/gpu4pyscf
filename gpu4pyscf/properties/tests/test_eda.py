@@ -271,10 +271,12 @@ class KnownValues(unittest.TestCase):
             else:
                 raise ValueError(f"Incorrect type of {key} = {reference_value}")
 
+
         reference_dft_energies = np.array(reference_dft_result["energy"])
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
+    @pytest.mark.slow
     def test_almo_eda_2_wb97xv_svp(self):
         ### Q-Chem input difference
         # $rem
@@ -317,6 +319,7 @@ class KnownValues(unittest.TestCase):
         print(test_dft_energies)
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
 
+    @pytest.mark.slow
     def test_almo_eda_2_wb97xv_svp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
@@ -354,6 +357,7 @@ class KnownValues(unittest.TestCase):
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
+    @pytest.mark.slow
     def test_almo_eda_2_hf_tzvpp(self):
         ### Q-Chem input difference
         # $molecule
@@ -494,6 +498,7 @@ class KnownValues(unittest.TestCase):
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
 
+    @pytest.mark.slow
     def test_almo_eda_2_wb97xv_tzvpp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
