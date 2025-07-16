@@ -1000,8 +1000,8 @@ def get_eda_charge_transfer_energy(mf_list, _make_mf, eda_cache):
 
 def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
                              xc = "wB97X-V", xc_grid = (99,590), nlc_grid = (50,194), auxbasis = None,
-                             conv_tol = 1e-10, conv_tol_cpscf = 1e-8, max_cycle = 100, verbose = 4,
-                             grid_response = False):
+                             conv_tol = 1e-10, conv_tol_cpscf = 1e-8, max_cycle = 100, verbose = 4, chkfile = None,
+                             grid_response = False, auxbasis_response = True):
     """
     Main driver of absolutely localized molecular orbital (ALMO) energy decomposition analysis (EDA) version 2
 
@@ -1074,6 +1074,7 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
         mf.conv_tol_cpscf = conv_tol_cpscf
         mf.max_cycle = max_cycle
         mf.verbose = verbose
+        mf.chkfile = chkfile
         if auxbasis is not None:
             mf = mf.density_fit(auxbasis = auxbasis)
         mf.direct_scf_tol = 1e-16
@@ -1087,6 +1088,10 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
     def _get_gradient(mf):
         grad_obj = mf.Gradients()
         grad_obj.grid_response = grid_response
+        grad_obj.auxbasis_response = auxbasis_response
+        gradient = grad_obj.kernel()
+        if isinstance(gradient, cp.ndarray):
+            gradient = gradient.get()
         return grad_obj.kernel()
 
     n_frag = len(mol_list)
