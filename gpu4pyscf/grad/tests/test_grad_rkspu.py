@@ -43,7 +43,7 @@ class KnownValues(unittest.TestCase):
         U_val = [5.0]
         mf = rkspu.RKSpU(mol, U_idx=U_idx, U_val=U_val)
         mf.__dict__.update(mol.RHF().to_gpu().run().__dict__)
-        de = rkspu_grad._hubbard_U_deriv1(mf).get()
+        de = rkspu_grad._hubbard_U_deriv1(mf)
 
         mf.mol.set_geom_('C 0 1.6 0; O 0 0 1.001', unit='B')
         e1 = mf.get_veff().E_U

@@ -118,7 +118,7 @@ def _hubbard_U_deriv1(mf, dm=None):
             dE_U[atm_id] += (val * 0.5) * (
                 cp.einsum('xii->x', P1).real * 2 # *2 for P1+P1.T
                 - cp.einsum('xij,ji->x', P1, P0).real * 2)
-    return dE_U
+    return dE_U.get()
 
 class Gradients(rks_grad.Gradients):
     def get_veff(self, mol=None, dm=None):

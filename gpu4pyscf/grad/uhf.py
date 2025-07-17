@@ -22,7 +22,7 @@ from pyscf.grad import uhf
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import tag_array, contract
+from gpu4pyscf.lib.cupy_helper import tag_array, contract, ensure_numpy
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -83,10 +83,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     t1 = log.timer_debug1('gradients of h1e', *t1)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
     dvhf = mf_grad.get_veff(mol, dm0)
-    
-    extra_force = cupy.zeros((len(atmlst),3))
+
+    extra_force = np.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += ensure_numpy(mf_grad.extra_force(ia, locals()))
     log.timer_debug1('gradients of 2e part', *t1)
 
     dh = contract('xij,ij->xi', h1, dm0_sf)
