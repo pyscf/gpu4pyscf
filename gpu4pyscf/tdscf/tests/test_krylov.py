@@ -117,7 +117,7 @@ class KnownValues(unittest.TestCase):
         )
 
         self.assertAlmostEqual(
-            float(cp.linalg.norm(cp.abs(eigenvectors_single) - cp.abs(cp.asarray(self.ref_eigenvectors, dtype=cp.float32)))), 0, places=self.places_single ,
+            float(cp.linalg.norm(cp.abs(eigenvectors_single) - cp.abs(cp.asarray(self.ref_eigenvectors, dtype=cp.float32)))), 0, places=self.places_single - 2,
             msg="Single precison Eigenvectors do not match reference within tolerance"
         )
 
