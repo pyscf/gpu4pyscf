@@ -17,6 +17,7 @@ import numpy as np
 import cupy as cp
 from pyscf.gto import ATOM_OF, PTR_COORD
 from pyscf.pbc import tools as pbctools
+from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
@@ -43,12 +44,12 @@ libpbc.PBCint1e_ipkin.restype = ctypes.c_int
 def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
     opt = _check_opt(cell, kpts, bvk_kmesh, opt)
     out = opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
-    return out[:,0]
+    return out
 
 def int1e_kin(cell, kpts=None, bvk_kmesh=None, opt=None):
     opt = _check_opt(cell, kpts, bvk_kmesh, opt)
     out = opt.intor('PBCint1e_kin', 1, 1, (2, 0))
-    return out[:,0]
+    return out
 
 def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
     opt = _check_opt(cell, kpts, bvk_kmesh, opt)
@@ -218,9 +219,14 @@ class _Int1eOpt:
         out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), self.coeff)
         out = out.reshape(bvk_ncells, comp, nao, nao)
 
-        if self.kpts is not None:
+        if self.kpts is not None and not is_zero(self.kpts):
             bvkmesh_Ls = translation_vectors_for_kmesh(self.cell, bvk_kmesh, True)
             kpts = self.kpts.reshape(-1, 3)
             expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
             out = contract('lk,lxpq->kxpq', expLk, out)
+
+        if comp == 1:
+            out = out[:,0]
+        if self.kpts is not None and self.kpts.ndim == 1:
+            out = out[0]
         return out

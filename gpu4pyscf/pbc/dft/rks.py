@@ -309,7 +309,8 @@ class RKS(KohnShamDFT, pbchf.RHF):
             nuc = ni.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
+        t = int1e.int1e_kin(cell, kpt)[0]
+        return nuc + t
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec

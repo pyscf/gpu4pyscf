@@ -196,7 +196,7 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
             nuc = ni.get_nuc(kpts)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpts))
+        t = int1e.int1e_kin(cell, kpts)
         return nuc + t
 
     def Gradients(self):

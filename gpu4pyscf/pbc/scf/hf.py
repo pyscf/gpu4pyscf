@@ -154,7 +154,7 @@ class SCF(mol_hf.SCF):
         if cell is None: cell = self.cell
         return int1e.int1e_ovlp(cell)[0]
 
-    def get_hcore(self, cell=None):
+    def get_hcore(self, cell=None, kpt=None):
         if cell is None: cell = self.cell
         if cell.pseudo:
             nuc = self.with_df.get_pp(kpt)
