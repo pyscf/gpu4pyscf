@@ -49,9 +49,9 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
-        nac = td.nac_method()
-        nac.states=(1,0)
-        nac.kernel()
+        nac_obj = td.nac_method()
+        nac_obj.states=(1,0)
+        nac_obj.kernel()
         g = td.nuc_grad_method()
         g.kernel()
 
@@ -65,9 +65,9 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
-        assert np.linalg.norm(np.abs(nac.de) - np.abs(nac_ris.de)) < 3.0E-3
-        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
-        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-3
+        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
+        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
     def test_grad_pbe0_tddftris_singlet_vs_tddft(self):
         mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
@@ -75,9 +75,9 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         td = mf.TDDFT().set(nstates=5)
         td.kernel()
-        nac = td.nac_method()
-        nac.states=(1,0)
-        nac.kernel()
+        nac_obj = td.nac_method()
+        nac_obj.states=(1,0)
+        nac_obj.kernel()
         g = td.nuc_grad_method()
         g.kernel()
 
@@ -91,9 +91,9 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
-        assert np.linalg.norm(np.abs(nac.de) - np.abs(nac_ris.de)) < 4.0E-3
-        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 4.0E-3
-        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 4.0E-3
+        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 4.0E-3
+        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
     def test_grad_camb3lyp_tdaris_singlet_vs_tda(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
@@ -101,9 +101,9 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
-        nac = td.nac_method()
-        nac.states=(1,0)
-        nac.kernel()
+        nac_obj = td.nac_method()
+        nac_obj.states=(1,0)
+        nac_obj.kernel()
         g = td.nuc_grad_method()
         g.kernel()
 
@@ -117,9 +117,9 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
-        assert np.linalg.norm(np.abs(nac.de) - np.abs(nac_ris.de)) < 3.0E-2
-        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
-        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-2
+        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
+        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
 if __name__ == "__main__":
     print("Full Tests for TD-RKS-ris nonadiabatic coupling vectors between ground and excited state.")
