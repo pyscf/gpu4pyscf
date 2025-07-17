@@ -295,7 +295,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
     extra_force = cupy.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += cupy.asarray(mf_grad.extra_force(ia, locals()))
 
     log.timer_debug1('gradients of 2e part', *t3)
 
