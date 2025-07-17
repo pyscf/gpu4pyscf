@@ -71,9 +71,12 @@ Features
 The following features are still in the experimental stage
 - MP2/DF-MP2 and CCSD;
 - Polarizability, IR, and NMR shielding;
+- Raman spectrum;
 - QM/MM with PBC;
-- Multi-GPU for both direct SCF and density fitting
-- SCF and DFT with periodic boundary condition
+- Multi-GPU for both direct SCF and density fitting;
+- SCF and DFT with periodic boundary condition;
+- Non-adiabatic coupling for TDDFT;
+- Energy decomposition analysis;
 
 Limitations
 --------
