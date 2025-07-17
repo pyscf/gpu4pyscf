@@ -82,8 +82,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     orbo = mo_coeff[:, :nocc]
     if getattr(mf, 'with_solvent', None) is not None:
         raise NotImplementedError('With solvent is not supported yet')
-    if getattr(mf, 'with_df', None) is not None:
-        raise NotImplementedError('With density fitting is not supported yet')
 
     xI, yI = x_yI
     xJ, yJ = x_yJ

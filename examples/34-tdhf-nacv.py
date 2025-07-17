@@ -39,7 +39,7 @@ mf.kernel()
 td = mf.TDA().set(nstates=5) # TDHF is OK
 td.kernel() # [ 9.21540892 10.99036172 11.83380819 13.62301694 15.06349085]
 
-nac = td.NAC()
+nac = td.nac_method()
 nac.state=(0,1) # same as (1,0) 0 means ground state, 1 means the first excited state
 nac.kernel()
 '''

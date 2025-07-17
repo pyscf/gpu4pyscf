@@ -11,3 +11,116 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import unittest
+import numpy as np
+import cupy as cp
+import pyscf
+from pyscf import lib, gto, scf, dft
+from gpu4pyscf import tdscf, nac
+import gpu4pyscf
+
+atom = """
+O       0.0000000000     0.0000000000     0.0000000000
+H       0.0000000000    -0.7570000000     0.5870000000
+H       0.0000000000     0.7570000000     0.5870000000
+"""
+
+# pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
+
+bas0 = "def2-tzvp"
+
+def setUpModule():
+    global mol
+    mol = pyscf.M(
+        atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
+
+
+def tearDownModule():
+    global mol
+    mol.stdout.close()
+    del mol
+
+
+class KnownValues(unittest.TestCase):
+    def test_grad_pbe_tdaris_singlet_vs_tda(self):
+        mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        td.kernel()
+        nac = td.nac_method()
+        nac.states=(1,0)
+        nac.kernel()
+        g = td.nuc_grad_method()
+        g.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris.conv_tol = 1.0E-4
+        td_ris.Ktrunc = 0.0
+        td_ris.kernel()
+        nac_ris = td_ris.nac_method()
+        nac_ris.states=(1,0)
+        nac_ris.kernel()
+        g_ris = td_ris.nuc_grad_method()
+        g_ris.kernel()
+
+        assert np.linalg.norm(np.abs(nac.de) - np.abs(nac_ris.de)) < 3.0E-3
+        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
+        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+
+    def test_grad_pbe0_tddftris_singlet_vs_tddft(self):
+        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDDFT().set(nstates=5)
+        td.kernel()
+        nac = td.nac_method()
+        nac.states=(1,0)
+        nac.kernel()
+        g = td.nuc_grad_method()
+        g.kernel()
+
+        td_ris = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris.conv_tol = 1.0E-4
+        td_ris.Ktrunc = 0.0
+        td_ris.kernel()
+        nac_ris = td_ris.nac_method()
+        nac_ris.states=(1,0)
+        nac_ris.kernel()
+        g_ris = td_ris.nuc_grad_method()
+        g_ris.kernel()
+
+        assert np.linalg.norm(np.abs(nac.de) - np.abs(nac_ris.de)) < 4.0E-3
+        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 4.0E-3
+        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+
+    def test_grad_camb3lyp_tdaris_singlet_vs_tda(self):
+        mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
+        # mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        td.kernel()
+        nac = td.nac_method()
+        nac.states=(1,0)
+        nac.kernel()
+        g = td.nuc_grad_method()
+        g.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris.conv_tol = 1.0E-4
+        td_ris.Ktrunc = 0.0
+        td_ris.kernel()
+        nac_ris = td_ris.nac_method()
+        nac_ris.states=(1,0)
+        nac_ris.kernel()
+        g_ris = td_ris.nuc_grad_method()
+        g_ris.kernel()
+
+        assert np.linalg.norm(np.abs(nac.de) - np.abs(nac_ris.de)) < 3.0E-2
+        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
+        assert np.linalg.norm(np.abs(nac.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+
+if __name__ == "__main__":
+    print("Full Tests for TD-RKS-ris nonadiabatic coupling vectors between ground and excited state.")
+    unittest.main()

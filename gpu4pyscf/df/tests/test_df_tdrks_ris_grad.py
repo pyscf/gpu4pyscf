@@ -100,10 +100,14 @@ def tearDownModule():
 
 
 def benchmark_with_finite_diff(
-        mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False):
+        mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False, with_df=False):
     
     mol = mol_input.copy()
-    mf = dft.RKS(mol, xc=xc).to_gpu()
+    
+    if with_df:
+        mf = dft.RKS(mol, xc=xc).density_fit().to_gpu()
+    else:
+        mf = dft.RKS(mol, xc=xc).to_gpu()
     mf.grids.level=9
     mf.grids.prune = None
     mf.run()
@@ -133,7 +137,10 @@ def benchmark_with_finite_diff(
             coords_new[i, j] += delta
             mol.set_geom_(coords_new, unit='Ang')
             mol.build()
-            mf_add = dft.RKS(mol, xc=xc).to_gpu()
+            if with_df:
+                mf_add = dft.RKS(mol, xc=xc).density_fit().to_gpu()
+            else:
+                mf_add = dft.RKS(mol, xc=xc).to_gpu()
             mf_add.grids.level=9
             mf_add.grids.prune = None
             mf_add.run()
@@ -155,7 +162,10 @@ def benchmark_with_finite_diff(
             coords_new[i, j] -= delta
             mol.set_geom_(coords_new, unit='Ang')
             mol.build()
-            mf_minus = dft.RKS(mol, xc=xc).to_gpu()
+            if with_df:
+                mf_minus = dft.RKS(mol, xc=xc).density_fit().to_gpu()
+            else:
+                mf_minus = dft.RKS(mol, xc=xc).to_gpu()
             mf_minus.grids.level=9
             mf_minus.grids.prune = None
             mf_minus.run()
@@ -177,9 +187,9 @@ def benchmark_with_finite_diff(
     return gradient_ana, grad
 
 
-def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False):
+def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False, with_df=False):
     grad_gpu, grad = benchmark_with_finite_diff(
-        mol, xc, delta=0.005, nstates=5, lindep=lindep, tda=tda)
+        mol, xc, delta=0.005, nstates=5, lindep=lindep, tda=tda, with_df=with_df)
     norm_diff = np.linalg.norm(grad_gpu - grad)
     assert norm_diff < tol
     return grad_gpu
@@ -187,36 +197,32 @@ def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False):
 
 class KnownValues(unittest.TestCase):
 
-    def test_grad_pbe_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="pbe", tol=1e-4, tda=False)
-
-    def test_grad_b3lyp_tda_singlet_numerical(self):
-        _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True)
-
-    def test_grad_b3lyp_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="b3lyp", tol=1e-4, tda=False)
-
-    def test_grad_camb3lyp_tddft_singlet_numerical(self):
-        _check_grad(mol, xc="camb3lyp", tol=1e-4, lindep=1.0e-6, tda=False)
-
-    def test_grad_b3lyp_tda_singlet_ref(self):
+    def test_grad_b3lyp_tda_singlet_df(self):
         mol = pyscf.M(atom=atom, basis='ccpvdz')
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
 
-        td = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False)
+        td = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, GS=True)
         td.conv_tol = 1.0E-4
         td.Ktrunc = 0.0
         td.kernel()
         g = td.nuc_grad_method()
         g.kernel()
-
-        ref_g = np.array(
-            [[ 9.66144236e-12,  9.47508727e-09,  1.16603260e-01],
-             [ 6.12953685e-11,  7.88236258e-02, -5.83042819e-02],
-             [-7.09570935e-11, -7.88236353e-02, -5.83042889e-02]])
         
-        assert np.linalg.norm(ref_g - g.de) < 1.0E-4
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().to_gpu()
+        mf.kernel()
+
+        td2 = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td2.conv_tol = 1.0E-4
+        td2.Ktrunc = 0.0
+        td2.kernel()
+        g2 = td2.nuc_grad_method()
+        g2.kernel()
+
+        assert np.linalg.norm(g.de - g2.de) < 1.0E-4
+
+    def test_grad_b3lyp_tda_singlet_df_num(self):
+        _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True, with_df=True)
 
 
 if __name__ == "__main__":
