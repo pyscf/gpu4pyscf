@@ -42,8 +42,9 @@ mol2 = pyscf.M(
 
 mol_list = [mol1, mol2]
 
-eda_result = eda.eval_ALMO_EDA_2_energies(mol_list, xc = "wB97M-V")
+eda_result, dft_result = eda.eval_ALMO_EDA_2_energies(mol_list, xc = "wB97M-V")
 print(f"EDA result in dict form: {eda_result}")
+print(f"DFT energies of each fragment and the total system: {dft_result}")
 
 ### Reference output:
 # Fragment 0 energy = -76.4334344665 Hartree
