@@ -26,6 +26,7 @@ from pyscf import lib
 from pyscf.pbc.dft import krks as krks_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.dft import rks
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2

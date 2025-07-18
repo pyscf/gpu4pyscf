@@ -150,11 +150,13 @@ class SCF(mol_hf.SCF):
     get_bands = get_bands
     get_rho = get_rho
 
-    def get_ovlp(self, cell=None):
+    def get_ovlp(self, cell=None, kpt=None):
+        if kpt is None: kpt = self.kpt
         if cell is None: cell = self.cell
-        return int1e.int1e_ovlp(cell)[0]
+        return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
+        if kpt is None: kpt = self.kpt
         if cell is None: cell = self.cell
         if cell.pseudo:
             nuc = self.with_df.get_pp(kpt)
@@ -162,7 +164,7 @@ class SCF(mol_hf.SCF):
             nuc = self.with_df.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell)[0]
+        t = int1e.int1e_kin(cell, kpt)
         return nuc + t
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,

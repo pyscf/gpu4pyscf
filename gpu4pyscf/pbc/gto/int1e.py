@@ -96,10 +96,7 @@ class _Int1eOpt:
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
 
-        pcell = cell.copy()
-        pcell.a = bvkcell.lattice_vectors()
-        pcell.unit = 'Bohr'
-        Ls = asarray(pcell.get_lattice_Ls(rcut=cell.rcut))
+        Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
 

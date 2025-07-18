@@ -107,3 +107,35 @@ def test_int1e_ipkin():
 
     dat = int1e.int1e_ipkin(cell, kpts=kpts).get()
     assert abs(dat - ref).max() < 1e-10
+
+def test_int1e_ovlp1():
+    L = 4
+    n = 21
+    cell = pyscf.M(unit = 'B',
+               precision = 1e-10,
+               a = ((L,0,0),(0,L,0),(0,0,L)),
+               mesh = [n,n,n],
+               atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
+                       ['He', (L/2.   ,L/2.,L/2.+.5)]],
+               basis = { 'He': [[0, (0.8, 1.0)],
+                                [0, (1.0, 1.0)],
+                                [0, (1.2, 1.0)]]})
+    nk = [2, 2, 1]
+    kpts = cell.make_kpts(nk, wrap_around=True)
+    s = int1e.int1e_ovlp(cell, kpts)
+    ref = cell.pbc_intor('int1e_ovlp', kpts=kpts)
+    assert abs(s.get() - ref).max() < 1e-10
+    k = int1e.int1e_kin(cell, kpts)
+    ref = cell.pbc_intor('int1e_kin', kpts=kpts)
+    assert abs(k.get() - ref).max() < 1e-10
+
+    nk = [5, 4, 1]
+    kpts = cell.make_kpts(nk, wrap_around=True)[[3, 8, 11]]
+    s = int1e.int1e_ovlp(cell, kpts)
+    ref = cell.pbc_intor('int1e_ovlp', kpts=kpts)
+    assert abs(s.get() - ref).max() < 1e-10
+    k = int1e.int1e_kin(cell, kpts)
+    ref = cell.pbc_intor('int1e_kin', kpts=kpts)
+    assert abs(k.get() - ref).max() < 1e-10
+
+test_int1e_ovlp1()
