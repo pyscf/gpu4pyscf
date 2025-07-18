@@ -57,7 +57,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     double *env = envs.env;
     double *img_coords = envs.img_coords;
 
-    int gout_stride = bounds.gout_stride_lookup[lj*L_AUX1+li];
+    int gout_stride = bounds.gout_stride_lookup[li*L_AUX1+lj];
     int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;

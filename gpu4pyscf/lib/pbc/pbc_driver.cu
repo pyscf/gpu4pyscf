@@ -693,7 +693,7 @@ int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
     pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int2ce kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

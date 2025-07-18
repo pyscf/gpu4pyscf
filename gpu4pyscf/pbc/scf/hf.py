@@ -28,6 +28,7 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
+from gpu4pyscf.pbc.gto import int1e
 
 def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     '''Get energy bands at the given (arbitrary) 'band' k-points.
@@ -149,18 +150,22 @@ class SCF(mol_hf.SCF):
     get_bands = get_bands
     get_rho = get_rho
 
-    get_ovlp = return_cupy_array(hf_cpu.SCF.get_ovlp)
+    def get_ovlp(self, cell=None, kpt=None):
+        if kpt is None: kpt = self.kpt
+        if cell is None: cell = self.cell
+        return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
-        if cell is None: cell = self.cell
         if kpt is None: kpt = self.kpt
+        if cell is None: cell = self.cell
         if cell.pseudo:
             nuc = self.with_df.get_pp(kpt)
         else:
             nuc = self.with_df.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
+        t = int1e.int1e_kin(cell, kpt)
+        return nuc + t
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):

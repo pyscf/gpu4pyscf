@@ -370,7 +370,8 @@ def get_k_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3)), exxdiv=None):
 
 def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     from pyscf.pbc.tools.pbc import madelung
-    s = cp.asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
+    from gpu4pyscf.pbc.gto.int1e import int1e_ovlp
+    s = int1e_ovlp(cell, kpts=kpts)
     m = madelung(cell, kpts)
     if kpts is None:
         for i,dm in enumerate(dms):
