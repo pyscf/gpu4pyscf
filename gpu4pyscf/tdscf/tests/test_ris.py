@@ -19,7 +19,7 @@ from pyscf import gto, lib
 from gpu4pyscf.dft import rks
 import gpu4pyscf.tdscf.ris as ris
 
-PLACES = 4
+PLACES = 3
 
 
 def diagonalize(a, b, nroots=5):
