@@ -756,6 +756,12 @@ class RisBase(lib.StreamObject):
         else:
             self.dtype = cp.dtype(cp.float64)
 
+        self._scf = mf
+        self.chkfile = mf.chkfile
+        self.singlet = True # TODO: add R-T excitation.
+        self.exclude_nlc = False # TODO: exclude nlc functional 
+        self.xy = None
+
         self.theta = theta
         self.J_fit = J_fit
         self.K_fit = K_fit
@@ -1221,7 +1227,7 @@ class TDA(RisBase):
         log.info(CITATION_INFO)
 
         self.energies = energies
-        self.X = X
+        self.xy = X
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
 
@@ -1387,8 +1393,7 @@ class TDDFT(RisBase):
         log.info(f'oscillator strength: {oscillator_strength}')
         log.info(CITATION_INFO)
         self.energies = energies
-        self.X = X
-        self.Y = Y
+        self.xy = X, Y
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
 
@@ -1459,7 +1464,7 @@ class StaticPolarizability(RisBase):
 
     def kernel(self):
         '''for static polarizability, the problem is to solve
-            (A+B)X = -(P+Q)
+            (A+B)(X+Y) = -(P+Q)
             Q=P
         '''
         
@@ -1472,10 +1477,10 @@ class StaticPolarizability(RisBase):
                                         rhs=-transition_dipole, conv_tol=self.conv_tol, max_iter=self.max_iter, 
                                         gram_schmidt=self.gram_schmidt, single=self.single, verbose=log)
         X = solver.run()
-
+        # actually X here means X+Y
         alpha = cp.dot(X, transition_dipole.T)*4
 
-        self.X = X
+        self.xy = X
         self.alpha = alpha
 
         log.info(CITATION_INFO)
