@@ -1219,7 +1219,7 @@ class TDA(RisBase):
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies,
                                                  X=X/(2**0.5), Y=None, P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(),
                                                  name=self.out_name+'_TDA_ris', RKS=self.RKS, spectra=self.spectra,
-                                                 print_threshold = self.print_threshold, n_occ=self.n_occ, n_vir=self.n_vir)
+                                                 print_threshold = self.print_threshold, n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
         
         energies = energies*HARTREE2EV
         log.info(f'energies: {energies}')
@@ -1386,7 +1386,7 @@ class TDDFT(RisBase):
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, X=X/(2**0.5), Y=Y/(2**0.5),
                                                     P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(), name=self.out_name+'_TDDFT_ris',
                                                     spectra=self.spectra, RKS=self.RKS, print_threshold = self.print_threshold,
-                                                    n_occ=self.n_occ, n_vir=self.n_vir)
+                                                    n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
         
         energies = energies*HARTREE2EV
         log.info(f'energies: {energies}')
