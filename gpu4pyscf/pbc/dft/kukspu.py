@@ -183,7 +183,7 @@ class KUKSpU(kuks.KUKS):
         super().dump_flags(verbose)
         log = logger.new_logger(self, verbose)
         if log.verbose >= logger.INFO:
-            from gpu4pyscf.dft.krkspu import _print_U_info
+            from gpu4pyscf.dft.rkspu import _print_U_info
             _print_U_info(self, log)
         return self
 
@@ -250,6 +250,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += sum(x.trace().real for x in rdm1_lo[0])
             local_occ += sum(x.trace().real for x in rdm1_lo[1])
+        local_occ = local_occ.get()
         local_occ /= nkpts
         final_occupancies.append(local_occ)
 
@@ -262,6 +263,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += sum(x.trace().real for x in rdm1_lo[0])
             local_occ += sum(x.trace().real for x in rdm1_lo[1])
+        local_occ = local_occ.get()
         local_occ /= nkpts
         bare_occupancies.append(local_occ)
         log.info('alpha=%f bare_occ=%g final_occ=%g',

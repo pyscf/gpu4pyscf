@@ -295,6 +295,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
             C_on_site = contract('kiq,kqj->kij', c, mf.mo_coeff)
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += sum(x.trace().real for x in rdm1_lo)
+        local_occ = local_occ.get()
         local_occ /= nkpts
         final_occupancies.append(local_occ)
 
@@ -306,6 +307,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
             C_on_site = contract('kiq,kqj->kij', c, mo)
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += sum(x.trace().real for x in rdm1_lo)
+        local_occ = local_occ.get()
         local_occ /= nkpts
         bare_occupancies.append(local_occ)
         log.info('alpha=%f bare_occ=%g final_occ=%g',
