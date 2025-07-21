@@ -74,7 +74,7 @@ class Gradients(GradientsBase):
         ni = mf._numint
         assert hasattr(mf, 'xc'), 'HF gradients not supported'
         de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
-        s1 = int1e.int1e_ipovlp(cell)[0]
+        s1 = int1e.int1e_ipovlp(cell)[0].get()
         de += cpu_rhf._contract_vhf_dm(self, s1, dme0) * 2
 
         # the CPU code requires the attribute .rhoG
@@ -83,7 +83,7 @@ class Gradients(GradientsBase):
             de += vpploc_part1_nuc_grad(ni, dm0_cpu)
         de += pp_int.vpploc_part2_nuc_grad(cell, dm0_cpu)
         de += pp_int.vppnl_nuc_grad(cell, dm0_cpu)
-        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0]
+        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0].get()
         kinetic_contribution = cpu_rhf._contract_vhf_dm(
             self, core_hamiltonian_gradient, dm0_cpu
         )
