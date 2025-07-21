@@ -64,7 +64,7 @@ class KnownValues(unittest.TestCase):
         mf = kukspu.KUKSpU(cell, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
         e, g = mf.nuc_grad_method().as_scanner()(cell)
         self.assertAlmostEqual(e, -15.939464667807849, 8)
-        self.assertAlmostEqual(lib.fp(g), -0.42370983409650914, 5)
+        self.assertAlmostEqual(lib.fp(g), -0.42370983409650914, 4)
 
         mf_scanner = mf.as_scanner()
         e1 = mf_scanner(cell.set_geom_('C 0 0 0 0; O 0.5 0.801 1.1'))

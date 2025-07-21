@@ -27,7 +27,7 @@ from pyscf.pbc.dft import kukspu as kukspu_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.dft import kuks
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
-from gpu4pyscf.lib.cupy_helper import asarray, tag_array
+from gpu4pyscf.lib.cupy_helper import asarray, contract, tag_array
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
              kpts=None, kpts_band=None):
@@ -237,9 +237,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
     pcell = reference_mol(cell, mf.minao_ref)
     U_idx, U_val, U_lab = _set_U(cell, pcell, mf.U_idx, mf.U_val)
     C_ao_lo = _make_minao_lo(cell, pcell, kpts)
-    C_inv = []
-    for local_idx in U_idx:
-        C_inv.append([C_k[:,local_idx].conj().T.dot(S_k) for C_k, S_k in zip(C_ao_lo, ovlp)])
+    C_inv = [contract('kpi,kpq->kiq', C_ao_lo[:,:,local_idx].conj(), ovlp) for local_idx in U_idx]
 
     bare_occupancies = []
     final_occupancies = []
@@ -248,8 +246,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
         mf.kernel(dm0=bare_dm)
         local_occ = 0
         for c in C_inv:
-            C_on_site = [[c[k].dot(mf.mo_coeff[0][k]) for k in range(nkpts)],
-                         [c[k].dot(mf.mo_coeff[1][k]) for k in range(nkpts)]]
+            C_on_site = contract('kiq,nkqj->nkij', c, mf.mo_coeff)
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += sum(x.trace().real for x in rdm1_lo[0])
             local_occ += sum(x.trace().real for x in rdm1_lo[1])
@@ -261,8 +258,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
         e, mo = mf.eig(fock, ovlp)
         local_occ = 0
         for c in C_inv:
-            C_on_site = [[c[k].dot(mo[0][k]) for k in range(nkpts)],
-                         [c[k].dot(mo[1][k]) for k in range(nkpts)]]
+            C_on_site = contract('kiq,nkqj->nkij', c, mo)
             rdm1_lo = mf.make_rdm1(C_on_site, mf.mo_occ)
             local_occ += sum(x.trace().real for x in rdm1_lo[0])
             local_occ += sum(x.trace().real for x in rdm1_lo[1])
