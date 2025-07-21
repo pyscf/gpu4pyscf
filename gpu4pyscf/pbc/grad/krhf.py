@@ -30,7 +30,7 @@ from gpu4pyscf.pbc.dft import UniformGrids
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 
 __all__ = ['Gradients']
 
@@ -68,7 +68,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     for ia in range(natm):
         h1ao = hcore_deriv(ia)
         dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
-        extra_force[ia] = mf_grad.extra_force(ia, locals())
+        extra_force[ia] = ensure_numpy(mf_grad.extra_force(ia, locals()))
     log.timer('gradients of 1e part', *t1)
 
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>

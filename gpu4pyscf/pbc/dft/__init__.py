@@ -20,9 +20,13 @@ from . import rks
 from . import uks
 from . import krks
 from . import kuks
+from . import krkspu
+from . import kukspu
 from .rks import KohnShamDFT
 
 RKS = rks.RKS
 UKS = uks.UKS
 KRKS = krks.KRKS
 KUKS = kuks.KUKS
+KRKSpU = krkspu.KRKSpU
+KUKSpU = kukspu.KUKSpU
