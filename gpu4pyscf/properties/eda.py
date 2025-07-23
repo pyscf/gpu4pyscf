@@ -29,6 +29,7 @@ from gpu4pyscf.lib.cupy_helper import pack_tril, unpack_tril
 from gpu4pyscf.lib.diis import DIIS
 from gpu4pyscf.lib import logger
 import time
+import warnings
 
 # np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
 
@@ -1080,6 +1081,7 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
         mf.direct_scf_tol = 1e-16
         if if_kernel:
             energy = mf.kernel()
+            mf.mol.stdout.flush()
             assert mf.converged
             return mf, energy
         else:
@@ -1092,9 +1094,17 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
         gradient = grad_obj.kernel()
         if isinstance(gradient, cp.ndarray):
             gradient = gradient.get()
+        mf.mol.stdout.flush()
         return grad_obj.kernel()
 
     n_frag = len(mol_list)
+    for i_frag in range(n_frag):
+        for j_frag in range(i_frag + 1, n_frag):
+            if mol_list[i_frag].stdout != mol_list[j_frag].stdout:
+                warnings.warn("The stdout of each mol in mol_list is not consistent. We do not guarantee which stdout to write. "
+                              "Notice if the mol objects share the same \"output\" value, then the same output file is opened "
+                              "more than once, and the outputs of earlier-created mol will be lost.")
+
     mf_list = []
     frag_energy_list = []
     frag_gradient_list = []
