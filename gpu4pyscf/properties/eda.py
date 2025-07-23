@@ -1101,15 +1101,9 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
     for i_frag in range(n_frag):
         for j_frag in range(i_frag + 1, n_frag):
             if mol_list[i_frag].stdout != mol_list[j_frag].stdout:
-                warnings.warn("The stdout of each mol in mol_list is not consistent. We do not guarantee which stdout to write.")
-                if mol_list[i_frag].stdout.name == mol_list[j_frag].stdout.name:
-                    import os
-                    if mol_list[i_frag].stdout.name != os.devnull:
-                        raise ValueError("The stdout of each mol in mol_list points to the same file but has different handle, "
-                                         "which usually means the same file is opened more than once by multiple mols. "
-                                         "This will cause outputs of earlier-created mols lost into vacuum. If you encounter this error message, "
-                                         "when creating mol objects, please specify the \"output\" field of each mol to None, and afterward, "
-                                         "open the desired output file, and change each mol.stdout to the file handle of that file.")
+                warnings.warn("The stdout of each mol in mol_list is not consistent. We do not guarantee which stdout to write. "
+                              "Notice if the mol objects share the same \"output\" value, then the same output file is opened "
+                              "more than once, and the outputs of earlier-created mol will be lost.")
 
     mf_list = []
     frag_energy_list = []
