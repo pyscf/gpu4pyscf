@@ -27,6 +27,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
+from gpu4pyscf.lib.multi_gpu import synchronize
 from gpu4pyscf.__config__ import _streams, num_devices
 
 def _pin_memory(array):
@@ -484,7 +485,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         mo_coeff = mo_coeff.reshape(-1,nao,nmo)
         mo_occ   = mo_occ.reshape(-1,nmo)
         mo_coeff = intopt.sort_orbitals(mo_coeff, axis=[1])
-        cupy.cuda.get_current_stream().synchronize()
+        synchronize()
 
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -506,7 +507,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
             mo1s = [mo1s]
         occ_coeffs = [intopt.sort_orbitals(occ_coeff, axis=[0]) for occ_coeff in occ_coeffs]
         mo1s = [intopt.sort_orbitals(mo1, axis=[1]) for mo1 in mo1s]
-        cupy.cuda.get_current_stream().synchronize()
+        synchronize()
 
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -520,7 +521,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
     # general K matrix with density matrix
     else:
-        cupy.cuda.Stream.null.synchronize()
+        synchronize()
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
             for device_id in range(num_devices):
