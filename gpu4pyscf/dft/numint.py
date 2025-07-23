@@ -27,7 +27,7 @@ from gpu4pyscf.lib.cupy_helper import (
     grouped_dot, grouped_gemm, reduce_to_device, take_last2d)
 from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.multi_gpu import lru_cache
+from gpu4pyscf.lib.multi_gpu import lru_cache, synchronize
 from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import _streams, num_devices
 
@@ -566,7 +566,7 @@ def nr_rks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         dms = opt.sort_orbitals(dms, axis=[0,1])
 
     release_gpu_stack()
-    cupy.cuda.get_current_stream().synchronize()
+    synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
@@ -960,7 +960,7 @@ def nr_uks(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     release_gpu_stack()
-    cupy.cuda.get_current_stream().synchronize()
+    synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
@@ -1159,7 +1159,7 @@ def nr_rks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
 
     futures = []
-    cupy.cuda.get_current_stream().synchronize()
+    synchronize()
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(
@@ -1332,7 +1332,7 @@ def nr_uks_fxc(ni, mol, grids, xc_code, dm0=None, dms=None, relativity=0, hermi=
     dmb = opt.sort_orbitals(dmb, axis=[1,2])
 
     futures = []
-    cupy.cuda.get_current_stream().synchronize()
+    synchronize()
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(

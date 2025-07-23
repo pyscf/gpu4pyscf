@@ -34,10 +34,10 @@ def run(func, args=(), kwargs={}, non_blocking=False):
     if num_devices == 1:
         return [func(*args, *kwargs)]
 
-    cp.cuda.Stream.null.synchronize()
+    synchronize()
 
     def proc(device_id):
-        with cp.cuda.Device(device_id):
+        with cp.cuda.Device(device_id), _streams[device_id]:
             return func(*args, **kwargs)
 
     if not non_blocking:
@@ -114,7 +114,8 @@ def array_broadcast(a):
     while step > 0:
         for device_id in range(0, num_devices, 2*step):
             if device_id + step < num_devices:
-                with cp.cuda.Device(device_id+step):
+                _streams[device_id].synchronize()
+                with cp.cuda.Device(device_id+step), _streams[device_id+step]:
                     out[device_id+step] = dst = cp.empty_like(a)
                     p2p_transfer(dst, a)
         step >>= 1
@@ -135,7 +136,7 @@ def array_reduce(array_list, inplace=False):
 
     array_list = list(array_list)
     for device_id in range(num_devices):
-        with cp.cuda.Device(device_id):
+        with cp.cuda.Device(device_id), _streams[device_id]:
             if inplace or device_id % 2 == 1:
                 array_list[device_id] = array_list[device_id].ravel()
             else:
@@ -147,7 +148,8 @@ def array_reduce(array_list, inplace=False):
     while step < num_devices:
         for device_id in range(0, num_devices, 2*step):
             if device_id + step < num_devices:
-                with cp.cuda.Device(device_id):
+                _streams[device_id+step].synchronize()
+                with cp.cuda.Device(device_id), _streams[device_id]:
                     dst = array_list[device_id]
                     src = array_list[device_id+step]
                     buf = cp.empty_like(dst[:blksize])
@@ -168,3 +170,12 @@ def lru_cache(size):
             return fn_with_device_id(device_id, *args, **kwargs)
         return fn_on_device
     return to_cache
+
+def synchronize(devices=None):
+    '''Synchronize cross all devices and all streams'''
+    if devices is None:
+        for s in _streams:
+            s.synchronize()
+    else:
+        for device_id in devices:
+            cp.cuda.Device(device_id).synchronize()

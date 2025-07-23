@@ -28,6 +28,7 @@ from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf import __config__
+from gpu4pyscf.lib.multi_gpu import synchronize
 from gpu4pyscf.__config__ import _streams, num_devices
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
@@ -269,7 +270,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     cd_low_f = cupy.array(cd_low, order='F', copy=False)
     cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
-    cupy.cuda.get_current_stream().synchronize()
+    synchronize()
     futures = []
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
@@ -281,8 +282,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     for future in futures:
         future.result()
 
-    if not use_gpu_memory:
-        cupy.cuda.Device().synchronize()
+    synchronize()
 
     return _cderi
 
