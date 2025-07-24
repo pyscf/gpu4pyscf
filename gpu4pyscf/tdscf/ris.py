@@ -242,7 +242,9 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
 
-    upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx].T.copy()
+    upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
+    # equivalent to 
+    # upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx].T.copy()
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
@@ -860,9 +862,14 @@ class RisBase(lib.StreamObject):
     def build(self):
         log = self.log
         log.info(f'nstates: {self.nstates}')
+        log.info(f'N atoms:{self.mf.mol.natm}')
         log.info(f'conv_tol: {self.conv_tol}')
         log.info(f'max_iter: {self.max_iter}')
         log.info(f'Ktrunc: {self.Ktrunc}')
+        log.info(f'calculate and print UV-vis spectra info: {self.spectra}')
+        if self.spectra:
+            log.info(f'spectra files will be written and their name start with: {self.out_name}')
+        log.info(f'store Tia Tij Tab in RAM: {self._in_ram}')
 
         if self.a_x or self.omega or self.alpha or self.beta:
             ''' user wants to define some XC parameters '''
