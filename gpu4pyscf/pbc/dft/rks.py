@@ -26,6 +26,7 @@ from pyscf import lib
 from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import rks as mol_ks
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf import hf as pbchf, khf
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
@@ -309,7 +310,8 @@ class RKS(KohnShamDFT, pbchf.RHF):
             nuc = ni.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
+        t = int1e.int1e_kin(cell, kpt)
+        return nuc + t
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
