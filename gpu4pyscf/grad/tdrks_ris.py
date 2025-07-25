@@ -71,8 +71,6 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     orbo = mo_coeff[:, :nocc]
     if getattr(mf, 'with_solvent', None) is not None:
         raise NotImplementedError('With solvent is not supported yet')
-    if getattr(mf, 'with_df', None) is not None:
-        raise NotImplementedError('With density fitting is not supported yet')
     
     dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
     doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}

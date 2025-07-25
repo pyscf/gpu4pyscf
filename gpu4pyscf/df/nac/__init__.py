@@ -12,6 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import tdrhf
-from . import tdrks
-from . import tdrks_ris
+from . import tdrhf, tdrks, tdrks_ris
