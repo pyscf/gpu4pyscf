@@ -18,6 +18,22 @@ from gpu4pyscf import scf, dft
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import ris
 
+
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
 def change_sign(s12_ao, mo_coeff_b ,mo_coeff):
     mo_coeff_new = mo_coeff*1.0
     s12_mo = mo_coeff_b.T @ s12_ao @ mo_coeff_new
@@ -53,14 +69,13 @@ def get_mf(mol, mf, s, mo_coeff):
             mf_new.grids.atom_grid = mf.grids.atom_grid
         else:
             mf_new.grids.level = mf.grids.level
-        mf_new.conv_tol = mf.conv_tol
-        mf_new.conv_tol_cpscf = mf.conv_tol_cpscf
-        mf_new.max_cycle = mf.max_cycle
     else:
         mf_new = scf.RHF(mol)
     if getattr(mf, 'with_df', None) is not None:
-        mf_new.density_fit()
-
+        mf_new = mf_new.density_fit()
+    mf_new.conv_tol = mf.conv_tol
+    mf_new.conv_tol_cpscf = mf.conv_tol_cpscf
+    mf_new.max_cycle = mf.max_cycle
     mf_new.kernel()
     assert mf_new.converged
     mo_coeff_new = change_sign(s, mo_coeff, mf_new.mo_coeff)
@@ -72,20 +87,16 @@ def get_mf(mol, mf, s, mo_coeff):
 def get_mf_td(mol, mf, s, mo_coeff, with_ris=False):
     mf_new = get_mf(mol, mf, s, mo_coeff)
     if with_ris:
-        td_new = ris.TDA(mf=mf_new, nstates=5, spectra=False, single=False, GS=True)
-        td_new.conv_tol = 1.0E-4
-        td_new.Ktrunc = 0.0
-        td_new.kernel()
+        td_new = ris.TDA(mf=mf_new, nstates=5, spectra=False, Ktrunc = 0.0, single=False, GS=True)
     else:
         td_new = mf_new.TDA()
-        td_new.nstates=5
-        td_new.kernel()
-    return mf_new, td_new
+    a, b = td_new.get_ab()
+    e_diag, xy_diag = diagonalize_tda(a)
+
+    return mf_new, xy_diag
 
 
 def get_nacv_ge(td_nac, x_yI, delta=0.001, with_ris=False, singlet=True, atmlst=None, verbose=logger.INFO):
-    print("delta", delta)
-    
     mf = td_nac.base._scf
     mol = mf.mol
 
@@ -167,19 +178,14 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, with_ris=False, singlet=Tru
     for iatm in range(natm):
         for icart in range(3):
             mol_add = get_new_mol(mol, coords, delta, iatm, icart)
-            mf_add, td_add = get_mf_td(mol_add, mf, s, mo_coeff, with_ris)
+            mf_add, xy_diag_add = get_mf_td(mol_add, mf, s, mo_coeff, with_ris)
             mol_minus = get_new_mol(mol, coords, -delta, iatm, icart)
-            mf_minus, td_minus = get_mf_td(mol_minus, mf, s, mo_coeff, with_ris)
+            mf_minus, xy_diag_minus = get_mf_td(mol_minus, mf, s, mo_coeff, with_ris)
 
             sign1 = 1.0
             sign2 = 1.0
-            if not with_ris:
-                xJ_add = cp.asarray(td_add.xy[nJ][0])
-                xJ_minus = cp.asarray(td_minus.xy[nJ][0])
-            else:
-                xJ_add = cp.asarray(td_add.X[nJ].reshape(nocc, nvir)*np.sqrt(0.5))
-                xJ_minus = cp.asarray(td_minus.X[nJ].reshape(nocc, nvir)*np.sqrt(0.5))
-            
+            xJ_add = cp.asarray(xy_diag_add[:, nJ]).reshape(nocc, nvir)*cp.sqrt(0.5)
+            xJ_minus = cp.asarray(xy_diag_minus[:, nJ]).reshape(nocc, nvir)*cp.sqrt(0.5)
             if (xJ*xJ_add).sum() < 0.0:
                 sign1 = -1.0
             if (xJ*xJ_minus).sum() < 0.0:
@@ -205,3 +211,4 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, with_ris=False, singlet=Tru
         ds1_tmp[:,:,p1:] = 0
         nac2[k] = cp.einsum('xij,ij->x', ds1_tmp, gamma_ao).get()
     return nac - nac2 + nac3
+   

@@ -71,7 +71,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         raise ValueError('TDDFT ris only supports singlet state')
     mol = td_nac.mol
     mf = td_nac.base._scf
-    mf_grad = mf.nuc_grad_method()
     mo_coeff = cp.asarray(mf.mo_coeff)
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
@@ -115,8 +114,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     f1voI, f1ooIJ, vxc1, k1aoIJ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyI, dmzooIJ, True, 
-        True, singlet, with_nac=True, dmvo_2=dmxpyJ)
-    f1voJ, _, _, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyJ, None, False, False, singlet)
+        False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
     auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
@@ -220,13 +218,11 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
         veff0doo = vj0IJ * 2 + f1ooIJ[0]
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
-        veffI = vj1I * 2
-        veffI *= 0.5
+        veffI = vj1I
         veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  
         wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
-        veffJ = vj1J * 2
-        veffJ *= 0.5
+        veffJ = vj1J
         veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  
         wvo += contract("ac,ai->ci", veff0mopJ[nocc:, nocc:], xpyI) * 2
@@ -275,7 +271,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopJ[nocc:, nocc:], xpyI)
     im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0momJ[nocc:, nocc:], xmyI)
 
-    im0[nocc:, :nocc] = TFvo*2
+    im0[nocc:, :nocc] = TFvo*2.0
     im0[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopI[:nocc, :nocc], xpyJ)
     im0[nocc:, :nocc]-= contract("ij,ai->aj", veff0momI[:nocc, :nocc], xmyJ)
     im0[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopJ[:nocc, :nocc], xpyI)
@@ -325,44 +321,43 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     
     extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor) 
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor=j_factor, k_factor=k_factor) 
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
     # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, oo0, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor, k_factor)
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor, k_factor)
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
     dvhf_all -= dvhf # NOTE: minus
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor)
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
         extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
     dvhf_all += dvhf
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
     dvhf_all -= dvhf
@@ -370,44 +365,44 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha - hyb
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega) 
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor=j_factor, k_factor=k_factor, omega=omega) 
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
         # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, oo0, j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
 
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega)
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
         # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, omega=omega)
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
         dvhf_all -= dvhf # NOTE: minus
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega)
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
         dvhf_all -= dvhf
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
         dvhf_all += dvhf
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
         dvhf_all -= dvhf
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
         dvhf_all -= dvhf
@@ -438,10 +433,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ds_vv_etf = contract("xij,ji->xi", s1, rIJvvS_ao * (EJ - EI))
     dsxy = cp.asarray([cp.sum(ds_oo[:, p0:p1] + ds_vv[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
     dsxy_etf = cp.asarray([cp.sum(ds_oo_etf[:, p0:p1] + ds_vv_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec + dveff1_0 + dveff1_1 # Eq. (64) in Ref. [1]
-    de_etf = de + dsxy_etf
-    de += dsxy 
     
+    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec + dveff1_0 + dveff1_1 # Eq. (64) in Ref. [1]
+
+    de_etf = de + dsxy_etf
+    de += dsxy
+
     de = de.get()
     de_etf = de_etf.get()
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)

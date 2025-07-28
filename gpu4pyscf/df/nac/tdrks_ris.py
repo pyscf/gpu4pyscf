@@ -27,10 +27,9 @@ class NAC(tdrks_ris_nac.NAC):
         tdrks_ris_nac.NAC.__init__(self, td)
 
     auxbasis_response = True
+    get_veff = tdrhf_nac_df.get_veff
     get_jk = tdrhf_nac_df.get_jk
 
     def check_sanity(self):
         assert isinstance(self.base._scf, df.df_jk._DFHF)
         assert isinstance(self.base, ris.TDDFT) or isinstance(self.base, ris.TDA)
-
-    get_veff = tdrhf_nac_df.get_veff

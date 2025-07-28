@@ -41,9 +41,22 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 class KnownValues(unittest.TestCase):
-    def test_grad_pbe_tdaris_singlet_vs_tda(self):
+    def test_nac_pbe_tdaris_singlet_vs_tda(self):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -69,7 +82,55 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
-    def test_grad_pbe0_tddftris_singlet_vs_tddft(self):
+    def test_nac_pbe_tdaris_singlet_fdiff(self):
+        mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        nac_ris = td_ris.nac_method()
+
+        a, b = td_ris.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+        nstate = 1
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+    def test_nac_pbe0_tdaris_singlet_fdiff(self):
+        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        nac_ris = td_ris.nac_method()
+
+        a, b = td_ris.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+        nstate = 1
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+    def test_nac_pbe0_tddftris_singlet_vs_tddft(self):
         mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -95,9 +156,8 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 4.0E-3
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
-    def test_grad_camb3lyp_tdaris_singlet_vs_tda(self):
+    def test_nac_camb3lyp_tdaris_singlet_vs_tda(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
-        # mf.grids.atom_grid = (99,590)
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
