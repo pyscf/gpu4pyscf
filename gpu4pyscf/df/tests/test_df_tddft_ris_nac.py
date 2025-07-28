@@ -26,7 +26,7 @@ H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
 
-bas0 = "def2-tzvp"
+bas0 = "def2tzvp"
 
 def setUpModule():
     global mol
@@ -40,8 +40,23 @@ def tearDownModule():
     del mol
 
 
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
 class KnownValues(unittest.TestCase):
-    def test_grad_pbe_tdaris_singlet_vs_tda_ge(self):
+    def test_nac_pbe_tdaris_singlet_vs_tda_ge(self):
         mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -63,11 +78,13 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
         
+        # compare with traditional TDDFT
         assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-3
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
+        # check the difference between RIS and TDDFT for nacv is the same with gradient
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
-    def test_grad_pbe0_tddftris_singlet_vs_tddft_ge(self):
+    def test_nac_pbe0_tddftris_singlet_vs_tddft_ge(self):
         mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -89,11 +106,13 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
+        # compare with traditional TDDFT
         assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 4.0E-3
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 4.0E-3
+        # check the difference between RIS and TDDFT for nacv is the same with gradient
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
-    def test_grad_camb3lyp_tdaris_singlet_vs_tda_ge(self):
+    def test_nac_camb3lyp_tdaris_singlet_vs_tda_ge(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").density_fit().to_gpu()
         # mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -115,11 +134,13 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
+        # compare with traditional TDDFT
         assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-2
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
+        # check the difference between RIS and TDDFT for nacv is the same with gradient
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
-    def test_grad_pbe_tda_singlet_vs_tda_ee(self):
+    def test_nac_pbe_tda_singlet_vs_tda_ee(self):
         mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -141,11 +162,75 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
+        # compare with traditional TDDFT
         assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 2.0E-2
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2.0E-2
+        # check the difference between RIS and TDDFT for nacv is the same with gradient
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2 * np.linalg.norm(g.de - g_ris.de)
 
-    def test_grad_pbe0_tddft_singlet_vs_tddft_ee(self):
+    def test_nac_pbe_tda_singlet_fdiff(self):
+        """
+        Compare the analytical nacv with finite difference nacv
+        """
+        mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        nac_ris = td_ris.nac_method()
+        a, b = td_ris.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        # ground-excited state
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[nstate])
+        delta = 0.001
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 4.0E-3
+        
+        # excited-excited state
+        nstateI = 1
+        nstateJ = 2
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        ana_nac = nac.tdrks_ris.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), e_diag[nstateI], e_diag[nstateJ])
+        delta=0.005
+        fdiff_nac = nac.finite_diff.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, with_ris=True)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1.0E-5
+        print(fdiff_nac)
+        print(delta, np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)))
+
+    def test_nac_pbe0_tda_singlet_fdiff(self):
+        """
+        Compare the analytical nacv with finite difference nacv
+        """
+        mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        nac_ris = td_ris.nac_method()
+        a, b = td_ris.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        # ground-excited state
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[nstate])
+        delta = 0.001
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 4.0E-3
+
+        # excited-excited state
+        nstateI = 1
+        nstateJ = 2
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        ana_nac = nac.tdrks_ris.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), e_diag[nstateI], e_diag[nstateJ])
+        delta=0.005
+        fdiff_nac = nac.finite_diff.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, with_ris=True)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1.0E-5
+
+    def test_nac_pbe0_tddft_singlet_vs_tddft_ee(self):
         mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -167,11 +252,13 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
+        # compare with traditional TDDFT
         assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 1.0E-2
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 1.0E-2
+        # check the difference between RIS and TDDFT for nacv is the same with gradient
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2 * np.linalg.norm(g.de - g_ris.de)
 
-    def test_grad_camb3lyp_tddft_singlet_vs_tddft_ee(self):
+    def test_nac_camb3lyp_tddft_singlet_vs_tddft_ee(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -193,8 +280,10 @@ class KnownValues(unittest.TestCase):
         g_ris = td_ris.nuc_grad_method()
         g_ris.kernel()
 
+        # compare with traditional TDDFT
         assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 1.0E-2
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 1.0E-2
+        # check the difference between RIS and TDDFT for nacv is the same with gradient
         assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2 * np.linalg.norm(g.de - g_ris.de)
 
 
