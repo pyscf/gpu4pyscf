@@ -317,29 +317,6 @@ def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omeg
     return vhf
 
 
-def as_scanner(td_grad, state=1):
-    '''Generating a nuclear gradients scanner/solver (for geometry optimizer).
-    The returned solver is a function. This function requires one argument
-    "mol" as input and returns energy and first order nuclear derivatives.
-    The solver will automatically use the results of last calculation as the
-    initial guess of the new calculation.  All parameters assigned in the
-    nuc-grad object and SCF object (DIIS, conv_tol, max_memory etc) are
-    automatically applied in the solver.
-    Note scanner has side effects.  It may change many underlying objects
-    (_scf, with_df, with_x2c, ...) during calculation.
-    '''
-    if isinstance(td_grad, lib.GradScanner):
-        return td_grad
-
-    if state == 0:
-        return td_grad.base._scf.nuc_grad_method().as_scanner()
-
-    logger.info(td_grad, 'Create scanner for %s', td_grad.__class__)
-    name = td_grad.__class__.__name__ + TDSCF_GradScanner.__name_mixin__
-    return lib.set_class(TDSCF_GradScanner(td_grad, state),
-                         (TDSCF_GradScanner, td_grad.__class__), name)
-
-
 class TDSCF_GradScanner(lib.GradScanner):
     _keys = {'e_tot'}
 
@@ -426,8 +403,6 @@ class Gradients(tdrhf.Gradients):
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, theta, singlet, atmlst=None, verbose=logger.info):
         return grad_elec(self, xy, theta, singlet=singlet, atmlst=atmlst, verbose=self.verbose)
-
-    as_scanner = as_scanner
 
 
 Grad = Gradients

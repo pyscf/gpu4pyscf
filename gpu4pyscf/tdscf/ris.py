@@ -21,7 +21,7 @@ from pyscf import gto, lib
 from gpu4pyscf import scf
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
 from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
-from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig
+from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, rhf
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
@@ -121,10 +121,9 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
     turns off PySCF built-in parsing function
     '''
     auxmol = mol.copy()
-    auxmol.parse_arg = False
     auxmol_basis_keys = mol._basis.keys()
     auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
-    auxmol.build(dump_input=False)
+    auxmol.build(dump_input=False, parse_arg=False)
     return auxmol
 
 
@@ -696,15 +695,6 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
     return a.get(), b.get()
 
 
-def as_scanner(td):
-    if isinstance(td, lib.SinglePointScanner):
-        return td
-
-    logger.info(td, 'Set %s as a scanner', td.__class__)
-    name = td.__class__.__name__ + TD_Scanner.__name_mixin__
-    return lib.set_class(TD_Scanner(td), (TD_Scanner, td.__class__), name)
-
-
 class TD_Scanner(lib.SinglePointScanner):
     def __init__(self, td):
         self.__dict__.update(td.__dict__)
@@ -970,7 +960,7 @@ class RisBase(lib.StreamObject):
         self._scf.reset(mol)
         return self
 
-    as_scanner = as_scanner
+    as_scanner = rhf.as_scanner
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
