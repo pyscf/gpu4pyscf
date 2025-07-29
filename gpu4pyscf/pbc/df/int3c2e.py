@@ -17,7 +17,6 @@ Perodic 3-center 2-electron short-range Coulomb integral helper functions
 '''
 
 import ctypes
-import itertools
 import math
 import numpy as np
 import cupy as cp
@@ -34,7 +33,8 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
                                 extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.pbc.df.ft_ao import libpbc, init_constant, most_diffused_pgto
+from gpu4pyscf.pbc.df.ft_ao import (
+    libpbc, init_constant, most_diffused_pgto, PBCIntEnvVars)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 
 __all__ = [
@@ -52,7 +52,6 @@ LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 45
 THREADS = 256
-BVK_CELL_SHELLS = 400
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     r'''
@@ -96,7 +95,6 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     else:
         nf = uniq_l * 2 + 1
     c_l_offsets = np.append(0, np.cumsum(c_shell_counts*nf))
-    lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
     aux_coeff = asarray(int3c2e_opt.aux_coeff)
@@ -201,7 +199,7 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     _env = cp.array(_scale_sp_ctr_coeff(bvkcell), dtype=np.float64)
     ao_loc = bvkcell.ao_loc_nr(cart=True)
     ao_loc_gpu = cp.array(ao_loc, dtype=np.int32)
-    int3c2e_envs = Int3c2eEnvVars(
+    int3c2e_envs = PBCIntEnvVars(
         sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
         _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
         ao_loc_gpu.data.ptr, Ls.data.ptr,
@@ -522,7 +520,7 @@ class SRInt3c2eOpt:
         bvk_ao_loc = bvkcell.ao_loc
         aux_loc = auxcell.ao_loc
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
-        int3c2e_envs = Int3c2eEnvVars(
+        int3c2e_envs = PBCIntEnvVars(
             pcell.natm, pcell.nbas, bvk_ncells, nimgs,
             _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
             ao_loc.data.ptr, Ls.data.ptr,
@@ -850,19 +848,6 @@ class SRInt3c2eOpt:
     def int3c2e_kernel(self, verbose=None, img_idx_cache=None):
         raise NotImplementedError(
             'The entire int3c2e tensor evaluated in one kernel is not supported')
-
-class Int3c2eEnvVars(ctypes.Structure):
-    _fields_ = [
-        ('cell0_natm', ctypes.c_uint16),
-        ('cell0_nbas', ctypes.c_uint16),
-        ('bvk_ncells', ctypes.c_uint16),
-        ('nimgs', ctypes.c_uint16),
-        ('atm', ctypes.c_void_p),
-        ('bas', ctypes.c_void_p),
-        ('env', ctypes.c_void_p),
-        ('ao_loc', ctypes.c_void_p),
-        ('img_coords', ctypes.c_void_p),
-    ]
 
 def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)

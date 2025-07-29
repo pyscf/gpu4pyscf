@@ -19,8 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#include "gvhf-rys/vhf.cuh"
+#include "pbc.cuh"
 #include "int3c2e.cuh"
 #include "ft_ao.cuh"
 
@@ -30,7 +29,7 @@
 #define OF_COMPLEX      2
 
 __global__
-void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_aopair_kernel(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                       int compressing)
 {
     // sp is short for shl_pair
@@ -310,7 +309,7 @@ int ft_aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells,
 // count images for the overlap between cell and bvkcell
 __global__ static
 void overlap_img_counts_kernel(int *img_counts, int ish0, int jsh0, int nish, int njsh,
-                               AFTIntEnvVars envs, float *exps, float *log_coeff,
+                               PBCIntEnvVars envs, float *exps, float *log_coeff,
                                float log_cutoff, int permutation_symmetry)
 {
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
@@ -385,7 +384,7 @@ void overlap_img_counts_kernel(int *img_counts, int ish0, int jsh0, int nish, in
 __global__ static
 void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
                             int npairs, int ish0, int jsh0, int nish, int njsh,
-                            AFTIntEnvVars envs, float *exps, float *log_coeff,
+                            PBCIntEnvVars envs, float *exps, float *log_coeff,
                             float log_cutoff)
 {
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -458,7 +457,7 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
 }
 
 extern "C" {
-int overlap_img_counts(int *img_counts, int *shls_slice, AFTIntEnvVars *envs,
+int overlap_img_counts(int *img_counts, int *shls_slice, PBCIntEnvVars *envs,
                        float *exps, float *log_coeff, float log_cutoff,
                        int permutation_symmetry)
 {
@@ -483,7 +482,7 @@ int overlap_img_counts(int *img_counts, int *shls_slice, AFTIntEnvVars *envs,
 }
 
 int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
-                    int npairs, int *shls_slice, AFTIntEnvVars *envs,
+                    int npairs, int *shls_slice, PBCIntEnvVars *envs,
                     float *exps, float *log_coeff, float log_cutoff)
 {
     int ish0 = shls_slice[0];

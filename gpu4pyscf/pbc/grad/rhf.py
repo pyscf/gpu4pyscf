@@ -26,10 +26,9 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.lib.cupy_helper import return_cupy_array
 from gpu4pyscf.pbc.dft import multigrid_v2
+from gpu4pyscf.pbc.gto import int1e
 
 __all__ = ['Gradients']
-
-libgpbc = multigrid_v2.libgpbc
 
 class GradientsBase(mol_rhf.GradientsBase):
     get_ovlp = NotImplemented
@@ -52,7 +51,6 @@ class Gradients(GradientsBase):
         mo_occ=None,
         atmlst=None,
     ):
-        raise RuntimeError('Unresolved bug in the Gradients code')
         mf = self.base
         cell = mf.cell
         assert hasattr(mf, '_numint')
@@ -76,7 +74,7 @@ class Gradients(GradientsBase):
         ni = mf._numint
         assert hasattr(mf, 'xc'), 'HF gradients not supported'
         de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
-        s1 = cell.pbc_intor('int1e_ipovlp')
+        s1 = int1e.int1e_ipovlp(cell)[0].get()
         de += cpu_rhf._contract_vhf_dm(self, s1, dme0) * 2
 
         # the CPU code requires the attribute .rhoG
@@ -85,7 +83,7 @@ class Gradients(GradientsBase):
             de += vpploc_part1_nuc_grad(ni, dm0_cpu)
         de += pp_int.vpploc_part2_nuc_grad(cell, dm0_cpu)
         de += pp_int.vppnl_nuc_grad(cell, dm0_cpu)
-        core_hamiltonian_gradient = cell.pbc_intor("int1e_ipkin")
+        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0].get()
         kinetic_contribution = cpu_rhf._contract_vhf_dm(
             self, core_hamiltonian_gradient, dm0_cpu
         )

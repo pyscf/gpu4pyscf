@@ -2088,14 +2088,15 @@ def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
 
 def _scale_ao(ao, wv, out=None):
     if wv.ndim == 1:
-        if ao.flags.f_contiguous:
+        if ao.flags.f_contiguous or ao.dtype != np.float64:
+            assert out is None
             return ao * wv
         nvar = 1
         nao, ngrids = ao.shape
         assert wv.size == ngrids
     else:
-        if ao[0].flags.f_contiguous:
-            return contract('nip,np->ip', ao, wv)
+        if ao[0].flags.f_contiguous or ao.dtype != np.float64:
+            return contract('nip,np->ip', ao, wv, out=out)
         nvar, nao, ngrids = ao.shape
         assert wv.shape == (nvar, ngrids)
 

@@ -1120,6 +1120,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
+    kpts, is_single_kpt = _check_kpts(ni, kpts)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
@@ -1256,7 +1257,7 @@ def get_veff_ip1(
     if xc_type == "GGA":
         xc_for_fock = (
             xc_for_fock[:, 0]
-            - contract("ngp, pg -> p", xc_for_fock[:,1:4], Gv) * 1j
+            - contract("ngp, pg -> np", xc_for_fock[:,1:4], Gv) * 1j
         ).reshape((nset, -1, ngrids))
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh

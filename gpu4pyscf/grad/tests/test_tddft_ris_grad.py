@@ -80,7 +80,7 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
         y = xy_diag[nsize:,0]*np.sqrt(0.5/(norm_1**2-norm_2**2))
         x = x.reshape(nocc, nvir)
         y = y.reshape(nocc, nvir)
-    
+
         de_td = grad_elec(tdgrad, (x, y), theta=td.theta, J_fit=td.J_fit, K_fit=td.K_fit)
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
@@ -101,7 +101,7 @@ def tearDownModule():
 
 def benchmark_with_finite_diff(
         mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False):
-    
+
     mol = mol_input.copy()
     mf = dft.RKS(mol, xc=xc).to_gpu()
     mf.grids.level=9
@@ -186,16 +186,19 @@ def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False):
 
 
 class KnownValues(unittest.TestCase):
-
+    @pytest.mark.slow
     def test_grad_pbe_tddft_singlet_numerical(self):
         _check_grad(mol, xc="pbe", tol=1e-4, tda=False)
 
+    @pytest.mark.slow
     def test_grad_b3lyp_tda_singlet_numerical(self):
         _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True)
 
+    @pytest.mark.slow
     def test_grad_b3lyp_tddft_singlet_numerical(self):
         _check_grad(mol, xc="b3lyp", tol=1e-4, tda=False)
 
+    @pytest.mark.slow
     def test_grad_camb3lyp_tddft_singlet_numerical(self):
         _check_grad(mol, xc="camb3lyp", tol=1e-4, lindep=1.0e-6, tda=False)
 
@@ -215,7 +218,7 @@ class KnownValues(unittest.TestCase):
             [[ 9.66144236e-12,  9.47508727e-09,  1.16603260e-01],
              [ 6.12953685e-11,  7.88236258e-02, -5.83042819e-02],
              [-7.09570935e-11, -7.88236353e-02, -5.83042889e-02]])
-        
+
         assert np.linalg.norm(ref_g - g.de) < 1.0E-4
 
 

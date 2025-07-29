@@ -58,7 +58,7 @@
 #define KAPPA_OF        4
 #define PTR_EXP         5
 #define PTR_COEFF       6
-#define RESERVE_BASLOT  7
+#define PTR_BAS_COORD   7
 #define BAS_SLOTS       8
 
 // boundaries for gint

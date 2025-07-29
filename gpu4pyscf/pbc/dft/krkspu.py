@@ -236,7 +236,7 @@ class KRKSpU(krks.KRKS):
             _print_U_info(self, log)
         return self
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         raise NotImplementedError
 
 def _print_U_info(mf, log):

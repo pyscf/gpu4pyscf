@@ -30,6 +30,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc import df
+from gpu4pyscf.pbc.gto import int1e
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -253,6 +254,11 @@ class KSCF(pbchf.SCF):
     build = khf_cpu.KSCF.build
     reset = pbchf.SCF.reset
 
+    def get_ovlp(self, cell=None, kpts=None):
+        if cell is None: cell = self.cell
+        if kpts is None: kpts = self.kpts
+        return int1e.int1e_ovlp(cell, kpts)
+
     def get_hcore(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
@@ -262,7 +268,7 @@ class KSCF(pbchf.SCF):
             nuc = self.with_df.get_nuc(kpts)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpts))
+        t = int1e.int1e_kin(cell, kpts)
         return nuc + t
 
     def get_j(self, cell=None, dm_kpts=None, hermi=1, kpts=None,
@@ -327,7 +333,6 @@ class KSCF(pbchf.SCF):
     make_rdm2 = NotImplemented
 
     init_direct_scf = NotImplemented
-    get_ovlp = return_cupy_array(khf_cpu.get_ovlp)
     get_fock = get_fock
     get_fermi = get_fermi
     get_occ = get_occ
@@ -356,7 +361,6 @@ class KSCF(pbchf.SCF):
     spin_square = NotImplemented
     dip_moment = NotImplemented
     stability = NotImplemented
-    nuc_grad_method = NotImplemented
     to_rhf = NotImplemented
     to_uhf = NotImplemented
     to_ghf = NotImplemented

@@ -208,14 +208,13 @@ class FFTDF(lib.StreamObject):
     _keys = fft_cpu.FFTDF._keys
 
     def __init__(self, cell, kpts=np.zeros((1,3))):
-        from gpu4pyscf.pbc.dft import gen_grid
         from gpu4pyscf.pbc.dft import numint
         self.cell = cell
         self.stdout = cell.stdout
         self.verbose = cell.verbose
         self.max_memory = cell.max_memory
         self.kpts = kpts
-        self.grids = gen_grid.UniformGrids(cell)
+        self.mesh = cell.mesh
 
         # The following attributes are not input options.
         # self.exxdiv has no effects. It was set in the get_k_kpts function to
@@ -224,13 +223,20 @@ class FFTDF(lib.StreamObject):
         self._numint = numint.KNumInt()
         self._rsh_df = {}  # Range separated Coulomb DF objects
 
-    mesh = fft_cpu.FFTDF.mesh
+    @property
+    def grids(self):
+        from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
+        grids = UniformGrids(self.cell)
+        grids.mesh = self.mesh
+        return grids
+    @grids.setter
+    def grids(self, val):
+        self.mesh = val.mesh
+
     dump_flags = fft_cpu.FFTDF.dump_flags
     check_sanity = fft_cpu.FFTDF.check_sanity
     build = fft_cpu.FFTDF.build
     reset = fft_cpu.FFTDF.reset
-
-    aoR_loop = NotImplemented
 
     get_pp = get_pp
     get_nuc = get_nuc
@@ -254,6 +260,8 @@ class FFTDF(lib.StreamObject):
                 vj = fft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
 
+    get_j_e1 = fft_jk.get_j_e1_kpts
+
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented
     ao2mo_7d = NotImplemented
@@ -264,4 +272,10 @@ class FFTDF(lib.StreamObject):
 
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
+
+    def to_cpu(self):
+        from pyscf.pbc.df.fft import FFTDF
+        out = FFTDF(self.cell)
+        out.mesh = self.mesh
+        out.kpts = self.kpts
+        return out

@@ -304,36 +304,35 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     l_ctr_counts = np.hstack(_l_ctr_counts)
     return uniq_l_ctr, l_ctr_counts
 
-# This function is only available in pyscf-2.8 or later
 def extract_pgto_params(mol, op='diffused'):
-    '''A helper function to extract exponents and contraction coefficients for
-    estimate_xxx function
+    '''A helper function to extract exponents and contraction coefficients of
+    the most diffused or compact primitive GTOs for each shell. These exponents
+    and coefficients are typically used in estimating rcut and Ecut for PBC
+    methods.
     '''
-    es = []
-    cs = []
-    if op == 'diffused':
-        precision = 1e-8
-        for i in range(mol.nbas):
-            e = mol.bas_exp(i)
-            c = abs(mol._libcint_ctr_coeff(i)).max(axis=1)
-            l = mol.bas_angular(i)
-            # A quick estimation for the radius that each primitive GTO vanishes
-            r2 = np.log(c**2 / precision * 10**l + 1e-200) / e
-            idx = r2.argmax()
-            es.append(e[idx])
-            cs.append(c[idx].max())
-    elif op == 'compact':
-        precision = 1e-8
-        for i in range(mol.nbas):
-            e = mol.bas_exp(i)
-            c = abs(mol._libcint_ctr_coeff(i)).max(axis=1)
-            l = mol.bas_angular(i)
-            # A quick estimation for the resolution of planewaves that each
-            # primitive GTO requires
-            ke = np.log(c**2 / precision * 50**l + 1e-200) * e
-            idx = ke.argmax()
-            es.append(e[idx])
-            cs.append(c[idx].max())
-    else:
+    if op != 'diffused' and op != 'compact':
         raise RuntimeError(f'Unsupported operation {op}')
-    return np.array(es), np.array(cs)
+
+    e = np.hstack(mol.bas_exps())
+    c = np.hstack([abs(mol._libcint_ctr_coeff(i)).max(axis=1)
+                   for i in range(mol.nbas)])
+    l = np.repeat(mol._bas[:,ANG_OF], mol._bas[:,NPRIM_OF])
+    basis_id = np.repeat(np.arange(mol.nbas), mol._bas[:,NPRIM_OF])
+    precision = 1e-8
+    if op == 'diffused':
+        # A quick estimation for the radius that each primitive GTO decays to the
+        # value smaller than the required precision
+        r2 = np.log(c**2/precision * 10**l + 1e-200) / e
+        # groupby.argmin()
+        r2_order = np.argsort(-r2)
+        _, idx = np.unique(basis_id[r2_order], return_index=True)
+        idx = r2_order[idx]
+    else:
+        # A quick estimation for the resolution of planewaves that each
+        # primitive GTO requires
+        ke = np.log(c**2 / precision * 50**l + 1e-200) * e
+        # groupby.argmax()
+        ke_order = np.argsort(-ke)
+        _, idx = np.unique(basis_id[ke_order], return_index=True)
+        idx = ke_order[idx]
+    return e[idx], c[idx]

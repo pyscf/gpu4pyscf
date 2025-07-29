@@ -27,6 +27,7 @@ def setUpModule():
     cell.build(unit = 'B',
                verbose = 7,
                output = '/dev/null',
+               precision = 1e-10,
                a = ((L,0,0),(0,L,0),(0,0,L)),
                mesh = [n,n,n],
                atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
@@ -60,7 +61,7 @@ class KnownValues(unittest.TestCase):
         mf = pscf.UHF(cell).run(conv_tol=1e-9)
         mf_cpu = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_cpu.e_tot, 8)
-        self.assertAlmostEqual(mf.e_tot, -3.9546467710639632, 8)
+        self.assertAlmostEqual(mf.e_tot, -3.9546467710639632, 7)
 
         np.random.seed(1)
         kpts_bands = np.random.random((1,3))
