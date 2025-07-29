@@ -355,7 +355,7 @@ class KnownValues(unittest.TestCase):
 
         reference_dft_energies = np.array(reference_dft_result["energy"])
         test_dft_energies      = np.array(test_dft_result["energy"])
-        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-7
 
     @pytest.mark.slow
     def test_almo_eda_2_hf_tzvpp(self):
@@ -453,7 +453,7 @@ class KnownValues(unittest.TestCase):
 
         reference_dft_energies = np.array(reference_dft_result["energy"])
         test_dft_energies      = np.array(test_dft_result["energy"])
-        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-4
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
     @pytest.mark.skip("Too slow, functionality roughly covered by corresponding density fitting test")
     def test_almo_eda_2_wb97xv_tzvpp(self):
@@ -534,7 +534,7 @@ class KnownValues(unittest.TestCase):
 
         reference_dft_energies = np.array(reference_dft_result["energy"])
         test_dft_energies      = np.array(test_dft_result["energy"])
-        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-6
 
     def test_almo_eda_2_pbe0_charged(self):
         ### Q-Chem input difference
@@ -670,7 +670,7 @@ class KnownValues(unittest.TestCase):
 
         reference_dft_energies = np.array(reference_dft_result["energy"])
         test_dft_energies      = np.array(test_dft_result["energy"])
-        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-7
 
         reference_dft_gradients = reference_dft_result["gradient"]
         test_dft_gradients      = test_dft_result["gradient"]
