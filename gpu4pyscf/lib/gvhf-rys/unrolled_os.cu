@@ -1,6 +1,6 @@
 #include <cuda.h>
 #include "vhf.cuh"
-#include "gamma_inc_unrolled.cu"
+#include "gamma_inc.cu"
 #include "create_tasks.cu"
 int os_jk_unrolled_lmax = 1;
 int os_jk_unrolled_max_order = 0;
@@ -134,20 +134,20 @@ void _os_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double theta = aij * akl / (aij + akl);
                 double theta_rr = theta * rr;
                 if (omega == 0) {
-                    eval_gamma_inc_fn(gamma_inc, theta_rr, 0);
+                    eval_gamma_inc_fn(gamma_inc, theta_rr, 0, sq_id, nsq_per_block);
                 } else if (omega > 0) {
                     double theta_fac = omega * omega / (omega * omega + theta);
-                    eval_gamma_inc_fn(gamma_inc, theta_fac*theta_rr, 0);
+                    eval_gamma_inc_fn(gamma_inc, theta_fac*theta_rr, 0, sq_id, nsq_per_block);
                     double scale = sqrt(theta_fac);
                     for (int n = 0 ; n <= 0; ++n) {
                         gamma_inc[sq_id+n*nsq_per_block] *= scale;
                         scale *= theta_fac;
                     }
                 } else { // omega < 0
-                    eval_gamma_inc_fn(gamma_inc, theta_rr, 0);
+                    eval_gamma_inc_fn(gamma_inc, theta_rr, 0, sq_id, nsq_per_block);
                     double theta_fac = omega * omega / (omega * omega + theta);
                     double *gamma_inc1 = gamma_inc + nsq_per_block * 1;
-                    eval_gamma_inc_fn(gamma_inc1, theta_fac*theta_rr, 0);
+                    eval_gamma_inc_fn(gamma_inc1, theta_fac*theta_rr, 0, sq_id, nsq_per_block);
                     __syncthreads();
                     double scale = sqrt(theta_fac);
                     for (int n = 0 ; n <= 0; ++n) {

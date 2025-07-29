@@ -217,17 +217,19 @@ class RHF(hf.RHF):
         raise NotImplementedError
 
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
-        '''Constructus the lower-triangular part of the Fock matrix.'''
+        '''Constructus the lower-triangular part of the Veff matrix.'''
         log = logger.new_logger(mol, self.verbose)
         cput0 = log.init_timer()
 
         omega = mol.omega
         if omega in self._opt_gpu:
-            vhfopt, jopt = self._opt_gpu[omega]
+            vhfopt = self._opt_gpu[omega]
         else:
-            vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
-            self._opt_gpu[omega] = (vhfopt, jopt)
+            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+        if omega in self._opt_jengine:
+            jopt = self._opt_jengine[omega]
+        else:
+            self._opt_jengine[omega] = jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
 
         #:vj, vk = vhfopt.get_jk(dm, hermi, True, True, log)
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, jopt)
@@ -246,7 +248,7 @@ class RHF(hf.RHF):
         vhf = pack_tril(vhf[0])
         if vhf_last is not None:
             vhf += asarray(vhf_last)
-        log.timer('vj and vk', *cput0)
+        log.timer('veff', *cput0)
         return vhf.get()
 
     def _delta_rdm1(self, dm_or_wfn, dm_last, vhfopt):

@@ -839,19 +839,26 @@ def pinv(a, lindep=1e-10):
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
 
-def cond(a):
+def cond(a, sympos=False):
     """
     Calculate the condition number of a matrix.
 
     Parameters:
     a (cupy.ndarray): The input matrix.
+    sympos : Whether the input matrix is symmetric and positive definite.
 
     Returns:
     float: The condition number of the matrix.
     """
-    _, s, _ = cupy.linalg.svd(a)
-    cond_number = s[0] / s[-1]
-    return cond_number
+    if sympos:
+        s = cupy.linalg.eigvalsh(a)
+        if s[0] <= 0:
+            raise RuntimeError('matrix is not positive definite')
+        return s[-1] / s[0]
+    else:
+        _, s, _ = cupy.linalg.svd(a)
+        cond_number = s[0] / s[-1]
+        return cond_number
 
 def grouped_dot(As, Bs, Cs=None):
     '''
@@ -974,9 +981,20 @@ def grouped_gemm(As, Bs, Cs=None):
     return Cs
 
 def condense(opname, a, loc_x, loc_y=None):
+    '''Aggregate the last two dimensions of an array using the specified operation.
+
+    .. code-block:: python
+
+        for i,i0 in enumerate(loc_x[:-1]):
+            i1 = loc_x[i+1]
+            for j,j0 in enumerate(loc_y[:-1]):
+                j1 = loc_y[j+1]
+                out[i,j] = op(a[..., i0:i1, j0:j1])
+    '''
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
     a = cupy.asarray(a, order='C')
+    assert a.ndim >= 2
     if loc_y is None:
         loc_y = loc_x
     do_transpose = False
@@ -987,7 +1005,8 @@ def condense(opname, a, loc_x, loc_y=None):
             do_transpose = True
         a = a[None]
     else:
-        assert a.flags.c_contiguous
+        nx, ny = a.shape[-2:]
+        a = a.reshape(-1, nx, ny)
     loc_x = cupy.asarray(loc_x, cupy.int32)
     loc_y = cupy.asarray(loc_y, cupy.int32)
     nloc_x = loc_x.size - 1

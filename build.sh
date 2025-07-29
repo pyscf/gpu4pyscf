@@ -6,8 +6,8 @@ echo "CUDA_HOME=${CUDA_HOME}"
 export PATH="${CUDA_HOME}/bin:$PATH"
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 
-cmake -B build -S gpu4pyscf/lib -DCUDA_ARCHITECTURES=70 -DBUILD_LIBXC=OFF
-cd build 
+cmake -B build -S gpu4pyscf/lib -DCUDA_ARCHITECTURES=70 -DBUILD_LIBXC=OFF -DCMAKE_MESSAGE_LOG_LEVEL=WARNING
+cd build
 make -j8
 cd ..
 

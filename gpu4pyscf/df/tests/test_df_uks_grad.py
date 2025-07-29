@@ -16,6 +16,7 @@ import pyscf
 import cupy
 import numpy as np
 import unittest
+import pytest
 from gpu4pyscf.dft import uks
 
 '''
@@ -118,7 +119,9 @@ def _vs_cpu(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
 
 class KnownValues(unittest.TestCase):
 
+    @pytest.mark.slow
     def test_grad_with_grids_response(self):
+        # TODO: no need to check all 3 directions, just one direction is enough
         print("-----testing DF DFT gradient with grids response----")
         _check_grad(mol_sph, grid_response=True, xc='LDA', disp=None)
         _check_grad(mol_sph, grid_response=True, xc='B3LYP', disp=None)

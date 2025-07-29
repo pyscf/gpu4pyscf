@@ -19,8 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#include "gvhf-rys/vhf.cuh"
+#include "pbc.cuh"
 #include "int3c2e.cuh"
 #include "ft_ao.cuh"
 
@@ -552,24 +551,24 @@ __constant__ int c_pair_offsets[L_AUX1*L_AUX1+1] = {
 };
 
 extern __global__
-void ft_aopair_kernel(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_aopair_kernel(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                       int compressing);
 extern __global__
-void ft_ao_bdiv_kernel(double *out, AFTIntEnvVars envs, int nGv, double *grids);
+void ft_ao_bdiv_kernel(double *out, PBCIntEnvVars envs, int nGv, double *grids);
 extern __global__
-void ft_aopair_bdiv_kernel(double *out, AFTIntEnvVars envs, BDivAFTBoundsInfo bounds);
+void ft_aopair_bdiv_kernel(double *out, PBCIntEnvVars envs, BDivAFTBoundsInfo bounds);
 
 extern __global__
-void pbc_int3c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt3c2eBounds bounds);
+void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds);
 extern __global__
-void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bounds);
+void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds);
 
-int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
+int ft_ao_unrolled(double *out, PBCIntEnvVars *envs, AFTBoundsInfo *bounds,
                    int *scheme, int compressing);
-int int3c2e_unrolled(double *out, PBCInt3c2eEnvVars *envs, PBCInt3c2eBounds *bounds);
+int int3c2e_unrolled(double *out, PBCIntEnvVars *envs, PBCInt3c2eBounds *bounds);
 
 extern "C" {
-int build_ft_aopair(double *out, int compressing, AFTIntEnvVars *envs,
+int build_ft_aopair(double *out, int compressing, PBCIntEnvVars *envs,
                     int *scheme, int *shls_slice, int npairs_ij, int ngrids,
                     int *bas_ij, double *grids, int *img_offsets, int *img_idx,
                     int *atm, int natm, int *bas, int nbas, double *env)
@@ -611,7 +610,7 @@ int build_ft_aopair(double *out, int compressing, AFTIntEnvVars *envs,
     return 0;
 }
 
-int build_ft_ao(double *out, AFTIntEnvVars *envs, int ngrids, double *grids,
+int build_ft_ao(double *out, PBCIntEnvVars *envs, int ngrids, double *grids,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
@@ -628,7 +627,7 @@ int build_ft_ao(double *out, AFTIntEnvVars *envs, int ngrids, double *grids,
     return 0;
 }
 
-int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs, int *scheme, int *shls_slice,
+int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
                  int naux, int n_prim_pairs, int n_ctr_pairs,
                  int *bas_ij_idx, int *pair_mapping, int *img_idx, int *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
@@ -683,7 +682,7 @@ int fill_int3c2e(double *out, PBCInt3c2eEnvVars *envs, int *scheme, int *shls_sl
     return 0;
 }
 
-int fill_int2c2e(double *out, PBCInt3c2eEnvVars *envs, int shm_size,
+int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
                  int nbatches_shl_pair, int *bas_ij_idx,
                  int *shl_pair_offsets, int *gout_stride_lookup,
                  int *atm, int natm, int *bas, int nbas, double *env)
@@ -694,7 +693,7 @@ int fill_int2c2e(double *out, PBCInt3c2eEnvVars *envs, int shm_size,
     pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int2ce kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

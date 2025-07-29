@@ -49,7 +49,7 @@ def make_mf(mol, xc = None, if_density_fitting = False, pcm = None):
         mf.nlcgrids.atom_grid = (50,194)
     else:
         mf = rhf.RHF(mol)
-    mf.conv_tol = 1e-15
+    mf.conv_tol = 1e-14
     mf.conv_tol_cpscf = 1e-10
     mf.direct_scf_tol = 1e-16
     mf.verbose = 0
@@ -90,6 +90,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.1
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
+    @pytest.mark.slow
     def test_raman_wb97mv_densityfitting(self):
         ### Q-Chem input
         # $rem

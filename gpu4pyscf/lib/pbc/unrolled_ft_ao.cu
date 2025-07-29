@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
+#include "pbc.cuh"
 #include "ft_ao.cuh"
 #define OVERLAP_FAC     5.56832799683170787
 #define OF_COMPLEX      2
@@ -13,7 +13,7 @@ __global__ __maxnreg__(64) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_00(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_00(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -123,7 +123,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_01(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_01(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -273,7 +273,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_02(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_02(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -474,7 +474,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_10(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_10(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -618,7 +618,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_11(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -842,7 +842,7 @@ void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
 }
 
 __global__ static
-void ft_ao_unrolled_12(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_12(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -1193,7 +1193,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_20(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -1372,7 +1372,7 @@ void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
 }
 
 __global__ static
-void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_21(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -1707,7 +1707,7 @@ void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
 }
 
 __global__ static
-void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_22(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
     int sp_block_id = blockIdx.x;
@@ -2269,7 +2269,7 @@ void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
     }
 }
 
-int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
+int ft_ao_unrolled(double *out, PBCIntEnvVars *envs, AFTBoundsInfo *bounds,
                    int *scheme, int compressing)
 {
     int li = bounds->li;

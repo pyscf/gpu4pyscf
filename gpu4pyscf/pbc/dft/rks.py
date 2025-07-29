@@ -26,11 +26,12 @@ from pyscf import lib
 from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import rks as mol_ks
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf import hf as pbchf, khf
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
-from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from pyscf import __config__
 
@@ -58,12 +59,12 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     log = logger.new_logger(ks)
     t0 = log.init_timer()
     mem_avail = get_avail_mem()
-    log.debug1('available GPU memory for uks.get_veff: %.3f GB', mem_avail/1e9)
+    log.debug1('available GPU memory for rks.get_veff: %.3f GB', mem_avail/1e9)
 
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if isinstance(ni, multigrid.MultiGridNumInt):
+    if isinstance(ni, (multigrid_v2.MultiGridNumInt, multigrid.MultiGridNumInt)):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_rks(
@@ -87,7 +88,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                 vklr *= (alpha - hyb)
                 vk += vklr
             vxc -= vk * .5
-            exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
+            exc -= cp.einsum('ij,ji->', dm, vk).get()[()] * .5 * .5
         log.timer_debug1('veff', *t0)
         return vxc
 
@@ -139,10 +140,10 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         vxc -= vk * .5
 
         if ground_state:
-            exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
+            exc -= cp.einsum('ij,ji->', dm, vk).get()[()] * .5 * .5
 
     if ground_state:
-        ecoul = cp.einsum('ij,ji->', dm, vj).real * .5
+        ecoul = cp.einsum('ij,ji->', dm, vj).get()[()] * .5
     else:
         ecoul = None
 
@@ -209,7 +210,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
                 ngrids = np.prod(cell.mesh)
                 if ngrids > 150000 * cell.natm:
                     logger.warn(cell, '''
-Tight basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
+Compact basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
     from gpu4pyscf.pbc.dft import BeckeGrids
     mf.grids = BeckeGrids(cell)
     mf.nlcgrids = BeckeGrids(cell).set(level=1)''')
@@ -218,7 +219,16 @@ Tight basis functions are found in the system. It is recommended to use Becke gr
             self.check_sanity()
         return self
 
-    reset = rks_cpu.KohnShamDFT.reset
+    def reset(self, cell=None):
+        pbchf.SCF.reset(self, cell)
+        self.grids.reset(cell)
+        self.nlcgrids.reset(cell)
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+            self._numint.reset(cell)
+        if hasattr(self, 'cphf_grids'):
+            self.cphf_grids.reset(cell)
+        return self
+
     dump_flags = rks_cpu.KohnShamDFT.dump_flags
 
     get_veff = NotImplemented
@@ -290,7 +300,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
     def get_hcore(self, cell=None, kpt=None):
         if cell is None: cell = self.cell
         if kpt is None: kpt = self.kpt
-        if isinstance(self._numint, multigrid.MultiGridNumInt):
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
             ni = self._numint
         else:
             ni = self.with_df
@@ -300,15 +310,26 @@ class RKS(KohnShamDFT, pbchf.RHF):
             nuc = ni.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
+        t = int1e.int1e_kin(cell, kpt)
+        return nuc + t
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
     get_rho = get_rho
     density_fit = pbchf.RHF.density_fit
-
-    nuc_grad_method = NotImplemented
     to_hf = NotImplemented
+
+    def multigrid_numint(self, mesh=None):
+        '''Apply the MultiGrid algorithm for XC numerical integartion'''
+        mf = self.copy()
+        mf._numint = multigrid.MultiGridNumInt(self.cell)
+        if mesh is not None:
+            mf._numint.mesh = mesh
+        return mf
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.rks import Gradients
+        return Gradients(self)
 
     def to_cpu(self):
         mf = rks_cpu.RKS(self.cell)

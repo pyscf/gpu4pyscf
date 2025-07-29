@@ -12,6 +12,26 @@ permissions:
   contents: read
 
 jobs:
+  unit_tests:
+    runs-on: [self-hosted, Linux, X64, v100]
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Pull CUDA Devel Image
+      run: |
+        docker pull pyscf/gpu4pyscf-devel:latest
+
+    - name: Test with pytest
+      run: |
+        docker run --gpus all \
+          --rm \
+          -u "$(id -u):$(id -g)" \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
+          -e HTTP_PROXY=$HTTP_PROXY \
+          -e HTTPS_PROXY=$HTTPS_PROXY \
+          -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
+          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not benchmark' --cov=/workspace --durations=20 && rm -rf .pytest_cache"
+
   test_rks:
     runs-on: [self-hosted, Linux, X64, v100]
     steps:

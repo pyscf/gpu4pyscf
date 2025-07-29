@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 The PySCF Developers. All Rights Reserved.
+ * Copyright 2024-2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,28 +14,13 @@
  * limitations under the License.
  */
 
-#include <stdlib.h>
-#include <stdint.h>
-#include <stddef.h>
+#pragma once
 
-#ifndef HAVE_DEFINED_AFTENVVAS_H
-#define HAVE_DEFINED_AFTENVVAS_H
+#include <stdint.h>
 
 #define WARP_SIZE       32
 #define FT_AO_THREADS   (WARP_SIZE*4)
 #define NG_PER_BLOCK    32
-
-typedef struct {
-    uint16_t cell0_natm; // in bvk-cell
-    uint16_t cell0_nbas; // in bvk-cell
-    uint16_t bvk_ncells; // number of images in the BvK cell
-    uint16_t nimgs; // number of images in lattice sum
-    int *atm;
-    int *bas;
-    double *env;
-    int *ao_loc; // in bvk-cell
-    double *img_coords; // vectors in lattice sum
-} AFTIntEnvVars;
 
 typedef struct {
     uint8_t li;
@@ -70,9 +55,3 @@ typedef struct {
     int *gout_stride_lookup;
     double *grids;
 } BDivAFTBoundsInfo;
-
-#ifdef __CUDACC__
-extern __constant__ int16_t c_pair_idx[];
-extern __constant__ int c_pair_offsets[];
-#endif
-#endif

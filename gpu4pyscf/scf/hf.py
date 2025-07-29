@@ -27,7 +27,7 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot)
-from gpu4pyscf.scf import diis, jk
+from gpu4pyscf.scf import diis, jk, j_engine
 from gpu4pyscf.lib import logger
 
 __all__ = [
@@ -46,8 +46,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         if with_k: vk = vk.get()
     return vj, vk
 
-def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True,
             omega=None):
+    if omega is None:
+        omega = mol.omega
     vhfopt = mf._opt_gpu.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
@@ -72,17 +74,26 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
     mo_occ[e_idx[:nocc]] = 2
+    if mf.verbose >= logger.INFO and nocc < nmo:
+        homo = float(mo_energy[e_idx[nocc-1]])
+        lumo = float(mo_energy[e_idx[nocc]])
+        if homo+1e-3 > lumo:
+            logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+        else:
+            logger.info(mf, '  HOMO = %.15g  LUMO = %.15g', homo, lumo)
     return mo_occ
 
-def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=None):
+def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     if dm is None: dm = mf.make_rdm1()
-    if dm_last is None or not mf.direct_scf:
-        vj, vk = mf.get_jk(mol, dm, hermi)
-        return vj - vk * .5
-    else:
-        ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-        vj, vk = mf.get_jk(mol, ddm, hermi)
-        return vj - vk * .5 + vhf_last
+    if dm_last is not None and mf.direct_scf:
+        dm = asarray(dm) - asarray(dm_last)
+    vj = mf.get_j(mol, dm, hermi)
+    vhf = mf.get_k(mol, dm, hermi)
+    vhf *= -.5
+    vhf += vj
+    if vhf_last is not None:
+        vhf += asarray(vhf_last)
+    return vhf
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
@@ -247,8 +258,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
-        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
-                 cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
+                 cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
         if dump_chk:
             mf.dump_chk(locals())
@@ -509,7 +520,7 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
             dm0 = None
         else:
             dm0 = None
-            if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
+            if np.array_equal(self._last_mol_fp, mol.ao_loc):
                 dm0 = self.make_rdm1()
             elif self.chkfile and h5py.is_hdf5(self.chkfile):
                 dm0 = self.from_chk(self.chkfile)
@@ -565,6 +576,7 @@ class SCF(pyscf_lib.StreamObject):
         self.scf_summary = {}
 
         self._opt_gpu = {None: None}
+        self._opt_jengine = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
@@ -573,9 +585,9 @@ class SCF(pyscf_lib.StreamObject):
     def check_sanity(self):
         s1e = self.get_ovlp()
         if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
-            c = cond(s1e)
+            c = cond(s1e, sympos=True)
         else:
-            c = cupy.asarray([cond(xi) for xi in s1e])
+            c = cupy.asarray([cond(xi, sympos=True) for xi in s1e])
         logger.debug(self, 'cond(S) = %s', c)
         if cupy.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
@@ -610,8 +622,6 @@ class SCF(pyscf_lib.StreamObject):
     _finalize                = hf_cpu.SCF._finalize
     init_direct_scf          = NotImplemented
     get_jk                   = _get_jk
-    get_j                    = hf_cpu.SCF.get_j
-    get_k                    = hf_cpu.SCF.get_k
     get_veff                 = NotImplemented
     mulliken_meta            = hf_cpu.SCF.mulliken_meta
     pop                      = hf_cpu.SCF.pop
@@ -670,6 +680,7 @@ class SCF(pyscf_lib.StreamObject):
         if mol is not None:
             self.mol = mol
         self._opt_gpu = {None: None}
+        self._opt_jengine = {None: None}
         self.scf_summary = {}
         return self
 
@@ -680,6 +691,21 @@ class SCF(pyscf_lib.StreamObject):
                 self.mol, self.chkfile, envs['e_tot'],
                 cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
                 cupy.asnumpy(envs['mo_occ']), overwrite_mol=False)
+
+    def get_j(self, mol, dm, hermi=1, omega=None):
+        if omega is None:
+            omega = mol.omega
+        if omega not in self._opt_jengine:
+            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
+            self._opt_jengine[omega] = jopt
+        jopt = self._opt_jengine[omega]
+        vj = j_engine.get_j(mol, dm, hermi, jopt)
+        if not isinstance(dm, cupy.ndarray):
+            vj = vj.get()
+        return vj
+
+    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
+        return self.get_jk(mol, dm, hermi, with_j=False, omega=omega)[1]
 
 class KohnShamDFT:
     '''

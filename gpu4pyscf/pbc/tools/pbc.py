@@ -14,10 +14,10 @@
 
 import numpy as np
 import cupy as cp
-from gpu4pyscf.lib.cupy_helper import return_cupy_array
-from pyscf.pbc.tools.pbc import get_coulG
-
-get_coulG = return_cupy_array(get_coulG)
+import pyscf
+from pyscf import lib
+from pyscf.pbc.gto.cell import Cell
+from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.
@@ -98,3 +98,261 @@ def ifftk(g, mesh, expikr):
     fk(r) = (1/Ng) \sum_G fk(k+G) e^{i(k+G)r} = (1/Ng) \sum_G [fk(k+G)e^{iGr}] e^{ikr}
     '''
     return ifft(g, mesh) * expikr
+
+def _get_Gv(cell, mesh):
+    # Default, the 3D uniform grids
+    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
+    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
+    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
+    b = cp.asarray(cell.reciprocal_vectors())
+    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
+    Gv = (rx[:,None,None,None] * b[0] +
+          ry[:,None,None] * b[1] +
+          rz[:,None] * b[2])
+    return Gv.reshape(-1, 3)
+
+def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
+              wrap_around=True, omega=None, **kwargs):
+    '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
+
+    Args:
+        k : (3,) ndarray
+            k-point
+        exx : bool or str
+            Whether this is an exchange matrix element
+        mf : instance of :class:`SCF`
+
+    Returns:
+        coulG : (ngrids,) ndarray
+            The Coulomb kernel.
+        mesh : (3,) ndarray of ints (= nx,ny,nz)
+            The number G-vectors along each direction.
+        omega : float
+            Enable Coulomb kernel ``erf(|omega|*r12)/r12`` if omega > 0
+            and ``erfc(|omega|*r12)/r12`` if omega < 0.
+            Note this parameter is slightly different to setting cell.omega for
+            exxdiv='ewald' at G0. When cell.omega is configured, the Ewald probe
+            charge correction will be computed using the LR or SR Coulomb
+            interactions. However, when this kwarg is explicitly specified, the
+            exxdiv correction is computed with the full-range Coulomb
+            interaction (1/r12). This parameter should only be specified in the
+            range-separated JK builder and range-separated DF (and other
+            range-separated integral methods if any).
+    '''
+    from pyscf.pbc.tools.pbc import get_coulG, madelung
+    exxdiv = exx
+    if isinstance(exx, str):
+        exxdiv = exx
+    elif exx and mf is not None:
+        exxdiv = mf.exxdiv
+    if exxdiv == 'vcut_sph' or exxdiv == 'vcut_ws':
+        return asarray(get_coulG(cell, k, exx, mf, mesh, Gv, wrap_around, omega, **kwargs))
+
+    if mesh is None:
+        mesh = cell.mesh
+    if Gv is None:
+        Gv = _get_Gv(cell, mesh)
+    Gv = asarray(Gv)
+
+    if omega is None:
+        _omega = cell.omega
+    else:
+        _omega = omega
+
+    if cell.dimension == 0 and cell.low_dim_ft_type != 'inf_vacuum':
+        a = cell.lattice_vectors()
+        assert abs(np.eye(3)*a[0,0] - a).max() < 1e-6, \
+                'Must be cubic box for cell.dimension=0'
+        # ensure the sphere is completely inside the box
+        Rc = a[0,0] / 2
+        if (_omega != 0 and
+            abs(_omega) * Rc < 2.0): # typically, error of \int erf(omega r) sin (G r) < 1e-5
+            raise RuntimeError(
+                'In sufficient box size for the truncated range-separated '
+                'Coulomb potential in 0D case')
+        absG = cp.linalg.norm(Gv, axis=1)
+        with np.errstate(divide='ignore',invalid='ignore'):
+            coulG = 4*np.pi/absG**2
+            coulG[0] = 0
+        if _omega == 0:
+            coulG *= 1. - cp.cos(absG*Rc)
+            # G=0 term carries the charge. This special term supports the charged
+            # system for dimension=0.
+            coulG[0] = 2*cp.pi*Rc**2
+        elif _omega > 0:
+            coulG *= cp.exp(-.25/_omega**2 * absG**2) - cp.cos(absG*Rc)
+            coulG[0] = 2*np.pi*Rc**2 - np.pi / _omega**2
+        else:
+            coulG *= 1 - cp.exp(-.25/_omega**2 * absG**2)
+            coulG[0] = np.pi / _omega**2
+        return coulG
+
+    if abs(k).sum() > 1e-9:
+        kG = asarray(k) + Gv
+    else:
+        kG = Gv
+
+    equal2boundary = None
+    if wrap_around and abs(k).sum() > 1e-9:
+        equal2boundary = cp.zeros(Gv.shape[0], dtype=bool)
+        # Here we 'wrap around' the high frequency k+G vectors into their lower
+        # frequency counterparts.  Important if you want the gamma point and k-point
+        # answers to agree
+        b = cell.reciprocal_vectors()
+        box_edge = np.einsum('i,ij->ij', np.asarray(mesh)//2+0.5, b)
+        assert all(np.rint(np.linalg.solve(box_edge.T, k))==0)
+        box_edge = asarray(box_edge)
+        reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
+        on_edge_p1 = abs(reduced_coords - 1) < 1e-9
+        on_edge_m1 = abs(reduced_coords + 1) < 1e-9
+        if cell.dimension >= 1:
+            equal2boundary |= on_edge_p1[:,0]
+            equal2boundary |= on_edge_m1[:,0]
+            kG[reduced_coords[:,0]> 1] -= 2 * box_edge[0]
+            kG[reduced_coords[:,0]<-1] += 2 * box_edge[0]
+        if cell.dimension >= 2:
+            equal2boundary |= on_edge_p1[:,1]
+            equal2boundary |= on_edge_m1[:,1]
+            kG[reduced_coords[:,1]> 1] -= 2 * box_edge[1]
+            kG[reduced_coords[:,1]<-1] += 2 * box_edge[1]
+        if cell.dimension == 3:
+            equal2boundary |= on_edge_p1[:,2]
+            equal2boundary |= on_edge_m1[:,2]
+            kG[reduced_coords[:,2]> 1] -= 2 * box_edge[2]
+            kG[reduced_coords[:,2]<-1] += 2 * box_edge[2]
+
+    absG2 = cp.einsum('gi,gi->g', kG, kG)
+    G0_idx = 0
+    if abs(k).sum() > 1e-9:
+        G0_idx = None
+
+    # Ewald probe charge method to get the leading term of the finite size
+    # error in exchange integrals
+
+    if cell.dimension == 3 or cell.low_dim_ft_type == 'inf_vacuum':
+        with np.errstate(divide='ignore'):
+            coulG = 4*np.pi/absG2
+            if G0_idx is not None:
+                coulG[G0_idx] = 0
+
+    elif cell.dimension == 2:
+        # The following 2D analytical fourier transform is taken from:
+        # R. Sundararaman and T. Arias PRB 87, 2013
+        b = cell.reciprocal_vectors()
+        Ld2 = np.pi/np.linalg.norm(b[2])
+        Gz = kG[:,2]
+        Gp = cp.linalg.norm(kG[:,:2], axis=1)
+        weights = 1. - cp.cos(Gz*Ld2) * cp.exp(-Gp*Ld2)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            coulG = weights*4*np.pi/absG2
+        if G0_idx is not None:
+            coulG[G0_idx] = -2*np.pi*Ld2**2 #-pi*L_z^2/2
+
+    else:
+        raise NotImplementedError(f'dimension={cell.dimension}')
+
+    if equal2boundary is not None:
+        coulG[equal2boundary] = 0
+
+    # Scale the coulG kernel for attenuated Coulomb integrals.
+    # * kwarg omega is used by RangeSeparatedJKBuilder which requires ewald probe charge
+    # being evaluated with regular Coulomb interaction (1/r12).
+    # * cell.omega, which affects the ewald probe charge, is often set by
+    # DFT-RSH functionals to build long-range HF-exchange for erf(omega*r12)/r12
+    if _omega != 0 and cell.dimension != 3:
+        raise RuntimeError('The coulG kernel for range-separated Coulomb potential '
+                           f'for dimension={cell.dimension} is inaccurate.')
+
+    if _omega > 0:
+        # long range part
+        coulG *= cp.exp(-.25/_omega**2 * absG2)
+    elif _omega < 0:
+        if exxdiv == 'vcut_sph' or exxdiv == 'vcut_ws':
+            raise RuntimeError(f'SR Coulomb for exxdiv={exxdiv} is not available')
+        # short range part
+        coulG *= (1 - cp.exp(-.25/_omega**2 * absG2))
+
+    # For full-range Coulomb and long-range Coulomb,
+    # the divergent part of periodic summation of (ii|ii) integrals in
+    # Coulomb integrals were cancelled out by electron-nucleus
+    # interaction. The periodic part of (ii|ii) in exchange cannot be
+    # cancelled out by Coulomb integrals. Its leading term is calculated
+    # using Ewald probe charge (the function madelung below)
+    if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
+        if hasattr(mf, 'kpts'):
+            kpts = mf.kpts
+            assert isinstance(kpts, np.ndarray)
+            Nk = len(kpts)
+        else:
+            Nk = 1
+        if omega is None: # Affects DFT-RSH
+            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
+        else: # for RangeSeparatedJKBuilder
+            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega=0)
+    return coulG
+
+def get_lattice_Ls(cell, nimgs=None, rcut=None, dimension=None, discard=True):
+    '''This version employs more strict criteria when discarding images in lattice sum.
+    It can be replaced by the built-in version available in PySCF 2.10.
+    '''
+    if dimension is None:
+        # For atoms near the boundary of the cell, it is necessary (even in low-
+        # dimensional systems) to include lattice translations in all 3 dimensions.
+        if cell.dimension < 2 or cell.low_dim_ft_type == 'inf_vacuum':
+            dimension = cell.dimension
+        else:
+            dimension = 3
+    if rcut is None:
+        rcut = cell.rcut
+
+    if dimension == 0 or rcut <= 0 or cell.natm == 0:
+        return np.zeros((1, 3))
+
+    a = cell.lattice_vectors()
+
+    scaled_atom_coords = cell.get_scaled_atom_coords()
+    atom_boundary_max = scaled_atom_coords[:,:dimension].max(axis=0)
+    atom_boundary_min = scaled_atom_coords[:,:dimension].min(axis=0)
+    if (np.any(atom_boundary_max > 1) or np.any(atom_boundary_min < -1)):
+        atom_boundary_max[atom_boundary_max > 1] = 1
+        atom_boundary_min[atom_boundary_min <-1] = -1
+    ovlp_penalty = atom_boundary_max - atom_boundary_min
+    dR = ovlp_penalty.dot(a[:dimension])
+    dR_basis = np.diag(dR)
+
+    # Search the minimal x,y,z requiring |x*a[0]+y*a[1]+z*a[2]+dR|^2 > rcut^2
+    # Ls boundary should be derived by decomposing (a, Rij) for each atom-pair.
+    # For reasons unclear, the so-obtained Ls boundary seems not large enough.
+    # The upper-bound of the Ls boundary is generated by find_boundary function.
+    def find_boundary(a):
+        aR = np.vstack([a, dR_basis])
+        r = np.linalg.qr(aR.T)[1]
+        ub = (rcut + abs(r[2,3:]).sum()) / abs(r[2,2])
+        return ub
+
+    xb = find_boundary(a[[1,2,0]])
+    if dimension > 1:
+        yb = find_boundary(a[[2,0,1]])
+    else:
+        yb = 0
+    if dimension > 2:
+        zb = find_boundary(a)
+    else:
+        zb = 0
+    bounds = np.ceil([xb, yb, zb]).astype(int)
+    Ts = lib.cartesian_prod((np.arange(-bounds[0], bounds[0]+1),
+                             np.arange(-bounds[1], bounds[1]+1),
+                             np.arange(-bounds[2], bounds[2]+1)))
+    Ls = np.dot(Ts[:,:dimension], a[:dimension])
+
+    if discard and len(Ls) > 1:
+        r = cell.atom_coords()
+        rr = r[:,None] - r
+        dist_max = np.linalg.norm(rr, axis=2).max()
+        Ls_mask = np.linalg.norm(Ls, axis=1) < rcut + dist_max
+        Ls = Ls[Ls_mask]
+    return np.asarray(Ls, order='C')
+
+if int(pyscf.__version__.split('.')[1]) < 10:
+    # Patch the get_lattice_Ls for pyscf-2.9 or older
+    Cell.get_lattice_Ls = get_lattice_Ls

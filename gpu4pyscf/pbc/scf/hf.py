@@ -28,6 +28,7 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
+from gpu4pyscf.pbc.gto import int1e
 
 def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     '''Get energy bands at the given (arbitrary) 'band' k-points.
@@ -105,13 +106,14 @@ class SCF(mol_hf.SCF):
 
     _keys = hf_cpu.SCF._keys
 
-    def __init__(self, cell, kpt=np.zeros(3), exxdiv='ewald'):
+    def __init__(self, cell, kpt=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
         self.with_df = df.FFTDF(cell)
         # Range separation JK builder
         self.rsjk = None
         self.exxdiv = exxdiv
-        self.kpt = kpt
+        if kpt is not None:
+            self.kpt = kpt
         self.conv_tol = max(cell.precision * 10, 1e-8)
 
     def check_sanity(self):
@@ -123,7 +125,21 @@ class SCF(mol_hf.SCF):
             mol_hf.SCF.check_sanity(self)
         return self
 
-    kpt = hf_cpu.SCF.kpt
+    @property
+    def kpt(self):
+        if 'kpt' in self.__dict__:
+            # To handle the attribute kpt loaded from chkfile
+            self.kpt = self.__dict__.pop('kpt')
+        return self.with_df.kpts.reshape(3)
+    @kpt.setter
+    def kpt(self, x):
+        kpts = np.reshape(x, (1, 3))
+        if np.any(kpts != 0):
+            raise NotImplementedError('single kpt SCF not available')
+        self.with_df.kpts = kpts
+        if self.rsjk:
+            self.rsjk.kpts = kpts
+
     kpts = hf_cpu.SCF.kpts
     mol = hf_cpu.SCF.mol # required by the hf.kernel
 
@@ -134,18 +150,22 @@ class SCF(mol_hf.SCF):
     get_bands = get_bands
     get_rho = get_rho
 
-    get_ovlp = return_cupy_array(hf_cpu.SCF.get_ovlp)
+    def get_ovlp(self, cell=None, kpt=None):
+        if kpt is None: kpt = self.kpt
+        if cell is None: cell = self.cell
+        return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
-        if cell is None: cell = self.cell
         if kpt is None: kpt = self.kpt
+        if cell is None: cell = self.cell
         if cell.pseudo:
             nuc = self.with_df.get_pp(kpt)
         else:
             nuc = self.with_df.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
+        t = int1e.int1e_kin(cell, kpt)
+        return nuc + t
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):
@@ -216,6 +236,14 @@ class SCF(mol_hf.SCF):
     x2c = x2c1e = sfx2c1e = NotImplemented
     spin_square = NotImplemented
     dip_moment = NotImplemented
+    Gradients = NotImplemented
+
+    def nuc_grad_method(self):
+        return self.Gradients()
+
+    def multigrid_numint(self, mesh=None):
+        '''Apply the MultiGrid algorithm for XC numerical integartion'''
+        raise NotImplementedError
 
     def dump_chk(self, envs):
         mol_hf.SCF.dump_chk(self, envs)
@@ -246,6 +274,10 @@ class RHF(SCF):
         mf = density_fit(self, auxbasis, with_df)
         mf.with_df.is_gamma_point = (mf.kpt == 0).all()
         return mf
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.rhf import Gradients
+        return Gradients(self)
 
     def to_cpu(self):
         mf = hf_cpu.RHF(self.cell)

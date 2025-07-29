@@ -319,26 +319,26 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     return None, -exc1
 
 def _make_dR_dao_w(ao, wv):
-    #:aow = numpy.einsum('npi,p->npi', ao[1:4], wv[0])
-    '''
-    aow = [
-        numint._scale_ao(ao[1], wv[0]),  # dX nabla_x
-        numint._scale_ao(ao[2], wv[0]),  # dX nabla_y
-        numint._scale_ao(ao[3], wv[0]),  # dX nabla_z
-    ]
-    # XX, XY, XZ = 4, 5, 6
-    # YX, YY, YZ = 5, 7, 8
-    # ZX, ZY, ZZ = 6, 8, 9
-    aow[0] += numint._scale_ao(ao[4], wv[1])  # dX nabla_x
-    aow[0] += numint._scale_ao(ao[5], wv[2])  # dX nabla_y
-    aow[0] += numint._scale_ao(ao[6], wv[3])  # dX nabla_z
-    aow[1] += numint._scale_ao(ao[5], wv[1])  # dY nabla_x
-    aow[1] += numint._scale_ao(ao[7], wv[2])  # dY nabla_y
-    aow[1] += numint._scale_ao(ao[8], wv[3])  # dY nabla_z
-    aow[2] += numint._scale_ao(ao[6], wv[1])  # dZ nabla_x
-    aow[2] += numint._scale_ao(ao[8], wv[2])  # dZ nabla_y
-    aow[2] += numint._scale_ao(ao[9], wv[3])  # dZ nabla_z
-    '''
+    #:aow = numpy.einsum('nip,p->nip', ao[1:4], wv[0])
+    if not ao.flags.c_contiguous or ao.dtype != numpy.float64:
+        aow = cupy.empty_like(ao[:3])
+        aow[0] = numint._scale_ao(ao[1], wv[0])  # dX nabla_x
+        aow[1] = numint._scale_ao(ao[2], wv[0])  # dX nabla_y
+        aow[2] = numint._scale_ao(ao[3], wv[0])  # dX nabla_z
+        # XX, XY, XZ = 4, 5, 6
+        # YX, YY, YZ = 5, 7, 8
+        # ZX, ZY, ZZ = 6, 8, 9
+        aow[0] += numint._scale_ao(ao[4], wv[1])  # dX nabla_x
+        aow[0] += numint._scale_ao(ao[5], wv[2])  # dX nabla_y
+        aow[0] += numint._scale_ao(ao[6], wv[3])  # dX nabla_z
+        aow[1] += numint._scale_ao(ao[5], wv[1])  # dY nabla_x
+        aow[1] += numint._scale_ao(ao[7], wv[2])  # dY nabla_y
+        aow[1] += numint._scale_ao(ao[8], wv[3])  # dY nabla_z
+        aow[2] += numint._scale_ao(ao[6], wv[1])  # dZ nabla_x
+        aow[2] += numint._scale_ao(ao[8], wv[2])  # dZ nabla_y
+        aow[2] += numint._scale_ao(ao[9], wv[3])  # dZ nabla_z
+        return aow
+
     assert ao.flags.c_contiguous
     assert wv.flags.c_contiguous
 
@@ -357,17 +357,12 @@ def _make_dR_dao_w(ao, wv):
 
 def _d1_dot_(ao1, ao2, out=None):
     if out is None:
-        out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]])
-        out[0] = cupy.dot(ao1[0], ao2)
-        out[1] = cupy.dot(ao1[1], ao2)
-        out[2] = cupy.dot(ao1[2], ao2)
-        return out
-        #return cupy.stack([vmat0,vmat1,vmat2])
-    else:
-        cupy.dot(ao1[0], ao2, out=out[0])
-        cupy.dot(ao1[1], ao2, out=out[1])
-        cupy.dot(ao1[2], ao2, out=out[2])
-        return out
+        dtype = numpy.result_type(ao1[0], ao2[0])
+        out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]], dtype=dtype)
+    cupy.dot(ao1[0].conj(), ao2, out=out[0])
+    cupy.dot(ao1[1].conj(), ao2, out=out[1])
+    cupy.dot(ao1[2].conj(), ao2, out=out[2])
+    return out
 
 def _gga_grad_sum_(ao, wv):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])

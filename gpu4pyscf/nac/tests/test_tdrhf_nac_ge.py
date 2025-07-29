@@ -193,5 +193,5 @@ class KnownValues(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    print("Full Tests for TD-RHF nonadiabatic coupling vectors")
+    print("Full Tests for TD-RHF nonadiabatic coupling vectors between ground and excited states.")
     unittest.main()

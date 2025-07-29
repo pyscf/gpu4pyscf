@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+import pytest
 import numpy as np
 import cupy as cp
 import pyscf
@@ -184,6 +185,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
 
+    @pytest.mark.slow
     def test_wb97xv_unrestricted_tddft(self):
         ### Q-Chem input
         # $rem
@@ -233,6 +235,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_oscillator_strength - reference_oscillator_strength) < oscillator_strength_threshold
 
+    @pytest.mark.slow
     def test_wb97xv_unrestricted_tda(self):
         # Same Q-Chem input as above, Q-Chem computes both TDA and TDDFT in the same run
         reference_ground_state_energy = -150.9397884760

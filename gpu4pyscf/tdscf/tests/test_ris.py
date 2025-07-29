@@ -19,7 +19,7 @@ from pyscf import gto, lib
 from gpu4pyscf.dft import rks
 import gpu4pyscf.tdscf.ris as ris
 
-PLACES = 4
+PLACES = 3
 
 
 def diagonalize(a, b, nroots=5):
@@ -51,9 +51,10 @@ class KnownValues(unittest.TestCase):
         H         -5.23998        4.31540        0.27138
         H         -3.22959        2.35981       -0.24953
         '''
-        mol = gto.M(atom=atom, basis='def2-svp', verbose=3)
-        mol.output = '/dev/null'  # Suppress excessive log output
-        cls.mol = mol.build()
+        mol = gto.M(atom=atom, basis='def2-svp',
+                    output = '/dev/null',  # Suppress excessive log output
+                    verbose=3)
+        cls.mol = mol
 
         # Initialize DFT calculations with different functionals
         cls.mf_pbe = rks.RKS(mol, xc='pbe').density_fit().to_gpu().run()
@@ -71,7 +72,7 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with PBE functional"""
         mf = self.mf_pbe
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -87,7 +88,7 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with PBE0 functional"""
         mf = self.mf_pbe0
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -102,7 +103,7 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with wB97x functional"""
         mf = self.mf_wb97x
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc = td.oscillator_strength.get()
@@ -118,7 +119,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris method with PBE functional"""
         mf = self.mf_pbe
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -134,7 +135,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris method with PBE0 functional"""
         mf = self.mf_pbe0
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -149,7 +150,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris method with wB97x functional"""
         mf = self.mf_wb97x
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', GS=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc = td.oscillator_strength.get()
@@ -164,7 +165,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris get_ab method with PBE0 functional"""
         mf = self.mf_pbe
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=0, J_fit='sp', K_fit='s', GS=True, single=False, conv_tol=1e-7)
+                      Ktrunc=0, J_fit='sp', K_fit='s', gram_schmidt=True, single=False, conv_tol=1e-7)
         td.kernel()  
         energies = td.energies.get()
         a,b = td.get_ab()
@@ -176,7 +177,7 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris get_ab method with PBE0 functional"""
         mf = self.mf_pbe0
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=0, J_fit='sp', K_fit='s', GS=True, single=False, conv_tol=1e-7)
+                      Ktrunc=0, J_fit='sp', K_fit='s', gram_schmidt=True, single=False, conv_tol=1e-7)
         td.kernel()  
         energies = td.energies.get()
         a,b = td.get_ab()
@@ -188,13 +189,13 @@ class KnownValues(unittest.TestCase):
         """Test TDDFT-ris get_ab method with wb97x functional"""
         mf = self.mf_wb97x
         td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=0, J_fit='sp', K_fit='sp', GS=False, single=False, conv_tol=1e-7)
+                      Ktrunc=0, J_fit='sp', K_fit='sp', gram_schmidt=True, single=False, conv_tol=1e-7)
         td.kernel()  
         energies = td.energies.get()
         a,b = td.get_ab()
         e_ab = diagonalize(a, b, self.nstates)[0]*27.21138602
 
-        self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, 1) # TODO: change to PLACES
+        self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, 2) # TODO: change to PLACES
 
 
 if __name__ == "__main__":

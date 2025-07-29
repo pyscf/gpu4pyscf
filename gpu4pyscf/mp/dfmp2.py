@@ -73,6 +73,7 @@ def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
 
     # Submit tasks to different devices
     futures = []
+    cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
         for device_id in range(num_devices):
             future = executor.submit(_dfmp2_tasks, mp, mo_coeff, mo_energy, 

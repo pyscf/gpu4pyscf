@@ -41,7 +41,7 @@ from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params, group_basis
 from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, estimate_rcut,
-    SRInt3c2eOpt, Int3c2eEnvVars)
+    SRInt3c2eOpt, PBCIntEnvVars)
 
 OMEGA_MIN = 0.25
 
@@ -413,7 +413,7 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     _atm = cp.array(pcell._atm)
     _bas = cp.array(pcell._bas)
     _env = cp.array(_scale_sp_ctr_coeff(pcell))
-    int3c2e_envs = Int3c2eEnvVars(
+    int3c2e_envs = PBCIntEnvVars(
         pcell.natm, p_nbas, 1, nimgs, _atm.data.ptr, _bas.data.ptr,
         _env.data.ptr, 0, Ls.data.ptr,
     )
@@ -907,7 +907,6 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     return cderi, cderip, cderi_idx
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
-    from gpu4pyscf.pbc.dft.multigrid import eval_nucG, eval_vpplocG
     log = logger.new_logger(cell, verbose)
     cell_exps, cs = extract_pgto_params(cell, 'diffused')
     omega = 0.2
@@ -932,19 +931,28 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
     mesh = cell.cutoff_to_mesh(ke_cutoff)
     mesh = cell.symmetrize_mesh(mesh)
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    Gv, (basex, basey, basez), kws = cell.get_Gv_weights(mesh)
     if with_pseudo:
         #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
         ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
         ZG = ZG.dot(charges)
         ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
-        if (with_pseudo and
-            (cell.dimension == 3 or
+        if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
             ZG[0] -= charges.dot(np.pi/exps) / cell.vol
     else:
-        ZG = eval_nucG(cell, mesh).conj()
+        basex = cp.asarray(basex)
+        basey = cp.asarray(basey)
+        basez = cp.asarray(basez)
+        b = cell.reciprocal_vectors()
+        coords = cell.atom_coords()
+        rb = cp.asarray(coords.dot(b.T))
+        SIx = cp.exp(-1j*rb[:,0,None] * basex)
+        SIy = cp.exp(-1j*rb[:,1,None] * basey)
+        SIz = cp.exp(-1j*rb[:,2,None] * basez)
+        SIx *= cp.asarray(-cell.atom_charges())[:,None]
+        ZG = cp.einsum('qx,qy,qz->xyz', SIx, SIy, SIz).ravel().conj()
         ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
 
     ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()

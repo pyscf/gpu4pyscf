@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.pbc.scf import khf, kuhf
 from gpu4pyscf.pbc.dft import rks, krks
-from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
              kpts=None, kpts_band=None):
@@ -43,7 +43,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if isinstance(ni, multigrid.MultiGridNumInt):
+    if isinstance(ni, (multigrid_v2.MultiGridNumInt, multigrid.MultiGridNumInt)):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_uks(
@@ -69,8 +69,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
                 vklr *= (alpha - hyb)
                 vk += vklr
             vxc -= vk
-            exc -= (cp.einsum('Kij,Kji->', dm[0], vk[0]) +
-                    cp.einsum('Kij,Kji->', dm[1], vk[1])).real * .5 * weight
+            exc -= cp.einsum('nKij,nKji->', dm, vk).get()[()] * .5 * weight
         log.timer('veff', *t0)
         return vxc
 
@@ -126,11 +125,10 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         vxc -= vk
 
         if ground_state:
-            exc -= (cp.einsum('Kij,Kji->', dm[0], vk[0]) +
-                    cp.einsum('Kij,Kji->', dm[1], vk[1])).real * .5 * weight
+            exc -= cp.einsum('nKij,nKji->', dm, vk).get()[()] * .5 * weight
 
     if ground_state:
-        ecoul = cp.einsum('nKij,Kji->', dm, vj) * .5 * weight
+        ecoul = cp.einsum('nKij,Kji->', dm, vj).get()[()] * .5 * weight
     else:
         ecoul = None
 
@@ -145,8 +143,7 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
         vhf = mf.get_veff(mf.cell, dm_kpts)
 
     weight = 1./len(h1e_kpts)
-    e1 = weight *(cp.einsum('kij,kji', h1e_kpts, dm_kpts[0]) +
-                  cp.einsum('kij,kji', h1e_kpts, dm_kpts[1]))
+    e1 = weight * cp.einsum('kij,nkji->', h1e_kpts, dm_kpts).get()[()]
     ecoul = vhf.ecoul
     exc = vhf.exc
     tot_e = e1 + ecoul + exc
@@ -179,8 +176,12 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         if dm is None: dm = self.make_rdm1()
         return krks.get_rho(self, dm[0]+dm[1], grids, kpts)
 
-    nuc_grad_method = NotImplemented
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.kuks import Gradients
+        return Gradients(self)
+
     to_hf = NotImplemented
+    multigrid_numint = krks.KRKS.multigrid_numint
 
     def to_cpu(self):
         mf = kuks_cpu.KUKS(self.cell)

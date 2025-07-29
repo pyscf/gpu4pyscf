@@ -19,9 +19,8 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
+#include "pbc.cuh"
 #include "int3c2e.cuh"
 
 typedef struct {
@@ -34,7 +33,7 @@ typedef struct {
 #define GOUT_WIDTH      43
 
 __global__
-void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bounds)
+void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
@@ -58,7 +57,7 @@ void pbc_int2c2e_kernel(double *out, PBCInt3c2eEnvVars envs, PBCInt2c2eBounds bo
     double *env = envs.env;
     double *img_coords = envs.img_coords;
 
-    int gout_stride = bounds.gout_stride_lookup[lj*L_AUX1+li];
+    int gout_stride = bounds.gout_stride_lookup[li*L_AUX1+lj];
     int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
