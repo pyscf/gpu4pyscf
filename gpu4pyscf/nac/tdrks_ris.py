@@ -480,10 +480,10 @@ class NAC(tdrks_nac.NAC):
                 raise ValueError(f"Excited state exceeds the number of states {nstates}.")
             elif I == 0:
                 logger.info(self, f"NACV between ground and excited state {J}.")
-                if self.base.xy is not None:
+                if self.base.xy[1] is not None:
                     xy_I = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[1][J-1]*np.sqrt(0.5))
                 else:
-                    xy_I = (self.base.X[J-1]*np.sqrt(0.5), self.base.X[J-1]*0.0)
+                    xy_I = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[0][J-1]*0.0)
                 E_I = self.base.energies[J-1]/HARTREE2EV
                 E_I = float(E_I)
                 self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
@@ -491,16 +491,16 @@ class NAC(tdrks_nac.NAC):
                 self._finalize()
             else:
                 logger.info(self, f"NACV between excited state {I} and {J}.")
-                if self.base.xy is not None:
+                if self.base.xy[1] is not None:
                     xy_I = (self.base.xy[0][I-1]*np.sqrt(0.5), self.base.xy[1][I-1]*np.sqrt(0.5))
                 else:
-                    xy_I = (self.base.X[I-1]*np.sqrt(0.5), self.base.X[I-1]*0.0)
+                    xy_I = (self.base.xy[0][I-1]*np.sqrt(0.5), self.base.xy[0][I-1]*0.0)
                 E_I = self.base.energies[I-1]/HARTREE2EV
                 E_I = float(E_I)
-                if self.base.xy is not None:
+                if self.base.xy[1] is not None:
                     xy_J = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[1][J-1]*np.sqrt(0.5))
                 else:
-                    xy_J = (self.base.X[J-1]*np.sqrt(0.5), self.base.X[J-1]*0.0)
+                    xy_J = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[0][J-1]*0.0)
                 E_J = self.base.energies[J-1]/HARTREE2EV
                 E_J = float(E_J)
                 self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \

@@ -202,7 +202,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
 
-        td = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td.conv_tol = 1.0E-4
         td.Ktrunc = 0.0
         td.kernel()
@@ -212,7 +212,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         mf.kernel()
 
-        td2 = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td2 = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td2.conv_tol = 1.0E-4
         td2.Ktrunc = 0.0
         td2.kernel()

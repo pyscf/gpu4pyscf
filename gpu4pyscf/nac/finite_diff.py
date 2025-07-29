@@ -87,7 +87,7 @@ def get_mf(mol, mf, s, mo_coeff):
 def get_mf_td(mol, mf, s, mo_coeff, with_ris=False):
     mf_new = get_mf(mol, mf, s, mo_coeff)
     if with_ris:
-        td_new = ris.TDA(mf=mf_new, nstates=5, spectra=False, Ktrunc = 0.0, single=False, GS=True)
+        td_new = ris.TDA(mf=mf_new, nstates=5, spectra=False, Ktrunc = 0.0, single=False, gram_schmidt=True)
     else:
         td_new = mf_new.TDA()
     a, b = td_new.get_ab()

@@ -339,10 +339,10 @@ class Gradients(tdrhf.Gradients):
                     "state=0 found in the input. Gradients of ground state is computed.",
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
-            if self.base.xy is not None:
+            if self.base.xy[1] is not None:
                 xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[1][state-1]*np.sqrt(0.5))
             else:
-                xy = (self.base.X[state-1]*np.sqrt(0.5), self.base.X[state-1]*0.0)
+                xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[0][state-1]*0.0)
 
         if singlet is None:
             singlet = self.base.singlet

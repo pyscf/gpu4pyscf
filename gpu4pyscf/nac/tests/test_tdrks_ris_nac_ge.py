@@ -68,7 +68,7 @@ class KnownValues(unittest.TestCase):
         g = td.nuc_grad_method()
         g.kernel()
 
-        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
         td_ris.Ktrunc = 0.0
         td_ris.kernel()
@@ -86,7 +86,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
         mf.kernel()
 
-        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         nac_ris = td_ris.nac_method()
 
         a, b = td_ris.get_ab()
@@ -110,7 +110,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
         mf.kernel()
 
-        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         nac_ris = td_ris.nac_method()
 
         a, b = td_ris.get_ab()
@@ -142,7 +142,7 @@ class KnownValues(unittest.TestCase):
         g = td.nuc_grad_method()
         g.kernel()
 
-        td_ris = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
         td_ris.Ktrunc = 0.0
         td_ris.kernel()
@@ -167,7 +167,7 @@ class KnownValues(unittest.TestCase):
         g = td.nuc_grad_method()
         g.kernel()
 
-        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, GS=True)
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
         td_ris.Ktrunc = 0.0
         td_ris.kernel()

@@ -1246,7 +1246,7 @@ class TDA(RisBase):
         log.info(CITATION_INFO)
 
         self.energies = energies
-        self.xy = X
+        self.xy = (X, None)
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
 
