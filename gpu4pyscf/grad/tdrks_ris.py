@@ -303,6 +303,7 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
 def get_extra_force(atom_id, envs):
     return envs['dvhf'].aux[atom_id]
 
+
 def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
     
     if omega != 0.0:
@@ -315,44 +316,6 @@ def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omeg
     e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
     vhf = tag_array(vhf, aux=e1_aux)
     return vhf
-
-
-class TDSCF_GradScanner(lib.GradScanner):
-    _keys = {'e_tot'}
-
-    def __init__(self, g, state):
-        lib.GradScanner.__init__(self, g)
-        if state is not None:
-            self.state = state
-
-    def __call__(self, mol_or_geom, state=None, **kwargs):
-        if isinstance(mol_or_geom, gto.MoleBase):
-            assert mol_or_geom.__class__ == gto.Mole
-            mol = mol_or_geom
-        else:
-            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
-        self.reset(mol)
-
-        if state is None:
-            state = self.state
-        else:
-            self.state = state
-
-        td_scanner = self.base
-        td_scanner(mol)
-        assert td_scanner.device == 'gpu'
-        assert self.device == 'gpu'
-        # TODO: Check root flip.  Maybe avoid the initial guess in TDHF otherwise
-        # large error may be found in the excited states amplitudes
-        de = self.kernel(state=state, **kwargs)
-        e_tot = self.e_tot[state-1]
-        return e_tot, de
-
-    @property
-    def converged(self):
-        td_scanner = self.base
-        return all((td_scanner._scf.converged,
-                    td_scanner.converged[self.state]))
 
 
 class Gradients(tdrhf.Gradients):
@@ -377,10 +340,10 @@ class Gradients(tdrhf.Gradients):
                     "state=0 found in the input. Gradients of ground state is computed.",
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
-            if self.base.xy is not None:
+            if self.base.xy[1] is not None:
                 xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[1][state-1]*np.sqrt(0.5))
             else:
-                xy = (self.base.X[state-1]*np.sqrt(0.5), self.base.X[state-1]*0.0)
+                xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[0][state-1]*0.0)
 
         if singlet is None:
             singlet = self.base.singlet

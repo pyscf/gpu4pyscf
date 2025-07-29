@@ -715,10 +715,10 @@ class TD_Scanner(lib.SinglePointScanner):
         else:
             mol = self.mol.set_geom_(mol_or_geom, inplace=False)
 
-        self.reset(mol)
-
         mf_scanner = self._scf
         mf_e = mf_scanner(mol)
+        self.reset(mol)
+        self.reset_mo_info()
         self.kernel(**kwargs)
         return mf_e + self.energies/HARTREE2EV
 
@@ -873,12 +873,6 @@ class RisBase(lib.StreamObject):
             mdpol_beta = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ[1], C_vir=self.C_vir[1])
             mdpol = cp.vstack((mdpol_alpha, mdpol_beta))
         return mdpol
-
-
-    @property
-    def e_tot(self):
-        '''Excited state energies'''
-        return self._scf.e_tot + self.energies/HARTREE2EV
 
     @property
     def e_tot(self):
@@ -1125,6 +1119,10 @@ class RisBase(lib.StreamObject):
         self._scf.reset(mol)
         return self
 
+    def reset_mo_info(self):
+        self.mo_coeff = cp.asarray(self._scf.mo_coeff, dtype=self.dtype)
+        self.build()
+
     as_scanner = as_scanner
 
 class TDA(RisBase):
@@ -1253,7 +1251,7 @@ class TDA(RisBase):
         log = self.log
 
         TDA_MVP, hdiag = self.gen_vind()
-        energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
+        converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                               single=self.single, verbose=log)
 
@@ -1261,7 +1259,7 @@ class TDA(RisBase):
         #                             conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
         #                             single=self.single, verbose=log)
         # print(energies)
-
+        self.converged = converged
         log.debug(f'check orthonormality of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies,
@@ -1275,7 +1273,7 @@ class TDA(RisBase):
         log.info(CITATION_INFO)
 
         self.energies = energies
-        self.xy = X
+        self.xy = (X, None)
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
 
@@ -1407,11 +1405,14 @@ class TDDFT(RisBase):
 
             #  TODO: UKS 
 
-            energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP, hdiag=hdiag,
+            conv, energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP, hdiag=hdiag,
                                                     N_states=self.nstates, conv_tol=self.conv_tol,
                                                     max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                                     single=self.single, verbose=self.verbose)
-
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
         elif self.a_x == 0:
             '''pure TDDFT'''
             if self.RKS:
@@ -1419,9 +1420,13 @@ class TDDFT(RisBase):
 
             elif self.UKS:
                 TDDFT_pure_MVP, hdiag_sq = self.get_UKS_TDDFT_pure_MVP()
-            energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP, hdiag=hdiag_sq,
+            conv, energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP, hdiag=hdiag_sq,
                                             N_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
                                             gram_schmidt=self.gram_schmidt, single=self.single, verbose=self.verbose)
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
 
             energies = energies_sq**0.5
             Z = (energies**0.5).reshape(-1,1) * Z
@@ -1435,7 +1440,6 @@ class TDDFT(RisBase):
                                                     P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(), name=self.out_name+'_TDDFT_ris',
                                                     spectra=self.spectra, RKS=self.RKS, print_threshold = self.print_threshold,
                                                     n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
-        
         energies = energies*HARTREE2EV
         log.info(f'energies: {energies}')
         log.info(f'oscillator strength: {oscillator_strength}')
@@ -1521,7 +1525,7 @@ class StaticPolarizability(RisBase):
         TDA_MVP, hdiag = self.gen_vind()
         transition_dipole = self.transition_dipole()
 
-        solver = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, problem_type='linear',
+        _, solver = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, problem_type='linear',
                                         rhs=-transition_dipole, conv_tol=self.conv_tol, max_iter=self.max_iter, 
                                         gram_schmidt=self.gram_schmidt, single=self.single, verbose=log)
         X = solver.run()
