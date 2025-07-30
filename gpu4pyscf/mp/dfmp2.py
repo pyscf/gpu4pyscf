@@ -154,9 +154,6 @@ class DFMP2(mp2.MP2):
     def make_rdm2(self, t2=None, ao_repr=False):
         raise NotImplementedError
 
-    def nuc_grad_method(self):
-        raise NotImplementedError
-
     # For non-canonical MP2
     def update_amps(self, t2, eris):
         raise NotImplementedError

@@ -418,6 +418,9 @@ class TDBase(lib.StreamObject):
     def nuc_grad_method(self):
         return self.Gradients()
 
+    def Gradients(self):
+        raise NotImplementedError
+
     def nac_method(self):
         raise NotImplementedError
 

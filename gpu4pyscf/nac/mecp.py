@@ -100,7 +100,7 @@ class MECPScanner:
 
         # 2. Calculate analytical gradients for both states
         # The td_scanner object also serves as the gradient method
-        grad_method = self._td_scanner.nuc_grad_method()
+        grad_method = self._td_scanner.Gradients()
         g1 = grad_method.kernel(state=self.states[0])
         g2 = grad_method.kernel(state=self.states[1])
 
@@ -153,8 +153,11 @@ class MECPScanner:
     def as_scanner(self):
         return self
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         return self
+
+    def nuc_grad_method(self):
+        return self.Gradients()
 
 
 class ConicalIntersectionOptimizer:

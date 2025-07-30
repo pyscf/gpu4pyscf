@@ -273,7 +273,7 @@ class UHF(hf.SCF):
             s = self.get_ovlp()
         return spin_square(mo_coeff, s)
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         from gpu4pyscf.grad import uhf
         return uhf.Gradients(self)
 

@@ -853,5 +853,3 @@ class Gradients(rhf_grad.Gradients):
             return 0
 
 Grad = Gradients
-from gpu4pyscf import dft
-dft.rks.RKS.Gradients = lib.class_as_method(Gradients)
