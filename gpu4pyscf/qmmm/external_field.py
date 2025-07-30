@@ -104,11 +104,9 @@ class EXTFSCF(EXTF):
             nuc += float(nuclear_dipole @ self.electric_field.get())
         return nuc
 
-    def nuc_grad_method(self):
-        scf_grad = super().nuc_grad_method()
+    def Gradients(self):
+        scf_grad = super().Gradients()
         return external_field_grad_for_scf(scf_grad)
-
-    Gradients = nuc_grad_method
 
 
 def add_external_field_grad(scf_grad, electric_field=None, origin=None):

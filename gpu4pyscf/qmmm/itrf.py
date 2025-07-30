@@ -117,11 +117,9 @@ class QMMMSCF(QMMM):
         obj = pyscf.qmmm.itrf.qmmm_for_scf(obj, self.mm_mol)
         return utils.to_cpu(self, obj)
 
-    def nuc_grad_method(self):
-        scf_grad = super().nuc_grad_method()
+    def Gradients(self):
+        scf_grad = super().Gradients()
         return qmmm_grad_for_scf(scf_grad)
-
-    Gradients = nuc_grad_method
 
 
 def add_mm_charges_grad(scf_grad, atoms_or_coords, charges, radii=None, unit=None):

@@ -193,9 +193,6 @@ class KUKSpU(kuks.KUKS):
         from gpu4pyscf.pbc.grad.kukspu import Gradients
         return Gradients(self)
 
-    def nuc_grad_method(self):
-        return self.Gradients()
-
 def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
     '''
     Refs:

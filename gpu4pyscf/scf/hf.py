@@ -774,7 +774,6 @@ class SCF(pyscf_lib.StreamObject):
     newton                   = NotImplemented
     x2c = x2c1e = sfx2c1e    = NotImplemented
     stability                = NotImplemented
-    nuc_grad_method          = NotImplemented
     update_                  = NotImplemented
     istype                   = hf_cpu.SCF.istype
     to_rhf                   = NotImplemented
@@ -869,6 +868,15 @@ class SCF(pyscf_lib.StreamObject):
             vk = vk.get()
         return vk
 
+    def nuc_grad_method(self):
+        return self.Gradients()
+
+    def Gradients(self):
+        raise NotImplementedError
+
+    def Hessian(self):
+        raise NotImplementedError
+
 class KohnShamDFT:
     '''
     A mock DFT base class, to be compatible with PySCF
@@ -898,7 +906,7 @@ class RHF(SCF):
 
     energy_elec = energy_elec
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         from gpu4pyscf.grad import rhf
         return rhf.Gradients(self)
 

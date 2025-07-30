@@ -436,6 +436,3 @@ class Gradients(GradientsBase):
         return _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
 
 Grad = Gradients
-
-from gpu4pyscf import scf
-scf.hf.RHF.Gradients = lib.class_as_method(Gradients)

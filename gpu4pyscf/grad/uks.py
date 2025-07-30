@@ -481,5 +481,3 @@ class Gradients(uhf_grad.Gradients):
     extra_force = rks_grad.Gradients.extra_force
 
 Grad = Gradients
-from gpu4pyscf import dft
-dft.uks.UKS.Gradients = lib.class_as_method(Gradients)

@@ -278,7 +278,20 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.RHF.dump_flags(self, verbose)
         return KohnShamDFT.dump_flags(self, verbose)
 
-    def nuc_grad_method(self):
+    def reset(self, mol=None):
+        hf.SCF.reset(self, mol)
+        self.grids.reset(mol)
+        self.nlcgrids.reset(mol)
+        self._numint.reset()
+        # The cphf_grids attribute is not available in the PySCF CPU version.
+        # In PySCF's to_gpu() function, this attribute is not properly
+        # initialized. mol of the KS object must be used for initialization.
+        if mol is None:
+            mol = self.mol
+        self.cphf_grids.reset(mol)
+        return self
+
+    def Gradients(self):
         from gpu4pyscf.grad import rks as rks_grad
         return rks_grad.Gradients(self)
 

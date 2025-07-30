@@ -138,7 +138,7 @@ class _DFHF:
             # vj, vk = super().get_jk(mol, dm, hermi, with_j, with_k, omega)
         return vj, vk
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         if self.istype('_Solvation'):
             raise NotImplementedError(
                 'Gradients of solvent are not computed. '
@@ -157,8 +157,6 @@ class _DFHF:
             from gpu4pyscf.df.grad import uhf as uhf_grad
             return uhf_grad.Gradients(self)
         raise NotImplementedError()
-
-    Gradients = nuc_grad_method
 
     def Hessian(self):
         if self.istype('_Solvation'):

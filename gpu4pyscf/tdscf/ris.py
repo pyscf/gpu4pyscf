@@ -1125,14 +1125,12 @@ class RisBase(lib.StreamObject):
         log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
         log.info(get_memory_info('after T_ia_K T_ij_K T_ab_K'))
         return T_ia_K, T_ij_K, T_ab_K
-    
+
+    def Gradients(self):
+        raise NotImplementedError
+
     def nuc_grad_method(self):
-        if getattr(self._scf, 'with_df', None) is not None:
-            from gpu4pyscf.df.grad import tdrks_ris
-            return tdrks_ris.Gradients(self)
-        else:
-            from gpu4pyscf.grad import tdrks_ris
-            return tdrks_ris.Gradients(self)
+        return self.Gradients()
 
     def nac_method(self):
         if getattr(self._scf, 'with_df', None) is not None:
@@ -1141,7 +1139,7 @@ class RisBase(lib.StreamObject):
         else:
             from gpu4pyscf.nac.tdrks_ris import NAC
             return NAC(self)
-    
+
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
@@ -1298,6 +1296,14 @@ class TDA(RisBase):
         self.rotatory_strength = rotatory_strength
 
         return energies, X, oscillator_strength, rotatory_strength
+
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None) is not None:
+            from gpu4pyscf.df.grad import tdrks_ris
+            return tdrks_ris.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrks_ris
+            return tdrks_ris.Gradients(self)
 
     
 class TDDFT(RisBase):
@@ -1474,6 +1480,8 @@ class TDDFT(RisBase):
         self.rotatory_strength = rotatory_strength
 
         return energies, X, Y, oscillator_strength, rotatory_strength
+
+    Gradients = TDA.Gradients
 
 
 class StaticPolarizability(RisBase):
