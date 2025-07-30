@@ -43,7 +43,6 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
-
     def test_opt_rks_tda_1(self):
         mf = dft.RKS(mol, xc='pbe0').to_gpu()
         mf.kernel()
