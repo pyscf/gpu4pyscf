@@ -714,12 +714,30 @@ class TD_Scanner(lib.SinglePointScanner):
             mol = mol_or_geom
         else:
             mol = self.mol.set_geom_(mol_or_geom, inplace=False)
-
+        
+        self.reset(mol)
         mf_scanner = self._scf
         mf_e = mf_scanner(mol)
-        self.reset(mol)
-        self.reset_mo_info()
-        self.kernel(**kwargs)
+        self.n_occ = None
+        self.n_vir = None
+        self.rest_occ = None
+        self.rest_vir = None
+        self.C_occ_notrunc = None
+        self.C_vir_notrunc = None
+        self.C_occ_Ktrunc = None
+        self.C_vir_Ktrunc = None
+        self.delta_hdiag = None
+        self.hdiag = None
+        self.eri_tag = None
+        self.auxmol_J = None
+        self.auxmol_K = None
+        self.lower_inv_eri2c_J = None
+        self.lower_inv_eri2c_K = None
+        self.RKS = True
+        self.UKS = False
+        self.mo_coeff = cp.asarray(self._scf.mo_coeff, dtype=self.dtype)
+        self.build()
+        self.kernel()
         return mf_e + self.energies/HARTREE2EV
 
 
@@ -773,7 +791,6 @@ class RisBase(lib.StreamObject):
             in_ram (bool, optional): Whether to perform calculations in RAM. Defaults to True.
             verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
         """
-        self.mf = mf
         self.single = single
 
         if single:
@@ -890,7 +907,7 @@ class RisBase(lib.StreamObject):
     def build(self):
         log = self.log
         log.info(f'nstates: {self.nstates}')
-        log.info(f'N atoms:{self.mf.mol.natm}')
+        log.info(f'N atoms:{self._scf.mol.natm}')
         log.info(f'conv_tol: {self.conv_tol}')
         log.info(f'max_iter: {self.max_iter}')
         log.info(f'Ktrunc: {self.Ktrunc}')
@@ -970,7 +987,7 @@ class RisBase(lib.StreamObject):
 
             self.C_occ_notrunc = cp.asfortranarray(self.mo_coeff[:,:n_occ])
             self.C_vir_notrunc = cp.asfortranarray(self.mo_coeff[:,n_occ:])
-            mo_energy = self.mf.mo_energy
+            mo_energy = self._scf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
             vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
             occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
@@ -1118,10 +1135,6 @@ class RisBase(lib.StreamObject):
             self.mol = mol
         self._scf.reset(mol)
         return self
-
-    def reset_mo_info(self):
-        self.mo_coeff = cp.asarray(self._scf.mo_coeff, dtype=self.dtype)
-        self.build()
 
     as_scanner = as_scanner
 

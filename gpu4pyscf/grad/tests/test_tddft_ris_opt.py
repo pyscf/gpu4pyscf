@@ -21,12 +21,15 @@ from pyscf.geomopt.geometric_solver import optimize
 import gpu4pyscf.tdscf.ris as ris
 
 atom = """
-O  -0.000000  -0.000000   0.391241
-H  -0.000000  -1.283134   0.391326
-H  -0.000000   1.283134   0.391326
+H     1.2953527433   -0.4895463266    0.8457608681
+C     0.6689912970   -0.0128659340    0.0499408027
+H     1.3504336752    0.5361460613   -0.6478375784
+C    -0.6690192526   -0.0870427249   -0.0501820705
+H    -1.4008634673    0.6483035475    0.3700152345
+H    -1.2449949956   -0.8949946232   -0.5680972562
 """
 
-bas0 = "ccpvdz"
+bas0 = "def2tzvp"
 
 def setUpModule():
     global mol
@@ -41,20 +44,20 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
 
-    def test_opt_rks_tddft_1(self):
-        mf = dft.RKS(mol, xc='b3lyp').to_gpu()
+    def test_opt_rks_tda_1(self):
+        mf = dft.RKS(mol, xc='pbe0').to_gpu()
         mf.kernel()
         assert mf.converged
-        td_ris = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-5
         td_ris.Ktrunc = 0.0
         td_ris.kernel()
         mol_gpu = optimize(td_ris)
 
-        mff = dft.RKS(mol_gpu, xc='b3lyp').to_gpu()
+        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu()
         mff.kernel()
         assert mff.converged
-        tdf_ris = ris.TDDFT(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        tdf_ris = ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
         tdf_ris.conv_tol = 1.0E-5
         tdf_ris.Ktrunc = 0.0
         tdf_ris.kernel()
@@ -62,11 +65,11 @@ class KnownValues(unittest.TestCase):
         excited_gradf_ris.kernel()
         assert np.linalg.norm(excited_gradf_ris.de) < 3.0e-4
 
-    def test_opt_rks_tddft_2(self):
-        mf = dft.RKS(mol, xc='b3lyp').to_gpu()
+    def test_opt_rks_tda_2(self):
+        mf = dft.RKS(mol, xc='pbe0').to_gpu()
         mf.kernel()
         assert mf.converged
-        td_ris = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-5
         td_ris.Ktrunc = 0.0
         td_ris.kernel()
@@ -74,10 +77,10 @@ class KnownValues(unittest.TestCase):
         excited_grad = td_ris.nuc_grad_method().as_scanner(state=1)
         mol_gpu = excited_grad.optimizer().kernel()
 
-        mff = dft.RKS(mol_gpu, xc='b3lyp').to_gpu()
+        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu()
         mff.kernel()
         assert mff.converged
-        tdf_ris = ris.TDDFT(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        tdf_ris = ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
         tdf_ris.conv_tol = 1.0E-5
         tdf_ris.Ktrunc = 0.0
         tdf_ris.kernel()
