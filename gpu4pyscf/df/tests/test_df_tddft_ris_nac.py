@@ -69,6 +69,10 @@ class KnownValues(unittest.TestCase):
         nac_ris.states=(1,0)
         nac_ris.kernel()
 
+        a, b = td_ris.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        ref_e = np.array([0.25623541, 0.33093807, 0.34839961, 0.41773945, 0.49824985])
         ref_de = np.array(
             [[ 4.42788915e-03,  7.31260374e-16, -8.06595393e-17],
              [-1.88130884e-02, -1.02675604e-16, -1.71476491e-15],
@@ -79,6 +83,8 @@ class KnownValues(unittest.TestCase):
              [-4.95950501e-02, -2.55837068e-15, -1.82666506e-15],])
 
         # compare with previous calculation resusts
+        assert np.linalg.norm(e_diag - td_ris.energies.get()/27.21138602) < 1.0E-8
+        assert np.linalg.norm(ref_e - td_ris.energies.get()/27.21138602) < 1.0E-8
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
@@ -146,6 +152,10 @@ class KnownValues(unittest.TestCase):
         nac_ris.states=(1,2)
         nac_ris.kernel()
 
+        a, b = td_ris.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        ref_e = np.array([0.25623541, 0.33093807, 0.34839961, 0.41773945, 0.49824985])
         ref_de = np.array(
             [[-2.27769085e-17, -9.37769130e-02,  2.08893394e-14],
              [-1.07278885e-16,  5.38085016e-02, -3.50951624e-02],
@@ -156,6 +166,8 @@ class KnownValues(unittest.TestCase):
              [ 1.79996735e-16,  4.63913465e-02,  3.65824631e-02],])
 
         # compare with previous calculation resusts
+        assert np.linalg.norm(e_diag - td_ris.energies.get()/27.21138602) < 1.0E-8
+        assert np.linalg.norm(ref_e - td_ris.energies.get()/27.21138602) < 1.0E-8
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
@@ -166,7 +178,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
         mf.kernel()
 
-        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)
         nac_ris = td_ris.nac_method()
         a, b = td_ris.get_ab()
         e_diag, xy_diag = diagonalize_tda(a)
@@ -196,7 +208,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
         mf.kernel()
 
-        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)
         nac_ris = td_ris.nac_method()
         a, b = td_ris.get_ab()
         e_diag, xy_diag = diagonalize_tda(a)
