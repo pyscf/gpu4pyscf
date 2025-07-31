@@ -73,7 +73,7 @@ class KnownValues(unittest.TestCase):
 
     def test_krylov_eigenvalue(self):
         """Test Krylov solver for eigenvalue problem"""
-        eigenvalues, eigenvectors = krylov_solver(
+        _, eigenvalues, eigenvectors = krylov_solver(
             matrix_vector_product=self.matrix_vector_product,
             hdiag=self.hdiag,
             problem_type='eigenvalue',
@@ -85,7 +85,7 @@ class KnownValues(unittest.TestCase):
             single=False
         )
 
-        eigenvalues_single, eigenvectors_single = krylov_solver(
+        _, eigenvalues_single, eigenvectors_single = krylov_solver(
             matrix_vector_product=self.matrix_vector_product_single,
             hdiag=self.hdiag,
             problem_type='eigenvalue',
@@ -124,7 +124,7 @@ class KnownValues(unittest.TestCase):
 
     def test_krylov_linear(self):
         """Test Krylov solver for linear system"""
-        solution_vectors = krylov_solver(
+        _, solution_vectors = krylov_solver(
             matrix_vector_product=self.matrix_vector_product,
             hdiag=self.hdiag,
             problem_type='linear',
@@ -137,7 +137,7 @@ class KnownValues(unittest.TestCase):
         )
 
 
-        solution_vectors_single = krylov_solver(
+        _, solution_vectors_single = krylov_solver(
             matrix_vector_product=self.matrix_vector_product_single,
             hdiag=self.hdiag,
             problem_type='linear',
@@ -164,7 +164,7 @@ class KnownValues(unittest.TestCase):
 
     def test_krylov_shifted_linear(self):
         """Test Krylov solver for shifted linear system"""
-        solution_vectors_shifted = krylov_solver(
+        _, solution_vectors_shifted = krylov_solver(
             matrix_vector_product=self.matrix_vector_product,
             hdiag=self.hdiag,
             problem_type='shifted_linear',
@@ -178,7 +178,7 @@ class KnownValues(unittest.TestCase):
         )
 
 
-        solution_vectors_shifted_single = krylov_solver(
+        _, solution_vectors_shifted_single = krylov_solver(
             matrix_vector_product=self.matrix_vector_product_single,
             hdiag=self.hdiag,
             problem_type='shifted_linear',

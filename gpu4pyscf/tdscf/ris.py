@@ -117,16 +117,10 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
     parse_arg = False
     turns off PySCF built-in parsing function
     '''
-    auxmol = gto.M(atom=mol.atom,
-                    basis=mol.basis,
-                    parse_arg=False,
-                    spin=mol.spin,
-                    charge=mol.charge,
-                    cart=mol.cart)
-
+    auxmol = mol.copy()
     auxmol_basis_keys = mol._basis.keys()
     auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
-    auxmol.build(dump_input=False)
+    auxmol.build(dump_input=False, parse_arg=False)
     return auxmol
 
 
@@ -700,6 +694,53 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
     return a.get(), b.get()
 
 
+def as_scanner(td):
+    if isinstance(td, lib.SinglePointScanner):
+        return td
+
+    logger.info(td, 'Set %s as a scanner', td.__class__)
+    name = td.__class__.__name__ + TD_Scanner.__name_mixin__
+    return lib.set_class(TD_Scanner(td), (TD_Scanner, td.__class__), name)
+
+
+class TD_Scanner(lib.SinglePointScanner):
+    def __init__(self, td):
+        self.__dict__.update(td.__dict__)
+        self._scf = td._scf.as_scanner()
+
+    def __call__(self, mol_or_geom, **kwargs):
+        assert self.device == 'gpu'
+        if isinstance(mol_or_geom, gto.MoleBase):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+        
+        self.reset(mol)
+        mf_scanner = self._scf
+        mf_e = mf_scanner(mol)
+        self.n_occ = None
+        self.n_vir = None
+        self.rest_occ = None
+        self.rest_vir = None
+        self.C_occ_notrunc = None
+        self.C_vir_notrunc = None
+        self.C_occ_Ktrunc = None
+        self.C_vir_Ktrunc = None
+        self.delta_hdiag = None
+        self.hdiag = None
+        self.eri_tag = None
+        self.auxmol_J = None
+        self.auxmol_K = None
+        self.lower_inv_eri2c_J = None
+        self.lower_inv_eri2c_K = None
+        self.RKS = True
+        self.UKS = False
+        self.mo_coeff = cp.asarray(self._scf.mo_coeff, dtype=self.dtype)
+        self.build()
+        self.kernel()
+        return mf_e + self.energies/HARTREE2EV
+
+
 class RisBase(lib.StreamObject):
     def __init__(self, mf,  
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', 
@@ -750,7 +791,6 @@ class RisBase(lib.StreamObject):
             in_ram (bool, optional): Whether to perform calculations in RAM. Defaults to True.
             verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
         """
-        self.mf = mf
         self.single = single
 
         if single:
@@ -788,6 +828,7 @@ class RisBase(lib.StreamObject):
         self.verbose = verbose if verbose else mf.verbose
 
         self.device = mf.device
+        self.converged = None
         
         self._in_ram = in_ram
 
@@ -850,10 +891,14 @@ class RisBase(lib.StreamObject):
             mdpol = cp.vstack((mdpol_alpha, mdpol_beta))
         return mdpol
 
+    @property
+    def e_tot(self):
+        '''Excited state energies'''
+        return self._scf.e_tot + self.energies/HARTREE2EV
 
     def get_ab(self, mf=None):
         if mf is None:
-            mf = self.mf
+            mf = self._scf
         J_fit = self.J_fit
         K_fit = self.K_fit
         theta = self.theta
@@ -862,7 +907,7 @@ class RisBase(lib.StreamObject):
     def build(self):
         log = self.log
         log.info(f'nstates: {self.nstates}')
-        log.info(f'N atoms:{self.mf.mol.natm}')
+        log.info(f'N atoms:{self._scf.mol.natm}')
         log.info(f'conv_tol: {self.conv_tol}')
         log.info(f'max_iter: {self.max_iter}')
         log.info(f'Ktrunc: {self.Ktrunc}')
@@ -892,7 +937,7 @@ class RisBase(lib.StreamObject):
                 note: the definition of a_x, α and β is kind of weird in pyscf/libxc
             '''
 
-            omega, alpha_libxc, hyb_libxc = self.mf._numint.rsh_and_hybrid_coeff(self.mf.xc, spin=self.mf.mol.spin)
+            omega, alpha_libxc, hyb_libxc = self._scf._numint.rsh_and_hybrid_coeff(self._scf.xc, spin=self._scf.mol.spin)
             log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
 
             if omega > 0:
@@ -935,14 +980,14 @@ class RisBase(lib.StreamObject):
         if self.mo_coeff.ndim == 2:
             self.RKS = True
             self.UKS = False
-            n_occ = int(sum(self.mf.mo_occ>0))
-            n_vir = int(sum(self.mf.mo_occ==0))
+            n_occ = int(sum(self._scf.mo_occ>0))
+            n_vir = int(sum(self._scf.mo_occ==0))
             self.n_occ = n_occ
             self.n_vir = n_vir
 
             self.C_occ_notrunc = cp.asfortranarray(self.mo_coeff[:,:n_occ])
             self.C_vir_notrunc = cp.asfortranarray(self.mo_coeff[:,n_occ:])
-            mo_energy = self.mf.mo_energy
+            mo_energy = self._scf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
             vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
             occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
@@ -986,10 +1031,10 @@ class RisBase(lib.StreamObject):
             ''' TODO UKS method '''
             self.RKS = False
             self.UKS = True
-            self.n_occ_a = sum(self.mf.mo_occ[0]>0)
-            self.n_vir_a = sum(self.mf.mo_occ[0]==0)
-            self.n_occ_b = sum(self.mf.mo_occ[1]>0)
-            self.n_vir_b = sum(self.mf.mo_occ[1]==0)
+            self.n_occ_a = sum(self._scf.mo_occ[0]>0)
+            self.n_vir_a = sum(self._scf.mo_occ[0]==0)
+            self.n_occ_b = sum(self._scf.mo_occ[1]>0)
+            self.n_vir_b = sum(self._scf.mo_occ[1]==0)
             log.info('n_occ for alpha spin = {self.n_occ_a}')
             log.info('n_vir for alpha spin = {self.n_vir_a}')
             log.info('n_occ for beta spin = {self.n_occ_b}')
@@ -1097,6 +1142,13 @@ class RisBase(lib.StreamObject):
             from gpu4pyscf.nac.tdrks_ris import NAC
             return NAC(self)
     
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self._scf.reset(mol)
+        return self
+
+    as_scanner = as_scanner
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
@@ -1224,7 +1276,7 @@ class TDA(RisBase):
         log = self.log
 
         TDA_MVP, hdiag = self.gen_vind()
-        energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
+        converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                               single=self.single, verbose=log)
 
@@ -1232,7 +1284,7 @@ class TDA(RisBase):
         #                             conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
         #                             single=self.single, verbose=log)
         # print(energies)
-
+        self.converged = converged
         log.debug(f'check orthonormality of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies,
@@ -1378,11 +1430,14 @@ class TDDFT(RisBase):
 
             #  TODO: UKS 
 
-            energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP, hdiag=hdiag,
+            conv, energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP, hdiag=hdiag,
                                                     N_states=self.nstates, conv_tol=self.conv_tol,
                                                     max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                                     single=self.single, verbose=self.verbose)
-
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
         elif self.a_x == 0:
             '''pure TDDFT'''
             if self.RKS:
@@ -1390,9 +1445,13 @@ class TDDFT(RisBase):
 
             elif self.UKS:
                 TDDFT_pure_MVP, hdiag_sq = self.get_UKS_TDDFT_pure_MVP()
-            energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP, hdiag=hdiag_sq,
+            conv, energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP, hdiag=hdiag_sq,
                                             N_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
                                             gram_schmidt=self.gram_schmidt, single=self.single, verbose=self.verbose)
+            self.converged = conv
+            if not all(self.converged):
+                log.info('TD-SCF states %s not converged.',
+                            [i for i, x in enumerate(self.converged) if not x])
 
             energies = energies_sq**0.5
             Z = (energies**0.5).reshape(-1,1) * Z
@@ -1406,7 +1465,6 @@ class TDDFT(RisBase):
                                                     P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(), name=self.out_name+'_TDDFT_ris',
                                                     spectra=self.spectra, RKS=self.RKS, print_threshold = self.print_threshold,
                                                     n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
-        
         energies = energies*HARTREE2EV
         log.info(f'energies: {energies}')
         log.info(f'oscillator strength: {oscillator_strength}')
@@ -1492,7 +1550,7 @@ class StaticPolarizability(RisBase):
         TDA_MVP, hdiag = self.gen_vind()
         transition_dipole = self.transition_dipole()
 
-        solver = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, problem_type='linear',
+        _, solver = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, problem_type='linear',
                                         rhs=-transition_dipole, conv_tol=self.conv_tol, max_iter=self.max_iter, 
                                         gram_schmidt=self.gram_schmidt, single=self.single, verbose=log)
         X = solver.run()

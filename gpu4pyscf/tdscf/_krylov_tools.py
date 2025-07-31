@@ -478,6 +478,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     if ii == max_iter - 1 and max_norm >= conv_tol:
         log.warn(f'=== Warning: {problem_type.capitalize()} solver not converged below {conv_tol:.2e} ===')
         log.warn(f'Current residual norms: {r_norms.tolist()}')
+    converged = r_norms < conv_tol
     log.info(f'Finished in {ii+1} steps')
     log.info(f'Maximum residual norm = {max_norm:.2e}')
     log.info(f'Final subspace size = {sub_A.shape[0]}')
@@ -497,9 +498,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     log.info(f'========== {problem_type.capitalize()} Solver Done ==========')
 
     if problem_type == 'eigenvalue':
-        return omega, full_X
+        return converged, omega, full_X
     elif problem_type in ['linear', 'shifted_linear']:
-        return full_X
+        return converged, full_X
 
 def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         rhs=None, omega_shift=None, n_states=20, conv_tol=1e-5, 
@@ -626,15 +627,15 @@ def example_krylov_solver():
 
     hdiag = cp.diag(A)
 
-    eigenvalues, eigenvecters = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+    _, eigenvalues, eigenvecters = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
                             problem_type='eigenvalue', n_states=5,
                             conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
 
-    solution_vectors = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+    _, solution_vectors = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
                             problem_type='linear', rhs=rhs,
                             conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
     
-    solution_vectors_shifted = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+    _, solution_vectors_shifted = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
                             problem_type='shifted_linear', rhs=rhs, omega_shift=omega_shift,
                             conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
     

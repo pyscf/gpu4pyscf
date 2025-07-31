@@ -16,16 +16,14 @@
 from functools import reduce
 import cupy as cp
 import numpy as np
-from pyscf import lib
+from pyscf import lib, gto
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.grad import tdrhf as tdrhf_df
-from gpu4pyscf.dft import numint,rks
-from pyscf.dft.numint import NumInt as numint_cpu
+from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
@@ -303,6 +301,7 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
 
 def get_extra_force(atom_id, envs):
     return envs['dvhf'].aux[atom_id]
+
 
 def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
     
