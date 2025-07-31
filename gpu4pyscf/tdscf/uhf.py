@@ -481,6 +481,9 @@ class TDBase(tdhf_gpu.TDBase):
             from gpu4pyscf.grad import tduhf
             return tduhf.Gradients(self)
 
+    def nac_method(self): 
+        raise NotImplementedError("Nonadiabatic coupling vector for unrestricted case is not implemented.")
+
     def _contract_multipole(tdobj, ints, hermi=True, xy=None):
         if xy is None: xy = tdobj.xy
         mo_coeff = tdobj._scf.mo_coeff

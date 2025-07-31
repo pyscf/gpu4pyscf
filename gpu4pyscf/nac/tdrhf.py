@@ -369,45 +369,45 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     dvhf_all = 0
     dvhf = td_nac.get_veff(mol, dmz1doo + oo0) 
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
     # thus minus the contribution from same DM ({D,D}, {P,P}).
     dvhf = td_nac.get_veff(mol, dmz1doo)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = td_nac.get_veff(mol, oo0)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     j_factor=1.0
     k_factor=1.0
     dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
     dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf # NOTE: minus
     dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
 
     delec = dh_td*2 - ds
@@ -601,4 +601,3 @@ class NAC(lib.StreamObject):
     to_gpu = lib.to_gpu
 
 
-tdscf.rhf.TDA.NAC = tdscf.rhf.TDHF.NAC = lib.class_as_method(NAC)

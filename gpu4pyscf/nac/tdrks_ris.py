@@ -20,20 +20,15 @@ from functools import reduce
 import cupy as cp
 import numpy as np
 from pyscf import lib
-import pyscf
 from gpu4pyscf.lib import logger
-from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrks, tdrks_ris
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.dft import numint, rks
+from gpu4pyscf.dft import rks
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from pyscf import __config__
-from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
-from pyscf.scf import _vhf
-from gpu4pyscf.nac import tdrhf
 from gpu4pyscf.nac import tdrks as tdrks_nac
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.tdscf.ris import get_auxmol
@@ -63,6 +58,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         atmlst (list): List of atoms to calculate the NAC.
         verbose (int): Verbosity level.
     """
+    if td_nac.base.Ktrunc != 0.0:
+        raise NotImplementedError('Ktrunc or frozen method is not supported yet')
     log = logger.new_logger(td_nac, verbose)
     theta = td_nac.base.theta
     J_fit = td_nac.base.J_fit
@@ -323,43 +320,43 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     dvhf_all = 0
     dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor=j_factor, k_factor=k_factor) 
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
     # thus minus the contribution from same DM ({D,D}, {P,P}).
     dvhf = td_nac.get_veff(mol, dmz1doo, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = td_nac.get_veff(mol, oo0, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
+        extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
     dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
     dvhf_all -= dvhf # NOTE: minus
     dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
+        extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
     dvhf_all += dvhf
     dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
     dvhf_all -= dvhf
 
     if with_k and omega != 0:
@@ -367,44 +364,44 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         k_factor = alpha - hyb
         dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor=j_factor, k_factor=k_factor, omega=omega) 
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
+            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
         # thus minus the contribution from same DM ({D,D}, {P,P}).
         dvhf = td_nac.get_veff(mol, dmz1doo, j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
         dvhf = td_nac.get_veff(mol, oo0, j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
 
         dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
+            extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
         # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
         dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
         dvhf_all -= dvhf # NOTE: minus
         dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
         dvhf_all -= dvhf
         dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += tdrks_ris.get_extra_force(ia, locals())
+            extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
         dvhf_all += dvhf
         dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
         dvhf_all -= dvhf
         dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= tdrks_ris.get_extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
         dvhf_all -= dvhf
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
@@ -455,7 +452,8 @@ class NAC(tdrks_nac.NAC):
     def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
 
         logger.warn(self, "This module is under development!!")
-
+        if self.base.Ktrunc != 0.0:
+            raise NotImplementedError('Ktrunc or frozen method is not supported yet')
         if singlet is None:
             singlet = self.base.singlet
         if atmlst is None:
@@ -509,4 +507,3 @@ class NAC(tdrks_nac.NAC):
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
 
 
-tdscf.ris.TDA.NAC = tdscf.ris.TDDFT.NAC = lib.class_as_method(NAC)

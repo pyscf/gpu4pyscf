@@ -56,17 +56,10 @@ def diagonalize_tda(a, nroots=5):
 
 
 class KnownValues(unittest.TestCase):
-    def test_nac_pbe_tdaris_singlet_vs_tda_ge(self):
+    def test_nac_pbe_tdaris_singlet_vs_ref_ge(self):
         mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,0)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -75,26 +68,24 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,0)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
-        
-        # compare with traditional TDDFT
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-3
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
-        # check the difference between RIS and TDDFT for nacv is the same with gradient
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
 
-    def test_nac_pbe0_tddftris_singlet_vs_tddft_ge(self):
+        ref_de = np.array(
+            [[ 4.42788915e-03,  7.31260374e-16, -8.06595393e-17],
+             [-1.88130884e-02, -1.02675604e-16, -1.71476491e-15],
+             [-1.88130884e-02, -2.33451452e-15, -1.51800320e-15]])
+        ref_de_etf = np.array(
+            [[ 9.91900878e-02,  1.12268110e-15,  8.42960524e-16],
+             [-4.95950501e-02, -7.93704373e-17, -2.17068380e-15],
+             [-4.95950501e-02, -2.55837068e-15, -1.82666506e-15],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_pbe0_tddftris_singlet_vs_ref_ge(self):
         mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDDFT().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,0)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -103,26 +94,23 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,0)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        # compare with traditional TDDFT
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 4.0E-3
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 4.0E-3
-        # check the difference between RIS and TDDFT for nacv is the same with gradient
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[ 7.10616608e-04,  1.67751530e-17,  2.43082576e-15],
+             [-2.01248594e-02, -1.27707824e-15,  2.20490394e-15],
+             [-2.01248611e-02,  5.34947467e-16,  1.53819879e-15],])
+        ref_de_etf = np.array(
+            [[ 1.06135079e-01,  2.11139079e-16,  2.05232306e-15],
+             [-5.30675522e-02,  3.70362138e-16,  1.20929274e-15],
+             [-5.30675585e-02, -7.92538762e-16,  5.86483960e-16],])
 
-    def test_nac_camb3lyp_tdaris_singlet_vs_tda_ge(self):
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_camb3lyp_tdaris_singlet_vs_ref_ge(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").density_fit().to_gpu()
-        # mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,0)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -131,26 +119,24 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,0)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        # compare with traditional TDDFT
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-2
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
-        # check the difference between RIS and TDDFT for nacv is the same with gradient
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[-4.89770318e-04, -4.82312005e-16,  1.17207473e-15],
+             [ 1.90733178e-02, -8.52029551e-16, -2.58105953e-16],
+             [ 1.90733197e-02,  1.54498000e-15,  2.32205946e-15],])
+        ref_de_etf = np.array(
+            [[-1.01768244e-01, -1.60217510e-16,  4.40680529e-16],
+             [ 5.08839991e-02, -8.82169442e-16,  4.39921371e-17],
+             [ 5.08840061e-02,  1.56981811e-15,  2.64021576e-15],])
 
-    def test_nac_pbe_tda_singlet_vs_tda_ee(self):
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_pbe_tda_singlet_vs_ref_ee(self):
         mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,2)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -159,14 +145,19 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,2)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        # compare with traditional TDDFT
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 2.0E-2
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2.0E-2
-        # check the difference between RIS and TDDFT for nacv is the same with gradient
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2 * np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[-2.27769085e-17, -9.37769130e-02,  2.08893394e-14],
+             [-1.07278885e-16,  5.38085016e-02, -3.50951624e-02],
+             [ 1.42167709e-16,  5.38085016e-02,  3.50951624e-02],])
+        ref_de_etf = np.array(
+            [[-2.76739526e-17, -9.27827341e-02,  1.88670851e-14],
+             [-1.52402937e-16,  4.63913465e-02, -3.65824631e-02],
+             [ 1.79996735e-16,  4.63913465e-02,  3.65824631e-02],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_pbe_tda_singlet_fdiff(self):
         """
@@ -197,8 +188,6 @@ class KnownValues(unittest.TestCase):
         delta=0.005
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, with_ris=True)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1.0E-5
-        print(fdiff_nac)
-        print(delta, np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)))
 
     def test_nac_pbe0_tda_singlet_fdiff(self):
         """
@@ -230,17 +219,10 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, with_ris=True)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1.0E-5
 
-    def test_nac_pbe0_tddft_singlet_vs_tddft_ee(self):
+    def test_nac_pbe0_tddft_singlet_vs_ref_ee(self):
         mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDDFT().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,2)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -249,26 +231,24 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,2)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        # compare with traditional TDDFT
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 1.0E-2
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 1.0E-2
-        # check the difference between RIS and TDDFT for nacv is the same with gradient
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2 * np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[-1.28630229e-16, -1.01018827e-01, -1.39860434e-09],
+             [-4.70672025e-16,  5.75872007e-02, -3.81043336e-02],
+             [-1.16131845e-16,  5.75872029e-02,  3.81043350e-02],])
+        ref_de_etf = np.array(
+            [[-1.35556786e-16, -1.00688286e-01, -1.46281252e-09],
+             [-3.65451480e-16,  5.03441246e-02, -3.95286117e-02],
+             [-1.79485516e-16,  5.03441269e-02,  3.95286131e-02],])
 
-    def test_nac_camb3lyp_tddft_singlet_vs_tddft_ee(self):
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_camb3lyp_tddft_singlet_vs_ref_ee(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDDFT().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,2)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -277,14 +257,19 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,2)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        # compare with traditional TDDFT
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 1.0E-2
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 1.0E-2
-        # check the difference between RIS and TDDFT for nacv is the same with gradient
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2 * np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[ 1.39495980e-14, -9.05064872e-02, -2.38916839e-09],
+             [ 6.45116755e-16,  5.26412496e-02, -3.38915479e-02],
+             [ 1.62215844e-15,  5.26412531e-02,  3.38915503e-02],])
+        ref_de_etf = np.array(
+            [[ 1.40478550e-14, -9.01595513e-02, -2.48094447e-09],
+             [ 6.25487158e-16,  4.50797680e-02, -3.54158761e-02],
+             [ 1.58165609e-15,  4.50797717e-02,  3.54158785e-02],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
 
 if __name__ == "__main__":

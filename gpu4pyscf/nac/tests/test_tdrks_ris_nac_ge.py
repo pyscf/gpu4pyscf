@@ -56,17 +56,10 @@ def diagonalize_tda(a, nroots=5):
     return e_sorted_final[:nroots], xy_sorted[:, :nroots]
 
 class KnownValues(unittest.TestCase):
-    def test_nac_pbe_tdaris_singlet_vs_tda(self):
+    def test_nac_pbe_tdaris_singlet_vs_ref(self):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,0)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -75,12 +68,19 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,0)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-3
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[ 4.38482838e-03, -8.21102914e-14, -1.69475145e-11],
+             [-1.88174873e-02,  9.56036995e-13,  8.47200352e-12],
+             [-1.88174873e-02, -8.88653417e-13,  8.37251505e-12],])
+        ref_de_etf = np.array(
+            [[ 9.89286619e-02, -8.19838431e-14, -1.69497938e-11],
+             [-4.94643370e-02,  9.57436679e-13,  8.47142257e-12],
+             [-4.94643370e-02, -8.90160772e-13,  8.37200753e-12],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_pbe_tdaris_singlet_fdiff(self):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
@@ -130,17 +130,10 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
-    def test_nac_pbe0_tddftris_singlet_vs_tddft(self):
+    def test_nac_pbe0_tddftris_singlet_vs_ref(self):
         mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDDFT().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,0)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -149,23 +142,23 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,0)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 4.0E-3
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 4.0E-3
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[ 7.16220831e-04,  1.01353380e-12,  1.38070626e-11],
+             [-2.01247331e-02,  5.83533772e-12, -6.67129184e-12],
+             [-2.01247348e-02, -6.83851932e-12, -7.11354404e-12],])
+        ref_de_etf = np.array(
+            [[ 1.06105659e-01,  1.01350398e-12,  1.38098156e-11],
+             [-5.30528420e-02,  5.83552982e-12, -6.67197889e-12],
+             [-5.30528484e-02, -6.83822778e-12, -7.11429737e-12],])
 
-    def test_nac_camb3lyp_tdaris_singlet_vs_tda(self):
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_camb3lyp_tdaris_singlet_vs_ref(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
         mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
-        nac_obj = td.nac_method()
-        nac_obj.states=(1,0)
-        nac_obj.kernel()
-        g = td.nuc_grad_method()
-        g.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -174,12 +167,19 @@ class KnownValues(unittest.TestCase):
         nac_ris = td_ris.nac_method()
         nac_ris.states=(1,0)
         nac_ris.kernel()
-        g_ris = td_ris.nuc_grad_method()
-        g_ris.kernel()
 
-        assert np.linalg.norm(np.abs(nac_obj.de) - np.abs(nac_ris.de)) < 3.0E-2
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 3.0E-3
-        assert np.linalg.norm(np.abs(nac_obj.de_etf) - np.abs(nac_ris.de_etf)) < 2*np.linalg.norm(g.de - g_ris.de)
+        ref_de = np.array(
+            [[-4.93284817e-04,  9.49072069e-14,  1.54699499e-11],
+             [ 1.90729037e-02,  5.89916730e-12, -7.71312299e-12],
+             [ 1.90729056e-02, -6.01789629e-12, -7.71186244e-12],])
+        ref_de_etf = np.array(
+            [[-1.01734827e-01,  9.49409210e-14,  1.54692207e-11],
+             [ 5.08672907e-02,  5.90047865e-12, -7.71388350e-12],
+             [ 5.08672977e-02, -6.01918084e-12, -7.71263288e-12],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
 if __name__ == "__main__":
     print("Full Tests for TD-RKS-ris nonadiabatic coupling vectors between ground and excited state.")

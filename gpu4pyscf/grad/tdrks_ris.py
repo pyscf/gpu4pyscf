@@ -42,7 +42,8 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
-    
+    if td_grad.base.Ktrunc != 0.0:
+        raise NotImplementedError('Ktrunc or frozen method is not supported yet')
     if J_fit is None:
         J_fit = td_grad.base.J_fit
     if K_fit is None:
@@ -236,12 +237,12 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     # this term contributes the ground state contribution.
     dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
     dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     if singlet:
         j_factor=1.0
@@ -249,11 +250,11 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
         j_factor=0.0
     dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor=j_factor, k_factor=k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += get_extra_force(ia, locals()) * 2
+        extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
     dvhf_all += dvhf * 2
     dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += get_extra_force(ia, locals()) * 2
+        extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
     dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
@@ -263,22 +264,22 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
         dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
+            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all += dvhf
         dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
         dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += get_extra_force(ia, locals()) * 2
+            extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
         dvhf_all += dvhf * 2
         dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 
                                 j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += get_extra_force(ia, locals()) * 2
+            extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
         dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
@@ -324,6 +325,8 @@ class Gradients(tdrhf.Gradients):
             state : int
                 Excited state ID.  state = 1 means the first excited state.
         """
+        if self.base.Ktrunc != 0.0:
+            raise NotImplementedError('Ktrunc or frozen method is not supported yet')
         log = self.base.log
         warn_message = "TDDFT-ris gradient is still in the experimental stage, \n" +\
             "and its APIs are subject to change in future releases."

@@ -57,7 +57,6 @@ def get_new_mol(mol, coords, delta, iatm, icart):
     coords_new[iatm, icart] += delta
     mol_new = mol.copy()
     mol_new.set_geom_(coords_new, unit='Ang')
-    mol_new.build()
     return mol_new
 
 
