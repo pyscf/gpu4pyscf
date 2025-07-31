@@ -207,7 +207,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
 
-        td = ris.TDDFT(mf=mf, nstates=5, spectra=True, single=False)
+        td = ris.TDDFT(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td.conv_tol = 1.0E-4
         td.Ktrunc = 0.0
         td.kernel()

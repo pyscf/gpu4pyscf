@@ -17,7 +17,6 @@ Perodic 3-center 2-electron short-range Coulomb integral helper functions
 '''
 
 import ctypes
-import itertools
 import math
 import numpy as np
 import cupy as cp
@@ -53,7 +52,6 @@ LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 45
 THREADS = 256
-BVK_CELL_SHELLS = 400
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     r'''
@@ -97,7 +95,6 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     else:
         nf = uniq_l * 2 + 1
     c_l_offsets = np.append(0, np.cumsum(c_shell_counts*nf))
-    lmax = cell._bas[:,ANG_OF].max()
     c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
     aux_coeff = asarray(int3c2e_opt.aux_coeff)

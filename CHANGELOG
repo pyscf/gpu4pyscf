@@ -1,3 +1,26 @@
+v1.4.2 (2025-07-20)
+-------------------
+* New Features
+  - Raman spectrum calculations.
+  - Non-adiabatic coupling vector for time-dependent RKS, including the coupling.
+    between ground state and excited states as well as among excited states.
+  - DFT+U for molecule and PBC systems.
+  - ALMO EDA 2 method.
+  - Analytical gradients for TDDFT-ris method.
+  - Analytical gradients for PBC k-point DFT.
+  - Efficient analytical gradients for PBC Gamma-point DFT using the multigrid algorithm.
+  - A custom CuPy memory pool to reduce GPU memory usage.
+* Improvements
+  - Improved PBC GDF integral computation at the Gamma point, including reduced.
+    GPU memory usage and enhanced computational efficiency.
+  - Set the J engine as the defult Coulomb matrix algorithm in the direct SCF driver.
+  - Efficient Multigrid integral algorithm for various functions in PBC DFT.
+    Gamma point computation such as get_nuc, get_pp, and GGA functionals.
+  - Supporting xc='HF' setting in DFT.
+* Fixes
+  - Ensured compatibility with CUDA 12.3.
+  - Issues related to the combination of density fitting, PCM solvent, and TDDFT.
+
 v1.4.1 (2025-05-20)
 -------------------
 * New Features

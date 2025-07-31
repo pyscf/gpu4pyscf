@@ -30,6 +30,7 @@ from gpu4pyscf.pbc.dft import UniformGrids
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc import tools
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 
 __all__ = ['Gradients']
@@ -84,7 +85,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 
 def get_hcore(cell, kpts):
     '''Part of the nuclear gradients of core Hamiltonian'''
-    h1 = cp.asarray(cell.pbc_intor('int1e_ipkin', kpts=kpts))
+    h1 = int1e.int1e_ipkin(cell, kpts)
     dtype = h1.dtype
     if cell._pseudo:
         SI = cell.get_SI()
@@ -269,7 +270,7 @@ class GradientsBase(molgrad.GradientsBase):
     def get_ovlp(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
-        return -cp.asarray(cell.pbc_intor('int1e_ipovlp', kpts=kpts))
+        return -int1e.int1e_ipovlp(cell, kpts)
 
     def get_jk(self, dm=None, kpts=None):
         if kpts is None: kpts = self.kpts
