@@ -21,15 +21,24 @@ from gpu4pyscf.lib import logger, cusolver
 from functools import partial
 from pyscf.data.nist import HARTREE2EV
 
-CITATION_INFO = '''
+RIS_PRECOND_CITATION_INFO = '''
 Please cite the TDDFT-ris preconditioning method if you are happy with the fast convergence:
 
-    1.  Zhou, Zehao, and Shane M. Parker. Accelerating molecular property calculations with
+    1.  Zhou, Zehao, and Shane M. Parker. 
+        Converging Time-Dependent Density Functional Theory Calculations in Five Iterations 
+        with Minimal Auxiliary Preconditioning. Journal of Chemical Theory and Computation 
+        20, no. 15 (2024): 6738-6746.
+
+    2.  Zhou, Zehao, Fabio Della Sala, and Shane M. Parker.
+        Minimal auxiliary basis set approach for the electronic excitation spectra
+        of organic molecules. The Journal of Physical Chemistry Letters
+        14, no. 7 (2023): 1968-1976.
+
+    3.  Zhou, Zehao, and Shane M. Parker. 
+        Accelerating molecular property calculations with
         semiempirical preconditioning. The Journal of Chemical Physics 155, no. 20 (2021).
 
-    2.  Zhou, Zehao, and Shane M. Parker. Converging Time-Dependent Density Functional Theory
-        Calculations in Five Iterations with Minimal Auxiliary Preconditioning. Journal of
-        Chemical Theory and Computation 20, no. 15 (2024): 6738-6746.
+
 '''
 
 def _time_add(log, t_total, t_start):
@@ -635,7 +644,7 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
         conv_tol=conv_tol, max_iter=max_iter, 
         gram_schmidt=gram_schmidt, single=single, verbose=verbose
     )
-    log.info(CITATION_INFO)
+    log.info(RIS_PRECOND_CITATION_INFO)
     return output
 
 '''above is for TDA;
@@ -998,7 +1007,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         '''
         t0 = log.init_timer()
         if problem_type == 'eigenvalue':
-            omega, x, y = math_helper.TDDFT_subspace_eigen_solver(sub_A, sub_B, sigma, pi, n_states)
+            omega, x, y = math_helper.TDDFT_subspace_eigen_solver2(sub_A, sub_B, sigma, pi, n_states)
         elif problem_type == 'shifted_linear':
             x,y = math_helper.TDDFT_subspace_linear_solver(sub_A, sub_B, sigma, pi, sub_rhs_1, sub_rhs_2, omega_shift)
 
@@ -1097,6 +1106,114 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         return converged, omega, X_full, Y_full
     elif problem_type == 'shifted_linear':
         return converged, X_full, Y_full
+
+def nested_ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
+        rhs_1=None, rhs_2=None, omega_shift=None, n_states=20, conv_tol=1e-5, 
+        max_iter=8, gram_schmidt=True, single=False, verbose=logger.INFO, 
+        init_mvp=None, precond_mvp=None, extra_init=3, extra_init_diag=8,
+        init_conv_tol=1e-3, init_max_iter=10,
+        precond_conv_tol=1e-2, precond_max_iter=10):
+    '''
+    Wrapper for Krylov solver to handle preconditioned eigenvalue, linear, or shifted linear problems.
+    requires the non-diagonal approximation of A matrix, i.e., ris approximation.
+
+    Args:
+        matrix_vector_product: Callable, computes AX+BY, BX+AY.
+        hdiag: 1D cupy array, diagonal of the Hamiltonian matrix.
+        problem_type: str, 'eigenvalue', 'linear', 'shifted_linear'.
+        rhs_1: 2D cupy array, upper part of right-hand side for linear systems (default: None).
+        rhs_2: 2D cupy array, lower part of right-hand side for linear systems (default: None).
+        omega_shift: Diagonal matrix for shifted linear systems (default: None).
+        n_states: int, number of eigenvalues or vectors to solve.
+        conv_tol: float, convergence tolerance.
+        max_iter: int, maximum iterations.
+        gram_schmidt: bool, use Gram-Schmidt orthogonalization.
+        single: bool, use single precision.
+        verbose: logger.Logger or int, logging verbosity.
+        init_mvp: Callable, matrix-vector product for initial guess (default: None).
+        precond_mvp: Callable, matrix-vector product for preconditioner (default: None).
+        init_conv_tol: float, convergence tolerance for initial guess.
+        init_max_iter: int, maximum iterations for initial guess.
+        precond_conv_tol: float, convergence tolerance for preconditioner.
+        precond_max_iter: int, maximum iterations for preconditioner.
+
+    Returns:
+        Output of ABBA_krylov_solver.
+    '''
+
+    if isinstance(verbose, logger.Logger):
+        log = verbose
+    else:
+        log = logger.Logger(sys.stdout, verbose)
+
+    dtype = cp.float32 if single else cp.float64
+    log.info(f'precision {dtype}')
+    if single:
+        log.info('Using single precision')
+        hdiag = hdiag.astype(cp.float32)
+    else:
+        log.info('Using double precision')
+        hdiag = hdiag.astype(cp.float64)
+
+    # Validate problem type
+    if problem_type not in ['eigenvalue', 'shifted_linear']:
+        raise ValueError('Invalid problem type, please choose either eigenvalue or shifted_linear.')
+
+    # Define micro_init_precond mapping
+    #    the problem_type of 
+    #    macro problem      intial guess      preconditioner
+    micro_init_precond = {
+        'eigenvalue':     ['eigenvalue',     'shifted_linear'],
+        'shifted_linear': ['shifted_linear', 'shifted_linear']
+    }
+
+    # Setup initial guess 
+    if callable(init_mvp):
+        log.info('Using iterative initial guess')
+
+        init_problem_type = micro_init_precond[problem_type][0]
+        initguess_fn = partial(
+            ABBA_krylov_solver,
+            problem_type=init_problem_type, hdiag=hdiag,
+            matrix_vector_product=init_mvp,
+            conv_tol=init_conv_tol, max_iter=init_max_iter,
+            gram_schmidt=gram_schmidt, single=single, verbose=log.verbose-2
+        )
+    else:
+        log.info('Using diagonal initial guess')
+        initguess_fn = None
+
+    # Setup preconditioner 
+    if callable(precond_mvp):
+        log.info('Using iterative preconditioner')
+
+        precond_problem_type = micro_init_precond[problem_type][1]
+        precond_fn = partial(
+            ABBA_krylov_solver,
+            problem_type=precond_problem_type, hdiag=hdiag,
+            matrix_vector_product=precond_mvp,
+            conv_tol=precond_conv_tol, max_iter=precond_max_iter,
+            gram_schmidt=gram_schmidt, single=single, verbose=log.verbose-1
+        )
+    else:
+        log.info('Using diagonal preconditioner')
+        precond_fn = None
+
+    if not init_mvp and not precond_mvp:
+        log.warn(f'diagonal initial guess and preconditioner provided, using extra_init={extra_init_diag}')
+        extra_init = extra_init_diag
+
+    # Run solver
+    output = ABBA_krylov_solver(
+        matrix_vector_product=matrix_vector_product, hdiag=hdiag,
+        problem_type=problem_type, n_states=n_states,
+        rhs_1=rhs_1, rhs_2=rhs_2, omega_shift=omega_shift, extra_init=extra_init,
+        initguess_fn=initguess_fn, precond_fn=precond_fn,
+        conv_tol=conv_tol, max_iter=max_iter, 
+        gram_schmidt=gram_schmidt, single=single, verbose=verbose
+    )
+    log.info(RIS_PRECOND_CITATION_INFO)
+    return output
 
 
 def example_krylov_solver():

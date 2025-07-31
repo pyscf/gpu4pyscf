@@ -1027,7 +1027,7 @@ class RisBase(lib.StreamObject):
             self.rest_vir = rest_vir
 
         elif self.mo_coeff.ndim == 3:
-            raise ValueError('TDA-ris does not support UKS method yet')
+            raise NotImplementedError('Does not support UKS method yet')
             ''' TODO UKS method '''
             self.RKS = False
             self.UKS = True
@@ -1250,7 +1250,7 @@ class TDA(RisBase):
             elif self.a_x == 0:
                 TDA_MVP, hdiag = self.get_RKS_TDA_pure_MVP()
         else:
-            raise ValueError('TDA-ris does not support UKS method yet')
+            raise NotImplementedError('Does not support UKS method yet')
         return TDA_MVP, hdiag
 
 
@@ -1268,10 +1268,6 @@ class TDA(RisBase):
                                               conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                               single=self.single, verbose=log)
 
-        # energies, X = _lr_eig.Davidson(matrix_vector_product=TDA_MVP, hdiag=hdiag, N_states=self.nstates,
-        #                             conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
-        #                             single=self.single, verbose=log)
-        # print(energies)
         self.converged = converged
         log.debug(f'check orthonormality of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
 
@@ -1407,36 +1403,40 @@ class TDDFT(RisBase):
 
         return RKS_TDDFT_pure_MVP, hdiag_sq
 
+    def gen_vind(self):
+        if self.RKS:
+            self.build()
+            if self.a_x != 0:
+                TDDFT_MVP, hdiag = self.gen_RKS_TDDFT_hybrid_MVP()
+
+            elif self.a_x == 0:
+                TDDFT_MVP, hdiag = self.gen_RKS_TDDFT_pure_MVP()
+        else:
+            raise NotImplementedError('Does not support UKS method yet')
+        return TDDFT_MVP, hdiag
+    
     #  TODO: UKS 
     def kernel(self):
         self.build()
         log = self.log
+        TDDFT_MVP, hdiag = self.gen_vind()
         if self.a_x != 0:
             '''hybrid TDDFT'''
-            if self.RKS:
-                TDDFT_hybrid_MVP, hdiag = self.gen_RKS_TDDFT_hybrid_MVP()
-
-            #  TODO: UKS 
-
-            conv, energies, X, Y = _lr_eig.Davidson_Casida(matrix_vector_product=TDDFT_hybrid_MVP, hdiag=hdiag,
+            converged, energies, X, Y = _krylov_tools.ABBA_krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag,
                                                     N_states=self.nstates, conv_tol=self.conv_tol,
                                                     max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                                     single=self.single, verbose=self.verbose)
-            self.converged = conv
+            self.converged = converged
             if not all(self.converged):
                 log.info('TD-SCF states %s not converged.',
                             [i for i, x in enumerate(self.converged) if not x])
         elif self.a_x == 0:
             '''pure TDDFT'''
-            if self.RKS:
-                TDDFT_pure_MVP, hdiag_sq = self.gen_RKS_TDDFT_pure_MVP()
-
-            elif self.UKS:
-                TDDFT_pure_MVP, hdiag_sq = self.get_UKS_TDDFT_pure_MVP()
-            conv, energies_sq, Z = _lr_eig.Davidson(matrix_vector_product=TDDFT_pure_MVP, hdiag=hdiag_sq,
+            hdiag_sq = hdiag
+            converged, energies_sq, Z = _krylov_tools.krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag_sq,
                                             N_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
                                             gram_schmidt=self.gram_schmidt, single=self.single, verbose=self.verbose)
-            self.converged = conv
+            self.converged = converged
             if not all(self.converged):
                 log.info('TD-SCF states %s not converged.',
                             [i for i, x in enumerate(self.converged) if not x])
@@ -1523,7 +1523,7 @@ class StaticPolarizability(RisBase):
             elif self.a_x == 0:
                 TDA_MVP, hdiag = self.get_ApB_pure_MVP()
         else:
-            raise ValueError('ris does not support UKS method yet')
+            raise NotImplementedError('Does not support UKS method yet')
         return TDA_MVP, hdiag
 
 

@@ -465,54 +465,60 @@ def solve_AX_Xla_B(A, omega, Q):
     X *= Qnorm
     return X
 
-def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, k):
+def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, nroots):
     ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
     ''' [ b a ] y   [-π  -σ] y    = 0 '''
 
     d = abs(cp.diag(sigma))
     d_mh = d**(-0.5)
 
-    s_m_p = d_mh.reshape(-1,1) * (sigma - pi) * d_mh.reshape(1,-1)
+    s_m_p = cp.einsum('i,ij,j->ij', d_mh, sigma - pi, d_mh)
 
     '''LU = d^−1/2 (σ − π) d^−1/2'''
+    ''' A = LU '''
+    L, U = cupyx.scipy.linalg.lu(s_m_p, permute_l=True)
+    L_inv = cp.linalg.inv(L)
+    U_inv = cp.linalg.inv(U)
 
-    L_inv = cp.linalg.cholesky(cp.linalg.inv(s_m_p))
-    U_inv = L_inv.T
-    ''' a ̃−b ̃= U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T '''
-    dambd =  d_mh.reshape(-1,1)*(a-b)*d_mh.reshape(1,-1)
-    GGT = cp.dot(U_inv.T, dambd)
-    GGT = cp.dot(GGT, U_inv)
+    '''U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T '''
+    d_amb_d = cp.einsum('i,ij,j->ij', d_mh, a-b, d_mh)
+    GGT = cp.dot(U_inv.T, cp.dot(d_amb_d, U_inv))
 
     G = cp.linalg.cholesky(GGT)
+    if cp.any(cp.isnan(G)):
+        eig, eigv = cp.linalg.eigh(GGT)
+        if eig[0] < -1e-4:
+            error_msg = (
+                "GGT matrix is not positive definite.\n"
+                "SCF not correctly converged is likely to cause this error.\n"
+                "For example, scf converged to the wrong state.\n"
+            )
+            raise RuntimeError(error_msg)
+
     G_inv = cp.linalg.inv(G)
 
     ''' M = G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G '''
-    dapbd = d_mh.reshape(-1,1)*(a+b)*d_mh.reshape(1,-1)
-    M = cp.dot(G.T, L_inv) # G^T L^−1
-    M = cp.dot(M, dapbd)  # d^−1/2 (a+b) d^−1/2
-    M = cp.dot(M, L_inv.T) #  L^−T
-    M = cp.dot(M, G)      # G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G
+    d_apb_d = cp.einsum('i,ij,j->ij', d_mh, a+b, d_mh)
+    M = cp.dot(G.T, cp.dot(L_inv, cp.dot(d_apb_d, cp.dot(L_inv.T, G))))
 
     omega2, Z = cp.linalg.eigh(M)
-    omega = (omega2**0.5)[:k]
-    Z = Z[:,:k]
+    if cp.any(omega2 <= 0):
+        idx = cp.nonzero(omega2 > 0)[0]
+        omega2 = omega2[idx[:nroots]]
+        Z = Z[:,idx[:nroots]]
+    else:
+        omega2 = omega2[:nroots]
+        Z = Z[:,:nroots]
+    omega = omega2**0.5
 
     ''' It requires Z^T Z = 1/Ω '''
     ''' x+y = d^−1/2 L^−T GZ Ω^-0.5 '''
     ''' x−y = d^−1/2 U^−1 G^−T Z Ω^0.5 '''
-
-    temp = cp.dot(L_inv.T, G)  # First multiply L_inv.T with G
-    L_inv_G_Z = cp.dot(temp, Z)  # Then multiply the result with Z
-    x_p_y = d_mh.reshape(-1, 1) * L_inv_G_Z * (cp.array(omega) ** -0.5).reshape(1, -1)
-
-
-    temp = cp.dot(U_inv, G_inv.T)  # First multiply U_inv with G_inv.T
-    U_inv_G_inv_Z = cp.dot(temp, Z)  # Then multiply the result with Z
-    x_m_y = d_mh.reshape(-1, 1) * U_inv_G_inv_Z * (cp.array(omega) ** 0.5).reshape(1, -1)
+    x_p_y = cp.einsum('i,ik,k->ik', d_mh, L_inv.T.dot(G.dot(Z)), omega**-0.5)
+    x_m_y = cp.einsum('i,ik,k->ik', d_mh, U_inv.dot(G_inv.T.dot(Z)), omega**0.5)
 
     x = (x_p_y + x_m_y)/2
     y = x_p_y - x
-
     return omega, x, y
 
 def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
@@ -610,9 +616,8 @@ def TDDFT_subspace_linear_solver(a, b, sigma, pi, p, q, omega):
 
     ''' TODO:replace LU decompose to cholesky '''
     '''LU = d^−1/2 (σ − π) d^−1/2 '''
-    s_m_p = d_mh.reshape(-1,1) * (sigma - pi) * d_mh.reshape(1,-1)
-    P_permutation, L, U = cupyx.scipy.linalg.lu(s_m_p)
-    L = cp.dot(P_permutation, L)
+    s_m_p = cp.einsum('i,ij,j->ij', d_mh, sigma - pi, d_mh)
+    L, U = cupyx.scipy.linalg.lu(s_m_p, permute_l=True)
     L_inv = cp.linalg.inv(L)
     U_inv = cp.linalg.inv(U)
 
@@ -620,22 +625,28 @@ def TDDFT_subspace_linear_solver(a, b, sigma, pi, p, q, omega):
     p_m_q_tilde = cp.dot(U_inv.T, d_mh.reshape(-1,1)*(p-q))
 
     ''' a ̃−b ̃= U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T'''
-    dambd = d_mh.reshape(-1,1)*(a-b)*d_mh.reshape(1,-1)
-    GGT = cp.dot(U_inv.T, dambd)
-    GGT = cp.dot(GGT, U_inv)
+    d_amb_d = cp.einsum('i,ij,j->ij', d_mh, a-b, d_mh)
+    GGT = cp.dot(U_inv.T, cp.dot(d_amb_d, U_inv))
 
     G = cp.linalg.cholesky(GGT)
+    if cp.any(cp.isnan(G)):
+        eig, eigv = cp.linalg.eigh(GGT)
+        if eig[0] < -1e-4:
+            error_msg = (
+                "GGT matrix is not positive definite.\n"
+                "SCF not correctly converged is likely to cause this error.\n"
+                "For example, scf converged to the wrong state.\n"
+            )
+            raise RuntimeError(error_msg)    
     G_inv = cp.linalg.inv(G)
 
     '''a ̃+ b ̃= L^−1 d^−1/2 (a+b) d^−1/2 L^−T
        M = G^T (a ̃+ b ̃) G
     '''
-    dapbd = d_mh.reshape(-1,1)*(a+b)*d_mh.reshape(1,-1)
-    a_p_b_tilde = cp.dot(L_inv, dapbd)
-    a_p_b_tilde = cp.dot(a_p_b_tilde,  L_inv.T)
+    d_apb_d = cp.einsum('i,ij,j->ij', d_mh, a+b, d_mh)
+    a_p_b_tilde = cp.dot(cp.dot(L_inv, d_apb_d),  L_inv.T)
 
-    M = cp.dot(G.T, a_p_b_tilde)
-    M = cp.dot(M, G)
+    M = cp.dot(cp.dot(G.T, a_p_b_tilde), G)
 
     T = cp.dot(G.T, p_p_q_tilde)
     T += cp.dot(G_inv, p_m_q_tilde * omega.reshape(1,-1))
