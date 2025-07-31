@@ -1325,8 +1325,8 @@ def Davidson_Casida(matrix_vector_product,
                         single=False,
                         verbose=logger.NOTE):
     '''
-    [ A B ] X - [1   0] Y Ω = 0
-    [ B A ] Y   [0  -1] X   = 0
+    [ A B ] X - [1   0] X Ω = 0
+    [ B A ] Y   [0  -1] Y   = 0
 
     same as real_eig, but support
     1) single precision
