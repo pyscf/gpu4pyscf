@@ -82,9 +82,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]],
-                            [1, [.8, 1]]
-                           ], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -103,9 +101,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]],
-                            [1, [.8, 1]]
-                           ], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -124,9 +120,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]],
-                            [1, [.8, 1]]
-                           ], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -145,9 +139,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]],
-                            [1, [.8, 1]]
-                           ], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -223,7 +215,7 @@ class KnownValues(unittest.TestCase):
                      a=a, unit='Bohr', verbose=0)
         mf = cell.RKS(xc='svwn').to_gpu().run()
         mf_grad = rks.Gradients(mf)
-        dat = rks_stress.kernel(mf_grad)
+        dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
@@ -241,7 +233,7 @@ class KnownValues(unittest.TestCase):
                      pseudo='gth-pade', a=a, unit='Bohr', verbose=0)
         mf = cell.RKS(xc='pbe').to_gpu().run()
         mf_grad = rks.Gradients(mf)
-        dat = rks_stress.kernel(mf_grad)
+        dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
@@ -259,7 +251,7 @@ class KnownValues(unittest.TestCase):
                      a=a, unit='Bohr', verbose=0)
         mf = cell.RKS(xc='rscan').to_gpu().run()
         mf_grad = rks.Gradients(mf)
-        dat = rks_stress.kernel(mf_grad)
+        dat = mf_grad.get_stress()
         mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:

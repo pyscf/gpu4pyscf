@@ -25,13 +25,14 @@ in the crystal
 
     \sum_j [\deta_ij + e_ij] R_j  [for j = x, y, z]
 
-The strain tensor is generally not a symmetric tensor. Symmetrization
+Due to numerical errors, the strain tensor may slightly break the symmetry
+within the stress tensor. The 6 independent components of the stress tensor
 
     [e1   e6/2 e5/2]
     [e6/2 e2   e4/2]
     [e5/2 e4/2 e3  ]
 
-is applied to form 6 independent component.
+is constructed by symmetrizing the strain tensor as follows:
 
     e1 = e_11
     e2 = e_22
@@ -39,22 +40,6 @@ is applied to form 6 independent component.
     e6 = e_12 + e_21
     e5 = e_13 + e_31
     e4 = e_32 + e_23
-
-The 6 component strain is then used to define the symmetric stress tensor.
-
-               1  d E
-    sigma_i = --- ------  for i = 1 .. 6
-               V  d e_i
-
-The symmetric stress tensor represented in the 6 Voigt notation can be
-transformed from the asymmetric stress tensor sigma_ij
-
-    sigma1 = sigma_11
-    sigma2 = sigma_22
-    sigma3 = sigma_33
-    sigma6 = (sigma_12 + sigma_21)/2
-    sigma5 = (sigma_13 + sigma_31)/2
-    sigma4 = (sigma_23 + sigma_32)/2
 
 See K. Doll, Mol Phys (2010), 108, 223
 '''
@@ -235,7 +220,7 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
 
     eval_gto_opt = _GTOvalOpt(cell, deriv=deriv)
     max_memory = 4e9
-    blksize = int((max_memory/16/((nvar*10)*nao))/ ALIGNED) * ALIGNED
+    blksize = int((max_memory/16/(nvar*10*nao))/ ALIGNED) * ALIGNED
     XY, YY, ZY, XZ, YZ, ZZ = 5, 7, 8, 6, 8, 9
 
     out = np.zeros((3,3))

@@ -144,3 +144,7 @@ class Gradients(rhf_grad.Gradients):
         return self
 
     get_veff = get_veff
+
+    def get_stress(self):
+        from gpu4pyscf.pbc.grad import krks_stress
+        return krks_stress.kernel(self)
