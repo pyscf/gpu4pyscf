@@ -26,7 +26,8 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
-from gpu4pyscf.lib.cupy_helper import tag_array, contract, condense, reduce_to_device, transpose_sum
+from gpu4pyscf.lib.cupy_helper import (
+    tag_array, contract, condense, reduce_to_device, transpose_sum, ensure_numpy)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
@@ -293,9 +294,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
     dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-    extra_force = cupy.zeros((len(atmlst),3))
+    extra_force = np.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += ensure_numpy(mf_grad.extra_force(ia, locals()))
 
     log.timer_debug1('gradients of 2e part', *t3)
 
@@ -304,7 +305,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = 2.0*(dh - ds)
 
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * dvhf + dh1e + delec + extra_force
+    de = 2.0 * dvhf + dh1e + delec + cupy.asarray(extra_force)
 
     # for backforward compatiability
     if(hasattr(mf, 'disp') and mf.disp is not None):
