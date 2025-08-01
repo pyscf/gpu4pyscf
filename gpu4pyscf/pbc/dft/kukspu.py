@@ -27,6 +27,7 @@ from pyscf.pbc.dft import kukspu as kukspu_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.dft import kuks
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract, tag_array
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
@@ -57,7 +58,7 @@ def _add_Vhubbard(vxc, ks, dm, kpts):
     kpts = kpts.reshape(-1, 3)
     nkpts = len(kpts)
 
-    ovlp = asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
+    ovlp = int1e.int1e_ovlp(cell, kpts)
     U_idx, U_val, U_lab = _set_U(cell, pcell, ks.U_idx, ks.U_val)
     assert ks.C_ao_lo is None
     C_ao_lo = _make_minao_lo(cell, pcell, kpts)
@@ -233,7 +234,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
     nkpts = len(kpts)
     cell = mf.cell
 
-    ovlp = asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
+    ovlp = int1e.int1e_ovlp(cell, kpts)
     pcell = reference_mol(cell, mf.minao_ref)
     U_idx, U_val, U_lab = _set_U(cell, pcell, mf.U_idx, mf.U_val)
     C_ao_lo = _make_minao_lo(cell, pcell, kpts)

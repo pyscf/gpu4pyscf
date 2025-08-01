@@ -48,11 +48,13 @@ import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.dft.numint import KNumInt, eval_ao_kpts, _GTOvalOpt
+from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
@@ -67,6 +69,22 @@ from gpu4pyscf.pbc.grad.rks_stress import (
     ewald)
 
 ALIGNED = 256
+
+def get_ovlp(cell, kpts):
+    '''Strain derivatives for overlap matrix
+    '''
+    disp = 1e-5
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    s = []
+    for x in range(3):
+        for y in range(3):
+            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            s1 = int1e.int1e_ovlp(cell1, kpts1)
+            s2 = int1e.int1e_ovlp(cell2, kpts2)
+            s.append((s1 - s2) / (2*disp))
+    return s
 
 def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
     '''Strain derivatives for Coulomb and XC at gamma point
@@ -260,8 +278,6 @@ def kernel(mf_grad):
     ni = mf._numint
     if ni.libxc.is_hybrid_xc(mf.xc):
         raise NotImplementedError('Stress tensor for hybrid DFT')
-    if hasattr(mf, 'U_idx'):
-        raise NotImplementedError('Stress tensor for DFT+U')
 
     log = logger.new_logger(mf_grad)
     t0 = (logger.process_clock(), logger.perf_counter())
@@ -296,8 +312,81 @@ def kernel(mf_grad):
     sigma += get_vxc(mf_grad, cell, dm0, kpts=kpts, with_j=True, with_nuc=True)
     t0 = log.timer_debug1('Vxc and Coulomb derivatives', *t0)
 
+    if hasattr(mf, 'U_idx'):
+        sigma += _hubbard_U_deriv1(mf, dm0, kpts)
+        log.timer_debug1('DFT+U')
+
     sigma /= cell.vol
     if log.verbose >= logger.DEBUG:
         log.debug('Asymmetric strain tensor')
         log.debug('%s', sigma)
     return sigma
+
+def _get_first_order_local_orbitals(cell, minao_ref='MINAO', kpts=None):
+    if isinstance(minao_ref, str):
+        pcell = reference_mol(cell, minao_ref)
+    else:
+        pcell = minao_ref
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    nkpts = len(kpts)
+
+    nao = cell.nao
+    naop = pcell.nao
+    if is_zero(kpts):
+        C1_minao = cp.empty((3, 3, nkpts, nao, naop))
+    else:
+        C1_minao = cp.empty((3, 3, nkpts, nao, naop), dtype=np.complex128)
+    disp = 1e-5
+    for x in range(3):
+        for y in range(3):
+            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
+            pcell1, pcell2 = _finite_diff_cells(pcell, x, y, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            C1 = _make_minao_lo(cell1, pcell1, kpts=kpts1)
+            C2 = _make_minao_lo(cell2, pcell2, kpts=kpts2)
+            C1_minao[x,y] = (C1 - C2) / (2*disp)
+    return C1_minao
+
+def _hubbard_U_deriv1(mf, dm=None, kpts=None):
+    assert mf.alpha is None
+    assert mf.C_ao_lo is None
+    assert mf.minao_ref is not None
+    if dm is None:
+        dm = mf.make_rdm1()
+    if kpts is None:
+        kpts = mf.kpts.reshape(-1, 3)
+    nkpts = len(kpts)
+    cell = mf.cell
+
+    # Construct orthogonal minao local orbitals.
+    pcell = reference_mol(cell, mf.minao_ref)
+    C_ao_lo = _make_minao_lo(cell, pcell, kpts=kpts)
+    U_idx, U_val = _set_U(cell, pcell, mf.U_idx, mf.U_val)[:2]
+    U_idx_stack = np.hstack(U_idx)
+    C0 = [C_k[:,U_idx_stack] for C_k in C_ao_lo]
+    C1_ao_lo = _get_first_order_local_orbitals(cell, pcell, kpts)
+    C1 = [C_k[:,:,:,U_idx_stack] for C_k in C1_ao_lo.transpose(2,0,1,3,4)]
+
+    ovlp0 = int1e.int1e_ovlp(cell, kpts)
+    ovlp1 = cp.asarray(get_ovlp(cell, kpts))
+    nao = ovlp0.shape[-1]
+    ovlp1 = ovlp1.reshape(3,3,nkpts,nao,nao).transpose(2,0,1,3,4)
+    C_inv = [C_k.conj().T.dot(S_k) for C_k, S_k in zip(C0, ovlp0)]
+    dm_deriv0 = [C_k.dot(dm_k).dot(C_k.conj().T) for C_k, dm_k in zip(C_inv, dm)]
+
+    sigma = cp.zeros((3, 3))
+    weight = 1. / nkpts
+    for k in range(nkpts):
+        SC1 = contract('pq,xyqi->xypi', ovlp0[k], C1[k])
+        SC1 += contract('xypq,qi->xypi', ovlp1[k], C0[k])
+        dm_deriv1 = contract('pj,xyjq->xypq', C_inv[k].dot(dm[k]), SC1)
+        i0 = i1 = 0
+        for idx, val in zip(U_idx, U_val):
+            i0, i1 = i1, i1 + len(idx)
+            P0 = dm_deriv0[k][i0:i1,i0:i1]
+            P1 = dm_deriv1[:,:,i0:i1,i0:i1]
+            sigma += weight * (val * 0.5) * (
+                cp.einsum('xyii->xy', P1).real * 2 # *2 for P1+P1.T
+                - cp.einsum('xyij,ji->xy', P1, P0).real * 2)
+    return sigma.get()
