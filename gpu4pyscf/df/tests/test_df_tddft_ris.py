@@ -26,7 +26,7 @@ H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
 
-bas0 = "def2tzvp"
+bas0 = "ccpvdz"
 
 def setUpModule():
     global mol
@@ -68,9 +68,9 @@ class KnownValues(unittest.TestCase):
 
         a, b = td_ris.get_ab()
         e_diag, xy_diag = diagonalize_tda(a)
-        ref = np.array([0.25623508, 0.33093763, 0.34839943, 0.41773916, 0.49824977])
-        assert np.linalg.norm(e_diag-ref) < 1.0E-7
+        ref = np.array([0.25933899, 0.33439342, 0.35638257, 0.42592451, 0.51762646])
         assert np.linalg.norm(e_diag-td_ris.energies.get()/27.21138602) < 1.0E-7
+        assert np.linalg.norm(e_diag-ref) < 1.0E-7
 
     def test_tdaris_pbe0_singlet(self):
         mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
@@ -84,9 +84,9 @@ class KnownValues(unittest.TestCase):
 
         a, b = td_ris.get_ab()
         e_diag, xy_diag = diagonalize_tda(a)
-        ref = np.array([0.2779635,  0.35487413, 0.3720499,  0.44465052, 0.51161883])
-        assert np.linalg.norm(e_diag-ref) < 1.0E-7
+        ref = np.array([0.28174892, 0.35852982, 0.38054425, 0.45227567, 0.5288743])
         assert np.linalg.norm(e_diag-td_ris.energies.get()/27.21138602) < 1.0E-7
+        assert np.linalg.norm(e_diag-ref) < 1.0E-7
     
 
 if __name__ == "__main__":
