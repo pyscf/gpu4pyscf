@@ -62,15 +62,15 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
-        td_ris.conv_tol = 1.0E-4
         td_ris.Ktrunc = 0.0
-        td_ris.kernel()
         nac_ris = td_ris.nac_method()
-        nac_ris.states=(1,0)
-        nac_ris.kernel()
 
         a, b = td_ris.get_ab()
         e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[nstate])
 
         ref_e = np.array([0.25623541, 0.33093807, 0.34839961, 0.41773945, 0.49824985])
         ref_de = np.array(
@@ -83,10 +83,9 @@ class KnownValues(unittest.TestCase):
              [-4.95950501e-02, -2.55837068e-15, -1.82666506e-15],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(e_diag - td_ris.energies.get()/27.21138602) < 1.0E-8
-        assert np.linalg.norm(ref_e - td_ris.energies.get()/27.21138602) < 1.0E-8
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert np.linalg.norm(e_diag - ref_e) < 1.0E-8
+        assert np.linalg.norm(np.abs(ana_nac[0]) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(ana_nac[2]) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_pbe0_tddftris_singlet_vs_ref_ge(self):
         mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
@@ -145,15 +144,18 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
-        td_ris.conv_tol = 1.0E-4
         td_ris.Ktrunc = 0.0
-        td_ris.kernel()
         nac_ris = td_ris.nac_method()
-        nac_ris.states=(1,2)
-        nac_ris.kernel()
 
         a, b = td_ris.get_ab()
         e_diag, xy_diag = diagonalize_tda(a)
+
+        # excited-excited state
+        nstateI = 0
+        nstateJ = 1
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        ana_nac = nac.tdrks_ris.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), e_diag[nstateI], e_diag[nstateJ])
 
         ref_e = np.array([0.25623541, 0.33093807, 0.34839961, 0.41773945, 0.49824985])
         ref_de = np.array(
@@ -166,10 +168,9 @@ class KnownValues(unittest.TestCase):
              [ 1.79996735e-16,  4.63913465e-02,  3.65824631e-02],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(e_diag - td_ris.energies.get()/27.21138602) < 1.0E-8
-        assert np.linalg.norm(ref_e - td_ris.energies.get()/27.21138602) < 1.0E-8
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert np.linalg.norm(e_diag - ref_e) < 1.0E-8
+        assert np.linalg.norm(np.abs(ana_nac[0]) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(ana_nac[2]) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_pbe_tda_singlet_fdiff(self):
         """
