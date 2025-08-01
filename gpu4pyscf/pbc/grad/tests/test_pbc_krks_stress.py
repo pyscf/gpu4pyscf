@@ -86,7 +86,6 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(len(kmesh), nao, nao) - (.5+.2j)
         dm = np.einsum('kpi,kqi->kpq', dm, dm.conj())
         xc = 'lda,'
-        kmesh = [3, 1, 1]
         mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu())
         dat = krks_stress.get_vxc(mf_grad, cell, dm, kpts=cell.make_kpts(kmesh))
         ni = KNumInt()

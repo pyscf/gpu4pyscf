@@ -142,3 +142,7 @@ class Gradients(kuhf_grad.Gradients):
     dump_flags = krks_grad.Gradients.dump_flags
 
     get_veff = get_veff
+
+    def get_stress(self):
+        from gpu4pyscf.pbc.grad import kuks_stress
+        return kuks_stress.kernel(self)

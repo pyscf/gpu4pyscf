@@ -202,8 +202,9 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
         raise NotImplementedError
 
     assert dm.ndim == 2
-    c2s = asarray(cell.cart2sph_coeff())
-    dm = sandwich_dot(dm, c2s.T)
+    if not cell.cart:
+        c2s = asarray(cell.cart2sph_coeff())
+        dm = sandwich_dot(dm, c2s.T)
     nao = dm.shape[-1]
 
     grids_idx = grids.argsort(tile=8)
@@ -483,7 +484,6 @@ def kernel(mf_grad):
             s1 = cp.einsum('ij,ji->', s1, dme0)
             s2 = cp.einsum('ij,ji->', s2, dme0)
             sigma[x,y] -= (s1 - s2) / (2*disp)
-
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_vxc(mf_grad, cell, dm0, with_j=True, with_nuc=True)
