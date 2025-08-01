@@ -1423,7 +1423,7 @@ class TDDFT(RisBase):
         if self.a_x != 0:
             '''hybrid TDDFT'''
             converged, energies, X, Y = _krylov_tools.ABBA_krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag,
-                                                    N_states=self.nstates, conv_tol=self.conv_tol,
+                                                    n_states=self.nstates, conv_tol=self.conv_tol,
                                                     max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                                     single=self.single, verbose=self.verbose)
             self.converged = converged
@@ -1434,7 +1434,7 @@ class TDDFT(RisBase):
             '''pure TDDFT'''
             hdiag_sq = hdiag
             converged, energies_sq, Z = _krylov_tools.krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag_sq,
-                                            N_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
+                                            n_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
                                             gram_schmidt=self.gram_schmidt, single=self.single, verbose=self.verbose)
             self.converged = converged
             if not all(self.converged):
