@@ -280,23 +280,23 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dvhf = td_grad.get_veff(mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
                                            (dmz1doob + dmz1doob.T) * 0.25 + oo0b,)), j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
     dvhf = td_grad.get_veff(mol, cp.stack(((dmz1dooa + dmz1dooa.T), (dmz1doob + dmz1doob.T))) * 0.25,
         j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
+        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     dvhf = td_grad.get_veff(mol, cp.stack(((dmxpya + dmxpya.T), (dmxpyb + dmxpyb.T))) * 0.5,
             j_factor, k_factor)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
     dvhf_all += dvhf * 2
     dvhf = td_grad.get_veff(mol, cp.stack(((dmxmya - dmxmya.T), (dmxmyb - dmxmyb.T))) * 0.5,
             j_factor=0.0, k_factor=k_factor, hermi=2)
     for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
     dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
@@ -308,25 +308,25 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
                            (dmz1doob + dmz1doob.T) * 0.25 + oo0b)),
             j_factor=0.0, k_factor = k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
+            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all += dvhf
         dvhf = td_grad.get_veff(mol,
                 cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25)),
                 j_factor=0.0, k_factor = k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
+            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
         dvhf = td_grad.get_veff(mol,
                 cp.stack(((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5)),
                 j_factor=0.0, k_factor = k_factor, omega=omega)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
         dvhf_all += dvhf * 2
         dvhf = td_grad.get_veff(mol,
                 cp.stack(((dmxmya - dmxmya.T) * 0.5, (dmxmyb - dmxmyb.T) * 0.5)),
                 j_factor=0.0, k_factor = k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals()) * 2
+            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
         dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
 

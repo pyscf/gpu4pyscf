@@ -14,7 +14,7 @@
 # limitations under the License.
 
 '''
-Nonadiabatic coupling vectors between ground and excited states for RHF
+Nonadiabatic coupling vectors for TDRHF and TDRKS
 '''
 
 # This example will gives the derivative coupling (DC),
@@ -24,6 +24,7 @@ Nonadiabatic coupling vectors between ground and excited states for RHF
 import pyscf
 import gpu4pyscf
 from gpu4pyscf.scf import hf
+from gpu4pyscf.dft import rks
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -39,8 +40,8 @@ mf.kernel()
 td = mf.TDA().set(nstates=5) # TDHF is OK
 td.kernel() # [ 9.21540892 10.99036172 11.83380819 13.62301694 15.06349085]
 
-nac = td.NAC()
-nac.state=(0,1) # same as (1,0) 0 means ground state, 1 means the first excited state
+nac = td.nac_method()
+nac.states=(0,1) # same as (1,0) 0 means ground state, 1 means the first excited state
 nac.kernel()
 '''
 --------- TDA nonadiabatic derivative coupling for state 0 and 1----------
@@ -65,6 +66,57 @@ nac.kernel()
 2 H    -0.0000000000     0.1943188879    -0.0000000000
 ----------------------------------------------
 '''
+
+print('-----------------------------------------------------')
+print("Non-adiabatic coupling matrix element (NACME) between ground and first excited state")
+print(nac.de)
+print('-----------------------------------------------------')
+print("NACME between ground and first excited state scaled by E (/E_ex)")
+print(nac.de_scaled)
+print('-----------------------------------------------------')
+print("NACME between ground and first excited state with ETF (electron translation factor)")
+# Without including the contribution of the electron translation factor (ETF), for some molecules, 
+# the non-adiabatic coupling matrix element (NACME) may lack translational invariance, 
+# which can further lead to errors in subsequent calculations such as MD simulations. 
+# In this case, it is necessary to use the NACME that takes the ETF into account.
+print(nac.de_etf)
+print('-----------------------------------------------------')
+print("NACME between ground and first excited state with ETF (electron translation factor) scaled by E (/E_ex)")
+print(nac.de_etf_scaled)
+
+
+mf = rks.RKS(mol, xc='b3lyp') #  -76.4203783335521
+mf.kernel()
+
+td = mf.TDA().set(nstates=5) # TDHF is OK
+td.kernel() # [ 7.63727447  9.47865422 10.00032863 11.95971483 14.06564139]
+
+nac = td.nac_method()
+nac.states=(1,2) # same as (1,2) 1 means the first excited state, 2 means the second excited state
+nac.kernel()
+"""
+--------- TDA nonadiabatic derivative coupling for states 1 and 2----------
+         x                y                z
+0 O    -0.1134916788    -0.0000000000     0.0000000000
+1 H     0.0639158824     0.0000000000     0.0424664269
+2 H     0.0639158824    -0.0000000000    -0.0424664269
+--------- TDA nonadiabatic derivative coupling for states 1 and 2 after E scaled (divided by E)----------
+         x                y                z
+0 O    -1.6771477392    -0.0000000000     0.0000000000
+1 H     0.9445307246     0.0000000000     0.6275567747
+2 H     0.9445307246    -0.0000000000    -0.6275567747
+--------- TDA nonadiabatic derivative coupling for states 1 and 2 with ETF----------
+         x                y                z
+0 O    -0.1180169882     0.0000000000     0.0000000000
+1 H     0.0590085046     0.0000000000     0.0438508910
+2 H     0.0590085046    -0.0000000000    -0.0438508910
+--------- TDA nonadiabatic derivative coupling for states 1 and 2 with ETF after E scaled (divided by E)----------
+         x                y                z
+0 O    -1.7440214738     0.0000000000     0.0000000000
+1 H     0.8720108929     0.0000000000     0.6480159906
+2 H     0.8720108929    -0.0000000000    -0.6480159906
+----------------------------------------------
+"""
 
 print('-----------------------------------------------------')
 print("Non-adiabatic coupling matrix element (NACME) between ground and first excited state")

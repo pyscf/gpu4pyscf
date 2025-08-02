@@ -26,8 +26,6 @@ H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
 
-# pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
-
 bas0 = "cc-pvdz"
 
 def setUpModule():
@@ -42,8 +40,23 @@ def tearDownModule():
     del mol
 
 
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
 class KnownValues(unittest.TestCase):
-    def test_grad_tdhf_singlet_bdf_qchem_12(self):
+    def test_nac_tdhf_singlet_bdf_qchem(self):
         """
         benchmark from both Qchem and BDF
         $rem
@@ -123,6 +136,47 @@ class KnownValues(unittest.TestCase):
         1 1 1 1 1 2
         noresp
         $end
+
+        ==== next is qchem output ====
+        ---------------------------------------------------
+        CIS derivative coupling without ETF
+        Atom         X              Y              Z     
+        ---------------------------------------------------
+        1      -0.000000       2.322814      -0.000000
+        2       0.000000      -1.261329       0.874838
+        3       0.000000      -1.261329      -0.874838
+        ---------------------------------------------------
+        ---------------------------------------------------
+        CIS Force Matrix Element
+        Atom         X              Y              Z     
+        ---------------------------------------------------
+        1      -0.000000       0.155023      -0.000000
+        2       0.000000      -0.077512       0.058107
+        3       0.000000      -0.077512      -0.058107
+        ---------------------------------------------------
+        ---------------------------------------------------
+        CIS derivative coupling with ETF
+        Atom         X              Y              Z     
+        ---------------------------------------------------
+        1      -0.000000       2.391220      -0.000000
+        2       0.000000      -1.195610       0.896297
+        3       0.000000      -1.195610      -0.896297
+        ---------------------------------------------------
+        ==== next is BDF output ====
+        Gradient contribution from Final-NAC(R)-Escaled
+        1       -0.0000000000        2.3228388812       -0.0000000000
+        2        0.0000000001       -1.2613416810        0.8748886382
+        3       -0.0000000001       -1.2613416810       -0.8748886382
+        ......
+        Gradient contribution from Final-NAC(S)
+        1       -0.0000000000        0.1550246190       -0.0000000000
+        2        0.0000000000       -0.0775123095        0.0581102860
+        3       -0.0000000000       -0.0775123095       -0.0581102860
+        ......
+        Gradient contribution from Final-NAC(S)-Escaled
+        1       -0.0000000000        2.3912443625       -0.0000000000
+        2        0.0000000001       -1.1956221812        0.8963472690
+        3       -0.0000000001       -1.1956221812       -0.8963472690
         """
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
@@ -161,7 +215,10 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_bdf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_bdf)).max() < 1e-4
 
-    def test_grad_tda_singlet_qchem(self):
+    def test_nac_tda_singlet_qchem(self):
+        """
+        Comapre with qchem
+        """
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -216,6 +273,35 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref_qchem)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_qchem)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_qchem)).max() < 1e-4
+
+    def test_nac_tda_singlet_fdiff(self):
+        """
+        Compare with finite difference
+        """
+        mf = scf.RHF(mol).to_gpu()
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstateI = 0
+        nstateJ = 1
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        ana_nac = nac.tdrhf.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), e_diag[nstateI], e_diag[nstateJ])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 5.0E-5
+
+        nstateI = 1
+        nstateJ = 2
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        ana_nac = nac.tdrhf.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), e_diag[nstateI], e_diag[nstateJ])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 5.0E-5
 
 
 if __name__ == "__main__":
