@@ -64,7 +64,7 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 
 ALIGNED = 256
 
-if int(pyscf.__version__.split('.')[1]) <= 9: # pyscf-2.9
+if int(pyscf.__version__.split('.')[1]) <= 10: # pyscf-2.9
     # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.9
     from pyscf.gto import mole
     from pyscf.pbc.gto.cell import Cell
