@@ -18,4 +18,8 @@ from gpu4pyscf.pbc.grad import rhf
 __all__ = ['Gradients']
 
 class Gradients(rhf.Gradients):
-    pass
+    grids = None
+
+    def get_stress(self):
+        from gpu4pyscf.pbc.grad import rks_stress
+        return rks_stress.kernel(self)

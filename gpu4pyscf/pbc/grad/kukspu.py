@@ -23,6 +23,7 @@ from pyscf import lib
 from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.grad import kuks as kuks_grad
 from gpu4pyscf.pbc.grad.krkspu import generate_first_order_local_orbitals
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract
 
 def _hubbard_U_deriv1(mf, dm=None, kpts=None):
@@ -43,8 +44,8 @@ def _hubbard_U_deriv1(mf, dm=None, kpts=None):
     U_idx_stack = np.hstack(U_idx)
     C0 = [C_k[:,U_idx_stack] for C_k in C_ao_lo]
 
-    ovlp0 = asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
-    ovlp1 = asarray(cell.pbc_intor('int1e_ipovlp', kpts=kpts))
+    ovlp0 = int1e.int1e_ovlp(cell, kpts)
+    ovlp1 = int1e.int1e_ipovlp(cell, kpts)
     C_inv = [C_k.conj().T.dot(S_k) for C_k, S_k in zip(C0, ovlp0)]
     dm_deriv0 = [
         [C_k.dot(dm_k).dot(C_k.conj().T) for C_k, dm_k in zip(C_inv, dm_s)]
