@@ -29,15 +29,19 @@ H       0.0000000000     0.7570000000     0.5870000000
 bas0 = "def2tzvp"
 
 def setUpModule():
-    global mol
+    global mol, molpbe
     mol = pyscf.M(
         atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
+    molpbe = pyscf.M(
+        atom=atom, basis="ccpvdz", max_memory=32000, output="/dev/null", verbose=1)
 
 
 def tearDownModule():
     global mol
+    global molpbe
     mol.stdout.close()
-    del mol
+    molpbe.stdout.close()
+    del mol, molpbe
 
 
 def diagonalize_tda(a, nroots=5):
@@ -57,8 +61,7 @@ def diagonalize_tda(a, nroots=5):
 
 class KnownValues(unittest.TestCase):
     def test_nac_pbe_tdaris_singlet_vs_ref_ge(self):
-        mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
-        mf.grids.atom_grid = (99,590)
+        mf = dft.rks.RKS(molpbe, xc="pbe").density_fit().to_gpu()
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -72,15 +75,15 @@ class KnownValues(unittest.TestCase):
         xI = xy_diag[:, nstate]*np.sqrt(0.5)
         ana_nac = nac.tdrks.get_nacv_ge(nac_ris, (xI, xI*0.0), e_diag[nstate])
 
-        ref_e = np.array([0.25623541, 0.33093807, 0.34839961, 0.41773945, 0.49824985])
+        ref_e = np.array([0.25933835, 0.33439277, 0.35638221, 0.42592415, 0.51762665])
         ref_de = np.array(
-            [[ 4.42788915e-03,  7.31260374e-16, -8.06595393e-17],
-             [-1.88130884e-02, -1.02675604e-16, -1.71476491e-15],
-             [-1.88130884e-02, -2.33451452e-15, -1.51800320e-15]])
+            [[-5.90903417e-05,  7.14375913e-17, -2.26866400e-15],
+             [ 2.60385843e-02,  9.51909004e-16, -2.78277910e-16],
+             [ 2.60385843e-02, -1.05669301e-15, -1.34098234e-15],])
         ref_de_etf = np.array(
-            [[ 9.91900878e-02,  1.12268110e-15,  8.42960524e-16],
-             [-4.95950501e-02, -7.93704373e-17, -2.17068380e-15],
-             [-4.95950501e-02, -2.55837068e-15, -1.82666506e-15],])
+            [[-1.06809321e-01, -2.75316895e-17, -1.66754809e-15],
+             [ 5.34045261e-02,  8.11192182e-16, -2.83779869e-16],
+             [ 5.34045261e-02, -9.49822786e-16, -1.37984533e-15],])
 
         # compare with previous calculation resusts
         assert np.linalg.norm(e_diag - ref_e) < 1.0E-8
@@ -139,8 +142,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_pbe_tda_singlet_vs_ref_ee(self):
-        mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
-        mf.grids.atom_grid = (99,590)
+        mf = dft.rks.RKS(molpbe, xc="pbe").density_fit().to_gpu()
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -157,15 +159,15 @@ class KnownValues(unittest.TestCase):
         xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
         ana_nac = nac.tdrks_ris.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), e_diag[nstateI], e_diag[nstateJ])
 
-        ref_e = np.array([0.25623541, 0.33093807, 0.34839961, 0.41773945, 0.49824985])
+        ref_e = np.array([0.25933835, 0.33439277, 0.35638221, 0.42592415, 0.51762665])
         ref_de = np.array(
-            [[-2.27769085e-17, -9.37769130e-02,  2.08893394e-14],
-             [-1.07278885e-16,  5.38085016e-02, -3.50951624e-02],
-             [ 1.42167709e-16,  5.38085016e-02,  3.50951624e-02],])
+            [[ 8.34605908e-17, -1.18122143e-01, -1.38959236e-14],
+             [ 8.91217037e-16,  6.74132293e-02, -4.46138124e-02],
+             [-9.93589447e-16,  6.74132293e-02,  4.46138124e-02],])
         ref_de_etf = np.array(
-            [[-2.76739526e-17, -9.27827341e-02,  1.88670851e-14],
-             [-1.52402937e-16,  4.63913465e-02, -3.65824631e-02],
-             [ 1.79996735e-16,  4.63913465e-02,  3.65824631e-02],])
+            [[ 8.84485527e-17, -1.23821678e-01, -1.40671554e-14],
+             [ 8.27342873e-16,  6.19105543e-02, -4.58616923e-02],
+             [-9.17992771e-16,  6.19105543e-02,  4.58616923e-02],])
 
         # compare with previous calculation resusts
         assert np.linalg.norm(e_diag - ref_e) < 1.0E-8
