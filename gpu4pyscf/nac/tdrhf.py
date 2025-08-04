@@ -480,7 +480,7 @@ class NAC(lib.StreamObject):
         )
         log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
         log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
-        log.info("chkfile = %s", self.chkfile)
+        # log.info("chkfile = %s", self.chkfile)
         log.info(f"States ID = {self.states}")
         log.info("\n")
         return self
