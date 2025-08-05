@@ -1127,8 +1127,20 @@ class RisBase(lib.StreamObject):
         return T_ia_K, T_ij_K, T_ab_K
     
     def nuc_grad_method(self):
-        from gpu4pyscf.grad import tdrks_ris
-        return tdrks_ris.Gradients(self)
+        if getattr(self._scf, 'with_df', None) is not None:
+            from gpu4pyscf.df.grad import tdrks_ris
+            return tdrks_ris.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrks_ris
+            return tdrks_ris.Gradients(self)
+
+    def nac_method(self):
+        if getattr(self._scf, 'with_df', None) is not None:
+            from gpu4pyscf.df.nac.tdrks_ris import NAC
+            return NAC(self)
+        else:
+            from gpu4pyscf.nac.tdrks_ris import NAC
+            return NAC(self)
     
     def reset(self, mol=None):
         if mol is not None:
