@@ -73,9 +73,15 @@ __global__ static void evaluate_density_kernel(
   const KernelType start_position_z =
       dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
 
-  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] + dxyz_dabc[1] * dxyz_dabc[4] + dxyz_dabc[2] * dxyz_dabc[5];
-  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] + dxyz_dabc[1] * dxyz_dabc[7] + dxyz_dabc[2] * dxyz_dabc[8];
-  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6] + dxyz_dabc[4] * dxyz_dabc[7] + dxyz_dabc[5] * dxyz_dabc[8];
+  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3]
+                           + dxyz_dabc[1] * dxyz_dabc[4]
+                           + dxyz_dabc[2] * dxyz_dabc[5];
+  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6]
+                           + dxyz_dabc[1] * dxyz_dabc[7]
+                           + dxyz_dabc[2] * dxyz_dabc[8];
+  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6]
+                           + dxyz_dabc[4] * dxyz_dabc[7]
+                           + dxyz_dabc[5] * dxyz_dabc[8];
 
   const int a_upper = min(a_start + BLOCK_DIM_XYZ, mesh_a) - a_start;
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
@@ -83,9 +89,6 @@ __global__ static void evaluate_density_kernel(
 
   const int thread_id = threadIdx.x + threadIdx.y * BLOCK_DIM_XYZ +
                         threadIdx.z * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
-
-  KernelType i_cartesian[n_i_cartesian_functions];
-  KernelType j_cartesian[n_j_cartesian_functions];
 
   KernelType
       prefactor[n_channels * n_i_cartesian_functions * n_j_cartesian_functions];
@@ -102,9 +105,6 @@ __global__ static void evaluate_density_kernel(
       accumulated_n_pairs_per_local_grid[block_index + 1];
   const int n_pairs = end_pair_index - start_pair_index;
   const int n_batches = (n_pairs + n_threads - 1) / n_threads;
-
-  int a_index, b_index, c_index;
-  KernelType x, y, z;
 
   for (int i_batch = 0, i_pair_index = start_pair_index + thread_id;
        i_batch < n_batches; i_batch++, i_pair_index += n_threads) {
@@ -237,17 +237,45 @@ __global__ static void evaluate_density_kernel(
     const KernelType exp_dadc = exp(-2 * ij_exponent * a_dot_c);
     const KernelType exp_dbdc = exp(-2 * ij_exponent * b_dot_c);
 
+    KernelType i_cartesian[n_i_cartesian_functions];
+    KernelType j_cartesian[n_j_cartesian_functions];
+    int a_index, b_index, c_index;
+    KernelType x, y, z;
     KernelType gaussian_x, gaussian_y, gaussian_z,
                recursion_factor_a, recursion_factor_b, recursion_factor_c;
-    for (a_index = 0, gaussian_x = 1,
-        recursion_factor_a = recursion_factor_a_start, x = start_position_x;
-         a_index < a_upper; a_index++, gaussian_x *= recursion_factor_a,
-        recursion_factor_a *= exp_da_squared, x += dxyz_dabc[0]) {
+    KernelType recursion_factor_ab_pow_a  = 1;
+    KernelType recursion_factor_ab_pow_ab = 1;
+    KernelType recursion_factor_ac_pow_a  = 1;
+    KernelType recursion_factor_ac_pow_ac = 1;
+    KernelType recursion_factor_bc_pow_b  = 1;
+    KernelType recursion_factor_bc_pow_bc = 1;
+
+    if constexpr (is_non_orthogonal) {
+      // recursion_factor_ab_pow_a = 1;
+      // recursion_factor_ac_pow_a = 1;
+    } else {
+      x = start_position_x;
+    }
+    for (a_index = 0, gaussian_x = 1, recursion_factor_a = recursion_factor_a_start;
+         a_index < a_upper;
+         a_index++, gaussian_x *= recursion_factor_a,
+         recursion_factor_a *= exp_da_squared) {
+
+      if constexpr (is_non_orthogonal) {
+        recursion_factor_bc_pow_b  = 1;
+        recursion_factor_ab_pow_ab = 1;
+      } else {
+        y = start_position_y;
+      }
       for (b_index = 0, gaussian_y = 1,
-          recursion_factor_b = recursion_factor_b_start, y = start_position_y;
-           b_index < b_upper; b_index++, gaussian_y *= recursion_factor_b,
-          recursion_factor_b *= exp_db_squared, y += dxyz_dabc[4]) {
+           recursion_factor_b = recursion_factor_b_start;
+           b_index < b_upper;
+           b_index++, gaussian_y *= recursion_factor_b,
+           recursion_factor_b *= exp_db_squared) {
+
         if constexpr (is_non_orthogonal) {
+          recursion_factor_ac_pow_ac = 1;
+          recursion_factor_bc_pow_bc = 1;
           x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
           y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
           z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
@@ -255,18 +283,20 @@ __global__ static void evaluate_density_kernel(
           z = start_position_z;
         }
         for (c_index = 0, gaussian_z = 1,
-            recursion_factor_c = recursion_factor_c_start;
-             c_index < c_upper; c_index++, gaussian_z *= recursion_factor_c,
-            recursion_factor_c *= exp_dc_squared, z += dxyz_dabc[8]) {
+             recursion_factor_c = recursion_factor_c_start;
+             c_index < c_upper;
+             c_index++, gaussian_z *= recursion_factor_c,
+             recursion_factor_c *= exp_dc_squared) {
+
           gto_cartesian<KernelType, i_angular>(i_cartesian, x - i_x, y - i_y,
                                                z - i_z);
           gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x, y - j_y,
                                                z - j_z);
 
           const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z
-                                      * pow(exp_dadb, a_index * b_index)
-                                      * pow(exp_dadc, a_index * c_index)
-                                      * pow(exp_dbdc, b_index * c_index);
+                                      * recursion_factor_ab_pow_ab
+                                      * recursion_factor_ac_pow_ac
+                                      * recursion_factor_bc_pow_bc;
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
             KernelType density_value_to_be_shared = 0;
@@ -304,25 +334,37 @@ __global__ static void evaluate_density_kernel(
                   reduced;
             }
           }
+
           if constexpr (is_non_orthogonal) {
+            recursion_factor_ac_pow_ac *= recursion_factor_ac_pow_a;
+            recursion_factor_bc_pow_bc *= recursion_factor_bc_pow_b;
             x += dxyz_dabc[6];
             y += dxyz_dabc[7];
+            z += dxyz_dabc[8];
+          } else {
+            z += dxyz_dabc[8];
           }
         }
-        // if constexpr (is_non_orthogonal) {
-        //   x += dxyz_dabc[3];
-        //   z += dxyz_dabc[5];
-        // }
+
+        if constexpr (is_non_orthogonal) {
+          recursion_factor_bc_pow_b  *= exp_dbdc;
+          recursion_factor_ab_pow_ab *= recursion_factor_ab_pow_a;
+        } else {
+          y += dxyz_dabc[4];
+        }
       }
-      // if constexpr (is_non_orthogonal) {
-      //   y += dxyz_dabc[1];
-      //   z += dxyz_dabc[2];
-      // }
+
+      if constexpr (is_non_orthogonal) {
+        recursion_factor_ab_pow_a *= exp_dadb;
+        recursion_factor_ac_pow_a *= exp_dadc;
+      } else {
+        x += dxyz_dabc[0];
+      }
     }
   }
-  a_index = a_start + threadIdx.z;
-  b_index = b_start + threadIdx.y;
-  c_index = c_start + threadIdx.x;
+  const int a_index = a_start + threadIdx.z;
+  const int b_index = b_start + threadIdx.y;
+  const int c_index = c_start + threadIdx.x;
 
   __syncthreads();
 
@@ -451,15 +493,22 @@ __global__ static void evaluate_xc_kernel(
   const KernelType start_position_z =
       dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
 
+  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3]
+                           + dxyz_dabc[1] * dxyz_dabc[4]
+                           + dxyz_dabc[2] * dxyz_dabc[5];
+  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6]
+                           + dxyz_dabc[1] * dxyz_dabc[7]
+                           + dxyz_dabc[2] * dxyz_dabc[8];
+  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6]
+                           + dxyz_dabc[4] * dxyz_dabc[7]
+                           + dxyz_dabc[5] * dxyz_dabc[8];
+
   const int a_upper = min(a_start + BLOCK_DIM_XYZ, mesh_a) - a_start;
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
   const int c_upper = min(c_start + BLOCK_DIM_XYZ, mesh_c) - c_start;
 
   KernelType neighboring_gaussian_sum[n_channels * n_i_cartesian_functions *
                                       n_j_cartesian_functions];
-
-  KernelType i_cartesian[n_i_cartesian_functions];
-  KernelType j_cartesian[n_j_cartesian_functions];
 
   const int start_pair_index = accumulated_n_pairs_per_local_grid[block_index];
   const int end_pair_index =
@@ -492,7 +541,6 @@ __global__ static void evaluate_xc_kernel(
               thread_id] = xc_value;
   }
   __syncthreads();
-  KernelType x, y, z;
   for (int i_batch = 0, i_pair_index = start_pair_index + thread_id;
        i_batch < n_batches; i_batch++, i_pair_index += n_threads) {
     const bool is_valid_pair = i_pair_index < end_pair_index;
@@ -583,6 +631,10 @@ __global__ static void evaluate_xc_kernel(
     const KernelType recursion_factor_c_start =
         exp(-ij_exponent * (2 * cross_term_c + dc_squared));
 
+    const KernelType exp_dadb = exp(-2 * ij_exponent * a_dot_b);
+    const KernelType exp_dadc = exp(-2 * ij_exponent * a_dot_c);
+    const KernelType exp_dbdc = exp(-2 * ij_exponent * b_dot_c);
+
 #pragma unroll
     for (int i_channel = 0; i_channel < n_channels; i_channel++) {
 #pragma unroll
@@ -599,26 +651,66 @@ __global__ static void evaluate_xc_kernel(
       }
     }
 
-    KernelType gaussian_x, gaussian_y, gaussian_z, recursion_factor_a,
-        recursion_factor_b, recursion_factor_c;
+    KernelType i_cartesian[n_i_cartesian_functions];
+    KernelType j_cartesian[n_j_cartesian_functions];
+
+    KernelType x, y, z;
+    KernelType gaussian_x, gaussian_y, gaussian_z,
+               recursion_factor_a, recursion_factor_b, recursion_factor_c;
+    KernelType recursion_factor_ab_pow_a  = 1;
+    KernelType recursion_factor_ab_pow_ab = 1;
+    KernelType recursion_factor_ac_pow_a  = 1;
+    KernelType recursion_factor_ac_pow_ac = 1;
+    KernelType recursion_factor_bc_pow_b  = 1;
+    KernelType recursion_factor_bc_pow_bc = 1;
+
+    if constexpr (is_non_orthogonal) {
+      // recursion_factor_ab_pow_a = 1;
+      // recursion_factor_ac_pow_a = 1;
+    } else {
+      x = start_position_x;
+    }
     for (a_index = 0, gaussian_x = 1,
-        recursion_factor_a = recursion_factor_a_start, x = start_position_x;
-         a_index < a_upper; a_index++, gaussian_x *= recursion_factor_a,
-        recursion_factor_a *= exp_da_squared, x += dxyz_dabc[0]) {
+         recursion_factor_a = recursion_factor_a_start;
+         a_index < a_upper;
+         a_index++, gaussian_x *= recursion_factor_a,
+         recursion_factor_a *= exp_da_squared) {
+
+      if constexpr (is_non_orthogonal) {
+        recursion_factor_bc_pow_b  = 1;
+        recursion_factor_ab_pow_ab = 1;
+      } else {
+        y = start_position_y;
+      }
       for (b_index = 0, gaussian_y = 1,
-          recursion_factor_b = recursion_factor_b_start, y = start_position_y;
-           b_index < b_upper; b_index++, gaussian_y *= recursion_factor_b,
-          recursion_factor_b *= exp_db_squared, y += dxyz_dabc[4]) {
+           recursion_factor_b = recursion_factor_b_start;
+           b_index < b_upper;
+           b_index++, gaussian_y *= recursion_factor_b,
+           recursion_factor_b *= exp_db_squared) {
+
+        if constexpr (is_non_orthogonal) {
+          recursion_factor_ac_pow_ac = 1;
+          recursion_factor_bc_pow_bc = 1;
+          x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
+          y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
+          z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
+        } else {
+          z = start_position_z;
+        }
         for (c_index = 0, gaussian_z = 1,
-            recursion_factor_c = recursion_factor_c_start, z = start_position_z;
-             c_index < c_upper; c_index++, gaussian_z *= recursion_factor_c,
-            recursion_factor_c *= exp_dc_squared, z += dxyz_dabc[8]) {
+             recursion_factor_c = recursion_factor_c_start;
+             c_index < c_upper;
+             c_index++, gaussian_z *= recursion_factor_c,
+             recursion_factor_c *= exp_dc_squared) {
           gto_cartesian<KernelType, i_angular>(i_cartesian, x - i_x, y - i_y,
                                                z - i_z);
           gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x, y - j_y,
                                                z - j_z);
 
-          const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
+          const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z
+                                      * recursion_factor_ab_pow_ab
+                                      * recursion_factor_ac_pow_ac
+                                      * recursion_factor_bc_pow_bc;
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
             xc_value =
@@ -643,19 +735,31 @@ __global__ static void evaluate_xc_kernel(
               }
             }
           }
+
           if constexpr (is_non_orthogonal) {
+            recursion_factor_ac_pow_ac *= recursion_factor_ac_pow_a;
+            recursion_factor_bc_pow_bc *= recursion_factor_bc_pow_b;
             x += dxyz_dabc[6];
             y += dxyz_dabc[7];
+            z += dxyz_dabc[8];
+          } else {
+            z += dxyz_dabc[8];
           }
         }
-        if constexpr (!is_non_orthogonal) {
-          x += dxyz_dabc[3];
-          z += dxyz_dabc[5];
+
+        if constexpr (is_non_orthogonal) {
+          recursion_factor_bc_pow_b  *= exp_dbdc;
+          recursion_factor_ab_pow_ab *= recursion_factor_ab_pow_a;
+        } else {
+          y += dxyz_dabc[4];
         }
       }
+
       if constexpr (is_non_orthogonal) {
-        y += dxyz_dabc[1];
-        z += dxyz_dabc[2];
+        recursion_factor_ab_pow_a *= exp_dadb;
+        recursion_factor_ac_pow_a *= exp_dadc;
+      } else {
+        x += dxyz_dabc[0];
       }
     }
 
