@@ -45,7 +45,7 @@ class ConicalIntersectionOptimizer:
         self.verbose = self.td.verbose
         self.crossing_type = crossing_type
         self.stdout = self.td.stdout
-        self.log = logger.new_logger(self, verbose)
+        self.log = logger.new_logger(self, self.verbose)
         
         self._last_geom = None
         self._last_energy = None
