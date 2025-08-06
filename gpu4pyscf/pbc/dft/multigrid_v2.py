@@ -1277,7 +1277,6 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     def __init__(self, cell):
         self.cell = cell
         a = cell.lattice_vectors()
-        assert abs(a - np.diag(a.diagonal())).max() < 1e-9, 'Non-orthogonal lattice'
         self.mesh = cell.mesh
         self.tasks = None
         self.sorted_gaussian_pairs = None
