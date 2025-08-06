@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
             By default, high angular momentum functions (d, f shells) are fully
             uncontracted.
     '''
-    from gpu4pyscf.lib.cupy_helper import block_diag
+    from gpu4pyscf.lib.cupy_helper import block_diag, asarray
     # Ensure backward compatibility. When allow_replica is True, decontraction
     # to primitive functions is disabled. When allow_replica is False, all
     # general contraction are decontracted.
@@ -56,6 +56,12 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
     workspace = cp.empty(30**2*100)
     workspace = None # noqa: F841
     bas_templates = {}
+    lmax = mol._bas[:,ANG_OF].max()
+    if mol.cart:
+        c2s = [np.eye((l+1)*(l+2)//2) for l in range(lmax+1)]
+    else:
+        c2s = [gto.mole.cart2sph(l, normalized='sp') for l in range(lmax+1)]
+    c2s_gpu = [asarray(c, order='C') for c in c2s]
     _bas = []
     _env = mol._env.copy()
     contr_coeff = []
@@ -76,13 +82,13 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
                 nctr = shell[NCTR_OF]
                 if nctr == 1:
                     bas_of_ia.append(shell)
-                    coeff.append(cp.eye(nf))
+                    coeff.append(c2s_gpu[l])
                     continue
                 # Only basis with nctr > 1 needs to be decontracted
                 nprim = shell[NPRIM_OF]
                 pcoeff = shell[PTR_COEFF]
                 if l <= allow_replica:
-                    coeff.extend([cp.eye(nf)] * nctr)
+                    coeff.extend([c2s_gpu[l]] * nctr)
                     bs = np.repeat(shell[np.newaxis], nctr, axis=0)
                     bs[:,NCTR_OF] = 1
                     bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
@@ -93,8 +99,8 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
                     norm = gto.gto_norm(l, exps)
                     # remove normalization from contraction coefficients
                     c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
-                    c = np.einsum('ip,p,ef->iepf', c, 1/norm, np.eye(nf))
-                    coeff.append(cp.asarray(c.reshape(nf*nctr, nf*nprim).T, order='C'))
+                    c = np.einsum('ip,p,fe->pfie', c, 1/norm, c2s[l])
+                    coeff.append(asarray(c.reshape(nf*nprim,-1), order='C'))
 
                     _env[pcoeff:pcoeff+nprim] = norm
                     bs = np.repeat(shell[np.newaxis], nprim, axis=0)
@@ -121,10 +127,6 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
 
     if not sparse_coeff:
         contr_coeff = block_diag(contr_coeff)
-
-        if not mol.cart:
-            c2s = block_diag([cart2sph_by_l(l) for l in pmol._bas[:,ANG_OF]])
-            contr_coeff = contr_coeff.dot(c2s)
         return pmol, contr_coeff
     else:
         return pmol, None
