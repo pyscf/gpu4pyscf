@@ -23,6 +23,7 @@ from pyscf.pbc.dft.numint import NumInt
 from pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.grad import uks_stress, uks
 from gpu4pyscf.pbc.grad.uks_stress import _finite_diff_cells
+import pytest
 
 def setUpModule():
     global cell
@@ -48,6 +49,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -67,6 +70,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -86,6 +91,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -105,6 +112,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             vj1 = FFTDF(cell1).get_jk(dm.sum(axis=0), with_k=False)[0]
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             vj2 = FFTDF(cell2).get_jk(dm.sum(axis=0), with_k=False)[0]
@@ -131,13 +140,14 @@ class KnownValues(unittest.TestCase):
             e2 = cell2.UKS(xc=xc).kernel()
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    def test_gga_vs_finite_difference_high_cost(self):
+    @pytest.mark.slow
+    def test_gga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='C 1 1 1; C 2 1.5 2.4',
+        cell = gto.M(atom='B 1 1 1; C 2 1.5 2.4',
                      basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     spin=2,
+                     spin=1,
                      pseudo='gth-pade', a=a, unit='Bohr', verbose=0)
         xc = 'pbe'
         mf = cell.UKS(xc=xc).to_gpu().run()
@@ -150,7 +160,8 @@ class KnownValues(unittest.TestCase):
             e2 = cell2.UKS(xc=xc).kernel()
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    def test_mgga_vs_finite_difference_high_cost(self):
+    @pytest.mark.slow
+    def test_mgga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5

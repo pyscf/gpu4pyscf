@@ -22,6 +22,7 @@ from pyscf.pbc.dft.numint import NumInt
 from pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.grad import rks_stress, rks
 from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+import pytest
 
 def setUpModule():
     global cell
@@ -54,6 +55,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             ao1 = ni.eval_ao(cell1, coords)
             ao2 = ni.eval_ao(cell2, coords)
             assert abs(ao_value[i,j,0] - (ao1 - ao2) / 2e-5).max() < 1e-9
@@ -73,6 +76,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             ao1 = ni.eval_ao(cell1, coords, deriv=1)
             ao2 = ni.eval_ao(cell2, coords, deriv=1)
             assert abs(ao_value[i,j] - (ao1 - ao2) / 2e-5).max() < 1e-9
@@ -92,6 +97,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -111,6 +118,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -130,6 +139,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -149,6 +160,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             vj1 = FFTDF(cell1).get_jk(dm, with_k=False)[0]
             vj1 *= .5
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
@@ -174,9 +187,11 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
-            vne1 = FFTDF(cell1).get_nuc()[0]
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
+            vne1 = FFTDF(cell1).get_nuc()
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
-            vne2 = FFTDF(cell2).get_nuc()[0]
+            vne2 = FFTDF(cell2).get_nuc()
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             de = np.einsum('ij,ji', dm, (vne1-vne2))
             de += exc1 - exc2
@@ -198,9 +213,11 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
-            vne1 = FFTDF(cell1).get_pp()[0]
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
+            vne1 = FFTDF(cell1).get_pp()
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
-            vne2 = FFTDF(cell2).get_pp()[0]
+            vne2 = FFTDF(cell2).get_pp()
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             de = np.einsum('ij,ji', dm, (vne1-vne2))
             de += exc1 - exc2
@@ -242,7 +259,8 @@ class KnownValues(unittest.TestCase):
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    def test_mgga_vs_finite_difference_high_cost(self):
+    @pytest.mark.slow
+    def test_mgga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5

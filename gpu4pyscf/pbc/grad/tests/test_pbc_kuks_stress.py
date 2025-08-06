@@ -24,6 +24,7 @@ from pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.dft import kukspu
 from gpu4pyscf.pbc.grad import kuks_stress, kuks
 from gpu4pyscf.pbc.grad.kuks_stress import _finite_diff_cells
+import pytest
 
 def setUpModule():
     global cell
@@ -50,6 +51,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -70,6 +73,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -90,6 +95,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -138,13 +145,14 @@ class KnownValues(unittest.TestCase):
             e2 = cell2.KUKS(xc=xc, kpts=cell2.make_kpts(kmesh)).kernel()
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    def test_gga_vs_finite_difference_high_cost(self):
+    @pytest.mark.slow
+    def test_gga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='C 1 1 1; C 2 1.5 2.4',
+        cell = gto.M(atom='B 1 1 1; C 2 1.5 2.4',
                      basis=[[0, [1.5, 1]], [1, [.8, 1]]],
-                     spin=2,
+                     spin=1,
                      pseudo='gth-pade', a=a, unit='Bohr', verbose=0)
         xc = 'pbe'
         kmesh = [3, 1, 1]
@@ -154,11 +162,14 @@ class KnownValues(unittest.TestCase):
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             e1 = cell1.KUKS(xc=xc, kpts=cell1.make_kpts(kmesh)).kernel()
             e2 = cell2.KUKS(xc=xc, kpts=cell2.make_kpts(kmesh)).kernel()
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    def test_mgga_vs_finite_difference_high_cost(self):
+    @pytest.mark.slow
+    def test_mgga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
@@ -173,6 +184,8 @@ class KnownValues(unittest.TestCase):
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             e1 = cell1.KUKS(xc=xc, kpts=cell1.make_kpts(kmesh)).kernel()
             e2 = cell2.KUKS(xc=xc, kpts=cell2.make_kpts(kmesh)).kernel()
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
@@ -211,7 +224,8 @@ class KnownValues(unittest.TestCase):
             e2 = mf2.get_veff().E_U.real
             assert abs(sigma[i,j] - (e1 - e2) / 2e-4) < 1e-8
 
-    def test_kukspu_finite_diff_high_cost(self):
+    @pytest.mark.slow
+    def test_kukspu_finite_diff(self):
         cell = gto.M(
             unit = 'A',
             atom = 'C 0.,  0.,  0.; O 0.5,  0.8,  1.1',

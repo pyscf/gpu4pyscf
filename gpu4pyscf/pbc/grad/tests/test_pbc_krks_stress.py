@@ -24,6 +24,7 @@ from pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.dft import krkspu
 from gpu4pyscf.pbc.grad import krks_stress, krks
 from gpu4pyscf.pbc.grad.krks_stress import _finite_diff_cells
+import pytest
 
 def setUpModule():
     global cell
@@ -49,6 +50,8 @@ class KnownValues(unittest.TestCase):
         ao_value = ao_value.get().transpose(0,1,2,3,5,4)
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             ao1 = dft.numint.eval_ao_kpts(cell1, coords, cell1.make_kpts(kmesh))
             ao2 = dft.numint.eval_ao_kpts(cell2, coords, cell2.make_kpts(kmesh))
             assert abs(ao_value[0][i,j,0] - (ao1[0] - ao2[0]) / 2e-5).max() < 1e-9
@@ -70,6 +73,8 @@ class KnownValues(unittest.TestCase):
         ao_value = ao_value.get().transpose(0,1,2,3,5,4)
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             ao1 = dft.numint.eval_ao_kpts(cell1, coords, cell1.make_kpts(kmesh), deriv=1)
             ao2 = dft.numint.eval_ao_kpts(cell2, coords, cell2.make_kpts(kmesh), deriv=1)
             assert abs(ao_value[0][i,j] - (ao1[0] - ao2[0]) / 2e-5).max() < 1e-9
@@ -92,6 +97,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -112,6 +119,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -132,6 +141,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -180,6 +191,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             vne1 = FFTDF(cell1).get_nuc(kpts=cell1.make_kpts(kmesh))
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             vne2 = FFTDF(cell2).get_nuc(kpts=cell2.make_kpts(kmesh))
@@ -206,6 +219,8 @@ class KnownValues(unittest.TestCase):
         ni = KNumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             vne1 = FFTDF(cell1).get_pp(kpts=cell1.make_kpts(kmesh))
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             vne2 = FFTDF(cell2).get_pp(kpts=cell2.make_kpts(kmesh))
@@ -252,7 +267,8 @@ class KnownValues(unittest.TestCase):
             e2 = cell2.KRKS(xc=xc, kpts=cell2.make_kpts(kmesh)).kernel()
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    def test_mgga_vs_finite_difference_high_cost(self):
+    @pytest.mark.slow
+    def test_mgga_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
@@ -305,7 +321,8 @@ class KnownValues(unittest.TestCase):
             e2 = mf2.get_veff().E_U.real
             assert abs(sigma[i,j] - (e1 - e2) / 2e-4) < 1e-8
 
-    def test_krkspu_finite_diff_high_cost(self):
+    @pytest.mark.slow
+    def test_krkspu_finite_diff(self):
         cell = gto.M(
             unit = 'A',
             atom = 'C 0.,  0.,  0.; O 0.5,  0.8,  1.1',
