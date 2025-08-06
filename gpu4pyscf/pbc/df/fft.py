@@ -32,6 +32,7 @@ from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 
 def get_nuc(mydf, kpts=None):
     from gpu4pyscf.pbc.dft import numint
@@ -233,10 +234,16 @@ class FFTDF(lib.StreamObject):
     def grids(self, val):
         self.mesh = val.mesh
 
+    def reset(self, cell=None):
+        if cell is not None:
+            self.kpts = reset_kpts(self, cell)
+            self.cell = cell
+        self._rsh_df = {}
+        return self
+
     dump_flags = fft_cpu.FFTDF.dump_flags
     check_sanity = fft_cpu.FFTDF.check_sanity
     build = fft_cpu.FFTDF.build
-    reset = fft_cpu.FFTDF.reset
 
     get_pp = get_pp
     get_nuc = get_nuc

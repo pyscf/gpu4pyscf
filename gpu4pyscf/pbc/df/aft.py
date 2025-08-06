@@ -31,6 +31,7 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
                                        get_avail_mem)
@@ -160,12 +161,18 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     __init__ = aft_cpu.AFTDF.__init__
     dump_flags = aft_cpu.AFTDF.dump_flags
-    reset = aft_cpu.AFTDF.reset
     check_sanity = aft_cpu.AFTDF.check_sanity
     build = aft_cpu.AFTDF.build
 
     get_nuc = get_nuc
     get_pp = get_pp
+
+    def reset(self, cell=None):
+        if cell is not None:
+            self.kpts = reset_kpts(self, cell)
+            self.cell = cell
+        self._rsh_df = {}
+        return self
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular

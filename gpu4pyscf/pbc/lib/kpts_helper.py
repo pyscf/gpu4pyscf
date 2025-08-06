@@ -14,6 +14,7 @@
 
 import numpy as np
 from pyscf import lib
+from pyscf.pbc.lib.kpts import KPoints
 
 def conj_images_in_bvk_cell(kmesh, return_pair=False):
     '''
@@ -80,3 +81,23 @@ def kk_adapted_iter(kmesh):
         kpti_idx = kpt_ij_idx // nkpts
         kptj_idx = kpt_ij_idx % nkpts
         yield kp, kp_conj, kpti_idx, kptj_idx
+
+def reset_kpts(obj, cell):
+    '''
+    Update the absolute k-points of an object wrt the input cell,
+    while preserving the same fractional (scaled) k-point coordinates.
+    '''
+    if isinstance(obj.kpts, KPoints):
+        kpts = obj.kpts
+        scaled_kpts = kpts.scaled_kpts
+        if hasattr(kpts, 'reset'):
+            kpts = kpts.reset(cell)
+        else: # kpts.reset() is not available in pyscf 2.10
+            kpts.cell = cell
+            kpts.kpts = kpts.kpts_ibz = cell.get_abs_kpts(kpts.kpts_scaled)
+            kpts.build(space_group_symmetry=True,
+                       time_reversal_symmetry=kpts.time_reversal)
+    else:
+        scaled_kpts = obj.cell.get_scaled_kpts(obj.kpts)
+        kpts = cell.get_abs_kpts(scaled_kpts)
+    return kpts

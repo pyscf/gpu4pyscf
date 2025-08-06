@@ -41,6 +41,7 @@ from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import _check_kpts, AFTDF
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 from gpu4pyscf.__config__ import num_devices
 
 DEBUG = False
@@ -71,7 +72,15 @@ class GDF(lib.StreamObject):
         reset_state=True)
 
     auxbasis = df_cpu.GDF.auxbasis
-    reset = df_cpu.GDF.reset
+
+    def reset(self, cell=None):
+        if cell is not None:
+            self.kpts = reset_kpts(self, cell)
+            self.cell = cell
+        self.auxcell = None
+        self._cderi = None
+        self._rsh_df = {}
+        return self
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
