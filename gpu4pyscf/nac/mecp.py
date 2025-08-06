@@ -15,6 +15,7 @@
 import numpy as np
 from pyscf import gto
 from pyscf.geomopt import geometric_solver
+from gpu4pyscf.lib import logger
 
 
 class ConicalIntersectionOptimizer:
@@ -44,6 +45,7 @@ class ConicalIntersectionOptimizer:
         self.verbose = self.td.verbose
         self.crossing_type = crossing_type
         self.stdout = self.td.stdout
+        self.log = logger.new_logger(self, verbose)
         
         self._last_geom = None
         self._last_energy = None
@@ -100,7 +102,7 @@ class ConicalIntersectionOptimizer:
     def get_eff_energy_and_gradient(self):
         current_geom = self.mol.atom_coords(unit='bohr')
 
-        print("\n--- CI Optimizer Step (using pyscf.geomopt.geometric_solver) ---")
+        self.log.info("\n--- CI Optimizer Step (using pyscf.geomopt.geometric_solver) ---")
 
         self.mf.mol = self.mol
         self.td.mol = self.mol
@@ -114,8 +116,8 @@ class ConicalIntersectionOptimizer:
         E1 = e_states[self.states[0]-1] + self.mf.e_tot
         E2 = e_states[self.states[1]-1] + self.mf.e_tot
         
-        print(f"  Total Energies: E1={E1:.6f}, E2={E2:.6f}")
-        print(f"  Energy Gap (E2-E1): {E2-E1:.6f} Ha")
+        self.log.info(f"  Total Energies: E1={E1:.6f}, E2={E2:.6f}")
+        self.log.info(f"  Energy Gap (E2-E1): {E2-E1:.6f} Ha")
 
         # 1. Calculate analytical gradients for both states
         grad_method = self.td.nuc_grad_method()
@@ -152,10 +154,10 @@ class ConicalIntersectionOptimizer:
         # 4. Total effective gradient
         g_bar = g_proj + f
 
-        print(f"  ||Seam Grad (g_proj)||: {np.linalg.norm(g_proj):.6f}")
-        print(f"  ||Degeneracy Grad (f)||: {np.linalg.norm(f):.6f}")
-        print(f"  ||Total Effective Grad||: {np.linalg.norm(g_bar):.6f}")
-        print("----------------------------------------------------------------")
+        self.log.info(f"  ||Seam Grad (g_proj)||: {np.linalg.norm(g_proj):.6f}")
+        self.log.info(f"  ||Degeneracy Grad (f)||: {np.linalg.norm(f):.6f}")
+        self.log.info(f"  ||Total Effective Grad||: {np.linalg.norm(g_bar):.6f}")
+        self.log.info("----------------------------------------------------------------")
         
         # The optimizer minimizes a single energy value. We provide the average.
         energy_for_optimizer = (E1 + E2) / 2.0
@@ -212,4 +214,3 @@ def project_on_plane_lstsq(x3, x1, x2):
     c, _, _, _ = np.linalg.lstsq(A, x3, rcond=None)
     projection = A @ c
     return projection
-    
