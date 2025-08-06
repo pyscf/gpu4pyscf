@@ -85,9 +85,9 @@ class KnownValues(unittest.TestCase):
         tdf.nstates = 5
         tdf.kernel()
         gf = tdf.nuc_grad_method()
-        nac = tdf.nac_method()
-        nac.states = (1, 2)
-        nac.kernel()
+        nac_obj = tdf.nac_method()
+        nac_obj.states = (1, 2)
+        nac_obj.kernel()
 
         gf.state = 1
         g1 = gf.kernel()
@@ -97,7 +97,7 @@ class KnownValues(unittest.TestCase):
         x1 = g1 - g2
         x1_norm_val = np.linalg.norm(x1)
         x1_norm_vec = x1 / x1_norm_val if x1_norm_val > 1e-9 else np.zeros_like(x1)
-        x2 = nac.de_scaled
+        x2 = nac_obj.de_scaled
         x2_norm_val = np.linalg.norm(x2)
         x2_norm_vec = x2 / x2_norm_val if x2_norm_val > 1e-9 else np.zeros_like(x2)
         natom = g2.shape[0]
