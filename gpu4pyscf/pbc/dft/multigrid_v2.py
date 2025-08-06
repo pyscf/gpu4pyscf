@@ -1276,7 +1276,6 @@ def get_veff_ip1(
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     def __init__(self, cell):
         self.cell = cell
-        a = cell.lattice_vectors()
         self.mesh = cell.mesh
         self.tasks = None
         self.sorted_gaussian_pairs = None
