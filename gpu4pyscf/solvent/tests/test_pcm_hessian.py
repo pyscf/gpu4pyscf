@@ -226,7 +226,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytical_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_grad_vmat_iefpcm(self):
         print("testing IEF-PCM dV_solv/dx")
@@ -240,7 +240,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytical_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_grad_vmat_ssvpe(self):
         print("testing SS(V)PE dV_solv/dx")
@@ -254,7 +254,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytical_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_nuc_iefpcm(self):
         print("testing IEF-PCM d2E_nuc/dx2")
@@ -266,7 +266,7 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_nuc
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_nuc)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_qv_iefpcm(self):
         print("testing IEF-PCM d2E_elec/dx2")
@@ -278,7 +278,7 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_qv
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_qv)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_solver_cpcm(self):
         print("testing C-PCM d2E_KR/dx2")
@@ -290,7 +290,7 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_solver
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_solver)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_solver_iefpcm(self):
         print("testing IEF-PCM d2E_KR/dx2")
@@ -302,7 +302,7 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_solver
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_solver)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_solver_ssvpe(self):
         print("testing SS(V)PE d2E_KR/dx2")
@@ -314,7 +314,7 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_solver
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_solver)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):

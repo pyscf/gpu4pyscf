@@ -203,6 +203,11 @@ def asarray(a, **kwargs):
 
     return cupy.asarray(a, **kwargs)
 
+def ensure_numpy(a):
+    if isinstance(a, cupy.ndarray):
+        a = a.get()
+    return np.asarray(a)
+
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
     if isinstance(a, lib.NPArrayWithTag):
