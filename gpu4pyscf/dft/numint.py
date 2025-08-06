@@ -1528,18 +1528,24 @@ def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
 def batch_square(a):
     return a[0]**2 + a[1]**2 + a[2]**2
 
-def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
+def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
+                verbose=None, spin=None):
     '''
     Different from PySCF, this function employ cuda version libxc
     '''
     if omega is None: omega = ni.omega
     if xctype is None: xctype = ni._xc_type(xc_code)
 
-    spin_polarized = rho.ndim >= 2 and rho.shape[0] == 2
-    xcfuns = ni._init_xcfuns(xc_code, spin_polarized)
+    if spin is None:
+        spin_polarized = rho.ndim >= 2 and rho.shape[0] == 2
+        if spin_polarized:
+            spin = 1
+        else:
+            spin = 0
+    xcfuns = ni._init_xcfuns(xc_code, spin)
 
     inp = {}
-    if not spin_polarized:
+    if spin == 0:
         assert rho.dtype == np.float64
         if xctype == 'LDA':
             inp['rho'] = rho.ravel()
@@ -1599,23 +1605,16 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
     kxc = None
 
     exc = ret_full["zk"]
-    if not spin_polarized:
-        vxc = [ret_full[label] for label in vxc_labels if label in ret_full]
-        if do_fxc:
-            fxc = [ret_full[label] for label in fxc_labels if label in ret_full]
-        if do_kxc:
-            kxc = [ret_full[label] for label in kxc_labels if label in ret_full]
-    else:
-        vxc = [ret_full[label] for label in vxc_labels if label in ret_full]
-        if do_fxc:
-            fxc = [ret_full[label] for label in fxc_labels if label in ret_full]
-        if do_kxc:
-            kxc = [ret_full[label] for label in kxc_labels if label in ret_full]
-    if do_kxc:
-        kxc = xc_deriv.transform_kxc(rho, fxc, kxc, xctype, spin_polarized)
+    vxc = [ret_full[label] for label in vxc_labels if label in ret_full]
     if do_fxc:
-        fxc = xc_deriv.transform_fxc(rho, vxc, fxc, xctype, spin_polarized)
-    vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin_polarized)
+        fxc = [ret_full[label] for label in fxc_labels if label in ret_full]
+    if do_kxc:
+        kxc = [ret_full[label] for label in kxc_labels if label in ret_full]
+    if do_kxc:
+        kxc = xc_deriv.transform_kxc(rho, fxc, kxc, xctype, spin)
+    if do_fxc:
+        fxc = xc_deriv.transform_fxc(rho, vxc, fxc, xctype, spin)
+    vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin)
     return exc, vxc, fxc, kxc
 
 def _init_xcfuns(xc_code, spin):

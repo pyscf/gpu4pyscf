@@ -140,10 +140,19 @@ class SCF(mol_hf.SCF):
         if self.rsjk:
             self.rsjk.kpts = kpts
 
+    def reset(self, cell=None):
+        '''Reset cell and relevant attributes associated to the old cell object'''
+        mol_hf.SCF.reset(self, cell)
+        if cell is not None:
+            self.cell = cell
+        self.with_df.reset(cell)
+        if self.rsjk is not None:
+            self.rsjk.reset(cell)
+        return self
+
     kpts = hf_cpu.SCF.kpts
     mol = hf_cpu.SCF.mol # required by the hf.kernel
 
-    reset = hf_cpu.SCF.reset
     build = hf_cpu.SCF.build
     dump_flags = hf_cpu.SCF.dump_flags
 

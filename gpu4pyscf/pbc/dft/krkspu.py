@@ -28,6 +28,7 @@ from pyscf.pbc import gto as pgto
 from gpu4pyscf.dft.rkspu import _set_U, reference_mol
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.dft import krks
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract
 
 def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
@@ -73,7 +74,7 @@ def _add_Vhubbard(vxc, ks, dm, kpts):
     kpts = kpts.reshape(-1, 3)
     nkpts = len(kpts)
 
-    ovlp = asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
+    ovlp = int1e.int1e_ovlp(cell, kpts)
     U_idx, U_val, U_lab = _set_U(cell, pcell, ks.U_idx, ks.U_val)
     assert ks.C_ao_lo is None
     C_ao_lo = _make_minao_lo(cell, pcell, kpts)
@@ -163,15 +164,17 @@ def _make_minao_lo(cell, minao_ref='minao', kpts=None):
         pcell = reference_mol(cell, minao_ref)
     else:
         pcell = minao_ref
-    ovlp = asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
-    s12 = asarray(pgto.cell.intor_cross('int1e_ovlp', cell, pcell, kpts=kpts))
-    C_minao = []
+    s = int1e.int1e_ovlp(cell+pcell, kpts)
+    nao = cell.nao
+    ovlp = s[:,:nao,:nao]
+    s12 = s[:,:nao,nao:]
+    C_minao = cp.empty_like(s12)
     for k, S_k in enumerate(ovlp):
         C = cp.linalg.solve(S_k, s12[k])
         S0 = C.conj().T.dot(S_k).dot(C)
         w2, v = cp.linalg.eigh(S0)
-        C_minao.append(C.dot((v*cp.sqrt(1./w2)).dot(v.conj().T)))
-    return cp.asarray(C_minao)
+        C_minao[k] = C.dot((v*cp.sqrt(1./w2)).dot(v.conj().T))
+    return C_minao
 
 class KRKSpU(krks.KRKS):
     """
@@ -275,7 +278,7 @@ def linear_response_u(mf_plus_u, alphalist=(0.02, 0.05, 0.08)):
     nkpts = len(kpts)
     cell = mf.cell
 
-    ovlp = asarray(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
+    ovlp = int1e.int1e_ovlp(cell, kpts)
     pcell = reference_mol(cell, mf.minao_ref)
     U_idx, U_val, U_lab = _set_U(cell, pcell, mf.U_idx, mf.U_val)
     if mf.C_ao_lo is None:
