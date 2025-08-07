@@ -107,6 +107,9 @@ class KnownValues(unittest.TestCase):
         print('------hybrid GGA with D4 testing--------')
         _check_grad(mol_sph, xc='B3LYP', disp='d4')
 
+    def test_grad_hf(self):
+        print('------HF testing--------')
+        _check_grad(mol_sph, xc='hf', disp=None)
 if __name__ == "__main__":
     print("Full Tests for UKS Gradient")
     unittest.main()

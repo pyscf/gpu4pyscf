@@ -17,8 +17,8 @@ from pyscf.dft import uks as uks_cpu
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import rks
-from gpu4pyscf.scf import hf, uhf
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.scf import hf, uhf, j_engine
+from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 from gpu4pyscf.lib import utils
 
 
@@ -28,12 +28,14 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     '''
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
+    if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
+        dm = cupy.asarray((dm*.5,dm*.5))
+    else:
+        dm = asarray(dm)
     assert dm.ndim == 3
     t0 = logger.init_timer(ks)
     rks.initialize_grids(ks, mol, cupy.asarray(dm[0]+dm[1]))
 
-    if hasattr(ks, 'screen_tol') and ks.screen_tol is not None:
-        ks.direct_scf_tol = ks.screen_tol
     ground_state = getattr(dm, 'ndim', 0) == 3
 
     ni = ks._numint
@@ -56,53 +58,43 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             logger.debug(ks, 'nelec with nlc grids = %s', n)
         t0 = logger.timer(ks, 'vxc', *t0)
 
-    if not ni.libxc.is_hybrid_xc(ks.xc):
-        vk = None
-        if (ks._eri is None and ks.direct_scf and
-            getattr(vhf_last, 'vj', None) is not None):
-            dm_last = cupy.asarray(dm_last)
-            dm = cupy.asarray(dm)
-            assert dm_last.ndim == 0 or dm_last.ndim == dm.ndim
-            ddm = dm - dm_last
-            vj = ks.get_j(mol, ddm[0]+ddm[1], hermi)
-            vj += vhf_last.vj
-        else:
-            vj = ks.get_j(mol, dm[0]+dm[1], hermi)
-        vxc += vj
-    else:
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
-        if (ks._eri is None and ks.direct_scf and
-            getattr(vhf_last, 'vk', None) is not None):
-            dm_last = cupy.asarray(dm_last)
-            dm = cupy.asarray(dm)
-            assert dm_last.ndim == 0 or dm_last.ndim == dm.ndim
-            ddm = dm - dm_last
-            vj, vk = ks.get_jk(mol, ddm, hermi)
-            vk *= hyb
-            if abs(omega) > 1e-10:  # For range separated Coulomb operator
-                vklr = ks.get_k(mol, ddm, hermi, omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vj = vj[0] + vj[1] + vhf_last.vj
-            vk += vhf_last.vk
-        else:
-            vj, vk = ks.get_jk(mol, dm, hermi)
-            vj = vj[0] + vj[1]
-            vk *= hyb
-            if abs(omega) > 1e-10:
-                vklr = ks.get_k(mol, dm, hermi, omega=omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-        vxc += vj - vk
-
-        if ground_state:
-            exc -=(cupy.einsum('ij,ji', dm[0], vk[0]).real +
-                   cupy.einsum('ij,ji', dm[1], vk[1]).real) * .5
+    dm_orig = dm
+    vj_last = getattr(vhf_last, 'vj', None)
+    if vj_last is not None:
+        dm = asarray(dm) - asarray(dm_last)
+    vj = ks.get_j(mol, dm[0]+dm[1], hermi)
+    if vj_last is not None:
+        vj += asarray(vj_last)
+    vxc += vj
     if ground_state:
-        ecoul = cupy.einsum('ij,ji', dm[0]+dm[1], vj).real * .5
+        ecoul = float(cupy.einsum('nij,ij->', dm_orig, vj).real) * .5
     else:
         ecoul = None
-    t0 = logger.timer_debug1(ks, 'jk total', *t0)
+
+    vk = None
+    if ni.libxc.is_hybrid_xc(ks.xc):
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
+        if omega == 0:
+            vk = ks.get_k(mol, dm, hermi)
+            vk *= hyb
+        elif alpha == 0: # LR=0, only SR exchange
+            vk = ks.get_k(mol, dm, hermi, omega=-omega)
+            vk *= hyb
+        elif hyb == 0: # SR=0, only LR exchange
+            vk = ks.get_k(mol, dm, hermi, omega=omega)
+            vk *= alpha
+        else: # SR and LR exchange with different ratios
+            vk = ks.get_k(mol, dm, hermi)
+            vk *= hyb
+            vklr = ks.get_k(mol, dm, hermi, omega=omega)
+            vklr *= (alpha - hyb)
+            vk += vklr
+        if vj_last is not None:
+            vk += asarray(vhf_last.vk)
+        vxc -= vk
+        if ground_state:
+            exc -= float(cupy.einsum('nij,nij', dm_orig, vk).real) * .5
+    t0 = logger.timer_debug1(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 

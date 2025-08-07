@@ -157,29 +157,30 @@ class _VHFOpt(jk._VHFOpt):
         assert self.tile == 1
         self._tile_q_cond_cpu = q_cond
 
-        if mol.omega < 0:
-            raise NotImplementedError
         log.timer('Initialize q_cond', *cput0)
         return self
 
     def get_j(self, dms, verbose):
-        if callable(dms):
-            dms = dms()
         log = logger.new_logger(self.mol, verbose)
         sorted_mol = self.sorted_mol
         prim_mol = self.prim_mol
-        p2c_mapping = self.prim_to_ctr_mapping
+        # Small arrays pair_mappings, pair_loc etc may the occupy freed memory
+        # created in dms(). Preallocate workspace for these arrays
+        workspace = cp.empty(prim_mol.nbas**2*2)
+        workspace = None # noqa: F841
+        if callable(dms):
+            dms = dms()
+        p2c_mapping = cp.asarray(self.prim_to_ctr_mapping)
         ao_loc = sorted_mol.ao_loc
         n_dm, nao = dms.shape[:2]
         assert dms.ndim == 3 and nao == ao_loc[-1]
-        assert n_dm == 1
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
         q_cutoff = log_cutoff - log_max_dm
         dm_cond = dm_cond[p2c_mapping[:,None],p2c_mapping]
 
-        l_counts = np.bincount(prim_mol._bas[:,ANG_OF])
+        l_counts = np.bincount(prim_mol._bas[:,ANG_OF])[:LMAX+1]
         n_groups = len(l_counts)
         l_ctr_bas_loc = np.cumsum(np.append(0, l_counts))
         l_symb = lib.param.ANGULAR
@@ -196,6 +197,7 @@ class _VHFOpt(jk._VHFOpt):
                 pair_lst.append(pair_ij_mapping)
                 p0, p1 = p1, p1 + pair_ij_mapping.size
                 task_offsets[i,j] = p0
+        pair_mapping_size = p1
         pair_lst = cp.asarray(cp.hstack(pair_lst), dtype=np.int32)
 
         ls = cp.asarray(prim_mol._bas[:,ANG_OF], dtype=np.int32)
@@ -203,19 +205,24 @@ class _VHFOpt(jk._VHFOpt):
         ll = ll.ravel()[pair_lst] # drops the pairs that do not contribute to integrals
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
         pair_loc = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
-        xyz_size = None
+        xyz_size = ls = ll = None
 
         pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)
         pair_loc = pair_loc.get()
+        dm_xyz_size = pair_loc[-1]
+        log.debug1('dm_xyz_size = %s, nao = %s, pair_mapping_size = %s',
+                   dm_xyz_size, nao, pair_mapping_size)
         dms = dms.get()
-        dm_xyz = np.zeros(pair_loc[-1])
+        dm_xyz = np.zeros((n_dm, dm_xyz_size))
         # Must use this modified _env to ensure the consistency with GPU kernel
         # In this _env, normalization coefficients for s and p funcitons are scaled.
         _env = _scale_sp_ctr_coeff(prim_mol)
         libvhf_md.Et_dot_dm(
-            dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
+            dm_xyz.ctypes, dms.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
+            ao_loc.ctypes, pair_loc.ctypes,
             pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
-            p2c_mapping.ctypes,
+            self.prim_to_ctr_mapping.ctypes,
             ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
             prim_mol._bas.ctypes, _env.ctypes)
 
@@ -226,7 +233,7 @@ class _VHFOpt(jk._VHFOpt):
                     for l in range(k+1):
                         if i == k and j < l: continue
                         tasks.append((i,j,k,l))
-        schemes = {t: _md_j_engine_quartets_scheme(t) for t in tasks}
+        schemes = {t: _md_j_engine_quartets_scheme(t, n_dm=n_dm) for t in tasks}
 
         def proc(dm_xyz):
             device_id = cp.cuda.device.get_device_id()
@@ -281,8 +288,8 @@ class _VHFOpt(jk._VHFOpt):
                 err = kern(
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    rys_envs, (ctypes.c_int*5)(*scheme),
+                    ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
+                    rys_envs, (ctypes.c_int*6)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(pair_ij_mapping.size),
                     ctypes.c_int(pair_kl_mapping.size),
@@ -330,9 +337,11 @@ class _VHFOpt(jk._VHFOpt):
         vj_xyz = vj_xyz.get()
         vj = np.zeros_like(dms)
         libvhf_md.jengine_dot_Et(
-            vj.ctypes, vj_xyz.ctypes, ao_loc.ctypes, pair_loc.ctypes,
+            vj.ctypes, vj_xyz.ctypes,
+            ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
+            ao_loc.ctypes, pair_loc.ctypes,
             pair_lst.ctypes, ctypes.c_int(len(pair_lst)),
-            p2c_mapping.ctypes,
+            self.prim_to_ctr_mapping.ctypes,
             ctypes.c_int(prim_mol.nbas), ctypes.c_int(sorted_mol.nbas),
             prim_mol._bas.ctypes, _env.ctypes)
         vj = transpose_sum(asarray(vj))
@@ -343,12 +352,12 @@ class _VHFOpt(jk._VHFOpt):
             mol = self.sorted_mol
             log.debug3('Integrals for %s functions on CPU',
                        lib.param.ANGULAR[LMAX+1])
-            scripts = ['ji->s2kl']
+            scripts = 'ji->s2kl'
             shls_excludes = [0, h_shls[0]] * 4
             vs_h = _vhf.direct_mapdm('int2e_cart', 's8', scripts,
                                      dms, 1, mol._atm, mol._bas, mol._env,
                                      shls_excludes=shls_excludes)
-            vj1 = asarray(vs_h[0])
+            vj1 = asarray(vs_h)
             vj += hermi_triu(vj1)
         return vj
 
@@ -390,50 +399,48 @@ def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             pair_mappings[i,j] = (t_ij[mask][idx], qd_tile_addrs, qd_batch_max)
     return pair_mappings
 
-def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE):
+VJ_IJ_REGISTERS = 9
+def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
+    if n_dm > 1:
+        n_dm = 4
+
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
     lij = li + lj
     lkl = lk + ll
     nf3ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3kl = (lkl+1)*(lkl+2)*(lkl+3)//6
-    unit = order+1 + (order+1)*(order+2)*(2*order+3)//6
+    Rt_size = (order+1)*(order+2)*(2*order+3)//6
+    gout_stride_min = _nearest_power2(
+        int((nf3ij+VJ_IJ_REGISTERS-1) / VJ_IJ_REGISTERS), False)
+
+    unit = order+1 + Rt_size
+    #counts = shm_size // ((unit+gout_stride_min-1)//gout_stride_min*8)
     counts = shm_size // (unit*8)
     threads = THREADS
-    if counts >= threads:
-        nsq = threads
+    if counts * gout_stride_min >= threads:
+        nsq = threads // gout_stride_min
     else:
         nsq = _nearest_power2(counts)
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
-    tilex = tiley = min(64, 128 // (lkl+1))
-    s4 = False # s4 seems not faster
-    if li == lk and lj == ll:
-        if s4:
-            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
-        else:
-            ij = kl
-            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
-    else:
-        cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
-    while (nsq * unit + cache_size) * 8 > shm_size:
-        nsq //= 2
-        kl = _nearest_power2(int(nsq**.5))
-        ij = nsq // kl
-        if li == lk and lj == ll:
-            if s4:
-                cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij + kl * nf3kl
-            else:
-                ij = kl
-                cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
-        else:
-            cache_size = ij * 4 + kl*tiley * 4 + ij * nf3ij * 2 + kl * nf3kl * 2
-    gout_stride = threads // nsq
-
-    # Adjust tiley, to effectively utilize the 28 registers per thread as cache
-    _KL_REGISTERS = 28 # see md_contract_j.cu
-    tiley = min(64, tiley, int(ij * gout_stride * _KL_REGISTERS / nf3kl))
+    tilex = 48
+    # Guess number of batches for kl indices
+    tiley = (shm_size//8 - nsq*unit - (ij*4+ij*nf3ij*n_dm)) // (kl*4+kl*nf3kl*n_dm)
+    tiley = min(tilex, tiley)
+    tiley = tiley // 4 * 4
+    if tiley < 4:
+        tiley = 4
     if li == lk and lj == ll:
         tilex = tiley
-    return ij, kl, gout_stride, tilex, tiley
+    cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
+    while (nsq * unit + cache_size) * 8 > shm_size:
+        nsq //= 2
+        assert nsq >= 1
+        kl = _nearest_power2(int(nsq**.5))
+        ij = nsq // kl
+        cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
+    gout_stride = threads // nsq
+    buflen = nsq*unit+cache_size
+    return ij, kl, gout_stride, tilex, tiley, buflen

@@ -103,7 +103,7 @@ class VHFOpt(_vhf.VHFOpt):
         except AttributeError:
             pass
 
-    def build(self, cutoff=1e-14, group_size=None, group_size_aux=None,
+    def build(self, cutoff=1e-14, group_size=None, group_size_aux=None, 
               diag_block_with_triu=False, aosym=False, verbose=None):
         '''
         int3c2e is based on int2e with (ao,ao|aux,1)
@@ -142,7 +142,7 @@ class VHFOpt(_vhf.VHFOpt):
 
         # shift atom indices back to actual atom indices
         nbas = _sorted_mol.nbas + 1
-        _tot_mol._bas[nbas:, gto.ATOM_OF] -= (mol.natm+1)
+        _tot_mol._bas[nbas:, gto.ATOM_OF] -= (mol.natm+1) 
         self._tot_mol = _tot_mol
 
         # Initialize vhfopt after reordering mol._bas
@@ -295,7 +295,6 @@ class VHFOpt(_vhf.VHFOpt):
                 indices = np.arange(n)
             idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
             fancy_index.append(indices.reshape(idx_shape))
-        fancy_index = [cupy.asarray(idx) for idx in fancy_index]
         return mat[tuple(fancy_index)]
 
     def unsort_orbitals(self, sorted_mat, axis=[], aux_axis=[]):
@@ -498,6 +497,7 @@ def loop_int3c2e_general(intopt, task_list=None, ip_type='', omega=None, stream=
 
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
+    assert omega >= 0
 
     nao = intopt._sorted_mol.nao
     naux = intopt._sorted_auxmol.nao
@@ -600,6 +600,7 @@ def loop_aux_jk(intopt, ip_type='', omega=None, stream=None):
 
     if omega is None: omega = 0.0
     if stream is None: stream = cupy.cuda.get_current_stream()
+    assert omega >= 0
 
     nao = intopt.mol.nao
     nao_cart = intopt._sorted_mol.nao
@@ -1334,6 +1335,7 @@ def get_int3c2e_general(mol, auxmol=None, ip_type='', auxbasis='weigend+etb', di
     if stream is None: stream = cupy.cuda.get_current_stream()
     if auxmol is None:
         auxmol = df.addons.make_auxmol(mol, auxbasis)
+    assert omega >= 0
 
     nao = mol.nao
     naux = auxmol.nao
@@ -1462,6 +1464,7 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
     '''
     if stream is None: stream = cupy.cuda.get_current_stream()
     if omega is None: omega = 0.0
+    assert omega >= 0
     nao_cart = intopt._sorted_mol.nao
     naux_cart = intopt._sorted_auxmol.nao
     norb_cart = nao_cart + naux_cart + 1

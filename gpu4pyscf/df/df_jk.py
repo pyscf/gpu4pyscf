@@ -22,7 +22,8 @@ import numpy
 from pyscf import lib, __config__
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, transpose_sum, reduce_to_device
+from gpu4pyscf.lib.cupy_helper import (
+    contract, transpose_sum, reduce_to_device, tag_array)
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.df import df, int3c2e
@@ -114,14 +115,16 @@ class _DFHF:
         self.with_df.reset(mol)
         return super().reset(mol)
 
+    def get_j(self, mol=None, dm=None, hermi=1, omega=None):
+        return self.with_df.get_jk(dm, hermi, True, False, self.direct_scf_tol, omega)[0]
+
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):
         if dm is None: dm = self.make_rdm1()
         if self.with_df and self.only_dfj:
             vj = vk = None
             if with_j:
-                vj, vk = self.with_df.get_jk(dm, hermi, True, False,
-                                             self.direct_scf_tol, omega)
+                vj = self.get_j(mol, dm, hermi, omega)
             if with_k:
                 vk = super().get_jk(mol, dm, hermi, False, True, omega)[1]
         elif self.with_df:
@@ -132,6 +135,11 @@ class _DFHF:
         return vj, vk
 
     def nuc_grad_method(self):
+        if self.istype('_Solvation'):
+            raise NotImplementedError(
+                'Gradients of solvent are not computed. '
+                'Solvent must be applied after density fitting method, e.g.\n'
+                'mf = mol.RKS().to_gpu().density_fit().PCM()')
         if isinstance(self, rks.RKS):
             from gpu4pyscf.df.grad import rks as rks_grad
             return rks_grad.Gradients(self)
@@ -149,6 +157,11 @@ class _DFHF:
     Gradients = nuc_grad_method
 
     def Hessian(self):
+        if self.istype('_Solvation'):
+            raise NotImplementedError(
+                'Hessian of solvent are not computed. '
+                'Solvent must be applied after density fitting method, e.g.\n'
+                'mf = mol.RKS().to_gpu().density_fit().PCM()')
         from gpu4pyscf.dft.rks import KohnShamDFT
         if isinstance(self, hf.RHF):
             if isinstance(self, KohnShamDFT):
@@ -177,32 +190,84 @@ class _DFHF:
         '''
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
+        assert not self.direct_scf
 
         # for DFT
         if isinstance(self, rks.KohnShamDFT):
-            if dm.ndim == 2:
-                return rks.get_veff(self, dm=dm)
-            elif dm.ndim == 3:
-                return uks.get_veff(self, dm=dm)
+            t0 = logger.init_timer(self)
+            rks.initialize_grids(self, mol, dm)
+            ni = self._numint
+            if dm.ndim == 2: # RKS
+                n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
+                logger.debug(self, 'nelec by numeric integration = %s', n)
+                if self.do_nlc():
+                    if ni.libxc.is_nlc(self.xc):
+                        xc = self.xc
+                    else:
+                        assert ni.libxc.is_nlc(self.nlc)
+                        xc = self.nlc
+                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
+                    exc += enlc
+                    vxc += vnlc
+                    logger.debug(self, 'nelec with nlc grids = %s', n)
+                t0 = logger.timer_debug1(self, 'vxc tot', *t0)
+
+                if not ni.libxc.is_hybrid_xc(self.xc):
+                    vj = self.get_j(mol, dm, hermi)
+                    vxc += vj
+                else:
+                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    vj, vk = self.get_jk(mol, dm, hermi)
+                    vxc += vj
+                    vk *= hyb
+                    if omega != 0:
+                        vklr = self.get_k(mol, dm, hermi, omega=abs(omega))
+                        vklr *= (alpha - hyb)
+                        vk += vklr
+                    vxc -= vk * .5
+                    exc -= cupy.einsum('ij,ji', dm, vk).real * .25
+                ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
+
+            elif dm.ndim == 3: # UKS
+                n, exc, vxc = ni.nr_uks(mol, self.grids, self.xc, dm)
+                logger.debug(self, 'nelec by numeric integration = %s', n)
+                if self.do_nlc():
+                    if ni.libxc.is_nlc(self.xc):
+                        xc = self.xc
+                    else:
+                        assert ni.libxc.is_nlc(self.nlc)
+                        xc = self.nlc
+                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm[0]+dm[1])
+                    exc += enlc
+                    vxc += vnlc
+                    logger.debug(self, 'nelec with nlc grids = %s', n)
+                t0 = logger.timer(self, 'vxc', *t0)
+
+                if not ni.libxc.is_hybrid_xc(self.xc):
+                    vj = self.get_j(mol, dm[0]+dm[1], hermi)
+                    vxc += vj
+                else:
+                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    vj, vk = self.get_jk(mol, dm, hermi)
+                    vj = vj[0] + vj[1]
+                    vxc += vj
+                    vk *= hyb
+                    if abs(omega) > 1e-10:
+                        vklr = self.get_k(mol, dm, hermi, omega=omega)
+                        vklr *= (alpha - hyb)
+                        vk += vklr
+                    vxc -= vk
+                    exc -= cupy.einsum('sij,sji->', dm, vk).real * .5
+                ecoul = cupy.einsum('sij,ji->', dm, vj).real * .5
+            t0 = logger.timer_debug1(self, 'jk total', *t0)
+            return tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
 
         if dm.ndim == 2:
-            if self.direct_scf:
-                ddm = cupy.asarray(dm) - dm_last
-                vj, vk = self.get_jk(mol, ddm, hermi=hermi)
-                return vhf_last + vj - vk * .5
-            else:
-                vj, vk = self.get_jk(mol, dm, hermi=hermi)
-                return vj - vk * .5
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            return vj - vk * .5
         elif dm.ndim == 3:
-            if self.direct_scf:
-                ddm = cupy.asarray(dm) - dm_last
-                vj, vk = self.get_jk(mol, ddm, hermi=hermi)
-                vhf = vj[0] + vj[1] - vk
-                vhf += cupy.asarray(vhf_last)
-                return vhf
-            else:
-                vj, vk = self.get_jk(mol, dm, hermi=hermi)
-                return vj[0] + vj[1] - vk
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            return vj[0] + vj[1] - vk
         else:
             raise NotImplementedError("Please check the dimension of the density matrix, it should not reach here.")
 
@@ -247,7 +312,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
             for i in range(nset):
                 occ_idx = mo_occ[i] > 0
                 occ_coeff[i] = mo_coeff[i][:,occ_idx] * mo_occ[i][occ_idx]**0.5
-                nocc += mo_occ[i].sum()
+                nocc += int(mo_occ[i].sum())
             blksize = dfobj.get_blksize(extra=nao*nocc)
             if with_j:
                 vj_packed = cupy.zeros_like(dm_sparse)
@@ -412,7 +477,6 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     intopt = dfobj.intopt
     dms = intopt.sort_orbitals(dms, axis=[1,2])
 
-    cupy.cuda.get_current_stream().synchronize()
     if getattr(dms_tag, 'mo_coeff', None) is not None:
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
@@ -420,6 +484,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
         mo_coeff = mo_coeff.reshape(-1,nao,nmo)
         mo_occ   = mo_occ.reshape(-1,nmo)
         mo_coeff = intopt.sort_orbitals(mo_coeff, axis=[1])
+        cupy.cuda.get_current_stream().synchronize()
 
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -441,6 +506,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
             mo1s = [mo1s]
         occ_coeffs = [intopt.sort_orbitals(occ_coeff, axis=[0]) for occ_coeff in occ_coeffs]
         mo1s = [intopt.sort_orbitals(mo1, axis=[1]) for mo1 in mo1s]
+        cupy.cuda.get_current_stream().synchronize()
 
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -454,6 +520,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
 
     # general K matrix with density matrix
     else:
+        cupy.cuda.Stream.null.synchronize()
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
             for device_id in range(num_devices):

@@ -23,7 +23,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import numint, gen_grid, rks
 from gpu4pyscf.scf import hf_lowmem, jk, j_engine
 from gpu4pyscf.lib.cupy_helper import (
-    tag_array, pack_tril, get_avail_mem, asarray)
+    tag_array, pack_tril, asarray)
 from pyscf import __config__
 
 __all__ = [
@@ -56,6 +56,7 @@ class RKS(rks.RKS):
     make_wfn = hf_lowmem.RHF.make_wfn
     make_rdm1 = hf_lowmem.RHF.make_rdm1
     _delta_rdm1 = hf_lowmem.RHF._delta_rdm1
+    _eigh = hf_lowmem.RHF._eigh
 
     def __init__(self, mol, xc='LDA,VWN'):
         hf_lowmem.RHF.__init__(self, mol)
@@ -85,9 +86,9 @@ class RKS(rks.RKS):
         else:
             dm = dm_or_wfn
         initialize_grids(self, mol, dm)
-        mem_avail = get_avail_mem()
-        log.debug1('available GPU memory for rks.get_veff: %.3f GB',
-                   mem_avail/1e9)
+        if log.verbose >= logger.DEBUG1:
+            mem_avail = log.print_mem_info()
+            log.debug1('available GPU memory for rks.get_veff: %.3f GB', mem_avail/1e9)
 
         ni = self._numint
         n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
@@ -107,16 +108,18 @@ class RKS(rks.RKS):
 
         omega = mol.omega
         if omega in self._opt_gpu:
-            vhfopt, jopt = self._opt_gpu[omega]
+            vhfopt = self._opt_gpu[omega]
         else:
-            vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
-            self._opt_gpu[omega] = (vhfopt, jopt)
+            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+        if omega in self._opt_jengine:
+            jopt = self._opt_jengine[omega]
+        else:
+            self._opt_jengine[omega] = jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
 
         cp.get_default_memory_pool().free_all_blocks()
-        mem_avail = get_avail_mem()
-        log.debug1('available GPU memory for get_jk in rks.get_veff: %.3f GB',
-                   mem_avail/1e9)
+        if log.verbose >= logger.DEBUG1:
+            mem_avail = log.print_mem_info()
+            log.debug1('available GPU memory for get_jk in rks.get_veff: %.3f GB', mem_avail/1e9)
 
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, jopt)
         vj = jopt.get_j(dm, log)
@@ -166,7 +169,7 @@ class RKS(rks.RKS):
             vk = vk.get()
 
         vxc = vxc.get()
-        log.timer_debug1('jk total', *cput1)
+        log.timer_debug1('veff', *cput0)
         vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
         return vxc
 
@@ -214,15 +217,14 @@ def initialize_grids(ks, mol=None, dm_or_wfn=None):
             ks.grids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.grids)
         t0 = logger.timer_debug1(ks, 'setting up grids', *t0)
 
-        if ks.do_nlc() and ks.nlcgrids.coords is None:
-            if ks.nlcgrids.coords is None:
-                t0 = logger.init_timer(ks)
-                #ks.nlcgrids.build(with_non0tab=True)
-                ks.nlcgrids.build()
-                ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
-                ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
-                if ks.small_rho_cutoff > 1e-20:
-                    # Filter grids the first time setup grids
-                    ks.nlcgrids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.nlcgrids)
-                t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
+    if ks.do_nlc() and ks.nlcgrids.coords is None:
+        t0 = logger.init_timer(ks)
+        #ks.nlcgrids.build(with_non0tab=True)
+        ks.nlcgrids.build()
+        ks.nlcgrids.weights = asarray(ks.nlcgrids.weights)
+        ks.nlcgrids.coords = asarray(ks.nlcgrids.coords)
+        if ks.small_rho_cutoff > 1e-20:
+            # Filter grids the first time setup grids
+            ks.nlcgrids = rks.prune_small_rho_grids_(ks, ks.mol, dm_or_wfn, ks.nlcgrids)
+        t0 = logger.timer_debug1(ks, 'setting up nlc grids', *t0)
     return ks

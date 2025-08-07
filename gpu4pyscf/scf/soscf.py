@@ -553,7 +553,6 @@ class _CIAH_SOSCF:
 
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
 
     def __init__(self, mf):
         self.__dict__.update(mf.__dict__)
@@ -638,6 +637,25 @@ class _CIAH_SOSCF:
 
     def rotate_mo(self, mo_coeff, u, log=None):
         return mo_coeff.dot(u)
+
+    def to_cpu(self):
+        return self.undo_soscf().to_cpu()
+
+    def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
+        '''Approximate the orbital Hessian using density fitting integrals.
+
+        This method applies the density fitting approximation to the SOSCF
+        accelerator rather than the mean-field instance itself. It specifically
+        affects the computation of the orbital Hessian.
+        '''
+        return self.approx_hessian(auxbasis, with_df, only_dfj)
+
+    def approx_hessian(self, auxbasis=None, with_df=None, only_dfj=False):
+        '''Approximate the orbital Hessian using density fitting integrals.'''
+        import gpu4pyscf.df.df_jk
+        logger.debug(self, 'Approximate the orbital hessian using DF integrals')
+        return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
+
 
 class _SecondOrderROHF(_CIAH_SOSCF):
     gen_g_hop = gen_g_hop_rohf

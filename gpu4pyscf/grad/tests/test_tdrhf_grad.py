@@ -224,6 +224,8 @@ class KnownValues(unittest.TestCase):
                         [-2.1596471752992e-16, -7.1515265578123e-02, -5.2533046857686e-02]])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    def test_grad_tdhf_scanner(self):
+        pass
 
 if __name__ == "__main__":
     print("Full Tests for TD-RHF Gradient")

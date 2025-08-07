@@ -18,16 +18,6 @@ import copy
 import numpy as np
 import scipy.linalg
 import cupy
-print("cupy.einsum =", getattr(cupy, 'einsum', 'NOT FOUND'))
-print("CUPY LOADED FROM:", getattr(cupy, "__file__", "NO __file__"))
-import sys
-print("sys.path:")
-for p in sys.path:
-    print("  ", p)
-print("cupy module:", cupy)
-print("cupy module file:", getattr(cupy, '__file__', 'No __file__ attribute'))
-print("cupy attributes:", dir(cupy))
-
 from pyscf import gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import block_c2s_diag, cart2sph, block_diag, contract, load_library

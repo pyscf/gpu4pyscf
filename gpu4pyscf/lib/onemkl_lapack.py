@@ -46,12 +46,12 @@ libonemkl.onemkl_zhegvd_scratchpad_size.argtypes = [
 libonemkl.onemkl_dsygvd.argtypes = [
     ctypes.c_int,                                                   # itype
     ctypes.c_int,                                                   # n
-    np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS"), # *A
+    ctypes.c_void_p, # *A
     ctypes.c_int,                                                   # lda
-    np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS"), # *B
+    ctypes.c_void_p, # *B
     ctypes.c_int,                                                   # ldb
-    np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS"), # *w
-    np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS"), # *scratchpad
+    ctypes.c_void_p, # *w
+    ctypes.c_void_p, # *scratchpad
     ctypes.c_int                                                    # scratchpad_size
 ]
 libonemkl.onemkl_zhegvd.argtypes = [
@@ -61,7 +61,7 @@ libonemkl.onemkl_zhegvd.argtypes = [
     ctypes.c_int,                                                      # lda
     np.ctypeslib.ndpointer(dtype=np.complex128, flags="C_CONTIGUOUS"), # *B
     ctypes.c_int,                                                      # ldb
-    np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS"),    # *w
+    ctypes.c_void_p,    # *w
     np.ctypeslib.ndpointer(dtype=np.complex128, flags="C_CONTIGUOUS"), # *scratchpad
     ctypes.c_int  # scratchpad_size
 ]
@@ -81,9 +81,9 @@ libonemkl.onemkl_zpotrf_scratchpad_size.argtypes = [
 
 libonemkl.onemkl_dpotrf.argtypes = [
     ctypes.c_int, # n
-    np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS"), # *A
+    ctypes.c_void_p, # *A
     ctypes.c_int, # lda
-    np.ctypeslib.ndpointer(dtype=np.float64, flags="C_CONTIGUOUS"), # *scratchpad
+    ctypes.c_void_p, # *scratchpad
     ctypes.c_int  # scratchpad_size
 ]
 libonemkl.onemkl_zpotrf.argtypes = [
@@ -115,9 +115,8 @@ def eigh(h, s):
 
     # Create buffers for A, B, and w
     # https://github.com/IntelPython/dpctl/issues/888
-    A_buf = dpctl.tensor.from_numpy(A)
-    B_buf = dpctl.tensor.from_numpy(B)
-    w_buf = dpctl.tensor.empty((n,), dtype=h.dtype)
+    w = dpnp.empty((n,), dtype=h.dtype)
+    print('here in eigh() from onemkl_lapack.py: ', type(A), type(B), type(w))
 
     # TODO: reuse workspace
     if (h.dtype, n) in _buffersize:
@@ -129,12 +128,11 @@ def eigh(h, s):
         else:
             fn = libonemkl.onemkl_zhegvd_scratchpad_size
         status = fn(
-            _handle,
             CUSOLVER_EIG_TYPE_1,
             n,
             n,
             n,
-            ctype.byref(lwork)
+            ctypes.byref(lwork)
         )
         lwork = lwork.value
         _buffersize[h.dtype, n] = lwork
@@ -144,38 +142,38 @@ def eigh(h, s):
     else:
         fn = libonemkl.onemkl_zhegvd
     #Allocate work-space
-    work_buf = dpctl.tensor.empty((lwork,), dtype=h.dtype)
+    work_buf = dpnp.empty((lwork,), dtype=h.dtype)
     fn(CUSOLVER_EIG_TYPE_1,
        n,
-       A_buf.data,
+       ctypes.c_void_p(A.get_array()._pointer),
        n,
-       B_buf.data,
+       ctypes.c_void_p(B.get_array()._pointer),
        n,
-       w_buf.data,
-       work_buf.data,
-       lwork
-       )
-
-    # Retrieve results
-    w = w_buf.get()
-    V = A_buf.get().T  # Transpose of A as eigenvectors
-    return w, V
+       ctypes.c_void_p(w.get_array()._pointer),
+       ctypes.c_void_p(work_buf.get_array()._pointer),
+       lwork)
+    
+    return w, A.T
 
 def cholesky(A):
     n = len(A)
     assert A.flags['C_CONTIGUOUS']
     x = A.copy()
-    x_buf = dpctl.tensor.from_numpy(x)
+    x_buf = dpctl.tensor.from_numpy(dpnp.asnumpy(x))
     if A.dtype == np.float64:
         potrf = libonemkl.onemkl_dpotrf
         potrf_bufferSize = libonemkl.onemkl_dpotrf_scratchpad_size
     else:
         potrf = libonemkl.onemkl_zpotrf
         potrf_bufferSize = libonemkl.onemkl_zpotrf_scratchpad_size
-    potrf_bufferSize(n, n, ctype.byref(buffersize))
+    potrf_bufferSize(n, n, ctypes.byref(buffersize))
     buffersize = buffersize.value
     workspace_buf = dpctl.tensor.empty((buffersize,), dtype=A.dtype)
-    potrf(n, x_buf.data, n, workspace_buf.data, buffersize)
+    potrf(n,
+          x_buf.__array_interface__['data'][0],
+          n,
+          workspace_buf.__array_interface__['data'][0],
+          buffersize)
 
     tril_dpnp(x)
     return x

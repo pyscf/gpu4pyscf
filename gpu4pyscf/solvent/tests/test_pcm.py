@@ -161,6 +161,14 @@ class KnownValues(unittest.TestCase):
         e_cpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
 
+    def test_df_and_pcm(self):
+        mol = gto.M(atom='H 0 0 0; H 0 0 1')
+        mf = mol.RHF().to_gpu().PCM()
+        with self.assertRaises(RuntimeError):
+            mf.density_fit()
+        # call approx_hessian after applying PCM is allowed
+        mf.newton().density_fit()
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()

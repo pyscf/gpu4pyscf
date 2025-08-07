@@ -25,26 +25,42 @@ from pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.solvent import pcm, smd
 from gpu4pyscf.solvent.grad import pcm as pcm_grad
 from gpu4pyscf.lib import logger
+from gpu4pyscf.grad.rhf import GradientsBase
 
 def get_cds(smdobj):
     return smd.get_cds_legacy(smdobj)[1]
 
 grad_solver = pcm_grad.grad_solver
 
-def make_grad_object(grad_method):
-    '''For grad_method in vacuum, add nuclear gradients of solvent smdobj'''
-    if grad_method.base.with_solvent.frozen:
+def make_grad_object(base_method):
+    '''Create nuclear gradients object with solvent contributions for the given
+    solvent-attached method based on its gradients method in vaccum
+    '''
+    if isinstance(base_method, GradientsBase):
+        # For backward compatibility. In gpu4pyscf-1.4 and older, the input
+        # argument is a gradient object.
+        base_method = base_method.base
+
+    # Must be a solvent-attached method
+    with_solvent = base_method.with_solvent
+    if with_solvent.frozen:
         raise RuntimeError('Frozen solvent model is not avialbe for energy gradients')
 
-    name = (grad_method.base.with_solvent.__class__.__name__
-            + grad_method.__class__.__name__)
-    return lib.set_class(WithSolventGrad(grad_method),
-                         (WithSolventGrad, grad_method.__class__), name)
+    # create the Gradients in vacuum. Cannot call super().Gradients() here
+    # because other dynamic corrections might be applied to the base_method. The
+    # super() class might discard these corrections .
+    vac_grad = base_method.undo_solvent().Gradients()
+    # The base method for vac_grad discards the with_solvent. Change its base to
+    # the solvent-attached base method
+    vac_grad.base = base_method
+    name = with_solvent.__class__.__name__ + vac_grad.__class__.__name__
+    return lib.set_class(WithSolventGrad(vac_grad),
+                         (WithSolventGrad, vac_grad.__class__), name)
 
 class WithSolventGrad:
     from gpu4pyscf.lib.utils import to_gpu, device
 
-    _keys = {'de_solvent', 'de_solute'}
+    _keys = {'de_solvent', 'de_solute', 'de_cds'}
 
     def __init__(self, grad_method):
         self.__dict__.update(grad_method.__dict__)
@@ -70,10 +86,10 @@ class WithSolventGrad:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
+        logger.debug(self, 'Compute gradients from solvents')
+        self.de_solvent = self.base.with_solvent.grad(dm)
+        logger.debug(self, 'Compute gradients from solutes')
         self.de_solute  = super().kernel(*args, **kwargs)
-        self.de_solvent = pcm_grad.grad_qv(self.base.with_solvent, dm)
-        self.de_solvent+= grad_solver(self.base.with_solvent, dm)
-        self.de_solvent+= pcm_grad.grad_nuc(self.base.with_solvent, dm)
         self.de_cds     = get_cds(self.base.with_solvent)
         self.de = self.de_solute + self.de_solvent + self.de_cds
         if self.verbose >= logger.NOTE:

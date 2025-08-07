@@ -388,6 +388,36 @@ class KnownValues(unittest.TestCase):
     def test_grad_tda_unrestrict_b3lyp_ssvpe(self):
         _check_grad_numerical(molu, tol=8e-4, xc='b3lyp', tda=True, unrestrict=True, solvent='ss(v)pe')
 
+    def test_ub3lyp_tda(self):
+        mol0 = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
+        mol1 = gto.M(atom='H  0.  0.  1.803; F  0.  0.  0.', verbose=0, unit='B')
+        mol2 = gto.M(atom='H  0.  0.  1.805; F  0.  0.  0.', verbose=0, unit='B')
+        mf = mol0.UKS(xc='b3lyp').to_gpu().PCM().run()
+        td = mf.TDA(equilibrium_solvation=True).run()
+        g1 = td.nuc_grad_method().kernel()
+
+        mf = mol1.UKS(xc='b3lyp').to_gpu().PCM().run()
+        td1 = mf.TDA(equilibrium_solvation=True).run()
+        mf = mol2.UKS(xc='b3lyp').to_gpu().PCM().run()
+        td2 = mf.TDA(equilibrium_solvation=True).run()
+        self.assertAlmostEqual((td2.e_tot[0]-td1.e_tot[0])/0.002, g1[0,2], 5)
+
+    def test_scanner(self):
+        mol = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
+        td = mol.RHF().to_gpu().PCM().TDA(equilibrium_solvation=True).Gradients()
+        scan = td.as_scanner()
+        e, de = scan('H 0 0 0; F .1 0 2.1')
+
+        mol0 = gto.M(atom='H 0 0 0; F .1 0 2.1', verbose=0, unit='B')
+        td_ref = mol0.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA(equilibrium_solvation=True).run(conf_tol=1e-10)
+        assert abs(e - -98.20379057832794) < 1e-8
+        assert abs(e - td_ref.e_tot[0]) < 1e-8
+
+        mol1 = gto.M(atom='H 0 0 -0.001; F .1 0 2.1', verbose=0, unit='B')
+        td1 = mol1.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA(equilibrium_solvation=True).run(conf_tol=1e-10)
+        mol2 = gto.M(atom='H 0 0  0.001; F .1 0 2.1', verbose=0, unit='B')
+        td2 = mol2.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA(equilibrium_solvation=True).run(conf_tol=1e-10)
+        assert abs((td2.e_tot[0]-td1.e_tot[0])/0.002- de[0,2]) < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for TDHF and TDDFT Gradient with PCM")

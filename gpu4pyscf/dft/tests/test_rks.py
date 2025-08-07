@@ -161,6 +161,16 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
+    def test_rks_hf(self):
+        print('-------- HF -------------')
+        mf = mol_sph.RKS(xc='hf')
+        e_cpu = mf.kernel()
+
+        mf_gpu = mf.to_gpu()
+        e_gpu = mf_gpu.kernel()
+        print('| CPU - GPU |:', e_cpu - e_gpu)
+        assert np.abs(e_cpu - e_gpu) < 1e-5
+
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()

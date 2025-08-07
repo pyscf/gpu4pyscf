@@ -137,6 +137,7 @@ class DF(lib.StreamObject):
         assert omega >= 0.0
 
         # A temporary treatment for RSH-DF integrals
+        # TODO: use the range_coulomb context from pyscf
         key = '%.6f' % omega
         if key in self._rsh_df:
             rsh_df = self._rsh_df[key]
@@ -263,12 +264,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     for device_id in range(num_devices):
         task_list_per_device.append(total_task_list[device_id::num_devices])
 
-
-    if isinstance(cd_low, cupy.ndarray) and cd_low.flags['F_CONTIGUOUS']:
-        cd_low_f = cupy.array(cd_low, order='F', copy=False)
-    else:
-        cd_low_f = cupy.array(cd_low, order='F', copy=True)        
-    #cd_low_f = cupy.array(cd_low, order='F', copy=False)
+    cd_low_f = cupy.array(cd_low, order='F', copy=False)
     cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
     cupy.cuda.get_current_stream().synchronize()

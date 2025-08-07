@@ -19,6 +19,7 @@ import ctypes
 import numpy as np
 import cupy
 import dpnp
+from dpnp.dpnp_array import dpnp_array  # low-level constructor
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
@@ -48,23 +49,20 @@ def pin_memory(array):
     return ret
 
 def release_gpu_stack():
-    print('release_gpu_stack place holder')
+    print('******** release_gpu_stack place holder ********')
     # cupy.cuda.runtime.deviceSetLimit(0x00, 128)
 
 def print_mem_info():
-    dev = get_default_cached_device()
-    dev.print_device_info()
-    descr = dpctl.utils.intel_device_info(dev)
-    mem_avail = descr['free_memory']
-    total_mem = dev.global_mem_size
+    total_mem = cupy.cuda.get_total_memory()
+    free_mem = cupy.cuda.get_free_memory()
+    used_mem = total_mem - free_mem
     GB = 1024 * 1024 * 1024
-    print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB')
+    msg = f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB'
+    print(msg)
+    return msg
 
 def get_avail_mem():
     return cupy.cuda.get_free_memory()
-    # dev = get_default_cached_device()
-    # descr = dpctl.utils.intel_device_info(dev)
-    # return descr['free_memory']
 
 def concatenate(array_list):
     ''' Concatenate axis=0 only
@@ -123,95 +121,340 @@ def reduce_to_device(array_list, inplace=False):
 
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
-        stream = dpctl.get_current_queue()
+        stream = cupy.cuda.get_current_stream()
     libdpnp_helper.async_d2h_2d(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         a_cpu.ctypes.data_as(ctypes.c_void_p),
         ctypes.c_int(a_cpu.strides[0]),
-        ctypes.cast(a_gpu.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(a_gpu.data.ptr, ctypes.c_void_p),
         ctypes.c_int(a_gpu.strides[0]),
         ctypes.c_int(a_gpu.shape[0]),
         ctypes.c_int(a_gpu.shape[1]))
     
-# define fallback class for dpnp
+# # # define fallback class for dpnp
+# # class DPNPArrayWithTag:
+# #     def __init__(self, array):
+# #         self._array = array
+# #         self.__dict__.update({})  # placeholder for custom tags
+
+# #     def __getattr__(self, name):
+# #         return getattr(self._array, name)
+
+# #     def __getitem__(self, key):
+# #         return self._array[key]
+
+# #     def __setitem__(self, key, value):
+# #         self._array[key] = value
+
+# #     def __array__(self):
+# #         return self._array  # allows np.asarray(tagged)
+
+# #     def __repr__(self):
+# #         return f"DPNPArrayWithTag({repr(self._array)})"
+    
+# # # define cupy array with tags
+# # class CPArrayWithTag(dpnp.ndarray):
+# #     pass
+
+# # #@functools.wraps(lib.tag_array)
+# # def tag_array(a, **kwargs):
+# #     '''
+# #     a should be dpnp/numpy array or tuple of dpnp/numpy array
+
+# #     attach attributes to dpnp ndarray for dpnp array
+# #     attach attributes to numpy ndarray for numpy array
+# #     '''
+# #     if isinstance(a, cupy.ndarray) or isinstance(a[0], cupy.ndarray):
+# #         t = cupy.asarray(a).view(CPArrayWithTag)
+# #         #t = DPNPArrayWithTag(cupy.asarray(a))
+# #         if isinstance(a, CPArrayWithTag):
+# #             t.__dict__.update(a.__dict__)
+# #     else:
+# #         t = np.asarray(a).view(lib.NPArrayWithTag)
+# #         if isinstance(a, lib.NPArrayWithTag):
+# #             t.__dict__.update(a.__dict__)
+# #     t.__dict__.update(kwargs)
+# #     return t
+
+
+
+# # --- 1. View emulation for dpnp arrays ---
+# def reinterpret_dpnp_view(a, dtype=None):
+#     """
+#     Replacement for a.view(dpnp.ndarray) or a.view(MyTagClass),
+#     creates a new dpnp_array instance sharing the buffer.
+#     Automatically unwraps DPArrayWithTag if needed.
+#     """
+#     # Unwrap to the underlying dpnp_array if wrapped
+#     if isinstance(a, DPArrayWithTag):
+#         a = a.array
+
+#     return dpnp_array(
+#         shape=a.shape,
+#         dtype=dtype or a.dtype,
+#         buffer=a,
+#         strides=a.strides,
+#         usm_type=a.usm_type,
+#         sycl_queue=a.sycl_queue
+#     )
+
+# # Safe way to get the real dpnp array type
+# DPNPArrayType = type(dpnp.array([1]))
+
+# class NPArrayWithTag(np.ndarray):
+#     pass
+
+# class DPArrayWithTag:
+#     def __init__(self, array, **kwargs):
+#         self.array = reinterpret_dpnp_view(array)
+#         self.__dict__.update(kwargs)
+
+#     def __getattr__(self, name):
+#         return getattr(self.array, name)
+
+#     def view(self, dtype_or_type=None):
+#         """
+#         Emulate .view(dtype) and handle monkey-patched view(cupy.ndarray).
+#         """
+#         import numpy as np
+#         import cupy as cp
+
+#         if dtype_or_type in (None, type(self.array)):
+#             return self
+
+#         if isinstance(dtype_or_type, type):
+#             type_name = dtype_or_type.__name__
+#             if "cupy" in dtype_or_type.__module__:
+#                 # CuPy view requested; return a compatible cupy array
+#                 print("⚠️  Redirected .view(cupy.ndarray) from DPNP to cupy.asarray(...)")
+#                 return cp.asarray(np.asarray(self.array))  # fallback copy via host
+#             elif "numpy" in dtype_or_type.__module__:
+#                 return np.asarray(self.array).view(dtype_or_type)
+
+#         # Fallback to dtype reinterpretation
+#         return reinterpret_dpnp_view(self.array, dtype=dtype_or_type)
+
+# # class DPArrayWithTag:
+# #     def __init__(self, array, **kwargs):
+# #         self.array = reinterpret_dpnp_view(array)
+# #         self.__dict__.update(kwargs)
+
+# #     def __getattr__(self, name):
+# #         return getattr(self.array, name)
+
+# #     def __getitem__(self, key):
+# #         return self.array[key]
+
+# #     def __repr__(self):
+# #         return f"DPArrayWithTag({repr(self.array)}, tags={{{', '.join(f'{k}={v}' for k, v in self.__dict__.items() if k != 'array')}}})"
+
+# #@functools.wraps(lib.tag_array)
+# def tag_array(a, **kwargs):
+#     if isinstance(a, tuple):
+#         return tuple(tag_array(x, **kwargs) for x in a)
+
+#     # Already tagged: just update metadata
+#     if isinstance(a, (DPArrayWithTag, NPArrayWithTag)):
+#         a.__dict__.update(kwargs)
+#         return a
+
+#     # DPNP detection
+#     if isinstance(a, DPNPArrayType):
+#         if hasattr(a, "view"):
+#             try:
+#                 class DPNPArrayWithTag(dpnp.ndarray): pass
+#                 t = a.view(DPNPArrayWithTag)
+#                 t.__dict__.update(kwargs)
+#                 return t
+#             except Exception:
+#                 return DPArrayWithTag(a, **kwargs)
+#         else:
+#             return DPArrayWithTag(a, **kwargs)
+
+#     # NumPy handling
+#     elif isinstance(a, np.ndarray):
+#         t = a.view(NPArrayWithTag)
+#         t.__dict__.update(kwargs)
+#         return t
+
+#     else:
+#         raise TypeError(f"Unsupported array type for tagging: {type(a)}")
+
+# # # --- 2. Tagged wrappers for NumPy and DPNP arrays ---
+
+# # class NPArrayWithTag(np.ndarray):
+# #     pass
+
+# # class DPArrayWithTag:
+# #     def __init__(self, array, **kwargs):
+# #         self.array = reinterpret_dpnp_view(array)
+# #         self.__dict__.update(kwargs)
+
+# #     def __getattr__(self, name):
+# #         return getattr(self.array, name)
+
+# #     def __getitem__(self, key):
+# #         return self.array[key]
+
+# #     def __repr__(self):
+# #         return f"DPArrayWithTag({repr(self.array)}, tags={{{', '.join(f'{k}={v}' for k, v in self.__dict__.items() if k != 'array')}}})"
+
+# # # --- 3. Universal tag_array() function ---
+
+# # def tag_array(a, **kwargs):
+# #     """
+# #     Attaches custom attributes to a NumPy or DPNP array.
+# #     For dpnp, a wrapper is used if view is not available.
+# #     """
+
+# #     if isinstance(a, tuple):
+# #         return tuple(tag_array(x, **kwargs) for x in a)
+
+# #     # DPNP handling
+# #     print("tag for tag_array: ", type(a))
+# #     if isinstance(a, dpnp.dpnp_array):
+# #         # If view is supported (rare), try subclassing
+# #         if hasattr(a, "view"):
+# #             class DPNPArrayWithTag(dpnp.ndarray): pass
+# #             try:
+# #                 t = a.view(DPNPArrayWithTag)
+# #                 t.__dict__.update(kwargs)
+# #                 return t
+# #             except Exception:
+# #                 # Fallback to wrapper
+# #                 return DPArrayWithTag(a, **kwargs)
+# #         else:
+# #             # Use composition-based wrapper if view not present
+# #             return DPArrayWithTag(a, **kwargs)
+
+# #     # NumPy handling
+# #     elif isinstance(a, np.ndarray):
+# #         t = a.view(NPArrayWithTag)
+# #         t.__dict__.update(kwargs)
+# #         return t
+
+# #     else:
+# #         raise TypeError(f"Unsupported array type for tagging: {type(a)}")
+
+# def asarray(a, **kwargs):
+#     '''
+#     Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
+#     If the input object is an instance of `DPArrayWithTag`, this function will remove any
+#     associated attributes from the tagged array during the transfer.
+
+#     Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
+#     host memory deallocation before transfer completion, this function
+#     eliminates that buffer for efficiency.
+#     '''
+#     if isinstance(a, np.ndarray):
+#         # Dpnp always allocates pinned memory as a temporary buffer during array transfer.
+#         # This leads to additional memory usage, and the buffer is not managed by Dpnp's
+#         # memory pool or Python's GC.
+#         # See the `cdef _ndarray_base _array_default` function in
+#         # dpnp/_core/core.pyx, where memory buffer is allocated via
+#         # mem = _alloc_async_transfer_buffer(nbytes)
+
+#         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
+#         # a must be C-contiguous or F-contiguous
+#         if not a.flags.c_contiguous and not a.flags.f_contiguous:
+#             allow_fast_transfer = False
+#         if allow_fast_transfer:
+#             out = cupy.empty_like(cupy.asarray(a))
+#             cupy.copyto(out, a)
+#             #out.set(a) # ABB: set() is not supported in DPNP
+#             if kwargs.get('blocking', False):
+#                 cupy.cuda.get_current_stream().synchronize()
+#             return out
+
+#     elif isinstance(a, DPArrayWithTag):
+#         a = reinterpret_dpnp_view(a)
+#         #a = a.view(cupy.ndarray)
+
+#     return cupy.asarray(a, **kwargs)
+
+# import dpnp
+# import dpctl.tensor as dpt
+# import numpy as np
+
+# Define dpnp array with tag using Python class wrapper
 class DPNPArrayWithTag:
     def __init__(self, array):
-        self._array = array
-        self.__dict__.update({})  # placeholder for custom tags
+        if not isinstance(array, dpnp.ndarray):
+            raise TypeError("Input must be a dpnp.ndarray")
+        self.array = array
+        self.metadata = {}
 
     def __getattr__(self, name):
-        return getattr(self._array, name)
+        if name in self.metadata:
+            return self.metadata[name]
+        return getattr(self.array, name)  # forward to underlying dpnp.ndarray
 
-    def __getitem__(self, key):
-        return self._array[key]
+    def __setattr__(self, name, value):
+        if name in ("array", "metadata"):
+            super().__setattr__(name, value)
+        else:
+            self.metadata[name] = value
 
-    def __setitem__(self, key, value):
-        self._array[key] = value
-
-    def __array__(self):
-        return self._array  # allows np.asarray(tagged)
-
-    def __repr__(self):
-        return f"DPNPArrayWithTag({repr(self._array)})"
-    
-# define cupy array with tags
-class CPArrayWithTag(dpnp.ndarray):
-    pass
-
+# Define numpy tagged array if needed for compatibility
+class NPArrayWithTag:
+    def __init__(self, array):
+        if not isinstance(array, np.ndarray):
+            raise TypeError("Input must be a numpy.ndarray")
+        self.array = array
+        self.__dict__.update(array.__dict__)
+        
+    def __getattr__(self, name):
+        if name in self.__dict__.get('metadata', {}):
+            return self.metadata[name]
+        return getattr(self.array, name)
+        
 #@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
     '''
-    a should be dpnp/numpy array or tuple of dpnp/numpy array
-
-    attach attributes to dpnp ndarray for dpnp array
-    attach attributes to numpy ndarray for numpy array
+    Tag a dpnp/numpy array or tuple of them with additional metadata.
     '''
-    if isinstance(a, cupy.ndarray) or isinstance(a[0], cupy.ndarray):
-        #t = cupy.asarray(a).view(CPArrayWithTag)
-        t = DPNPArrayWithTag(cupy.asarray(a))
-        if isinstance(a, CPArrayWithTag):
-            t.__dict__.update(a.__dict__)
+    # Unwrap if a is already a wrapper
+    if isinstance(a, DPNPArrayWithTag):
+        base = a.array
     else:
+        base = a
+
+    if isinstance(base, dpnp.ndarray) or (isinstance(base, tuple) and isinstance(base[0], dpnp.ndarray)):
+        t = DPNPArrayWithTag(dpnp.asarray(base))
+        if isinstance(a, DPNPArrayWithTag):
+            t.metadata.update(a.metadata) # Copy metadata if already tagged
+        t.metadata.update(kwargs)
+    elif isinstance(base, np.ndarray):
         t = np.asarray(a).view(lib.NPArrayWithTag)
         if isinstance(a, lib.NPArrayWithTag):
             t.__dict__.update(a.__dict__)
-    t.__dict__.update(kwargs)
+        t.__dict__.update(kwargs)
+    else:
+        raise TypeError(f"Unsupported input type: {type(a)}")
+
     return t
 
 def asarray(a, **kwargs):
     '''
-    Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
-    If the input object is an instance of `CPArrayWithTag`, this function will remove any
-    associated attributes from the tagged array during the transfer.
-
-    Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
-    host memory deallocation before transfer completion, this function
-    eliminates that buffer for efficiency.
+    Like cupy.asarray replacement using dpnp and dpctl.
+    Transfers numpy arrays to device memory using dpnp.
     '''
+    print("1. value of type(a) in dpnp_helper.py asarray(): ", type(a))
     if isinstance(a, np.ndarray):
-        # Dpnp always allocates pinned memory as a temporary buffer during array transfer.
-        # This leads to additional memory usage, and the buffer is not managed by Dpnp's
-        # memory pool or Python's GC.
-        # See the `cdef _ndarray_base _array_default` function in
-        # dpnp/_core/core.pyx, where memory buffer is allocated via
-        # mem = _alloc_async_transfer_buffer(nbytes)
-
         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
-        # a must be C-contiguous or F-contiguous
+        # a must be C-contiguous or F-contiguous        
         if not a.flags.c_contiguous and not a.flags.f_contiguous:
             allow_fast_transfer = False
         if allow_fast_transfer:
-            out = cupy.empty_like(cupy.asarray(a))
-            cupy.copyto(out, a)
-            #out.set(a) # ABB: set() is not supported in DPNP
-            if kwargs.get('blocking', False):
-                cupy.cuda.get_current_stream().synchronize()
-            return out
+            #ABB: cupy.empty_like(a) worked for CUPY where a was of type `numpy.ndarray`
+            # but it wouldnt work for DPNP. Since the input is expected of dpnp.ndarray
+            print("2. value of type(a) in dpnp_helper.py asarray(): ", type(a))            
+            return dpnp.asarray(a)
 
-    elif isinstance(a, CPArrayWithTag):
-        a = a.view(cupy.ndarray)
+    elif isinstance(a, DPNPArrayWithTag):
+        a = a.array
 
-    return cupy.asarray(a, **kwargs)
+    return dpnp.asarray(a, **kwargs)
 
 def to_dpnp(a):
     '''Converts a numpy (and subclass) object to a dpnp object'''
@@ -465,31 +708,35 @@ def take_last2d(a, indices, out=None):
     assert a.flags.c_contiguous
     assert a.shape[-1] == a.shape[-2]
     nao = a.shape[-1]
-    assert len(indices) == nao
+    nidx = len(indices)
     if a.ndim == 2:
         count = 1
     else:
         count = np.prod(a.shape[:-2])
     if out is None:
-        out = cupy.zeros_like(a)
+        out = cupy.zeros((count, nidx, nidx))
+    else:
+        assert out.size == count*nidx*nidx
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
-    print(stream)
     err = libdpnp_helper.take_last2d(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(out.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(a.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(indices_int32.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(indices_int32.data.ptr, ctypes.c_void_p),
         ctypes.c_int(count),
+        ctypes.c_int(nidx),
         ctypes.c_int(nao)
     )
     if err != 0:
         raise RuntimeError('failed in take_last2d kernel')
+    if a.ndim == 2:
+        out = out.reshape(nidx,nidx)
     return out
 
 def takebak(out, a, indices, axis=-1):
     '''(experimental)
-    Take elements from a NumPy array along an axis and write to Dpnp array.
+    Take elements from a NumPy array along an axis and write to CuPy array.
     out[..., indices] = a
     '''
     assert axis == -1
@@ -504,16 +751,12 @@ def takebak(out, a, indices, axis=-1):
         count = np.prod(a.shape[:-1])
     n_a = a.shape[-1]
     n_o = out.shape[-1]
-    indices_int32 = cupy.asarray(indices, dtype=cupy.int32, sycl_queue=stream)
-    if stream is None:
-        stream = out.sycl_queue
-    out_ptr = out.__sycl_usm_array_interface__['data'][0]
-    indices_int32_ptr = indices_int32.__sycl_usm_array_interface__['data'][0]
+    indices_int32 = cupy.asarray(indices, dtype=cupy.int32)
+    stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.takebak(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),        
-        ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_double)),
-        a.ctypes,
-        ctypes.cast(indices_int32_ptr, ctypes.POINTER(ctypes.c_int32)),
+        ctypes.c_void_p(stream.ptr),
+        ctypes.c_void_p(out.data.ptr), a.ctypes,
+        ctypes.c_void_p(indices_int32.data.ptr),
         ctypes.c_int(count), ctypes.c_int(n_o), ctypes.c_int(n_a)
     )
     if err != 0: # Not the mapped host memory
@@ -533,13 +776,10 @@ def transpose_sum(a, stream=None):
     count, m, n = a.shape
     assert m == n
     out = a
-
-    if stream is None:
-        stream = cupy.cuda.get_current_stream()
-    a_ptr = a.__sycl_usm_array_interface__['data'][0]
+    stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.transpose_sum(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(a_ptr, ctypes.POINTER(ctypes.c_double)),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
         ctypes.c_int(count)
     )
@@ -573,7 +813,7 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
         stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.fill_triu(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(mat.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(mat.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('hermi_triu kernel failed')
@@ -847,20 +1087,26 @@ def pinv(a, lindep=1e-10):
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
 
-def cond(a):
+def cond(a, sympos=False):
     """
     Calculate the condition number of a matrix.
 
     Parameters:
     a (cupy.ndarray): The input matrix.
+    sympos : Whether the input matrix is symmetric and positive definite.
 
     Returns:
     float: The condition number of the matrix.
     """
-    print("cupy.linalg.svd input shape:", a.shape)
-    _, s, _ = cupy.linalg.svd(a)
-    cond_number = s[0] / s[-1]
-    return cond_number
+    if sympos:
+        s = cupy.linalg.eigvalsh(a)
+        if s[0] <= 0:
+            raise RuntimeError('matrix is not positive definite')
+        return s[-1] / s[0]
+    else:
+        _, s, _ = cupy.linalg.svd(a)
+        cond_number = s[0] / s[-1]
+        return cond_number
 
 def grouped_dot(As, Bs, Cs=None):
     '''
@@ -983,9 +1229,20 @@ def grouped_gemm(As, Bs, Cs=None):
     return Cs
 
 def condense(opname, a, loc_x, loc_y=None):
+    '''Aggregate the last two dimensions of an array using the specified operation.
+
+    .. code-block:: python
+
+        for i,i0 in enumerate(loc_x[:-1]):
+            i1 = loc_x[i+1]
+            for j,j0 in enumerate(loc_y[:-1]):
+                j1 = loc_y[j+1]
+                out[i,j] = op(a[..., i0:i1, j0:j1])
+    '''
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
     a = cupy.asarray(a, order='C')
+    assert a.ndim >= 2
     if loc_y is None:
         loc_y = loc_x
     do_transpose = False
@@ -996,7 +1253,8 @@ def condense(opname, a, loc_x, loc_y=None):
             do_transpose = True
         a = a[None]
     else:
-        assert a.flags.c_contiguous
+        nx, ny = a.shape[-2:]
+        a = a.reshape(-1, nx, ny)
     loc_x = cupy.asarray(loc_x, cupy.int32)
     loc_y = cupy.asarray(loc_y, cupy.int32)
     nloc_x = loc_x.size - 1
@@ -1007,7 +1265,7 @@ def condense(opname, a, loc_x, loc_y=None):
 
     #if opname == 'absmax':
     #    out = cupy.zeros((nloc_x, nloc_y))
-    #    err = libdpnp_helper.dabsmax_condense(
+    #    err = libcupy_helper.dabsmax_condense(
     #        ctypes.cast(out.ctypes.data, ctypes.c_void_p),
     #        ctypes.cast(a.ctypes.data, ctypes.c_void_p),
     #        ctypes.cast(loc_x.ctypes.data, ctypes.c_void_p),
@@ -1105,3 +1363,23 @@ def sandwich_dot(a, c, out=None):
     if a_ndim == 2:
         out = out[0]
     return out
+
+def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
+    '''
+    Customize CuPy memory allocator.
+
+    For large memory allocations (>100MB by default), the custom allocator bypasses
+    the CuPy memory pool, directly calling the CUDA malloc API. The large memory
+    chunks will be released back to the system when the associated object is
+    destroyed. Only small memory blocks are allocated from the CuPy memory pool.
+
+    Execute the following command to restore the default CuPy malloc
+        cupy.cuda.set_allocator(cupy.get_default_memory_pool().malloc)
+    '''
+    cuda_malloc = cupy.cuda.memory._malloc
+    default_mempool_malloc = cupy.get_default_memory_pool().malloc
+    def malloc(size):
+        if size >= n_bytes_threshold:
+            return cuda_malloc(size)
+        return default_mempool_malloc(size)
+    cupy.cuda.set_allocator(malloc)

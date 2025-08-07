@@ -27,7 +27,7 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot)
-from gpu4pyscf.scf import diis, jk
+from gpu4pyscf.scf import diis, jk, j_engine
 from gpu4pyscf.lib import logger
 
 __all__ = [
@@ -46,8 +46,10 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         if with_k: vk = vk.get()
     return vj, vk
 
-def _get_jk(mf, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
+def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True,
             omega=None):
+    if omega is None:
+        omega = mol.omega
     vhfopt = mf._opt_gpu.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
@@ -72,17 +74,26 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
     mo_occ[e_idx[:nocc]] = 2
+    if mf.verbose >= logger.INFO and nocc < nmo:
+        homo = float(mo_energy[e_idx[nocc-1]])
+        lumo = float(mo_energy[e_idx[nocc]])
+        if homo+1e-3 > lumo:
+            logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+        else:
+            logger.info(mf, '  HOMO = %.15g  LUMO = %.15g', homo, lumo)
     return mo_occ
 
-def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1, vhfopt=None):
+def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     if dm is None: dm = mf.make_rdm1()
-    if dm_last is None or not mf.direct_scf:
-        vj, vk = mf.get_jk(mol, dm, hermi)
-        return vj - vk * .5
-    else:
-        ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-        vj, vk = mf.get_jk(mol, ddm, hermi)
-        return vj - vk * .5 + vhf_last
+    if dm_last is not None and mf.direct_scf:
+        dm = asarray(dm) - asarray(dm_last)
+    vj = mf.get_j(mol, dm, hermi)
+    vhf = mf.get_k(mol, dm, hermi)
+    vhf *= -.5
+    vhf += vj
+    if vhf_last is not None:
+        vhf += asarray(vhf_last)
+    return vhf
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
@@ -102,19 +113,19 @@ def level_shift(s, d, f, factor):
     return f + dm_vir * factor
 
 def get_hcore(mol):
-    h = mol.intor_symmetric('int1e_kin')
     if mol._pseudo:
         # Although mol._pseudo for GTH PP is only available in Cell, GTH PP
         # may exist if mol is converted from cell object.
         from pyscf.gto import pp_int
+        h = mol.intor_symmetric('int1e_kin')
         h += pp_int.get_gth_pp(mol)
         h = asarray(h)
     else:
         assert not mol.nucmod
-        #:h+= mol.intor_symmetric('int1e_nuc')
         from gpu4pyscf.gto.int3c1e import int1e_grids
-        h = asarray(h)
-        h += int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
+        #:h = mol.intor_symmetric('int1e_nuc')
+        h = int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
+        h += asarray(mol.intor_symmetric('int1e_kin'))
     if len(mol._ecpbas) > 0:
         h += get_ecp(mol)
     return h
@@ -247,8 +258,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer_debug1('total', *t0)
-        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |ddm|= %4.3g',
-                 cycle+1, e_tot, e_tot-last_hf_e, norm_ddm)
+        log.info('cycle= %d E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
+                 cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
         if dump_chk:
             mf.dump_chk(locals())
@@ -442,16 +453,18 @@ def init_guess_by_minao(mol):
     mol2 = mol.copy()
 
     aoslice = mol.aoslice_by_atom()
+    nao = aoslice[-1,3]
+    dm = cupy.zeros((nao, nao))
+    # Preallocate a buffer in cupy memory pool for small arrays held in atm_conf
+    workspace = cupy.empty(50**2*12)
+    workspace = None # noqa: F841
     atm_conf = {}
-    dm = []
     mo_coeff = []
     mo_occ = []
-    for ia in range(mol.natm):
+    for ia, (p0, p1) in enumerate(aoslice[:,2:]):
         symb = mol.atom_symbol(ia)
         if gto.is_ghost_atom(symb):
-            i0, i1 = aoslice[ia,2:]
-            n = i1 - i0
-            dm.append(cupy.zeros((n, n)))
+            n = p1 - p0
             mo_coeff.append(cupy.zeros((n, 0)))
             mo_occ.append(cupy.zeros(0))
             continue
@@ -466,16 +479,15 @@ def init_guess_by_minao(mol):
             s22 = mol2.intor_symmetric('int1e_ovlp')
             s21 = gto.mole.intor_cross('int1e_ovlp', mol2, mol1)
             c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
-            c = cupy.asarray(c[:,occ>0])
-            occ = cupy.asarray(occ[occ>0])
+            c = cupy.asarray(c[:,occ>0], order='C')
+            occ = cupy.asarray(occ[occ>0], order='C')
             atm_conf[symb] = occ, c
 
         occ, c = atm_conf[symb]
-        dm.append((c*occ).dot(c.conj().T))
+        dm[p0:p1,p0:p1] = (c*occ).dot(c.conj().T)
         mo_coeff.append(c)
         mo_occ.append(occ)
 
-    dm = block_diag(dm)
     mo_coeff = block_diag(mo_coeff)
     mo_occ = cupy.hstack(mo_occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
@@ -508,7 +520,7 @@ class SCF_Scanner(pyscf_lib.SinglePointScanner):
             dm0 = None
         else:
             dm0 = None
-            if cupy.array_equal(self._last_mol_fp, mol.ao_loc):
+            if np.array_equal(self._last_mol_fp, mol.ao_loc):
                 dm0 = self.make_rdm1()
             elif self.chkfile and h5py.is_hdf5(self.chkfile):
                 dm0 = self.from_chk(self.chkfile)
@@ -564,6 +576,7 @@ class SCF(pyscf_lib.StreamObject):
         self.scf_summary = {}
 
         self._opt_gpu = {None: None}
+        self._opt_jengine = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
@@ -571,11 +584,10 @@ class SCF(pyscf_lib.StreamObject):
 
     def check_sanity(self):
         s1e = self.get_ovlp()
-        print("value of s1e: ", type(s1e), s1e.ndim, s1e.shape)
         if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
-            c = cond(s1e)
+            c = cond(s1e, sympos=True)
         else:
-            c = cupy.asarray([cond(xi) for xi in s1e])
+            c = cupy.asarray([cond(xi, sympos=True) for xi in s1e])
         logger.debug(self, 'cond(S) = %s', c)
         if cupy.max(c)*1e-17 > self.conv_tol:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
@@ -610,8 +622,6 @@ class SCF(pyscf_lib.StreamObject):
     _finalize                = hf_cpu.SCF._finalize
     init_direct_scf          = NotImplemented
     get_jk                   = _get_jk
-    get_j                    = hf_cpu.SCF.get_j
-    get_k                    = hf_cpu.SCF.get_k
     get_veff                 = NotImplemented
     mulliken_meta            = hf_cpu.SCF.mulliken_meta
     pop                      = hf_cpu.SCF.pop
@@ -670,6 +680,7 @@ class SCF(pyscf_lib.StreamObject):
         if mol is not None:
             self.mol = mol
         self._opt_gpu = {None: None}
+        self._opt_jengine = {None: None}
         self.scf_summary = {}
         return self
 
@@ -680,6 +691,21 @@ class SCF(pyscf_lib.StreamObject):
                 self.mol, self.chkfile, envs['e_tot'],
                 cupy.asnumpy(envs['mo_energy']), cupy.asnumpy(envs['mo_coeff']),
                 cupy.asnumpy(envs['mo_occ']), overwrite_mol=False)
+
+    def get_j(self, mol, dm, hermi=1, omega=None):
+        if omega is None:
+            omega = mol.omega
+        if omega not in self._opt_jengine:
+            jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
+            self._opt_jengine[omega] = jopt
+        jopt = self._opt_jengine[omega]
+        vj = j_engine.get_j(mol, dm, hermi, jopt)
+        if not isinstance(dm, cupy.ndarray):
+            vj = vj.get()
+        return vj
+
+    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
+        return self.get_jk(mol, dm, hermi, with_j=False, omega=omega)[1]
 
 class KohnShamDFT:
     '''
@@ -729,6 +755,11 @@ class RHF(SCF):
 
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         import gpu4pyscf.df.df_jk
+        if self.istype('_Solvation'):
+            raise RuntimeError(
+                'It is recommended to call density_fit() before applying a solvent model. '
+                'Calling density_fit() after the solvent model may result in '
+                'incorrect nuclear gradients, TDDFT, and other methods.')
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
 
     def newton(self):

@@ -19,11 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else // USE_SYCL
-#include <cuda_runtime.h>
-#endif // USE_SYCL
 #include "gint/gint.h"
 #include "gint/cuda_alloc.cuh"
 #include "nr_eval_gto.cuh"
@@ -51,8 +46,86 @@ static void _nabla1(double *fx1, double *fy1, double *fz1,
 }
 
 __global__
-static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim,
-                          double *coords, int ngrids, int bas_offset, const GTOValEnvVars &gto_envs){
+static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
+                          double *coords, int ngrids, int block_size,
+                          int *atm, int natm, int *bas, int nbas, double *env)
+{
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int blockIdx_x = item.get_group(1);
+    const int blockIdx_y = item.get_group(0);
+    const int blockDim_x = item.get_group_range(1);
+    const int threadIdx_x = item.get_local_id(1);
+    double (&gridx_cache)[NG_PER_BLOCK*3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[NG_PER_BLOCK*3]>(item.get_group());
+#else
+    const int blockIdx_x = blockIdx.x;
+    const int blockIdx_y = blockIdx.y;
+    const int blockDim_x = blockDim.x;
+    const int threadIdx_x = threadIdx.x;
+    __shared__ double gridx_cache[NG_PER_BLOCK*3];
+#endif
+
+    int grid_block_id = blockIdx_x;
+    int grid_start = grid_block_id * block_size;
+    int grid_stop = min(grid_start+block_size, ngrids);
+    int shl_block_id = blockIdx_y;
+    int thread_id = threadIdx_x;
+    int ish = shl_block_id * blockDim_x + thread_id;
+    if (ish >= nbas) {
+        ish = 0;
+    }
+
+    int atm_id = bas[ish*BAS_SLOTS+ATOM_OF];
+    int ang = bas[ish*BAS_SLOTS+ANG_OF];
+    int nprim = bas[ish*BAS_SLOTS+NPRIM_OF];
+    double *exps = env + bas[ish*BAS_SLOTS+PTR_EXP];
+    double *coeffs = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *ri = env + atm[atm_id*ATM_SLOTS+PTR_COORD];
+    double atom_x = ri[0];
+    double atom_y = ri[1];
+    double atom_z = ri[2];
+
+    double *gridy_cache = gridx_cache + NG_PER_BLOCK;
+    double *gridz_cache = gridy_cache + NG_PER_BLOCK;
+
+    int8_t is_large = 0;
+    for (int grid0 = grid_start; grid0 < grid_stop; grid0 += NG_PER_BLOCK) {
+        if (grid0 + thread_id < ngrids) {
+            gridx_cache[thread_id] = coords[         grid0+thread_id];
+            gridy_cache[thread_id] = coords[ngrids  +grid0+thread_id];
+            gridz_cache[thread_id] = coords[ngrids*2+grid0+thread_id];
+        }
+        __syncthreads();
+        // check if any GTO values on grids are larger than threshold
+        if (is_large) {
+            continue;
+        }
+        int ng_in_tile = min(NG_PER_BLOCK, ngrids-grid0);
+        for (int grid_id = 0; grid_id < ng_in_tile; ++grid_id) {
+            double rx = gridx_cache[grid_id] - atom_x;
+            double ry = gridy_cache[grid_id] - atom_y;
+            double rz = gridz_cache[grid_id] - atom_z;
+            double rr = rx * rx + ry * ry + rz * rz + 1e-300;
+            double gto_sup = 1e-300;
+            for (int ip = 0; ip < nprim; ++ip) {
+                gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
+            }
+            //if (!sycl::isfinite(gto_sup) || rr <= 0 || !sycl::isfinite(rr)) {
+            //sycl::ext::oneapi::experimental::printf("Bad values: gto_sup = %f, rr = %f, log_cutoff = %f\n", gto_sup, rr, log_cutoff);
+            // sycl::ext::oneapi::experimental::printf("Bad values: gto_sup = %f\n", rr);
+              // //}
+
+            is_large |= (log(fabs(gto_sup)) + ang*log(rr)/2) > log_cutoff;
+        }
+    }
+    if (shl_block_id * blockDim_x + thread_id < nbas) {
+        non0shl_mask[grid_block_id*nbas + ish] = is_large;
+    }
+}
+
+__global__
+static void _screen_index_legacy(int *non0shl_idx, double cutoff, int ang, int nprim,
+        double *coords, int ngrids, int bas_offset, const GTOValEnvVars &gto_envs){
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     int grid_id = item.get_global_id(1);
@@ -72,7 +145,7 @@ static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim,
 
     int natm = gto_envs.natm;
     int atm_id = gto_envs.bas_atom[ish];
-    const double* atm_coords = gto_envs.atom_coordx;
+    double* atm_coords = gto_envs.atom_coordx;
     double gridx, gridy, gridz;
     if (active) {
         gridx = coords[0*ngrids + grid_id];
@@ -89,8 +162,8 @@ static void _screen_index(int *non0shl_idx, double cutoff, int ang, int nprim,
     double rr = rx * rx + ry * ry + rz * rz;
     double r = sqrt(rr);
 
-    const double *exps = gto_envs.env + gto_envs.bas_exp[ish];
-    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[ish];
+    double *exps = gto_envs.env + gto_envs.bas_exp[ish];
+    double *coeffs = gto_envs.env + gto_envs.bas_coeff[ish];
     /*
     double maxc = 0.0;
     double min_exp = 1e9;
@@ -2108,7 +2181,37 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
     return 0;
 }
 
-int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
+int GDFTscreen_index(cudaStream_t stream, int8_t *non0shl_mask, double log_cutoff,
+                 double *grids, int ngrids, int block_size,
+                 int *atm, int natm, int *bas, int nbas, double *env)
+{
+#ifdef USE_SYCL
+    sycl::range<2> threads(1, NG_PER_BLOCK);
+    sycl::range<2> blocks((nbas+NG_PER_BLOCK-1)/NG_PER_BLOCK,
+                          (ngrids+block_size-1)/block_size);
+    stream.parallel_for<class _screen_index_kernel>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    _screen_index (
+            non0shl_mask, log_cutoff, grids, ngrids, block_size,
+            atm, natm, bas, nbas, env);
+    });
+#else // USE_SYCL
+    dim3 threads(NG_PER_BLOCK);
+    dim3 blocks((ngrids+block_size-1)/block_size,
+                (nbas+NG_PER_BLOCK-1)/NG_PER_BLOCK);
+    _screen_index<<<blocks, threads, 0, stream>>> (
+            non0shl_mask, log_cutoff, grids, ngrids, block_size,
+            atm, natm, bas, nbas, env);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of GDFTscreen_index: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+#endif // USE_SYCL
+    return 0;
+}
+
+int GDFTscreen_index_legacy(cudaStream_t stream, int *non0shl_idx, double cutoff,
                  double *grids, int ngrids, int *ctr_offsets, int nctr, int *bas,
                  GTOValEnvVars *gto_envs)
 {
@@ -2130,11 +2233,12 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
             return 1;
         }
         auto dev_gto_envs = *gto_envs;
-        stream.parallel_for<class _screen_index_kernel>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-          _screen_index (non0shl_idx, cutoff, l, nprim, grids, ngrids, bas_offset, dev_gto_envs);
+        stream.parallel_for<class _screen_index_legacy_kernel>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+          _screen_index_legacy (non0shl_idx, cutoff, l, nprim,
+                                grids, ngrids, bas_offset, dev_gto_envs);
         });
     }
-#else
+#else //USE_SYCL
     dim3 threads(NG_PER_BLOCK);
     dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
 
@@ -2151,7 +2255,7 @@ int GDFTscreen_index(cudaStream_t stream, int *non0shl_idx, double cutoff,
             fprintf(stderr, "l = %d not supported\n", l);
             return 1;
         }
-        _screen_index<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim,
+        _screen_index_legacy<<<blocks, threads, 0, stream>>> (non0shl_idx, cutoff, l, nprim,
                 grids, ngrids, bas_offset, *gto_envs);
     }
 

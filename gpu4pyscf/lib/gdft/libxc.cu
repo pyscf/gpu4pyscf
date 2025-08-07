@@ -48,7 +48,7 @@
                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho3, dev_out_gga.v3rho3, coef, np, dim->v3rho3); }); \
                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho2sigma, dev_out_gga.v3rho2sigma, coef, np, dim->v3rho2sigma); }); \
                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rhosigma2, dev_out_gga.v3rhosigma2, coef, np, dim->v3rhosigma2); }); \
-                if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigma3, dev_out_gga.v3sigma3, coef, np, dim->v3sigma3); }); 
+                if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigma3, dev_out_gga.v3sigma3, coef, np, dim->v3sigma3); });
 
 #define ADD_MGGA auto dev_out_mgga = *out_mgga; auto dev_out = *out; \
                  if(dev_out.zk     != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.zk, dev_out_mgga.zk, coef, np, dim->zk); }); \
@@ -85,7 +85,7 @@
                  if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigmalapltau, dev_out_mgga.v3sigmalapltau, coef, np, dim->v3sigmalapltau); }); \
                  if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3lapl3       , dev_out_mgga.v3lapl3       , coef, np, dim->v3lapl3       ); }); \
                  if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3lapl2tau    , dev_out_mgga.v3lapl2tau    , coef, np, dim->v3lapl2tau    ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3lapltau2    , dev_out_mgga.v3lapltau2    , coef, np, dim->v3lapltau2    ); }); 
+                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3lapltau2    , dev_out_mgga.v3lapltau2    , coef, np, dim->v3lapltau2    ); });
 
 #else // USE_SYCL //#####################
 
@@ -105,7 +105,7 @@
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho3, out_gga->v3rho3, coef, np, dim->v3rho3); \
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho2sigma, out_gga->v3rho2sigma, coef, np, dim->v3rho2sigma); \
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhosigma2, out_gga->v3rhosigma2, coef, np, dim->v3rhosigma2); \
-                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3, out_gga->v3sigma3, coef, np, dim->v3sigma3); 
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3, out_gga->v3sigma3, coef, np, dim->v3sigma3);
 
 #define ADD_MGGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_mgga->zk, coef, np, dim->zk); \
                  if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_mgga->vrho, coef, np, dim->vrho); \
@@ -141,7 +141,7 @@
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigmalapltau, out_mgga->v3sigmalapltau, coef, np, dim->v3sigmalapltau); \
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl3       , out_mgga->v3lapl3       , coef, np, dim->v3lapl3       ); \
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl2tau    , out_mgga->v3lapl2tau    , coef, np, dim->v3lapl2tau    ); \
-                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapltau2    , out_mgga->v3lapltau2    , coef, np, dim->v3lapltau2    ); 
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapltau2    , out_mgga->v3lapltau2    , coef, np, dim->v3lapltau2    );
 
 #endif // USE_SYCL //#####################
 
@@ -152,7 +152,7 @@ static void _add_out(double *out, const double *buf, double coef, int np, int di
     const int i = item.get_global_id(0);
     #else
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    #endif  
+    #endif
     if (i < np) {
         #pragma unroll
         for (int j = 0; j < dim; j++){
@@ -514,6 +514,19 @@ int GDFT_xc_gga(cudaStream_t stream,
     xc_gga_out_params *out, xc_gga_out_params *buf)
 {
     int order = -1;
+
+    auto alloc_zk = sycl::get_pointer_type(out->zk, stream.get_context());
+    auto alloc_vrho = sycl::get_pointer_type(out->vrho, stream.get_context());
+    auto alloc_v2rho2 = sycl::get_pointer_type(out->v2rho2, stream.get_context());
+    auto alloc_v3rho3 = sycl::get_pointer_type(out->v3rho3, stream.get_context());
+    auto alloc_v4rho4 = sycl::get_pointer_type(out->v4rho4, stream.get_context());
+
+    std::cout << "alloc_zk from libxc :" << (alloc_zk==sycl::usm::alloc::host) << ", " << (alloc_zk==sycl::usm::alloc::device) << ", " << (alloc_zk==sycl::usm::alloc::unknown) << ", " << (out->zk==NULL) << std::endl;
+    std::cout << "alloc_vrho from libxc :" << (alloc_vrho==sycl::usm::alloc::host) << ", " << (alloc_vrho==sycl::usm::alloc::device) << ", " << (alloc_vrho==sycl::usm::alloc::unknown) << ", " << (out->vrho==NULL) << std::endl;
+    std::cout << "alloc_v2rho2 from libxc :" << (alloc_v2rho2==sycl::usm::alloc::host) << ", " << (alloc_v2rho2==sycl::usm::alloc::device) << ", " << (alloc_v2rho2==sycl::usm::alloc::unknown) << ", " << (out->v2rho2==NULL) << std::endl;
+    std::cout << "alloc_v3rho3 from libxc :" << (alloc_v3rho3==sycl::usm::alloc::host) << ", " << (alloc_v3rho3==sycl::usm::alloc::device) << ", " << (alloc_v3rho3==sycl::usm::alloc::unknown) << ", " << (out->v3rho3==NULL) << std::endl;
+    std::cout << "alloc_v4rho4 from libxc :" << (alloc_v4rho4==sycl::usm::alloc::host) << ", " << (alloc_v4rho4==sycl::usm::alloc::device) << ", " << (alloc_v4rho4==sycl::usm::alloc::unknown) << ", " << (out->v4rho4==NULL) << std::endl;
+
     if(out->zk     != NULL) order = 0;
     if(out->vrho   != NULL) order = 1;
     if(out->v2rho2 != NULL) order = 2;
@@ -522,7 +535,10 @@ int GDFT_xc_gga(cudaStream_t stream,
 
     // If the functional is not a mix
     int ierr = 0;
+    auto alloc = sycl::get_pointer_type(func->info, stream.get_context());
+    std::cout << "alloc from libxc :" << (alloc==sycl::usm::alloc::host) << ", " << (alloc==sycl::usm::alloc::host) << ", " << (func->info==NULL) << ", " << (func->info->gga==NULL) << ", " << (func==NULL) << std::endl;
     if(func->info->gga != NULL){
+        std::cout << "hello from here in libxc \n";
         ierr = _xc_gga(func, np, order, rho, sigma, out);
         return ierr;
     }

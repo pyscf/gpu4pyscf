@@ -79,7 +79,7 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
 }
 
 __device__
-static void GINTmemset_int3c2e(ERITensor &eri, int ish, int jsh, int ksh)
+static void GINTmemset_int3c2e(const ERITensor &eri, int ish, int jsh, int ksh)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -111,7 +111,7 @@ static void GINTmemset_int3c2e(ERITensor &eri, int ish, int jsh, int ksh)
 }
 
 __global__
-void GINTfill_int3c2e_kernel(const GINTEnvVars &envs, ERITensor &eri, const BasisProdOffsets &offsets
+void GINTfill_int3c2e_kernel(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets
 			     #ifdef USE_SYCL
 			     , sycl::nd_item<2> item, double* g
 			     #endif
@@ -156,7 +156,7 @@ void GINTfill_int3c2e_kernel(const GINTEnvVars &envs, ERITensor &eri, const Basi
 }
 
 __global__
-static void GINTfill_int3c2e_kernel0000(const GINTEnvVars &envs, ERITensor *eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel0000(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -223,18 +223,18 @@ static void GINTfill_int3c2e_kernel0000(const GINTEnvVars &envs, ERITensor *eri,
         gout0 += fac;
     } }
 
-    const size_t jstride = eri->stride_j;
-    const size_t kstride = eri->stride_k;
+    const size_t jstride = eri.stride_j;
+    const size_t kstride = eri.stride_k;
 
     int *ao_loc = c_bpcache.ao_loc;
-    const int i0 = ao_loc[ish] - eri->ao_offsets_i;
-    const int j0 = ao_loc[jsh] - eri->ao_offsets_j;
-    const int k0 = ao_loc[ksh] - eri->ao_offsets_k;
-    eri->data[k0*kstride+j0*jstride+i0] = gout0;
+    const int i0 = ao_loc[ish] - eri.ao_offsets_i;
+    const int j0 = ao_loc[jsh] - eri.ao_offsets_j;
+    const int k0 = ao_loc[ksh] - eri.ao_offsets_k;
+    eri.data[k0*kstride+j0*jstride+i0] = gout0;
 }
 
 __global__
-static void GINTfill_int3c2e_kernel0010(const GINTEnvVars &envs, ERITensor &eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel0010(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -348,7 +348,7 @@ static void GINTfill_int3c2e_kernel0010(const GINTEnvVars &envs, ERITensor &eri,
 }
 
 __global__
-static void GINTfill_int3c2e_kernel1000(const GINTEnvVars &envs, ERITensor &eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel1000(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -467,7 +467,7 @@ static void GINTfill_int3c2e_kernel1000(const GINTEnvVars &envs, ERITensor &eri,
 }
 
 __global__
-static void GINTfill_int3c2e_kernel0100(const GINTEnvVars &envs, ERITensor &eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel0100(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;

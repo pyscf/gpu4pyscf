@@ -327,9 +327,9 @@ void type1_cart_ip1(double *gctr,
         double *gx = gctr;
         double *gy = gctr +   nao*nao;
         double *gz = gctr + 2*nao*nao;
-        atomicAdd(gx+i*nao+j, gctr_smem[ij]);
-        atomicAdd(gy+i*nao+j, gctr_smem[ij+nfi*nfj]);
-        atomicAdd(gz+i*nao+j, gctr_smem[ij+2*nfi*nfj]);
+        // atomicAdd(gx+i*nao+j, gctr_smem[ij]);
+        // atomicAdd(gy+i*nao+j, gctr_smem[ij+nfi*nfj]);
+        // atomicAdd(gz+i*nao+j, gctr_smem[ij+2*nfi*nfj]);
     }
     return;
 }
@@ -408,9 +408,9 @@ void type1_cart_ip1_general(double *gctr,
         double *gx = gctr;
         double *gy = gctr +   nao*nao;
         double *gz = gctr + 2*nao*nao;
-        atomicAdd(gx+i*nao+j, gctr_smem[ij]);
-        atomicAdd(gy+i*nao+j, gctr_smem[ij+nfi*nfj]);
-        atomicAdd(gz+i*nao+j, gctr_smem[ij+2*nfi*nfj]);
+        // atomicAdd(gx+i*nao+j, gctr_smem[ij]);
+        // atomicAdd(gy+i*nao+j, gctr_smem[ij+nfi*nfj]);
+        // atomicAdd(gz+i*nao+j, gctr_smem[ij+2*nfi*nfj]);
     }
     return;
 }

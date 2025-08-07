@@ -63,7 +63,9 @@ def print_mem_info():
     #stack_size_per_thread = cupy.cuda.runtime.deviceGetLimit(0x00)
     #mem_stack = stack_size_per_thread
     GB = 1024 * 1024 * 1024
-    print(f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB')
+    msg = f'mem_avail: {mem_avail/GB:.3f} GB, total_mem: {total_mem/GB:.3f} GB, used_mem: {used_mem/GB:.3f} GB,mem_limt: {mem_limit/GB:.3f} GB'
+    print(msg)
+    return msg
 
 def get_avail_mem():
     mempool = cupy.get_default_memory_pool()
@@ -108,30 +110,30 @@ def reduce_to_device(array_list, inplace=False):
     assert len(array_list) == num_devices
     if num_devices == 1:
         return array_list[0]
-
+    
     out_shape = array_list[0].shape
     for s in _streams:
         s.synchronize()
-
+        
     if inplace:
         result = array_list[0]
     else:
         result = array_list[0].copy()
-
+    
     # Transfer data chunk by chunk, reduce memory footprint,
     result = result.reshape(-1)
     for device_id, matrix in enumerate(array_list):
         if device_id == 0:
             continue
-
+        
         assert matrix.device.id == device_id
         matrix = matrix.reshape(-1)
         blksize = 1024*1024*1024 // matrix.itemsize # 1GB
         for p0, p1 in lib.prange(0,len(matrix), blksize):
             result[p0:p1] += copy_array(matrix[p0:p1])
-            #result[p0:p1] += cupy.asarray(matrix[p0:p1])
+            #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
     return result.reshape(out_shape)
-
+    
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -181,7 +183,7 @@ def asarray(a, **kwargs):
         # CuPy always allocates pinned memory as a temporary buffer during array transfer.
         # This leads to additional memory usage, and the buffer is not managed by CuPy's
         # memory pool or Python's GC.
-        # See the `cdef _ndarray_base _array_default` function in
+        # See the `cdef _ndarray_base _array_default` function in 
         # cupy/_core/core.pyx, where memory buffer is allocated via
         # mem = _alloc_async_transfer_buffer(nbytes)
 
@@ -346,6 +348,8 @@ def add_sparse(a, b, indices):
     return a
 
 def dist_matrix(x, y, out=None):
+    x = cupy.asarray(x, dtype=np.float64)
+    y = cupy.asarray(y, dtype=np.float64)
     assert x.flags.c_contiguous
     assert y.flags.c_contiguous
 
@@ -378,7 +382,7 @@ def _initialize_c2s_data():
 def block_c2s_diag(angular, counts):
     '''
     Diagonal blocked cartesian to spherical transformation
-    Args:
+    Args: 
         angular (list): angular momentum type, e.g. [0,1,2,3]
         counts (list): count of each angular momentum
     '''
@@ -395,7 +399,7 @@ def block_c2s_diag(angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
-
+    
     ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')
@@ -453,13 +457,15 @@ def take_last2d(a, indices, out=None):
     assert a.flags.c_contiguous
     assert a.shape[-1] == a.shape[-2]
     nao = a.shape[-1]
-    assert len(indices) == nao
+    nidx = len(indices)
     if a.ndim == 2:
         count = 1
     else:
         count = np.prod(a.shape[:-2])
     if out is None:
-        out = cupy.zeros_like(a)
+        out = cupy.zeros((count, nidx, nidx))
+    else:
+        assert out.size == count*nidx*nidx
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.take_last2d(
@@ -468,10 +474,13 @@ def take_last2d(a, indices, out=None):
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(indices_int32.data.ptr, ctypes.c_void_p),
         ctypes.c_int(count),
+        ctypes.c_int(nidx),
         ctypes.c_int(nao)
     )
     if err != 0:
         raise RuntimeError('failed in take_last2d kernel')
+    if a.ndim == 2:
+        out = out.reshape(nidx,nidx)
     return out
 
 def takebak(out, a, indices, axis=-1):
@@ -672,6 +681,9 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         x1 = x1.reshape(1, x1.size)
     nroots, ndim = x1.shape
     x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+    if len(x1) == 0:
+        return cupy.zeros_like(b)
+    
     x1 *= rmat.diagonal()[:,None]
 
     innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
@@ -827,19 +839,26 @@ def pinv(a, lindep=1e-10):
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
 
-def cond(a):
+def cond(a, sympos=False):
     """
     Calculate the condition number of a matrix.
 
     Parameters:
     a (cupy.ndarray): The input matrix.
+    sympos : Whether the input matrix is symmetric and positive definite.
 
     Returns:
     float: The condition number of the matrix.
     """
-    _, s, _ = cupy.linalg.svd(a)
-    cond_number = s[0] / s[-1]
-    return cond_number
+    if sympos:
+        s = cupy.linalg.eigvalsh(a)
+        if s[0] <= 0:
+            raise RuntimeError('matrix is not positive definite')
+        return s[-1] / s[0]
+    else:
+        _, s, _ = cupy.linalg.svd(a)
+        cond_number = s[0] / s[-1]
+        return cond_number
 
 def grouped_dot(As, Bs, Cs=None):
     '''
@@ -962,9 +981,20 @@ def grouped_gemm(As, Bs, Cs=None):
     return Cs
 
 def condense(opname, a, loc_x, loc_y=None):
+    '''Aggregate the last two dimensions of an array using the specified operation.
+
+    .. code-block:: python
+
+        for i,i0 in enumerate(loc_x[:-1]):
+            i1 = loc_x[i+1]
+            for j,j0 in enumerate(loc_y[:-1]):
+                j1 = loc_y[j+1]
+                out[i,j] = op(a[..., i0:i1, j0:j1])
+    '''
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
     a = cupy.asarray(a, order='C')
+    assert a.ndim >= 2
     if loc_y is None:
         loc_y = loc_x
     do_transpose = False
@@ -975,7 +1005,8 @@ def condense(opname, a, loc_x, loc_y=None):
             do_transpose = True
         a = a[None]
     else:
-        assert a.flags.c_contiguous
+        nx, ny = a.shape[-2:]
+        a = a.reshape(-1, nx, ny)
     loc_x = cupy.asarray(loc_x, cupy.int32)
     loc_y = cupy.asarray(loc_y, cupy.int32)
     nloc_x = loc_x.size - 1
@@ -1084,3 +1115,23 @@ def sandwich_dot(a, c, out=None):
     if a_ndim == 2:
         out = out[0]
     return out
+
+def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
+    '''
+    Customize CuPy memory allocator.
+
+    For large memory allocations (>100MB by default), the custom allocator bypasses
+    the CuPy memory pool, directly calling the CUDA malloc API. The large memory
+    chunks will be released back to the system when the associated object is
+    destroyed. Only small memory blocks are allocated from the CuPy memory pool.
+
+    Execute the following command to restore the default CuPy malloc
+        cupy.cuda.set_allocator(cupy.get_default_memory_pool().malloc)
+    '''
+    cuda_malloc = cupy.cuda.memory._malloc
+    default_mempool_malloc = cupy.get_default_memory_pool().malloc
+    def malloc(size):
+        if size >= n_bytes_threshold:
+            return cuda_malloc(size)
+        return default_mempool_malloc(size)
+    cupy.cuda.set_allocator(malloc)

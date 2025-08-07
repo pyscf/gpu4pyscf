@@ -32,8 +32,8 @@ if (USE_SYCL)
   #find_package(IntelSYCL REQUIRED PATHS ${DPCTL_CMAKE_MODULES_PATH} NO_DEFAULT_PATH)
 
   add_definitions(-DUSE_SYCL=1)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register")
-  # add_definitions(-DSYCL_EXT_ONEAPI_DEVICE_GLOBAL=1)
+  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register -Wsycl-strict -fsycl-device-code-split=per_kernel -fsycl-targets=intel_gpu_pvc -sycl-std=2020 -fp-model=precise -fsycl-max-parallel-link-jobs=5")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register -Wsycl-strict -fsycl-device-code-split=per_kernel -fsycl -sycl-std=2020 -fp-model=precise -mllvm -enable-global-offset=false")
 endif(USE_SYCL)
 
 # For better performance on A100, the option
@@ -226,7 +226,7 @@ if(BUILD_LIBXC)
       -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DENABLE_SYCL=ON
       -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
       -DCMAKE_CXX_COMPILER=icpx
-      "-DCMAKE_CXX_FLAGS=-march=sapphirerapids -mtune=sapphirerapids -mlong-double-64 -fsycl -fsycl-device-code-split=per_kernel -fsycl-targets=intel_gpu_pvc -sycl-std=2020 -fsycl-enable-function-pointers"
+      "-DCMAKE_CXX_FLAGS=-march=sapphirerapids -mtune=sapphirerapids -mlong-double-64 -fsycl -Wsycl-strict -fsycl-device-code-split=per_kernel -fsycl-targets=intel_gpu_pvc -sycl-std=2020 -fsycl-enable-function-pointers -fp-model=precise "
       -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
       -DCMAKE_INSTALL_LIBDIR:PATH=lib
       -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}

@@ -382,9 +382,9 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     This function returns matrices in the MO-occupied_orb basis, while the CPU
     version returns matrices in MO basis.
     '''
-    assert atmlst is None
     mol = hessobj.mol
     natm = mol.natm
+    assert atmlst is None or atmlst == range(natm)
     mo_coeff = cp.asarray(mo_coeff)
     mocc = cp.asarray(mo_coeff[:,mo_occ>0])
     dm0 = mocc.dot(mocc.T) * 2

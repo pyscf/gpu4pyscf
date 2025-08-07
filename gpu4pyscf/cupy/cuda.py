@@ -46,6 +46,9 @@ libgpu.sycl_get_device_id.restype = ctypes.c_int
 libgpu.sycl_get_device_count.argtypes = []
 libgpu.sycl_get_device_count.restype = ctypes.c_int
 
+libgpu.sycl_get_total_memory.argtypes = []
+libgpu.sycl_get_total_memory.restype = ctypes.c_size_t
+
 libgpu.sycl_get_free_memory.argtypes = []
 libgpu.sycl_get_free_memory.restype = ctypes.c_size_t
 
@@ -53,10 +56,15 @@ libgpu.sycl_get_free_memory.restype = ctypes.c_size_t
 libgpu.sycl_queue_synchronize.argtypes = [ctypes.c_void_p]
 libgpu.sycl_queue_synchronize.restype = None
 
+class classproperty:
+    def __init__(self, fget):
+        self.fget = fget
+    def __get__(self, obj, owner):
+        return self.fget(owner)
+
 class Stream:
     def __init__(self, device_id=None):
         if device_id is not None:
-            # Optionally set the thread device ID if you want
             libgpu.sycl_set_device(device_id)
             ptr = libgpu.sycl_get_queue_ptr_nth(device_id)
             if ptr is None:
@@ -74,16 +82,49 @@ class Stream:
         return self._ptr
 
     def __enter__(self):
-        # Push stream context if needed
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Pop stream context if needed
         pass
 
     def synchronize(self):
-        """Wait for all operations in the stream to finish."""
         libgpu.sycl_queue_synchronize(self._ptr)
+
+    @classproperty
+    def null(cls):
+        return get_current_stream()
+
+# class Stream:
+#     def __init__(self, device_id=None):
+#         if device_id is not None:
+#             # Optionally set the thread device ID if you want
+#             libgpu.sycl_set_device(device_id)
+#             ptr = libgpu.sycl_get_queue_ptr_nth(device_id)
+#             if ptr is None:
+#                 raise ValueError(f"Invalid device_id {device_id} - out of range")
+#         else:
+#             ptr = libgpu.sycl_get_queue_ptr()
+
+#         self._ptr = ptr
+
+#     @property
+#     def ptr(self):
+#         return self._ptr
+
+#     def __int__(self):
+#         return self._ptr
+
+#     def __enter__(self):
+#         # Push stream context if needed
+#         return self
+
+#     def __exit__(self, exc_type, exc_val, exc_tb):
+#         # Pop stream context if needed
+#         pass
+
+#     def synchronize(self):
+#         """Wait for all operations in the stream to finish."""
+#         libgpu.sycl_queue_synchronize(self._ptr)
 
 def _init_streams(devices):
     # devices: list of device IDs (ints)
@@ -94,8 +135,14 @@ def get_current_stream():
     # Default Stream for current default device (no device_id passed)
     return Stream()
 
+# Class-level property injection
+#Stream.null = staticmethod(get_current_stream)
+
 def get_device_count():
     return libgpu.sycl_get_device_count()
+
+def get_total_memory():
+    return libgpu.sycl_get_total_memory()
 
 def get_free_memory():
     return libgpu.sycl_get_free_memory()

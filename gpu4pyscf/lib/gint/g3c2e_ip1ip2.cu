@@ -101,7 +101,7 @@ static void GINTgout3c2e_ip1ip2(GINTEnvVars envs, double* __restrict__ gout, dou
 
 // Unrolled version
 template <int LI, int LJ, int LK> __global__
-void GINTfill_int3c2e_ip1ip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
+void GINTfill_int3c2e_ip1ip2_kernel(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -288,7 +288,7 @@ static void GINTwrite_int3c2e_ip1ip2_direct(GINTEnvVars envs, ERITensor eri,
 
 // General version
 __global__
-void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets
+void GINTfill_int3c2e_ip1ip2_general_kernel(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets
 #ifdef USE_SYCL
 					    , sycl::nd_item<2> item, double* g0
 #endif
@@ -329,7 +329,7 @@ void GINTfill_int3c2e_ip1ip2_general_kernel(GINTEnvVars envs, ERITensor eri, Bas
 
 
 __global__
-static void GINTfill_int3c2e_ip1ip2_kernel000(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
+static void GINTfill_int3c2e_ip1ip2_kernel000(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;

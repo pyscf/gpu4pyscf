@@ -36,6 +36,8 @@ libonemkl.onemkl_trsm.argtypes = [
 ]
 libonemkl.onemkl_trsm.restype = None
 
+###########################################################################################################
+
 def solve_triangular(a, b, trans=0, lower=False, unit_diagonal=False,
                      overwrite_b=False, check_finite=False):
     """
@@ -102,3 +104,52 @@ def solve_triangular(a, b, trans=0, lower=False, unit_diagonal=False,
                           ctypes.c_int(lower), ctypes.c_int(trans_flag), ctypes.c_int(unit_diagonal))
 
     return b
+
+###########################################################################################################
+
+
+def block_diag(*arrs):
+    """Create a block diagonal matrix from provided arrays.
+
+    Given the inputs ``A``, ``B``, and ``C``, the output will have these
+    arrays arranged on the diagonal::
+
+        [A, 0, 0]
+        [0, B, 0]
+        [0, 0, C]
+
+    Args:
+        A, B, C, ... (cupy.ndarray): Input arrays. A 1-D array of length ``n``
+            is treated as a 2-D array with shape ``(1,n)``.
+
+    Returns:
+        (cupy.ndarray): Array with ``A``, ``B``, ``C``, ... on the diagonal.
+        Output has the same dtype as ``A``.
+
+    .. seealso:: :func:`scipy.linalg.block_diag`
+    """
+    if not arrs:
+        return dpnp.empty((1, 0))
+
+    # Convert to 2D and check
+    if len(arrs) == 1:
+        arrs = (dpnp.atleast_2d(*arrs),)
+    else:
+        arrs = dpnp.atleast_2d(*arrs)
+    if any(a.ndim != 2 for a in arrs):
+        bad = [k for k in range(len(arrs)) if arrs[k].ndim != 2]
+        raise ValueError('arguments in the following positions have dimension '
+                         'greater than 2: {}'.format(bad))
+
+    shapes = tuple(a.shape for a in arrs)
+    shape = tuple(sum(x) for x in zip(*shapes))
+    out = dpnp.zeros(shape, dtype=dpnp.result_type(*arrs))
+    r, c = 0, 0
+    for arr in arrs:
+        rr, cc = arr.shape
+        out[r:r + rr, c:c + cc] = arr
+        r += rr
+        c += cc
+    return out
+
+###########################################################################################################

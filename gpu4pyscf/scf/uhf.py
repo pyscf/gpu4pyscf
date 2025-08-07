@@ -21,7 +21,7 @@ from pyscf import __config__
 from gpu4pyscf.scf.hf import eigh, damping, level_shift
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 
 def make_rdm1(mo_coeff, mo_occ, **kwargs):
     '''One-particle density matrix in AO representation
@@ -253,18 +253,16 @@ class UHF(hf.SCF):
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-
         if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
             dm = cupy.asarray((dm*.5,dm*.5))
-
-        if self._eri is not None or not self.direct_scf:
-            vj, vk = self.get_jk(mol, cupy.asarray(dm), hermi)
-            vhf = vj[0] + vj[1] - vk
-        else:
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-            vj, vk = self.get_jk(mol, ddm, hermi)
-            vhf = vj[0] + vj[1] - vk
-            vhf += cupy.asarray(vhf_last)
+        if dm_last is not None and self.direct_scf:
+            dm = asarray(dm) - asarray(dm_last)
+        vj = self.get_j(mol, dm[0]+dm[1], hermi)
+        vhf = self.get_k(mol, dm, hermi)
+        vhf *= -1
+        vhf += vj
+        if vhf_last is not None:
+            vhf += asarray(vhf_last)
         return vhf
 
     def spin_square(self, mo_coeff=None, s=None):

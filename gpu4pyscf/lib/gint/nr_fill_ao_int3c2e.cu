@@ -50,7 +50,6 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
     sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
     auto dev_envs = *envs;
     auto dev_eri = *eri;
-    //ERITensor dev_tmp_eri = dev_eri;
     auto dev_offsets = *offsets;
     #else
     dim3 threads(THREADSX, THREADSY);
@@ -110,43 +109,36 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
         }
 #else // USE_SYCL
         // nroots = 1
-    case 0: {
-      stream.wait();
-      std::cout << "1. I m here in nr_fill_ao_int3c2e.cu\n";
-      stream.parallel_for<class GINTfill_int3c2e_kernel0000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel0000(dev_envs, eri, dev_offsets); });
-      stream.wait();
-      std::cout << "2. I m here in nr_fill_ao_int3c2e.cu\n";      
-      break;
-    }
-        case 1: stream.parallel_for<class GINTfill_int3c2e_kernel0010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel0010(dev_envs, *eri, dev_offsets); }); break;
-        case 10: stream.parallel_for<class GINTfill_int3c2e_kernel0100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel0100(dev_envs, *eri, dev_offsets); }); break;
-        case 100: stream.parallel_for<class GINTfill_int3c2e_kernel1000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel1000(dev_envs, *eri, dev_offsets); }); break;
+        case 0: stream.parallel_for<class GINTfill_int3c2e_kernel0000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel0000(dev_envs, dev_eri, dev_offsets); }); break;
+        case 1: stream.parallel_for<class GINTfill_int3c2e_kernel0010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel0010(dev_envs, dev_eri, dev_offsets); }); break;
+        case 10: stream.parallel_for<class GINTfill_int3c2e_kernel0100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel0100(dev_envs, dev_eri, dev_offsets); }); break;
+        case 100: stream.parallel_for<class GINTfill_int3c2e_kernel1000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int3c2e_kernel1000(dev_envs, dev_eri, dev_offsets); }); break;
         // nroots = 2
-        case 2: stream.parallel_for<class GINTfill_int2e_kernel0020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel0020(dev_envs, *eri, dev_offsets); }); break;
-        case 3: stream.parallel_for<class GINTfill_int2e_kernel0030dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel0030(dev_envs, *eri, dev_offsets); }); break;
-        case 101: stream.parallel_for<class GINTfill_int2e_kernel1010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1010(dev_envs, *eri, dev_offsets); }); break;
-        case 102: stream.parallel_for<class GINTfill_int2e_kernel1020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1020(dev_envs, *eri, dev_offsets); }); break;
-        case 110: stream.parallel_for<class GINTfill_int2e_kernel1100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1100(dev_envs, *eri, dev_offsets); }); break;
-        case 111: stream.parallel_for<class GINTfill_int2e_kernel1110dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1110(dev_envs, *eri, dev_offsets); }); break;
-        case 200: stream.parallel_for<class GINTfill_int2e_kernel2000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2000(dev_envs, *eri, dev_offsets); }); break;
-        case 201: stream.parallel_for<class GINTfill_int2e_kernel2010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2010(dev_envs, *eri, dev_offsets); }); break;
-        case 210: stream.parallel_for<class GINTfill_int2e_kernel2100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2100(dev_envs, *eri, dev_offsets); }); break;
-        case 300: stream.parallel_for<class GINTfill_int2e_kernel3000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3000(dev_envs, *eri, dev_offsets); }); break;
+        case 2: stream.parallel_for<class GINTfill_int2e_kernel0020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel0020(dev_envs, dev_eri, dev_offsets); }); break;
+        case 3: stream.parallel_for<class GINTfill_int2e_kernel0030dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel0030(dev_envs, dev_eri, dev_offsets); }); break;
+        case 101: stream.parallel_for<class GINTfill_int2e_kernel1010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1010(dev_envs, dev_eri, dev_offsets); }); break;
+        case 102: stream.parallel_for<class GINTfill_int2e_kernel1020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1020(dev_envs, dev_eri, dev_offsets); }); break;
+        case 110: stream.parallel_for<class GINTfill_int2e_kernel1100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1100(dev_envs, dev_eri, dev_offsets); }); break;
+        case 111: stream.parallel_for<class GINTfill_int2e_kernel1110dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1110(dev_envs, dev_eri, dev_offsets); }); break;
+        case 200: stream.parallel_for<class GINTfill_int2e_kernel2000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2000(dev_envs, dev_eri, dev_offsets); }); break;
+        case 201: stream.parallel_for<class GINTfill_int2e_kernel2010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2010(dev_envs, dev_eri, dev_offsets); }); break;
+        case 210: stream.parallel_for<class GINTfill_int2e_kernel2100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2100(dev_envs, dev_eri, dev_offsets); }); break;
+        case 300: stream.parallel_for<class GINTfill_int2e_kernel3000dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3000(dev_envs, dev_eri, dev_offsets); }); break;
         // nroots = 3
-        case 103: stream.parallel_for<class GINTfill_int2e_kernel1030dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1030(dev_envs, *eri, dev_offsets); }); break;
-        case 112: stream.parallel_for<class GINTfill_int2e_kernel1120dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1120(dev_envs, *eri, dev_offsets); }); break;
-        case 113: stream.parallel_for<class GINTfill_int2e_kernel1130dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1130(dev_envs, *eri, dev_offsets); }); break;
-        case 202: stream.parallel_for<class GINTfill_int2e_kernel2020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2020(dev_envs, *eri, dev_offsets); }); break;
-        case 203: stream.parallel_for<class GINTfill_int2e_kernel2030dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2030(dev_envs, *eri, dev_offsets); }); break;
-        case 211: stream.parallel_for<class GINTfill_int2e_kernel2110dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2110(dev_envs, *eri, dev_offsets); }); break;
-        case 212: stream.parallel_for<class GINTfill_int2e_kernel2120dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2120(dev_envs, *eri, dev_offsets); }); break;
-        case 220: stream.parallel_for<class GINTfill_int2e_kernel2200dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2200(dev_envs, *eri, dev_offsets); }); break;
-        case 221: stream.parallel_for<class GINTfill_int2e_kernel2210dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2210(dev_envs, *eri, dev_offsets); }); break;
-        case 301: stream.parallel_for<class GINTfill_int2e_kernel3010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3010(dev_envs, *eri, dev_offsets); }); break;
-        case 302: stream.parallel_for<class GINTfill_int2e_kernel3020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3020(dev_envs, *eri, dev_offsets); }); break;
-        case 310: stream.parallel_for<class GINTfill_int2e_kernel3100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3100(dev_envs, *eri, dev_offsets); }); break;
-        case 311: stream.parallel_for<class GINTfill_int2e_kernel3110dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3110(dev_envs, *eri, dev_offsets); }); break;
-        case 320: stream.parallel_for<class GINTfill_int2e_kernel3200dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3200(dev_envs, *eri, dev_offsets); }); break;
+        case 103: stream.parallel_for<class GINTfill_int2e_kernel1030dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1030(dev_envs, dev_eri, dev_offsets); }); break;
+        case 112: stream.parallel_for<class GINTfill_int2e_kernel1120dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1120(dev_envs, dev_eri, dev_offsets); }); break;
+        case 113: stream.parallel_for<class GINTfill_int2e_kernel1130dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel1130(dev_envs, dev_eri, dev_offsets); }); break;
+        case 202: stream.parallel_for<class GINTfill_int2e_kernel2020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2020(dev_envs, dev_eri, dev_offsets); }); break;
+        case 203: stream.parallel_for<class GINTfill_int2e_kernel2030dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2030(dev_envs, dev_eri, dev_offsets); }); break;
+        case 211: stream.parallel_for<class GINTfill_int2e_kernel2110dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2110(dev_envs, dev_eri, dev_offsets); }); break;
+        case 212: stream.parallel_for<class GINTfill_int2e_kernel2120dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2120(dev_envs, dev_eri, dev_offsets); }); break;
+        case 220: stream.parallel_for<class GINTfill_int2e_kernel2200dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2200(dev_envs, dev_eri, dev_offsets); }); break;
+        case 221: stream.parallel_for<class GINTfill_int2e_kernel2210dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2210(dev_envs, dev_eri, dev_offsets); }); break;
+        case 301: stream.parallel_for<class GINTfill_int2e_kernel3010dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3010(dev_envs, dev_eri, dev_offsets); }); break;
+        case 302: stream.parallel_for<class GINTfill_int2e_kernel3020dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3020(dev_envs, dev_eri, dev_offsets); }); break;
+        case 310: stream.parallel_for<class GINTfill_int2e_kernel3100dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3100(dev_envs, dev_eri, dev_offsets); }); break;
+        case 311: stream.parallel_for<class GINTfill_int2e_kernel3110dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3110(dev_envs, dev_eri, dev_offsets); }); break;
+        case 320: stream.parallel_for<class GINTfill_int2e_kernel3200dev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3200(dev_envs, dev_eri, dev_offsets); }); break;
         default: {
             sycl::range<2> threads(1, THREADSX*THREADSY);
             sycl::range<2> blocks(ntasks_kl, ntasks_ij);
@@ -154,7 +146,7 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
 	    stream.submit([&](sycl::handler &cgh) {
 		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize+16), cgh);
 		cgh.parallel_for<class GINTfill_int3c2e_kerneldev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-                  GINTfill_int3c2e_kernel(dev_envs, *eri, dev_offsets, item,
+                  GINTfill_int3c2e_kernel(dev_envs, dev_eri, dev_offsets, item,
 			GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
 		}); });
         }

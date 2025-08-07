@@ -68,6 +68,11 @@ GPU4PYSCF_EXPORT void sycl_wait_event(void* handle) {
   }
 }
 
+GPU4PYSCF_EXPORT size_t sycl_get_total_memory() {
+  auto dev = sycl_get_queue()->get_device();
+  return dev.get_info<sycl::info::device::global_mem_size>();
+}
+
 GPU4PYSCF_EXPORT size_t sycl_get_free_memory() {
   auto dev = sycl_get_queue()->get_device();
   if (!dev.has(sycl::aspect::ext_intel_free_memory)) {

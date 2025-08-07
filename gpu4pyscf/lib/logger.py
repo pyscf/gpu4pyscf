@@ -14,32 +14,9 @@
 
 import sys
 import time
+from importlib.util import find_spec
+has_dpctl = find_spec("dpctl")
 import cupy
-# from importlib.util import find_spec
-# has_dpctl = find_spec("dpctl")
-# if not has_dpctl:
-#     import cupy as cupy
-# else:
-#     import dpctl
-#     import types
-
-#     # Create dummy cupy.cuda module
-#     cupy_module = types.ModuleType("cupy")
-#     cuda_module = types.ModuleType("cupy.cuda")
-
-#     # Alias Event to dpctl.SyclEvent
-#     cuda_module.Event = dpctl.SyclEvent
-
-#     # Attach the fake cuda module to cupy
-#     cupy_module.cuda = cuda_module
-
-#     # Insert the fake cupy module into sys.modules
-#     sys.modules["cupy"] = cupy_module
-#     sys.modules["cupy.cuda"] = cuda_module
-
-#     # Now code that imports cupy.cuda.Event will work
-#     from cupy.cuda import Event
-
 from pyscf import lib
 
 INFO = lib.logger.INFO
@@ -84,6 +61,20 @@ def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):
             flush(rec, '    CPU time for %s %9.2f sec' % (msg, t0-cpu0))
         return t0,
 
+def timer_silent(rec, cpu0=None, wall0=None, gpu0=None):
+    if gpu0:
+        t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
+        e0.record()
+        e0.synchronize()
+        return t0-cpu0, w0-wall0, cupy.cuda.get_elapsed_time(gpu0,e0)
+    elif wall0:
+        t0, w0 = process_clock(), perf_counter()
+        return t0-cpu0, w0-wall0
+    else:
+        t0 = process_clock()
+        return t0-cpu0,
+
+
 def _timer_debug1(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
     if rec.verbose >= DEBUG1:
         return timer(rec, msg, cpu0, wall0, gpu0)
@@ -112,6 +103,25 @@ def _timer_debug2(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
         t0 = process_clock()
         return t0,
 
+def print_mem_info(rec):
+    if has_dpctl:
+        total_mem = cupy.cuda.get_total_memory()
+        mem_avail = free_mem = cupy.cuda.get_free_memory()
+        used_mem = total_mem - free_mem
+        flush(rec, f'mem_info: unallocated={free_mem/1024**2:.2f} MB, '
+              f'used={used_mem/1024**2:.2f} MB, free={free_mem/1024**2:.2f} MB')
+        return mem_avail
+    else:
+        mempool = cupy.get_default_memory_pool()
+        used_mem = mempool.used_bytes()
+        free_mem = mempool.free_bytes()
+        free_blocks = mempool.n_free_blocks()
+        mem_avail = cupy.cuda.runtime.memGetInfo()[0]
+        flush(rec, f'mem_info: unallocated={mem_avail/1024**2:.2f} MB, '
+              f'used={used_mem/1024**2:.2f} MB, free={free_mem/1024**2:.2f} MB, '
+              f'free_blocks={free_blocks}')
+        return mem_avail + free_mem
+
 info = lib.logger.info
 note = lib.logger.note
 warn = lib.logger.warn
@@ -128,6 +138,8 @@ class Logger(lib.logger.Logger):
     timer_debug2 = _timer_debug2
     timer = timer
     init_timer = init_timer
+    timer_silent = timer_silent
+    print_mem_info = print_mem_info
 
 def new_logger(rec=None, verbose=None):
     '''Create and return a :class:`Logger` object

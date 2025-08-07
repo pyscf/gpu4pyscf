@@ -21,8 +21,6 @@ from cupy_backends.cuda.libs import cusolver
 from cupy_backends.cuda.libs import cublas
 from cupy.cuda import device
 
-
-
 libcusolver = find_library('cusolver')
 libcusolver = ctypes.CDLL(libcusolver)
 
@@ -100,7 +98,7 @@ libcusolver.cusolverDnZhegvd.argtypes = [
     ctypes.c_void_p   # *devInfo
 ]
 
-def eigh(h, s):
+def eigh(h, s, overwrite=False):
     '''
     solve generalized eigenvalue problem
     '''
@@ -112,6 +110,9 @@ def eigh(h, s):
         # .T.copy() is equivalent to .conj()
         A = h.conj()
         B = s.conj()
+    elif overwrite:
+        A = h
+        B = s
     else:
         A = h.copy()
         B = s.copy()
@@ -189,5 +190,7 @@ def cholesky(A):
     potrf(handle, cublas.CUBLAS_FILL_MODE_UPPER, n, x.data.ptr, n,
         workspace.data.ptr, buffersize, dev_info.data.ptr)
 
+    if dev_info[0] != 0:
+        raise RuntimeError('failed to perform Cholesky Decomposition')
     cupy.linalg._util._tril(x,k=0)
     return x

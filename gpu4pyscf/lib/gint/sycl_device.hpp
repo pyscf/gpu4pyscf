@@ -40,7 +40,8 @@ template <typename T> inline auto fabs(T x) { return sycl::fabs(x); }
 template <typename T> inline auto erf(T x) { return sycl::erf(x); }
 template <typename T> inline auto floor(T x) { return sycl::floor(x); }
 template <typename T> inline auto pow(T x, int n) { return sycl::pown(x, n); }
-template <typename T> inline auto logf(T x) { return sycl::log(x); }
+template <typename T> inline typename std::enable_if<std::is_same<T, float>::value, float>::type logf(T x) { return sycl::log(x); }
+template <typename T> inline auto log(T x) { return sycl::log(x); }
 template <typename T> inline void sincos(T x, T* sptr, T* cptr) { *sptr = sycl::sincos(x, cptr); }
 #define NAN std::numeric_limits<float>::quiet_NaN()
 

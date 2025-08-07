@@ -81,6 +81,7 @@ class ROHF(hf.RHF):
     get_occ = hf.return_cupy_array(rohf_cpu.ROHF.get_occ)
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
+    get_veff = uhf.UHF.get_veff
     get_init_guess = uhf.UHF.get_init_guess
     init_guess_by_minao      = rohf_cpu.ROHF.init_guess_by_minao
     init_guess_by_atom       = rohf_cpu.ROHF.init_guess_by_atom
@@ -170,28 +171,6 @@ class ROHF(hf.RHF):
             f = hf.level_shift(s1e, dm_tot*.5, f, level_shift_factor)
         f = tag_array(f, focka=focka, fockb=fockb)
         return f
-
-    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=0, hermi=1):
-        if mol is None: mol = self.mol
-        if dm is None: dm = self.make_rdm1()
-        if getattr(dm, 'ndim', 0) == 2:
-            dm = cupy.stack((dm*.5,dm*.5))
-
-        if dm_last is None or not self.direct_scf:
-            if getattr(dm, 'mo_coeff', None) is not None:
-                mo_coeff = dm.mo_coeff
-                mo_occ_a = (dm.mo_occ > 0).astype(np.double)
-                mo_occ_b = (dm.mo_occ ==2).astype(np.double)
-                dm = tag_array(dm, mo_coeff=(mo_coeff,mo_coeff),
-                               mo_occ=(mo_occ_a,mo_occ_b))
-            vj, vk = self.get_jk(mol, dm, hermi)
-            vhf = vj[0] + vj[1] - vk
-        else:
-            ddm = cupy.asarray(dm) - cupy.asarray(dm_last)
-            vj, vk = self.get_jk(mol, ddm, hermi)
-            vhf = vj[0] + vj[1] - vk
-            vhf += vhf_last
-        return vhf
 
     def get_grad(self, mo_coeff, mo_occ, fock):
         '''ROHF gradients is the off-diagonal block [co + cv + ov], where
