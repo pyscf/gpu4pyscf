@@ -87,7 +87,7 @@ def reset_kpts(kpts, cell):
     Update the absolute k-points of an object wrt the input cell,
     while preserving the same fractional (scaled) k-point coordinates.
     '''
-    assert isinstance(self.kpts, KPoints)
+    assert isinstance(kpts, KPoints)
     if hasattr(kpts, 'reset'):
         kpts = kpts.reset(cell)
     else: # kpts.reset() is not available in pyscf 2.10

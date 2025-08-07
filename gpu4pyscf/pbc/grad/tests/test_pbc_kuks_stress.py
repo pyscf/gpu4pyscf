@@ -211,7 +211,6 @@ class KnownValues(unittest.TestCase):
         mf = kukspu.KUKSpU(cell, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
         mf.__dict__.update(cell.KUKS(kpts=kpts).to_gpu().run(max_cycle=1).__dict__)
         sigma = kuks_stress._hubbard_U_deriv1(mf)
-        mf_scanner = mf.as_scanner()
 
         for (i, j) in [(1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)

@@ -237,7 +237,7 @@ class FFTDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if isinstance(self._kpts, KPoints):
+        if self._kpts is None or isinstance(self._kpts, KPoints):
             return self._kpts
         else:
             return self.cell.get_abs_kpts(self._kpts)

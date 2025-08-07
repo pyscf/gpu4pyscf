@@ -170,7 +170,7 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     @property
     def kpts(self):
-        if isinstance(val, KPoints):
+        if self._kpts is None or isinstance(self._kpts, KPoints):
             return self._kpts
         else:
             return self.cell.get_abs_kpts(self._kpts)

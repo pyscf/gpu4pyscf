@@ -425,7 +425,7 @@ class GradientsBase(lib.StreamObject):
         g_disp = 0
         mf = self.base
         if hasattr(mf, 'disp') and mf.disp is not None:
-            g_disp = mf_grad.get_dispersion()
+            g_disp = self.get_dispersion()
         return g_disp
 
     @property
