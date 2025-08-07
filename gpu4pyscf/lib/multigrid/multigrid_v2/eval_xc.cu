@@ -61,6 +61,7 @@ int evaluate_xc_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
+        // TODO: general n_channels function has been removed, the compilation of this call will fail.
         return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_xc_driver<float, true>(
             (float *)fock, (float *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,
@@ -93,6 +94,7 @@ int evaluate_xc_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
+        // TODO: general n_channels function has been removed, the compilation of this call will fail.
         return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_xc_driver<float, false>(
             (float *)fock, (float *)xc_weights, i_angular, j_angular,
             non_trivial_pairs, i_shells, j_shells, n_j_shells,

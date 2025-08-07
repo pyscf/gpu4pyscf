@@ -83,6 +83,7 @@ int evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
+        // TODO: general n_channels function has been removed, the compilation of this call will fail.
         return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
             float, true>((float *)density, (float *)density_matrices, i_angular,
                          j_angular, non_trivial_pairs, i_shells, j_shells,
@@ -116,6 +117,7 @@ int evaluate_density_driver(
             image_pair_difference_index, n_difference_images, mesh, atm, bas,
             env);
       } else {
+        // TODO: general n_channels function has been removed, the compilation of this call will fail.
         return gpu4pyscf::gpbc::multi_grid::runtime_channel::evaluate_density_driver<
             float, false>(
             (float *)density, (float *)density_matrices, i_angular, j_angular,
