@@ -71,7 +71,7 @@ def calc_energy(mol):
 
 class KnownValues(unittest.TestCase):
     def test_mecp_hf_tda_singlet(self):
-        mf = dft.RKS(mol, xc='pbe0').to_gpu()
+        mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         td = mf.TDA()
         td.nstates = 5
@@ -79,7 +79,7 @@ class KnownValues(unittest.TestCase):
         ci_optimizer = ConicalIntersectionOptimizer(td, states=(1, 2), crossing_type='n-2')
             
         optimized_mol = ci_optimizer.optimize()
-        mff = dft.RKS(mol, xc='pbe0').to_gpu()
+        mff = scf.RHF(optimized_mol).to_gpu()
         mff.kernel()
         tdf = mff.TDA()
         tdf.nstates = 5
