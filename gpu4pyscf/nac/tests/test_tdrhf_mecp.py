@@ -22,18 +22,18 @@ from gpu4pyscf.nac.mecp import ConicalIntersectionOptimizer
 import gpu4pyscf
 
 atom = [
-    ['C', ( 0.0000,  1.3970, 0.1000)],
-    ['C', ( 1.2100,  0.6985, 0.0000)],
-    ['C', ( 1.2100, -0.6985, 0.0000)],
-    ['C', ( 0.0000, -1.3970, 0.0000)],
-    ['C', (-1.2100, -0.6985, 0.0000)],
-    ['C', (-1.2100,  0.6985, 0.0000)],
-    ['H', ( 0.0000,  2.4770, 0.0000)],
-    ['H', ( 2.1450,  1.2385, 0.0000)],
-    ['H', ( 2.1450, -1.2385, 0.0000)],
-    ['H', ( 0.0000, -2.4770, 0.0000)],
-    ['H', (-2.1450, -1.2385, 0.0000)],
-    ['H', (-2.1450,  1.2385, 0.0000)],
+    ['C', ( 1.08714538e-07,  1.42742925e+00,  1.66180082e-02)],
+    ['C', ( 1.20863220e+00,  7.37682299e-01,  1.26124030e-02)],
+    ['C', ( 1.20863229e+00, -7.37682827e-01,  4.05547048e-03)],
+    ['C', (-1.10080950e-07, -1.42742890e+00,  4.18955561e-05)],
+    ['C', (-1.20863232e+00, -7.37682428e-01,  4.05542079e-03)],
+    ['C', (-1.20863217e+00,  7.37682696e-01,  1.26126415e-02)],
+    ['H', ( 3.30517487e-07,  2.50912129e+00,  2.28905128e-02)],
+    ['H', ( 2.15206376e+00,  1.26465626e+00,  1.56466006e-02)],
+    ['H', ( 2.15206372e+00, -1.26465701e+00,  1.02499797e-03)],
+    ['H', (-3.28717469e-07, -2.50912092e+00, -6.22998716e-03)],
+    ['H', (-2.15206383e+00, -1.26465649e+00,  1.02491283e-03)],
+    ['H', (-2.15206365e+00,  1.26465678e+00,  1.56471236e-02)],
 ]
 
 bas0 = "cc-pvdz"
@@ -71,7 +71,7 @@ def calc_energy(mol):
 
 class KnownValues(unittest.TestCase):
     def test_mecp_hf_tda_singlet(self):
-        mf = scf.RHF(mol).to_gpu()
+        mf = dft.RKS(mol, xc='pbe0').to_gpu()
         mf.kernel()
         td = mf.TDA()
         td.nstates = 5
@@ -79,7 +79,7 @@ class KnownValues(unittest.TestCase):
         ci_optimizer = ConicalIntersectionOptimizer(td, states=(1, 2), crossing_type='n-2')
             
         optimized_mol = ci_optimizer.optimize()
-        mff = scf.RHF(optimized_mol).to_gpu()
+        mff = dft.RKS(mol, xc='pbe0').to_gpu()
         mff.kernel()
         tdf = mff.TDA()
         tdf.nstates = 5
@@ -124,6 +124,9 @@ class KnownValues(unittest.TestCase):
         delta_e1 = e1[1] - e1[0]
         delta_e2 = e2[1] - e2[0]
 
+        ci_optimizer.get_eff_energy_and_gradient() # calculate the energy and effective gradient.
+
+        assert np.linalg.norm(ci_optimizer._last_grad) <= 1.0E-5
         assert e_mecp <= 1.0E-5
         assert delta_e1 >= 1.0E-5
         assert delta_e2 <= 1.0E-5
