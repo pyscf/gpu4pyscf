@@ -14,6 +14,8 @@
 
 __version__ = '1.4.2'
 
+from . import _patch_pyscf
+
 from . import lib, grad, hessian, solvent, scf, dft, tdscf, nac
 
 # Overwrite the cupy memory allocator. Make memory pool manage small-sized

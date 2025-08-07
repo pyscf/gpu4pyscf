@@ -113,12 +113,13 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     """
     Electronic energy for KUKSpU.
     """
-    if h1e_kpts is None: h1e_kpts = mf.get_hcore(mf.cell, mf.kpts)
+    kpts = mf.kpts
+    if h1e_kpts is None: h1e_kpts = mf.get_hcore(mf.cell, kpts)
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
     if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.cell, dm_kpts)
 
-    if hasattr(mf.kpts, "weights_ibz"):
+    if hasattr(kpts, "weights_ibz"):
         raise NotImplementedError('DFT+U for k-point symmetry')
     nkpts = len(h1e_kpts)
     e1 = cp.einsum('kij,nkji->', h1e_kpts, dm_kpts).get()[()] / nkpts
@@ -143,7 +144,7 @@ class KUKSpU(kuks.KUKS):
     energy_elec = energy_elec
     to_hf = NotImplemented
 
-    def __init__(self, cell, kpts=np.zeros((1,3)), xc='LDA,VWN',
+    def __init__(self, cell, kpts=None, xc='LDA,VWN',
                  exxdiv=getattr(__config__, 'pbc_scf_SCF_exxdiv', 'ewald'),
                  U_idx=[], U_val=[], C_ao_lo=None, minao_ref='MINAO', **kwargs):
         """

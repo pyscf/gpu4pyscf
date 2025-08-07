@@ -32,6 +32,7 @@ from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from pyscf.pbc.df import df as df_cpu
 from pyscf.pbc.df.gdf_builder import libpbc
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
@@ -54,7 +55,7 @@ class GDF(lib.StreamObject):
 
     _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao'})
 
-    def __init__(self, cell, kpts=np.zeros((1,3))):
+    def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
         self.is_gamma_point = False
         self.nao = None
@@ -67,20 +68,33 @@ class GDF(lib.StreamObject):
     def mol(self, x):
         self.cell = x
 
+    @property
+    def kpts(self):
+        if isinstance(val, KPoints):
+            return self._kpts
+        else:
+            return self.cell.get_abs_kpts(self._kpts)
+
+    @kpts.setter
+    def kpts(self, val):
+        if val is None or isinstance(val, KPoints):
+            self._kpts = val
+        else:
+            self._kpts = self.cell.get_scaled_kpts(val)
+
+    def reset(self, cell=None):
+        if cell is not None:
+            if isinstance(self._kpts, KPoints):
+                self.kpts = reset_kpts(self.kpts, cell)
+            self.cell = cell
+        self._rsh_df = {}
+        return self
+
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_cderi_to_save', '_cderi', '_cderip', '_cderi_idx', '_rsh_df'),
         reset_state=True)
 
     auxbasis = df_cpu.GDF.auxbasis
-
-    def reset(self, cell=None):
-        if cell is not None:
-            self.kpts = reset_kpts(self, cell)
-            self.cell = cell
-        self.auxcell = None
-        self._cderi = None
-        self._rsh_df = {}
-        return self
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
@@ -91,7 +105,7 @@ class GDF(lib.StreamObject):
         else:
             log.info('auxbasis = %s', self.auxcell.basis)
         log.info('exp_to_discard = %s', self.exp_to_discard)
-        log.info('len(kpts) = %d', len(self.kpts))
+        #log.info('len(kpts) = %d', len(self.kpts))
         log.info('is_gamma_point = %s', self.is_gamma_point)
         return self
 
@@ -308,4 +322,8 @@ class GDF(lib.StreamObject):
 
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
+
+    def to_cpu(self):
+        from pyscf.pbc.df.df import GDF
+        out = GDF(self.cell)
+        return utils.to_cpu(self, out=out)

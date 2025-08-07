@@ -241,11 +241,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
         mf_grad = krks.Gradients(mf)
         dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = cell1.KRKS(xc=xc, kpts=cell1.make_kpts(kmesh)).kernel()
-            e2 = cell2.KRKS(xc=xc, kpts=cell2.make_kpts(kmesh)).kernel()
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
     def test_gga_vs_finite_difference(self):
@@ -260,11 +261,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
         mf_grad = krks.Gradients(mf)
         dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = cell1.KRKS(xc=xc, kpts=cell1.make_kpts(kmesh)).kernel()
-            e2 = cell2.KRKS(xc=xc, kpts=cell2.make_kpts(kmesh)).kernel()
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
     @pytest.mark.slow
@@ -280,11 +282,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().run()
         mf_grad = krks.Gradients(mf)
         dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = cell1.KRKS(xc=xc, kpts=cell1.make_kpts(kmesh)).kernel()
-            e2 = cell2.KRKS(xc=xc, kpts=cell2.make_kpts(kmesh)).kernel()
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
     def test_hubbard_U(self):
@@ -305,20 +308,14 @@ class KnownValues(unittest.TestCase):
         mf = krkspu.KRKSpU(cell, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
         mf.__dict__.update(cell.KRKS(kpts=kpts).to_gpu().run(max_cycle=1).__dict__)
         sigma = krks_stress._hubbard_U_deriv1(mf)
+        mf_scanner = mf.as_scanner()
 
         for (i, j) in [(1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-4)
-            kpts = cell1.make_kpts(kmesh)
-            mf1 = krkspu.KRKSpU(cell1, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
-            mf1.mo_coeff = mf.mo_coeff
-            mf1.mo_occ = mf.mo_occ
-            e1 = mf1.get_veff().E_U.real
-
-            kpts = cell2.make_kpts(kmesh)
-            mf2 = krkspu.KRKSpU(cell2, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao)
-            mf2.mo_coeff = mf.mo_coeff
-            mf2.mo_occ = mf.mo_occ
-            e2 = mf2.get_veff().E_U.real
+            mf.reset(cell1)
+            e1 = mf.get_veff().E_U.real
+            mf.reset(cell2)
+            e2 = mf.get_veff().E_U.real
             assert abs(sigma[i,j] - (e1 - e2) / 2e-4) < 1e-8
 
     @pytest.mark.slow
@@ -339,15 +336,11 @@ class KnownValues(unittest.TestCase):
         U_val = [5]
         mf = krkspu.KRKSpU(cell, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao).run()
         sigma = mf.Gradients().get_stress()
+        mf_scanner = mf.as_scanner()
 
         cell1, cell2 = _finite_diff_cells(cell, 0, 0, disp=1e-3)
-        kpts = cell1.make_kpts(kmesh)
-        mf1 = krkspu.KRKSpU(cell1, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao).run()
-        e1 = mf1.e_tot
-
-        kpts = cell2.make_kpts(kmesh)
-        mf2 = krkspu.KRKSpU(cell2, kpts=kpts, U_idx=U_idx, U_val=U_val, minao_ref=minao).run()
-        e2 = mf2.e_tot
+        e1 = mf_scanner(cell1)
+        e2 = mf_scanner(cell2)
         assert abs(sigma[0,0] - (e1 - e2)/2e-3/cell.vol) < 1e-6
 
 if __name__ == "__main__":

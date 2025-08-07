@@ -80,7 +80,7 @@ def to_cpu(method, out=None):
     cls_keys = [getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]]
     out_keys = set(out.__dict__).union(*cls_keys)
     # Only overwrite the attributes of the same name.
-    keys = set(method.__dict__).intersection(out_keys)
+    keys = out_keys.intersection(method.__dict__)
     for key in keys:
         val = getattr(method, key)
         if isinstance(val, cupy.ndarray):

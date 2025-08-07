@@ -49,8 +49,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
-            cell1.precision = 1e-10
-            cell2.precision = 1e-10
+            cell1.precision = 1e-11
+            cell2.precision = 1e-11
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -133,11 +133,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.UKS(xc=xc).to_gpu().run()
         mf_grad = uks.Gradients(mf)
         dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = cell1.UKS(xc=xc).kernel()
-            e2 = cell2.UKS(xc=xc).kernel()
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
     @pytest.mark.slow
@@ -153,11 +154,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.UKS(xc=xc).to_gpu().run()
         mf_grad = uks.Gradients(mf)
         dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = cell1.UKS(xc=xc).kernel()
-            e2 = cell2.UKS(xc=xc).kernel()
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
     @pytest.mark.slow
@@ -172,11 +174,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.UKS(xc=xc).to_gpu().run()
         mf_grad = uks.Gradients(mf)
         dat = mf_grad.get_stress()
+        mf_scanner = mf.as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
-            e1 = cell1.UKS(xc=xc).kernel()
-            e2 = cell2.UKS(xc=xc).kernel()
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
 if __name__ == "__main__":

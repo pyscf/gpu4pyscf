@@ -26,6 +26,7 @@ from pyscf import gto
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.pbc.tools.pbc import get_coulG
@@ -167,9 +168,24 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
     get_nuc = get_nuc
     get_pp = get_pp
 
+    @property
+    def kpts(self):
+        if isinstance(val, KPoints):
+            return self._kpts
+        else:
+            return self.cell.get_abs_kpts(self._kpts)
+
+    @kpts.setter
+    def kpts(self, val):
+        if val is None or isinstance(val, KPoints):
+            self._kpts = val
+        else:
+            self._kpts = self.cell.get_scaled_kpts(val)
+
     def reset(self, cell=None):
         if cell is not None:
-            self.kpts = reset_kpts(self, cell)
+            if isinstance(self._kpts, KPoints):
+                self.kpts = reset_kpts(self.kpts, cell)
             self.cell = cell
         self._rsh_df = {}
         return self
@@ -206,7 +222,11 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
+
+    def to_cpu(self):
+        from pyscf.pbc.df.aft import AFTDF
+        out = AFTDF(self.cell)
+        return utils.to_cpu(self, out=out)
 
 def _check_kpts(mydf, kpts):
     '''Check if the argument kpts is a single k-point'''

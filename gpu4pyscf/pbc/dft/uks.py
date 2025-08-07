@@ -151,7 +151,7 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
     variables replaced by `cell`.
     '''
 
-    def __init__(self, cell, kpt=np.zeros(3), xc='LDA,VWN', exxdiv='ewald'):
+    def __init__(self, cell, kpt=None, xc='LDA,VWN', exxdiv='ewald'):
         pbcuhf.UHF.__init__(self, cell, kpt, exxdiv=exxdiv)
         rks.KohnShamDFT.__init__(self, xc)
 

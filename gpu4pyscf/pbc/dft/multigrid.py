@@ -1305,6 +1305,17 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
         self._tasks = {}
 
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
+            supmol_bas, supmol_env, ao_loc_in_cell0 = to_primitive_bas(cell)
+            self.supmol_bas = supmol_bas
+            self.supmol_env = supmol_env
+            self.ao_loc_in_cell0 = ao_loc_in_cell0
+            self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
+        self._tasks = {}
+        return self
+
     def create_tasks(self, xctype, hermi=1):
         xctype = xctype.upper()
         if (xctype, hermi) in self._tasks:

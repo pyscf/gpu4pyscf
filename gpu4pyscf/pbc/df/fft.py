@@ -26,6 +26,7 @@ from pyscf.pbc.df import fft as fft_cpu
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
@@ -208,14 +209,14 @@ class FFTDF(lib.StreamObject):
 
     _keys = fft_cpu.FFTDF._keys
 
-    def __init__(self, cell, kpts=np.zeros((1,3))):
+    def __init__(self, cell, kpts=None):
         from gpu4pyscf.pbc.dft import numint
         self.cell = cell
         self.stdout = cell.stdout
         self.verbose = cell.verbose
         self.max_memory = cell.max_memory
-        self.kpts = kpts
         self.mesh = cell.mesh
+        self.kpts = kpts
 
         # The following attributes are not input options.
         # self.exxdiv has no effects. It was set in the get_k_kpts function to
@@ -234,9 +235,24 @@ class FFTDF(lib.StreamObject):
     def grids(self, val):
         self.mesh = val.mesh
 
+    @property
+    def kpts(self):
+        if isinstance(self._kpts, KPoints):
+            return self._kpts
+        else:
+            return self.cell.get_abs_kpts(self._kpts)
+
+    @kpts.setter
+    def kpts(self, val):
+        if val is None or isinstance(val, KPoints):
+            self._kpts = val
+        else:
+            self._kpts = self.cell.get_scaled_kpts(val)
+
     def reset(self, cell=None):
         if cell is not None:
-            self.kpts = reset_kpts(self, cell)
+            if isinstance(self._kpts, KPoints):
+                self.kpts = reset_kpts(self.kpts, cell)
             self.cell = cell
         self._rsh_df = {}
         return self
@@ -283,6 +299,4 @@ class FFTDF(lib.StreamObject):
     def to_cpu(self):
         from pyscf.pbc.df.fft import FFTDF
         out = FFTDF(self.cell)
-        out.mesh = self.mesh
-        out.kpts = self.kpts
-        return out
+        return utils.to_cpu(self, out=out)
