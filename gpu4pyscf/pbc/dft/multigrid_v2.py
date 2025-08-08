@@ -461,9 +461,9 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
 
 def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, compute_tau=False):
     if compute_tau:
-        c_driver = libgpbc.evaluate_density_driver
-    else:
         c_driver = libgpbc.evaluate_density_tau_driver
+    else:
+        c_driver = libgpbc.evaluate_density_driver
     n_images = pairs_info["neighboring_images"].shape[0]
     phase_diff_among_images, image_pair_difference_index = img_phase
     n_k_points, n_difference_images = phase_diff_among_images.shape
@@ -490,9 +490,9 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
         use_float_precision = ctypes.c_int(0)
 
     if compute_tau:
-        density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
-    else:
         density = cp.zeros((n_channels, 2, ) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
+    else:
+        density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
@@ -598,7 +598,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         density = (
             evaluate_density_wrapper(
-                pairs, coeff_sandwiched_density_matrix, img_phase, compute_tau
+                pairs, coeff_sandwiched_density_matrix, img_phase, compute_tau = compute_tau
             )
             * weight_per_grid_point
         )
