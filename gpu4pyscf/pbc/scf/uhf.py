@@ -36,7 +36,7 @@ class UHF(pbchf.SCF):
 
     init_guess_breaksym = uhf_cpu.UHF.init_guess_breaksym
 
-    def __init__(self, cell, kpt=np.zeros(3), exxdiv='ewald'):
+    def __init__(self, cell, kpt=None, exxdiv='ewald'):
         pbchf.SCF.__init__(self, cell, kpt, exxdiv)
         self.nelec = None
 

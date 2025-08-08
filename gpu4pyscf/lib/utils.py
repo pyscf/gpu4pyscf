@@ -71,24 +71,23 @@ def to_cpu(method, out=None):
         from importlib import import_module
         mod = import_module(method.__module__.replace('gpu4pyscf', 'pyscf'))
         cls = getattr(mod, method.__class__.__name__)
-
-        # A temporary CPU instance. This ensures to initialize private
-        # attributes that are only available for CPU code.
-        out = cls(omniobj)
+        out = method.view(cls)
 
     # Convert only the keys that are defined in the corresponding CPU class
     cls_keys = [getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]]
     out_keys = set(out.__dict__).union(*cls_keys)
     # Only overwrite the attributes of the same name.
-    keys = set(method.__dict__).intersection(out_keys)
+    keys = out_keys.intersection(method.__dict__)
+
     for key in keys:
         val = getattr(method, key)
-        if isinstance(val, cupy.ndarray):
-            val = val.get()
-        elif hasattr(val, 'to_cpu'):
+        if hasattr(val, 'to_cpu'):
             val = val.to_cpu()
+        elif isinstance(val, cupy.ndarray):
+            val = val.get()
         setattr(out, key, val)
-    out.reset()
+    if hasattr(out, 'reset'):
+        out.reset()
     return out
 
 def to_gpu(method, device=None):

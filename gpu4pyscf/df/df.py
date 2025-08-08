@@ -26,6 +26,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
 from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import _streams, num_devices
 
@@ -38,7 +39,6 @@ LINEAR_DEP_THR = incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
-    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
 
@@ -71,10 +71,12 @@ class DF(lib.StreamObject):
             self.reset()
             self._auxbasis = x
 
+    to_gpu = utils.to_gpu
+    device = utils.device
+
     def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        obj = to_cpu(self)
-        return obj.reset()
+        from pyscf.df.df import DF
+        return utils.to_cpu(self, out=DF(self.mol, auxbasis=self.auxbasis))
 
     def build(self, direct_scf_tol=1e-14, omega=None):
         mol = self.mol

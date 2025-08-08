@@ -20,7 +20,6 @@ from pyscf.pbc import tools as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE

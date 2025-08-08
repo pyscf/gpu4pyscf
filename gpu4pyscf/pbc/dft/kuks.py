@@ -162,7 +162,7 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
     '''UKS class adapted for PBCs with k-point sampling.
     '''
 
-    def __init__(self, cell, kpts=np.zeros((1,3)), xc='LDA,VWN', exxdiv='ewald'):
+    def __init__(self, cell, kpts=None, xc='LDA,VWN', exxdiv='ewald'):
         kuhf.KUHF.__init__(self, cell, kpts, exxdiv=exxdiv)
         rks.KohnShamDFT.__init__(self, xc)
 

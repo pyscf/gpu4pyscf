@@ -130,13 +130,14 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     """
     Electronic energy for KRKSpU.
     """
-    if h1e_kpts is None: h1e_kpts = mf.get_hcore(mf.cell, mf.kpts)
+    kpts = mf.kpts
+    if h1e_kpts is None: h1e_kpts = mf.get_hcore(mf.cell, kpts)
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
     if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.cell, dm_kpts)
 
-    if hasattr(mf.kpts, "weights_ibz"):
-        e1 = cp.einsum('k,kij,kji->', mf.kpts.weights_ibz.dot, h1e_kpts, dm_kpts).get()[()]
+    if hasattr(kpts, "weights_ibz"):
+        e1 = cp.einsum('k,kij,kji->', kpts.weights_ibz.dot, h1e_kpts, dm_kpts).get()[()]
     else:
         weight = 1./len(h1e_kpts)
         e1 = weight * cp.einsum('kij,kji', h1e_kpts, dm_kpts).get()[()]
@@ -187,7 +188,7 @@ class KRKSpU(krks.KRKS):
     energy_elec = energy_elec
     to_hf = NotImplemented
 
-    def __init__(self, cell, kpts=np.zeros((1,3)), xc='LDA,VWN',
+    def __init__(self, cell, kpts=None, xc='LDA,VWN',
                  exxdiv=getattr(__config__, 'pbc_scf_SCF_exxdiv', 'ewald'),
                  U_idx=[], U_val=[], C_ao_lo=None, minao_ref='MINAO', **kwargs):
         """

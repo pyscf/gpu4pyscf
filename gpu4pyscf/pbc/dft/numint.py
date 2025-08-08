@@ -545,6 +545,9 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
 
     make_mask = NotImplemented
 
+    def reset(self, cell=None):
+        return self
+
     def get_rho(self, cell, dm, grids, kpts=np.zeros((1,3))):
         '''Density in real space
         '''

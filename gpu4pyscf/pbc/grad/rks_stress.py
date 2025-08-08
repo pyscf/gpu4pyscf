@@ -47,7 +47,6 @@ See K. Doll, Mol Phys (2010), 108, 223
 import ctypes
 import numpy as np
 import cupy as cp
-import pyscf
 from pyscf import lib
 from pyscf import gto
 from pyscf.pbc.lib.kpts_helper import is_zero
@@ -63,34 +62,6 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 
 ALIGNED = 256
-
-if int(pyscf.__version__.split('.')[1]) <= 10: # pyscf-2.9
-    # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.9
-    from pyscf.gto import mole
-    from pyscf.pbc.gto.cell import Cell
-    def set_geom_(cell, atoms_or_coords=None, unit=None, symmetry=None,
-                  a=None, inplace=True):
-        '''Update geometry and lattice parameters'''
-        if not inplace:
-            cell = cell.copy(deep=False)
-            cell._env = cell._env.copy()
-        if a is not None:
-            logger.info(cell, 'Set new lattice vectors')
-            logger.info(cell, '%s', a)
-            cell.a = a
-            if cell._mesh_from_build:
-                cell.mesh = None
-            if cell._rcut_from_build:
-                cell.rcut = None
-            cell._built = False
-        cell.enuc = None
-
-        if atoms_or_coords is not None:
-            cell = mole.MoleBase.set_geom_(cell, atoms_or_coords, unit, symmetry)
-        if not cell._built:
-            cell.build(False, False)
-        return cell
-    Cell.set_geom_ = set_geom_
 
 def strain_tensor_dispalcement(x, y, disp):
     E_strain = np.eye(3)

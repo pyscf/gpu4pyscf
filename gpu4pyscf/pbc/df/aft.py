@@ -26,11 +26,13 @@ from pyscf import gto
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
                                        get_avail_mem)
@@ -160,12 +162,35 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     __init__ = aft_cpu.AFTDF.__init__
     dump_flags = aft_cpu.AFTDF.dump_flags
-    reset = aft_cpu.AFTDF.reset
     check_sanity = aft_cpu.AFTDF.check_sanity
     build = aft_cpu.AFTDF.build
 
     get_nuc = get_nuc
     get_pp = get_pp
+
+    @property
+    def kpts(self):
+        if isinstance(self._kpts, KPoints):
+            return self._kpts
+        else:
+            return self.cell.get_abs_kpts(self._kpts)
+
+    @kpts.setter
+    def kpts(self, val):
+        if val is None:
+            self._kpts = np.zeros((1, 3))
+        elif isinstance(val, KPoints):
+            self._kpts = val
+        else:
+            self._kpts = self.cell.get_scaled_kpts(val)
+
+    def reset(self, cell=None):
+        if cell is not None:
+            if isinstance(self._kpts, KPoints):
+                self.kpts = reset_kpts(self.kpts, cell)
+            self.cell = cell
+        self._rsh_df = {}
+        return self
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular
@@ -199,7 +224,11 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
+
+    def to_cpu(self):
+        from pyscf.pbc.df.aft import AFTDF
+        out = AFTDF(self.cell, kpts=self.kpts)
+        return utils.to_cpu(self, out=out)
 
 def _check_kpts(mydf, kpts):
     '''Check if the argument kpts is a single k-point'''
