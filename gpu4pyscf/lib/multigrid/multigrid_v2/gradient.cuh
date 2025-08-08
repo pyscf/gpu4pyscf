@@ -48,8 +48,8 @@ __global__ void evaluate_xc_kernel(
   constexpr int n_j_cartesian_functions = (j_angular + 1) * (j_angular + 2) / 2;
   constexpr int n_ij = n_i_cartesian_functions * n_j_cartesian_functions;
   constexpr int n_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
-  constexpr int n_dimensions = 3;
   constexpr int n_xy_threads = BLOCK_DIM_XYZ * BLOCK_DIM_XYZ;
+  constexpr int n_dimensions = 3;
 
   const int xc_weights_stride = mesh_a * mesh_b * mesh_c;
   const int density_matrix_stride = n_i_functions * n_j_functions;
@@ -81,11 +81,6 @@ __global__ void evaluate_xc_kernel(
   const int a_upper = min(a_start + BLOCK_DIM_XYZ, mesh_a) - a_start;
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
   const int c_upper = min(c_start + BLOCK_DIM_XYZ, mesh_c) - c_start;
-
-  KernelType i_cartesian[n_i_cartesian_functions];
-  KernelType i_cartesian_gradient[n_dimensions * n_i_cartesian_functions];
-  KernelType j_cartesian[n_j_cartesian_functions];
-  KernelType j_cartesian_gradient[n_dimensions * n_j_cartesian_functions];
 
   KernelType i_atom_gradient[n_dimensions];
   KernelType j_atom_gradient[n_dimensions];
@@ -245,6 +240,11 @@ __global__ void evaluate_xc_kernel(
     KernelType gaussian_x, gaussian_y, gaussian_z, recursion_factor_a,
         recursion_factor_b, recursion_factor_c;
 
+    KernelType i_cartesian[n_i_cartesian_functions];
+    KernelType j_cartesian[n_j_cartesian_functions];
+    KernelType i_cartesian_gradient[n_dimensions * n_i_cartesian_functions];
+    KernelType j_cartesian_gradient[n_dimensions * n_j_cartesian_functions];
+
     for (a_index = 0, gaussian_x = 1,
         recursion_factor_a = recursion_factor_a_start, x = start_position_x;
          a_index < a_upper; a_index++, gaussian_x *= recursion_factor_a,
@@ -259,11 +259,11 @@ __global__ void evaluate_xc_kernel(
             recursion_factor_c *= exp_dc_squared, z += dxyz_dabc[8]) {
           multi_grid::gto_cartesian<KernelType, i_angular>(i_cartesian, x - i_x,
                                                            y - i_y, z - i_z);
+          multi_grid::gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x,
+                                                           y - j_y, z - j_z);
           gradient::gto_cartesian<KernelType, i_angular>(
               i_cartesian_gradient, i_cartesian, x - i_x, y - i_y, z - i_z,
               i_exponent);
-          multi_grid::gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x,
-                                                           y - j_y, z - j_z);
           gradient::gto_cartesian<KernelType, j_angular>(
               j_cartesian_gradient, j_cartesian, x - j_x, y - j_y, z - j_z,
               j_exponent);

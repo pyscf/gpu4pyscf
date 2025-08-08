@@ -459,8 +459,11 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
     return mydf
 
 
-def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True):
-    c_driver = libgpbc.evaluate_density_driver
+def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, compute_tau=False):
+    if compute_tau:
+        c_driver = libgpbc.evaluate_density_driver
+    else:
+        c_driver = libgpbc.evaluate_density_tau_driver
     n_images = pairs_info["neighboring_images"].shape[0]
     phase_diff_among_images, image_pair_difference_index = img_phase
     n_k_points, n_difference_images = phase_diff_among_images.shape
@@ -486,7 +489,10 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True):
     else:
         use_float_precision = ctypes.c_int(0)
 
-    density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
+    if compute_tau:
+        density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
+    else:
+        density = cp.zeros((n_channels, 2, ) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
@@ -532,13 +538,16 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
     if mydf.sorted_gaussian_pairs is None:
         mydf.build(xc_type)
 
+    compute_tau = False
     if xc_type == "LDA":
         density_slices = 1
     elif xc_type == "GGA":
         density_slices = 4
-    else:
-        raise NotImplementedError
+    elif xc_type == "MGGA":
         density_slices = 5
+        compute_tau = True
+    else:
+        raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     cell = mydf.cell
 
@@ -589,10 +598,15 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         density = (
             evaluate_density_wrapper(
-                pairs, coeff_sandwiched_density_matrix, img_phase
+                pairs, coeff_sandwiched_density_matrix, img_phase, compute_tau
             )
             * weight_per_grid_point
         )
+
+        if compute_tau:
+            assert density.shape[1] == 2
+            tau = density[:, 1]
+            density = density[:, 0]
 
         density = fft_in_place(density)
 
@@ -604,6 +618,17 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
             pairs["fft_grid"][2],
         ] += density
 
+        if compute_tau:
+            tau = fft_in_place(tau)
+
+            density_on_g_mesh[
+                :,
+                4,
+                pairs["fft_grid"][0][:, None, None],
+                pairs["fft_grid"][1][:, None],
+                pairs["fft_grid"][2],
+            ] += tau
+
     density_on_g_mesh = density_on_g_mesh.reshape([n_channels, density_slices, -1])
     if xc_type != 'LDA':
         density_on_g_mesh[:, 1:4] = pbc_tools._get_Gv(mydf.cell, mydf.mesh).T
@@ -612,7 +637,13 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
 
 
 def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase):
-    c_driver = libgpbc.evaluate_xc_driver
+    density_slices = xc_weights.shape[1]
+    if density_slices == 1:
+        c_driver = libgpbc.evaluate_xc_driver
+    elif density_slices == 2:
+        c_driver = libgpbc.evaluate_xc_with_tau_driver
+    else:
+        raise ValueError("Incorrect xc_weights.shape = {xc_weights.shape}")
     n_i_functions = len(pairs_info["coeff_in_localized"])
     n_j_functions = len(pairs_info["concatenated_coeff"])
 
@@ -686,8 +717,16 @@ def convert_xc_on_g_mesh_to_fock(
     cell = mydf.cell
     nao = cell.nao_nr()
 
-    xc_on_g_mesh = xc_on_g_mesh.reshape(-1, *mydf.mesh)
+    # TODO: This logic will cause bugs with kpts
+    if xc_on_g_mesh.ndim < 3: # 1 for n_channels, 1 for rho/tau, 1 for ngrids
+        xc_on_g_mesh = xc_on_g_mesh[cp.newaxis, :] # n_channels == 1
+    if xc_on_g_mesh.ndim < 3:
+        xc_on_g_mesh = xc_on_g_mesh[cp.newaxis, :]
+    assert xc_on_g_mesh.ndim == 3
     n_channels = xc_on_g_mesh.shape[0]
+    density_slices = xc_on_g_mesh.shape[1]
+    xc_on_g_mesh = xc_on_g_mesh.reshape(n_channels, density_slices, *mydf.mesh)
+
     if kpts is None:
         n_k_points = 1
         at_gamma_point = True
@@ -707,6 +746,7 @@ def convert_xc_on_g_mesh_to_fock(
 
     for pairs in mydf.sorted_gaussian_pairs:
         interpolated_xc = xc_on_g_mesh[
+            :,
             :,
             pairs["fft_grid"][0][:, None, None],
             pairs["fft_grid"][1][:, None],
@@ -1059,7 +1099,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             xc_code, density, deriv=1, xctype=xc_type
         )[:2]
     else:
-        raise NotImplementedError(f'XC functional {xc_code}')
+        raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     rho_sf = density[0].real
     xc_energy_sum = rho_sf.dot(xc_for_energy.ravel()).get()[()] * weight
@@ -1071,12 +1111,21 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
 
-    if xc_type != "LDA":
+    if xc_type == "LDA":
+        pass
+    elif xc_type == "GGA":
         xc_for_fock = (
-            xc_for_fock[0]
-            - contract("gp, pg -> p", xc_for_fock[1:4], Gv) * 1j
+            xc_for_fock[0] - contract("gp, pg -> p", xc_for_fock[1:4], Gv) * 1j
         )
         xc_for_fock = xc_for_fock.reshape((-1, ngrids))
+    elif xc_type == "MGGA":
+        xc_for_fock[0] -= contract("gp, pg -> p", xc_for_fock[1:4], Gv) * 1j
+        xc_for_fock = cp.concatenate([
+            xc_for_fock[0].reshape((-1, ngrids)),
+            xc_for_fock[4].reshape((-1, ngrids)),
+        ], axis = 0)
+    else:
+        raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     if with_j:
         xc_for_fock[0] += coulomb_on_g_mesh
