@@ -1206,7 +1206,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             xc_code, density, deriv=1, xctype=xc_type
         )[:2]
     else:
-        raise NotImplementedError(f'XC functional {xc_code}')
+        raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     rho_sf = (density[0, 0] + density[1, 0]).real
     xc_energy_sum = rho_sf.dot(xc_for_energy.ravel()).get()[()] * weight
@@ -1218,12 +1218,21 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
 
-    if xc_type != "LDA":
+    if xc_type == "LDA":
+        pass
+    elif xc_type == "GGA":
         xc_for_fock = (
-            xc_for_fock[:, 0]
-            - contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
+            xc_for_fock[:, 0] - contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
         )
         xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
+    elif xc_type == "MGGA":
+        xc_for_fock[:, 0] -= contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
+        xc_for_fock = cp.concatenate([
+            xc_for_fock[:, 0].reshape((nset, -1, ngrids)),
+            xc_for_fock[:, 4].reshape((nset, -1, ngrids)),
+        ], axis = 1)
+    else:
+        raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh
