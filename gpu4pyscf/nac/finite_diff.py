@@ -17,6 +17,7 @@ import numpy as np
 from gpu4pyscf import scf, dft
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf import ris
+from scipy.optimize import linear_sum_assignment
 
 
 def diagonalize_tda(a, nroots=5):
@@ -52,6 +53,43 @@ def change_sign(s12_ao, mo_coeff_b ,mo_coeff):
     return mo_coeff_new
 
 
+def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
+    if mo_coeff_b.shape != mo_coeff.shape:
+        raise ValueError("Mo coeff b and mo coeff must have the same shape.")
+    if s12_ao.shape[0] != s12_ao.shape[1] or s12_ao.shape[0] != mo_coeff_b.shape[0]:
+        raise ValueError("S12 ao must be a square matrix with the same shape as mo coeff b.")
+    mo_overlap_matrix = mo_coeff_b.T @ s12_ao @ mo_coeff
+    abs_mo_overlap = cp.abs(mo_overlap_matrix)
+    cost_matrix = -abs_mo_overlap
+    below_threshold_mask = abs_mo_overlap < threshold
+    infinity_cost = mo_coeff_b.shape[1] + 1
+    cost_matrix[below_threshold_mask] = infinity_cost
+    
+    row_ind, col_ind = linear_sum_assignment(cost_matrix.get())
+
+    matching_indices = col_ind
+    
+    mo2_reordered = mo_coeff[:, matching_indices]
+
+    final_chosen_overlaps = abs_mo_overlap[row_ind, col_ind]
+    invalid_matches_mask = final_chosen_overlaps < threshold
+    
+    if cp.any(invalid_matches_mask):
+        num_invalid = cp.sum(invalid_matches_mask)
+        print(
+            f"{num_invalid} orbital below threshold {threshold}."
+            "This may indicate significant changes in the properties of these orbitals between the two structures."
+        )
+        invalid_indices = cp.where(invalid_matches_mask)[0]
+        for idx in invalid_indices:
+            print(f"Warning: reference coeff #{idx}'s best match is {final_chosen_overlaps[idx]:.4f} (below threshold {threshold})")
+    s_mo_new = mo_coeff_b.T @ s12_ao @ mo2_reordered
+    for i in range(s_mo_new.shape[-1]):
+        if s_mo_new[i,i] < 0.0:
+            mo2_reordered[:,i] *= -1
+    return mo2_reordered, matching_indices
+
+
 def get_new_mol(mol, coords, delta, iatm, icart):
     coords_new = coords*1.0
     coords_new[iatm, icart] += delta
@@ -77,7 +115,7 @@ def get_mf(mol, mf, s, mo_coeff):
     mf_new.max_cycle = mf.max_cycle
     mf_new.kernel()
     assert mf_new.converged
-    mo_coeff_new = change_sign(s, mo_coeff, mf_new.mo_coeff)
+    mo_coeff_new, _ = match_and_reorder_mos(s, mo_coeff, mf_new.mo_coeff)
     mf_new.mo_coeff = mo_coeff_new
 
     return mf_new
@@ -176,6 +214,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, with_ris=False, singlet=Tru
     s = cp.asarray(s)
     for iatm in range(natm):
         for icart in range(3):
+            print(f"iatm, icart, {iatm} {icart}")
             mol_add = get_new_mol(mol, coords, delta, iatm, icart)
             mf_add, xy_diag_add = get_mf_td(mol_add, mf, s, mo_coeff, with_ris)
             mol_minus = get_new_mol(mol, coords, -delta, iatm, icart)
