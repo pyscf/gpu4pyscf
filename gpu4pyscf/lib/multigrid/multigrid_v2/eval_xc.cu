@@ -181,4 +181,92 @@ int evaluate_xc_driver(
     return 0;
   }
 }
+
+int evaluate_xc_with_tau_driver(
+    double *fock, double *xc_weights, const int i_angular,
+    const int j_angular, const int *non_trivial_pairs, const int *i_shells,
+    const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
+    const int n_i_functions, const int n_j_functions,
+    const int *sorted_pairs_per_local_grid,
+    const int *accumulated_n_pairs_per_local_grid,
+    const int *sorted_block_index, const int n_contributing_blocks,
+    const int *image_indices, const double *vectors_to_neighboring_images,
+    const int n_images, const int *image_pair_difference_index,
+    const int n_difference_images, const int *mesh, const int *atm,
+    const int *bas, const double *env, int n_channels,
+    const int is_non_orthogonal, const int use_float_precision) {
+  if (use_float_precision) {
+    fprintf(stderr, "single precision not available\n");
+    return 1;
+  } else {
+    size_t size_dm = (size_t)n_i_functions * n_j_functions * n_difference_images;
+    size_t ngrids = (size_t)mesh[0] * mesh[1] * mesh[2];
+    int err;
+    while (n_channels > 0) {
+      if (is_non_orthogonal) {
+        if (n_channels == 1 ||
+            // two channels requires too many registers for high orders.
+            i_angular + j_angular >= 6) {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_xc_with_tau_driver<double, 1, true>(
+              (double *)fock, (double *)xc_weights, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          xc_weights += ngrids * 2;
+          fock += size_dm;
+          n_channels -= 1;
+        } else {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_xc_with_tau_driver<double, 2, true>(
+              (double *)fock, (double *)xc_weights, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          xc_weights += ngrids * 2 * 2;
+          fock += size_dm * 2;
+          n_channels -= 2;
+        }
+      } else {
+        if (n_channels == 1 || i_angular + j_angular >= 6) {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_xc_with_tau_driver<double, 1, false>(
+              (double *)fock, (double *)xc_weights, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          xc_weights += ngrids * 2;
+          fock += size_dm;
+          n_channels -= 1;
+        } else {
+          err = gpu4pyscf::gpbc::multi_grid::evaluate_xc_with_tau_driver<double, 2, false>(
+              (double *)fock, (double *)xc_weights, i_angular, j_angular,
+              non_trivial_pairs, i_shells, j_shells, n_j_shells,
+              shell_to_ao_indices, n_i_functions, n_j_functions,
+              sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,
+              sorted_block_index, n_contributing_blocks, image_indices,
+              vectors_to_neighboring_images, n_images,
+              image_pair_difference_index, n_difference_images, mesh, atm, bas,
+              env);
+          xc_weights += ngrids * 2 * 2;
+          fock += size_dm * 2;
+          n_channels -= 2;
+        }
+      }
+      if (err != 0) {
+          return err;
+      }
+    }
+    return 0;
+  }
+}
 }
