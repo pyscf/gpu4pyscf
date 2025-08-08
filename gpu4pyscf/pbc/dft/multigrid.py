@@ -1299,14 +1299,14 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
-            # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
-            # primitive GTOs in the super-mole.
-            supmol_bas, supmol_env, ao_loc_in_cell0 = to_primitive_bas(cell)
-            self.supmol_bas = supmol_bas
-            self.supmol_env = supmol_env
-            self.ao_loc_in_cell0 = ao_loc_in_cell0
-            # Number of primitive shells
-            self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
+        # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
+        # primitive GTOs in the super-mole.
+        supmol_bas, supmol_env, ao_loc_in_cell0 = to_primitive_bas(cell)
+        self.supmol_bas = supmol_bas
+        self.supmol_env = supmol_env
+        self.ao_loc_in_cell0 = ao_loc_in_cell0
+        # Number of primitive shells
+        self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
         self._tasks = {}
         return self
 

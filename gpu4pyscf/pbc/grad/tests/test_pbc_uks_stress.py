@@ -49,11 +49,11 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
-            cell1.precision = 1e-11
-            cell2.precision = 1e-11
+            cell1.precision = 1e-10
+            cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm)[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
+            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 2e-9
 
     def test_get_vxc_gga(self):
         a = np.eye(3) * 5

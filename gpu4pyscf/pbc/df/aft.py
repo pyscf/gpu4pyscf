@@ -170,14 +170,16 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     @property
     def kpts(self):
-        if self._kpts is None or isinstance(self._kpts, KPoints):
+        if isinstance(self._kpts, KPoints):
             return self._kpts
         else:
             return self.cell.get_abs_kpts(self._kpts)
 
     @kpts.setter
     def kpts(self, val):
-        if val is None or isinstance(val, KPoints):
+        if val is None:
+            self._kpts = np.zeros((1, 3))
+        elif isinstance(val, KPoints):
             self._kpts = val
         else:
             self._kpts = self.cell.get_scaled_kpts(val)
@@ -225,7 +227,7 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     def to_cpu(self):
         from pyscf.pbc.df.aft import AFTDF
-        out = AFTDF(self.cell)
+        out = AFTDF(self.cell, kpts=self.kpts)
         return utils.to_cpu(self, out=out)
 
 def _check_kpts(mydf, kpts):

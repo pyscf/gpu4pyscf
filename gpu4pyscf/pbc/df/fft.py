@@ -237,14 +237,16 @@ class FFTDF(lib.StreamObject):
 
     @property
     def kpts(self):
-        if self._kpts is None or isinstance(self._kpts, KPoints):
+        if isinstance(self._kpts, KPoints):
             return self._kpts
         else:
             return self.cell.get_abs_kpts(self._kpts)
 
     @kpts.setter
     def kpts(self, val):
-        if val is None or isinstance(val, KPoints):
+        if val is None:
+            self._kpts = np.zeros((1, 3))
+        elif isinstance(val, KPoints):
             self._kpts = val
         else:
             self._kpts = self.cell.get_scaled_kpts(val)
@@ -296,7 +298,9 @@ class FFTDF(lib.StreamObject):
     to_gpu = utils.to_gpu
     device = utils.device
 
+    # customize to_cpu because attributes grids and kpts are not compatible with pyscf-2.10
     def to_cpu(self):
         from pyscf.pbc.df.fft import FFTDF
-        out = FFTDF(self.cell)
-        return utils.to_cpu(self, out=out)
+        out = FFTDF(self.cell, kpts=self.kpts)
+        out.mesh = self.mesh
+        return out
