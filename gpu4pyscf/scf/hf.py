@@ -271,6 +271,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     else:
         log.warn("SCF failed to converge")
 
+    mo_energy[mo_occ == 0] -= mf.level_shift
     return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
 
