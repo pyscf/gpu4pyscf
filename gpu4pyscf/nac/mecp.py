@@ -72,7 +72,7 @@ class ConicalIntersectionOptimizer:
             self.solver_wrapper.ci_optimizer.mol = self.solver_wrapper.ci_optimizer.td.mol
             self.solver_wrapper.mol = self.solver_wrapper.ci_optimizer.td.mol
             if isinstance(self.solver_wrapper.ci_optimizer.td, tdscf.ris.TDA) or \
-                isinstance(self.solver_wrapper.ci_optimizer.td, tdscf.ris.TDDFT):
+                    isinstance(self.solver_wrapper.ci_optimizer.td, tdscf.ris.TDDFT):
                 self.solver_wrapper.ci_optimizer.td.n_occ = None
                 self.solver_wrapper.ci_optimizer.td.n_vir = None
                 self.solver_wrapper.ci_optimizer.td.rest_occ = None
@@ -90,7 +90,8 @@ class ConicalIntersectionOptimizer:
                 self.solver_wrapper.ci_optimizer.td.lower_inv_eri2c_K = None
                 self.solver_wrapper.ci_optimizer.td.RKS = True
                 self.solver_wrapper.ci_optimizer.td.UKS = False
-                self.solver_wrapper.ci_optimizer.td.mo_coeff = cp.asarray(self.solver_wrapper.ci_optimizer.mf.mo_coeff, dtype=self.solver_wrapper.ci_optimizer.td.dtype)
+                self.solver_wrapper.ci_optimizer.td.mo_coeff = cp.asarray(self.solver_wrapper.ci_optimizer.mf.mo_coeff, 
+                    dtype=self.solver_wrapper.ci_optimizer.td.dtype)
                 self.solver_wrapper.ci_optimizer.td.build()
             return self.kernel(**kwargs)
 
