@@ -13,9 +13,12 @@
 # limitations under the License.
 
 import numpy as np
+import cupy as cp
 from pyscf import gto
+from pyscf.data.nist import HARTREE2EV
 from pyscf.geomopt import geometric_solver
 from gpu4pyscf.lib import logger
+from gpu4pyscf import tdscf
 
 
 class ConicalIntersectionOptimizer:
@@ -68,6 +71,27 @@ class ConicalIntersectionOptimizer:
             self.solver_wrapper.ci_optimizer.td.reset(mol)
             self.solver_wrapper.ci_optimizer.mol = self.solver_wrapper.ci_optimizer.td.mol
             self.solver_wrapper.mol = self.solver_wrapper.ci_optimizer.td.mol
+            if isinstance(self.solver_wrapper.ci_optimizer.td, tdscf.ris.TDA) or \
+                isinstance(self.solver_wrapper.ci_optimizer.td, tdscf.ris.TDDFT):
+                self.solver_wrapper.ci_optimizer.td.n_occ = None
+                self.solver_wrapper.ci_optimizer.td.n_vir = None
+                self.solver_wrapper.ci_optimizer.td.rest_occ = None
+                self.solver_wrapper.ci_optimizer.td.rest_vir = None
+                self.solver_wrapper.ci_optimizer.td.C_occ_notrunc = None
+                self.solver_wrapper.ci_optimizer.td.C_vir_notrunc = None
+                self.solver_wrapper.ci_optimizer.td.C_occ_Ktrunc = None
+                self.solver_wrapper.ci_optimizer.td.C_vir_Ktrunc = None
+                self.solver_wrapper.ci_optimizer.td.delta_hdiag = None
+                self.solver_wrapper.ci_optimizer.td.hdiag = None
+                self.solver_wrapper.ci_optimizer.td.eri_tag = None
+                self.solver_wrapper.ci_optimizer.td.auxmol_J = None
+                self.solver_wrapper.ci_optimizer.td.auxmol_K = None
+                self.solver_wrapper.ci_optimizer.td.lower_inv_eri2c_J = None
+                self.solver_wrapper.ci_optimizer.td.lower_inv_eri2c_K = None
+                self.solver_wrapper.ci_optimizer.td.RKS = True
+                self.solver_wrapper.ci_optimizer.td.UKS = False
+                self.solver_wrapper.ci_optimizer.td.mo_coeff = cp.asarray(self.solver_wrapper.ci_optimizer.mf.mo_coeff, dtype=self.solver_wrapper.ci_optimizer.td.dtype)
+                self.solver_wrapper.ci_optimizer.td.build()
             return self.kernel(**kwargs)
 
         def kernel(self, *args, **kwargs):
@@ -109,13 +133,16 @@ class ConicalIntersectionOptimizer:
 
         self.mf.kernel()
         self.td.kernel()
-        e_states = self.td.e
+        if (isinstance(self.td, tdscf.rhf.TDA) or isinstance(self.td, tdscf.rhf.TDHF)
+            or isinstance(self.td, tdscf.rks.TDA) or isinstance(self.td, tdscf.rks.TDDFT)):
+            e_states = self.td.e
+        else:
+            e_states = self.td.energies/HARTREE2EV
         assert self.states[0] <= self.states[1]
         assert self.states[0] != 0
         
-        E1 = e_states[self.states[0]-1] + self.mf.e_tot
-        E2 = e_states[self.states[1]-1] + self.mf.e_tot
-        
+        E1 = float(e_states[self.states[0]-1] + self.mf.e_tot)
+        E2 = float(e_states[self.states[1]-1] + self.mf.e_tot)
         self.log.info(f"  Total Energies: E1={E1:.6f}, E2={E2:.6f}")
         self.log.info(f"  Energy Gap (E2-E1): {E2-E1:.6f} Ha")
 
