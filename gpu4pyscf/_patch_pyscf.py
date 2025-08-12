@@ -70,10 +70,10 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
 
         if unit is not None and cell.unit != unit:
             if isinstance(unit, str):
-                if is_au(unit):
+                if mole.is_au(unit):
                     _unit = 1.
                 else:
-                    _unit = param.BOHR
+                    _unit = lib.param.BOHR
             else:
                 _unit = unit
             if a is None:
