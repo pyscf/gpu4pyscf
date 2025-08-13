@@ -18,6 +18,8 @@ import unittest
 import pytest
 from gpu4pyscf.dft import RKS, UKS
 from gpu4pyscf.scf import HF, UHF
+from gpu4pyscf.scf.hf_lowmem import RHF as HF_LOWMEM
+from gpu4pyscf.dft.rks_lowmem import RKS as RKS_LOWMEM
 
 def setUpModule():
     global mol_close, mol_open
@@ -70,6 +72,7 @@ class KnownValues(unittest.TestCase):
         mf.level_shift = 1.0
 
         test_energy = mf.kernel()
+        assert mf.converged
         gobj = mf.nuc_grad_method()
         test_gradient = gobj.kernel()
 
@@ -92,8 +95,10 @@ class KnownValues(unittest.TestCase):
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
         mf.level_shift = 1.0
+        mf.max_cycle = 200
 
         test_energy = mf.kernel()
+        assert mf.converged
         gobj = mf.nuc_grad_method()
         test_gradient = gobj.kernel()
 
@@ -104,8 +109,8 @@ class KnownValues(unittest.TestCase):
             [ 0.03320805,  0.00757202,  0.06555009],
             [-0.03041575, -0.04053383, -0.03575653],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-5
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
     def test_level_shift_gradient_rhf(self):
         mf = HF(mol_close)
@@ -115,6 +120,7 @@ class KnownValues(unittest.TestCase):
         mf.level_shift = 1.0
 
         test_energy = mf.kernel()
+        assert mf.converged
         gobj = mf.nuc_grad_method()
         test_gradient = gobj.kernel()
 
@@ -135,8 +141,10 @@ class KnownValues(unittest.TestCase):
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
         mf.level_shift = 1.0
+        mf.max_cycle = 200
 
         test_energy = mf.kernel()
+        assert mf.converged
         gobj = mf.nuc_grad_method()
         test_gradient = gobj.kernel()
 
@@ -147,8 +155,56 @@ class KnownValues(unittest.TestCase):
             [ 1.47109479e-02,  2.13332766e-02,  8.39433701e-02],
             [-4.37473963e-02, -5.09416180e-02, -4.54662613e-02],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-5
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+
+    # Lowmem
+
+    def test_level_shift_gradient_rks_lowmem(self):
+        mf = RKS_LOWMEM(mol_close, xc = 'wB97X')
+        mf.grids.atom_grid = (99,590)
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.conv_tol = 1e-11
+
+        mf.level_shift = 1.0
+
+        test_energy = mf.kernel()
+        assert mf.converged
+        gobj = mf.nuc_grad_method()
+        test_gradient = gobj.kernel()
+
+        ref_energy = -189.525657478194
+        ref_gradient = np.array([
+            [ 0.0722262 , -0.05127889, -0.11886791],
+            [ 0.00377738,  0.02165158, -0.01800976],
+            [ 0.01062201,  0.0449061 ,  0.07181856],
+            [-0.04677732, -0.0450351 , -0.03373522],
+            [-0.03985063,  0.02975333,  0.09880519],
+        ])
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+
+    def test_level_shift_gradient_rhf_lowmem(self):
+        mf = HF_LOWMEM(mol_close)
+        mf.conv_tol = 1e-11
+
+        mf.level_shift = 1.0
+
+        test_energy = mf.kernel()
+        assert mf.converged
+        gobj = mf.nuc_grad_method()
+        test_gradient = gobj.kernel()
+
+        ref_energy = -188.538338996066
+        ref_gradient = np.array([
+            [ 0.06199652, -0.05796828, -0.13895198],
+            [ 0.03324866,  0.03785366, -0.0198227 ],
+            [ 0.00276811,  0.03634416,  0.08623013],
+            [-0.05469687, -0.05289908, -0.04192038],
+            [-0.04331642,  0.03666955,  0.11446493],
+        ])
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
 
 if __name__ == "__main__":
     print("Tests for HF and KS gradient with level shift")

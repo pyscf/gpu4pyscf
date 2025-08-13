@@ -71,6 +71,7 @@ class KnownValues(unittest.TestCase):
         mf.level_shift = 1.0
 
         test_energy = mf.kernel()
+        assert mf.converged
         hobj = mf.Hessian()
         hobj.auxbasis_response = 2
         hessian = hobj.kernel()
@@ -92,8 +93,10 @@ class KnownValues(unittest.TestCase):
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
         mf.level_shift = 1.0
+        mf.max_cycle = 200
 
         test_energy = mf.kernel()
+        assert mf.converged
         hobj = mf.Hessian()
         hobj.auxbasis_response = 2
         hessian = hobj.kernel()
@@ -103,8 +106,8 @@ class KnownValues(unittest.TestCase):
         ref_energy = -188.92925230031926
         ref_frequency = np.array([ 292.72066163,  877.69576251, 1082.27549661, 1277.57877335,
             1693.48392029, 1760.06314071])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
-        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e0
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
+        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e-2
 
     def test_level_shift_hessian_rhf(self):
         mf = HF(mol_close)
@@ -114,6 +117,7 @@ class KnownValues(unittest.TestCase):
         mf.level_shift = 1.0
 
         test_energy = mf.kernel()
+        assert mf.converged
         hobj = mf.Hessian()
         hobj.auxbasis_response = 2
         hessian = hobj.kernel()
@@ -133,8 +137,10 @@ class KnownValues(unittest.TestCase):
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
         mf.level_shift = 1.0
+        mf.max_cycle = 200
 
         test_energy = mf.kernel()
+        assert mf.converged
         hobj = mf.Hessian()
         hobj.auxbasis_response = 2
         hessian = hobj.kernel()
@@ -144,8 +150,8 @@ class KnownValues(unittest.TestCase):
         ref_energy = -188.00032587095123
         ref_frequency = np.array([ 624.64398354, 1030.20793768, 1183.88711991, 1362.44325456,
             1694.04574717, 1798.01003435])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
-        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e0
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
+        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e-2
 
 if __name__ == "__main__":
     print("Tests for HF and KS hessian with level shift")
