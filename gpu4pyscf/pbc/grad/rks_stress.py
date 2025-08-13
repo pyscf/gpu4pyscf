@@ -75,10 +75,16 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
     a = cell.lattice_vectors()
     r = cell.atom_coords()
     e_strain = strain_tensor_dispalcement(x, y, disp)
-    cell1 = cell.set_geom_(r.dot(e_strain.T), a=a.dot(e_strain.T), unit='AU', inplace=False)
+    cell1 = cell.set_geom_(r.dot(e_strain.T), unit='AU', inplace=False)
+    cell1.a = a.dot(e_strain.T)
 
     e_strain = strain_tensor_dispalcement(x, y, -disp)
-    cell2 = cell.set_geom_(r.dot(e_strain.T), a=a.dot(e_strain.T), unit='AU', inplace=False)
+    cell2 = cell.set_geom_(r.dot(e_strain.T), unit='AU', inplace=False)
+    cell2.a = a.dot(e_strain.T)
+
+    if cell.space_group_symmetry:
+        cell1.build(False, False)
+        cell2.build(False, False)
     return cell1, cell2
 
 def _get_coulG_strain_derivatives(cell, Gv):
@@ -176,6 +182,8 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     if not cell.cart:
         c2s = asarray(cell.cart2sph_coeff())
         dm = sandwich_dot(dm, c2s.T)
+        cell = cell.copy()
+        cell.cart = True
     nao = dm.shape[-1]
 
     grids_idx = grids.argsort(tile=8)
@@ -376,9 +384,11 @@ def _get_pp_nonloc_strain_derivatives(cell, mesh, dm_kpts, kpts=None):
                     for l, proj in enumerate(pp[5:]):
                         rl, nl, hl = proj
                         if nl > 0:
-                            p0, p1 = p1, p1+nl*(l*2+1)
+                            nf = l * 2 + 1
+                            p0, p1 = p1, p1+nl*nf
                             hl = np.asarray(hl)
-                            vppnl += np.einsum('ij,ji->', hl, rho[p0:p1,p0:p1])
+                            rho_sub = rho[p0:p1,p0:p1].reshape(nl, nf, nl, nf)
+                            vppnl += np.einsum('ij,jmim->', hl, rho_sub)
         return vppnl / (nkpts*vol)
 
     disp = max(1e-5, (cell.precision*.1)**.5)

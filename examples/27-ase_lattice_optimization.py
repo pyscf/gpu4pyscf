@@ -18,9 +18,9 @@ from gpu4pyscf.tools.ase_interface import PySCF, cell_from_ase
 atoms = bulk('Si', 'diamond', a=5.4)
 cell = cell_from_ase(atoms)
 cell.basis = 'gth-dzv'
-cell.pseudo = 'gth-pade'
+cell.pseudo = 'gth-pbe'
 cell.verbose = 4
-mf = cell.KRKS(xc='pbe', kpts=cell.make_kpts([2,2,2])).to_gpu()
+mf = cell.KRKS(xc='pbe', kpts=cell.make_kpts([3,3,3])).to_gpu()
 atoms.calc = PySCF(method=mf)
 
 # 

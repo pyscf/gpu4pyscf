@@ -39,7 +39,7 @@ def cell_from_ase(ase_atoms):
     '''
     cell = Cell()
     cell.atom = ase_atoms_to_pyscf(ase_atoms)
-    cell.a = ase_atoms.cell
+    cell.a = np.asarray(ase_atoms.cell)
     return cell
 
 class PySCF(Calculator):

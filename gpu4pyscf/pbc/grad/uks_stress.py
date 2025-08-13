@@ -75,6 +75,8 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     if not cell.cart:
         c2s = asarray(cell.cart2sph_coeff())
         dm = sandwich_dot(dm, c2s.T)
+        cell = cell.copy()
+        cell.cart = True
     nao = dm.shape[1]
 
     grids_idx = grids.argsort(tile=8)
