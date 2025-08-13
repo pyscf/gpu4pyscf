@@ -27,6 +27,7 @@ from pyscf import lib
 from pyscf.data.nist import BOHR, HARTREE2EV
 from pyscf.gto.mole import charge
 from pyscf.pbc.gto.cell import Cell
+from pyscf.pbc.tools.pyscf_ase import ase_atoms_to_pyscf
 
 # These functions are copied from the development branch of PySCF and will be
 # provided by the pyscf.pbc.tools.pyscf_ase module in PySCF 2.11.
@@ -102,7 +103,10 @@ class PySCF(Calculator):
         else:
             self.mol.set_geom_(_atoms)
 
-        if 'energy' in properties:
+        with_grad = 'forces' in properties or 'stress' in properties
+        with_energy = with_grad or 'energy' in properties or 'dipole' in properties
+
+        if with_energy:
             if self.method_scan is None:
                 self.mol.set_geom_(atoms)
                 self.method.reset(self.mol).run()
@@ -120,7 +124,7 @@ class PySCF(Calculator):
         else:
             base_method = self.method_scan
 
-        if 'forces' in properties or 'stress' in properties:
+        if with_grad:
             grad_obj = base_method.Gradients()
 
         if 'forces' in properties:
@@ -132,6 +136,8 @@ class PySCF(Calculator):
             self.results['stress'] = stress * (HARTREE2EV / BOHR)
 
         if 'dipole' in properties:
+            if self.pbc:
+                raise NotImplementedError('dipole for PBC calculations')
             # in Gaussian cgs unit
             self.results['dipole'] = base_method.dip_moment() * Debye
 
