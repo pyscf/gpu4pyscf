@@ -93,16 +93,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     ds = contract('xij,ij->xi', s1, dme0_sf)
     delec = 2.0*(dh - ds)
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-
-    de = 2.0 * dvhf + dh1e + delec + cupy.asarray(extra_force)
-
-    # for backward compatiability
-    if(hasattr(mf, 'disp') and mf.disp is not None):
-        g_disp = mf_grad.get_dispersion()
-        mf_grad.grad_disp = g_disp
-        mf_grad.grad_mf = de
+    de = ensure_numpy(2.0 * dvhf + dh1e + delec)
+    de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
-    return de.get()
+    return de
 
 
 class Gradients(rhf_grad.GradientsBase):

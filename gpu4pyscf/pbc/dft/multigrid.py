@@ -1293,8 +1293,12 @@ class MGridEnvVars(ctypes.Structure):
 
 class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     def __init__(self, cell):
-        self.cell = cell
         self.mesh = cell.mesh
+        self.reset(cell)
+
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
         # ao_loc_in_cell0 is the address of Cartesian AO in cell-0 for each
         # primitive GTOs in the super-mole.
         supmol_bas, supmol_env, ao_loc_in_cell0 = to_primitive_bas(cell)
@@ -1304,6 +1308,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         # Number of primitive shells
         self.primitive_nbas = cell._bas[:,NPRIM_OF].dot(cell._bas[:,NCTR_OF])
         self._tasks = {}
+        return self
 
     def create_tasks(self, xctype, hermi=1):
         xctype = xctype.upper()
@@ -1316,12 +1321,6 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                 self.ao_loc_in_cell0, self.mesh, xctype, hermi)
             logger.debug(self.cell, 'Multigrid ntasks for %s: %s', xctype, len(tasks))
         return tasks
-
-    def reset(self, cell=None):
-        if cell is not None:
-            self.cell = cell
-        self._tasks = {}
-        return self
 
     def sort_orbitals(self, mat):
         ''' Transform bases of a matrix into Cartesian bases

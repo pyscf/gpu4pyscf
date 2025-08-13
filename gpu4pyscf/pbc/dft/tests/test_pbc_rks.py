@@ -247,6 +247,35 @@ class KnownValues(unittest.TestCase):
         #mf_ref.run()
         #self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
 
+    def test_reset(self):
+        cell = pbcgto.Cell()
+        cell.unit = 'A'
+        cell.atom = 'C 0.,  0.,  0.; C 0.8917,  0.8917,  0.8917'
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+        cell.basis = 'gth-dzvp'
+        cell.pseudo = 'gth-pade'
+        cell.verbose = 7
+        cell.output = '/dev/null'
+        cell.build()
+        np.random.seed(1)
+        kpt0 = np.random.rand(3)
+        mf = cell.RKS(kpt=kpt0).to_gpu()
+
+        cell1 = pbcgto.Cell()
+        cell1.atom = 'C 0.,  0.,  0.; C 0.95,  0.95,  0.95'
+        cell1.a = '''0.   1.9  1.9
+                     1.9  0.   1.9
+                     1.9  1.9  0.    '''
+        cell1.basis = 'gth-dzvp'
+        cell1.pseudo = 'gth-pade'
+        cell1.verbose = 7
+        cell1.output = '/dev/null'
+        cell1.build()
+        mf.reset(cell1)
+        assert abs(mf.kpt - kpt0).sum() > 0.01
+
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")
     unittest.main()

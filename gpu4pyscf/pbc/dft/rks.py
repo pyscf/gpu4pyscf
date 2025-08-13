@@ -220,6 +220,8 @@ Compact basis functions are found in the system. It is recommended to use Becke 
         return self
 
     def reset(self, cell=None):
+        if cell is None:
+            return self
         pbchf.SCF.reset(self, cell)
         self.grids.reset(cell)
         self.nlcgrids.reset(cell)
@@ -288,7 +290,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
     variables replaced by `cell`.
     '''
 
-    def __init__(self, cell, kpt=np.zeros(3), xc='LDA,VWN', exxdiv='ewald'):
+    def __init__(self, cell, kpt=None, xc='LDA,VWN', exxdiv='ewald'):
         pbchf.RHF.__init__(self, cell, kpt, exxdiv=exxdiv)
         KohnShamDFT.__init__(self, xc)
 

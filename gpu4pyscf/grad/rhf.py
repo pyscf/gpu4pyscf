@@ -23,6 +23,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
+from pyscf.grad.dispersion import get_dispersion
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
@@ -305,16 +306,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     delec = 2.0*(dh - ds)
 
     delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = 2.0 * dvhf + dh1e + delec + cupy.asarray(extra_force)
-
-    # for backforward compatiability
-    if(hasattr(mf, 'disp') and mf.disp is not None):
-        g_disp = mf_grad.get_dispersion()
-        mf_grad.grad_disp = g_disp
-        mf_grad.grad_mf = de
-
+    de = ensure_numpy(2.0 * dvhf + dh1e + delec)
+    de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
-    return de.get()
+    return de
 
 def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     '''
@@ -421,6 +416,22 @@ class GradientsBase(lib.StreamObject):
     as_scanner  = as_scanner
     _tag_rdm1   = rhf_grad_cpu.GradientsBase._tag_rdm1
 
+    get_dispersion = get_dispersion
+
+    @property
+    def grad_disp(self):
+        logger.warn(self, 'Attributes grad_disp and grad_mf are deprecated. '
+                    'They will be removed in the future')
+        g_disp = 0
+        mf = self.base
+        if hasattr(mf, 'disp') and mf.disp is not None:
+            g_disp = self.get_dispersion()
+        return g_disp
+
+    @property
+    def grad_mf(self):
+        return self.de - self.grad_disp
+
 
 class Gradients(GradientsBase):
 
@@ -430,7 +441,7 @@ class Gradients(GradientsBase):
 
     make_rdm1e = rhf_grad_cpu.Gradients.make_rdm1e
     grad_elec = grad_elec
-    
+
     def get_veff(self, mol=None, dm=None, verbose=None):
         '''
         Computes the first-order derivatives of the energy contributions from

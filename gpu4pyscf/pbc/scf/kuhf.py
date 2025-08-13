@@ -207,7 +207,7 @@ class KUHF(khf.KSCF):
 
     _keys = kuhf_cpu.KUHF._keys
 
-    def __init__(self, cell, kpts=np.zeros((1,3)), exxdiv='ewald'):
+    def __init__(self, cell, kpts=None, exxdiv='ewald'):
         khf.KSCF.__init__(self, cell, kpts, exxdiv)
         self.nelec = None
 
