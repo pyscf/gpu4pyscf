@@ -15,7 +15,7 @@
  */
 
 #define BLKSIZEX        32
-#define BLKSIZEY        32
+#define BLKSIZEY        16
 
 __global__
 void GDFTcontract_rho_kernel(double *rho, double *bra, double *ket, int ngrids, int nao);
