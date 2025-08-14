@@ -21,7 +21,6 @@ pip3 install ase
     raise RuntimeError("ASE is not found")
 
 import numpy as np
-from ase.calculators.calculator import Calculator, all_properties
 from ase.units import Debye
 from pyscf import lib
 from pyscf.data.nist import BOHR, HARTREE2EV
