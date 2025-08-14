@@ -94,6 +94,6 @@ def reset_kpts(kpts, cell):
         kpts.cell = cell
         kpts._built = False
         kpts.kpts = kpts.kpts_ibz = cell.get_abs_kpts(kpts.kpts_scaled)
-        kpts.build(space_group_symmetry=True,
+        kpts.build(space_group_symmetry=cell.space_group_symmetry,
                    time_reversal_symmetry=kpts.time_reversal)
     return kpts
