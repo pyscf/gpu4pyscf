@@ -27,7 +27,7 @@ from gpu4pyscf.dft import numint, xc_deriv
 from gpu4pyscf.dft import radi
 from gpu4pyscf.dft import gen_grid
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device)
+    contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device, take_last2d)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
@@ -74,10 +74,10 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
                                          verbose=ks_grad.verbose)
     else:
         exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm,
-                           max_memory=max_memory, verbose=ks_grad.verbose)
+                           max_memory=max_memory, verbose=ks_grad.verbose)    # exc exc1 分别代表什么
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
-    aoslices = mol.aoslice_by_atom()
+    aoslices = mol.aoslice_by_atom()     # 属于该原子的原子轨道的初始p0，结尾p1
     exc1_per_atom = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     exc1_per_atom = cupy.asarray(exc1_per_atom)
 
@@ -175,56 +175,103 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 
         nset = len(dms)
-        assert nset == 1
+        assert nset == 1            ### 其实只能处理nset为1的情况
         exc1_ao = cupy.zeros((nset,3,nao))
+
         if xctype == 'LDA':
-            ao_deriv = 1
+            ncomp = 1          
+        elif xctype == 'GGA':
+            ncomp = 4
+        else:
+            ncomp = 5
+        rho_buf = cupy.empty(nset*ncomp*MIN_BLK_SIZE)      # 注意可能需要裁剪，最后一块格点数可能是 < MIN_BLK_SIZE
+        vtmp_buf = cupy.empty((3, nao, nao))
+        res_buf = cupy.empty((3, nao))
+        dm_mask_buf = cupy.empty(nao*nao)
+        if xctype == 'LDA':
+            ao_deriv = 1     # 输出ao在格点中的数值与导数，对与lda,vwn等xc函数，导数为3维
+            aow_buf = cupy.empty(MIN_BLK_SIZE * nao)
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
+                # 初始化 buffer
+                blk_size = len(weight)
+                nao_sub = len(idx)
+                rho = cupy.ndarray((nset, ncomp, blk_size), memptr=rho_buf.data)
+                aow  = cupy.ndarray((nao_sub, blk_size), memptr=aow_buf.data)
+                vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
+                res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
+
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype, buf=rho)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0]        ## QYZ TODO: 这里是否能够构建缓冲区，需要修改eval_xc_eff 函数
+                wv = cupy.multiply(weight, vxc, out=vxc)
+                aow = numint._scale_ao(ao_mask[0], wv, out=aow)                # (nao, ngrids_blk)
+                vtmp = _d1_dot_(ao_mask[1:4], aow.T, out=vtmp)                  # ao_mask[1:4] (3,nao,ngrids_blk) vtmp (ncomp, nao, nao)
                 for idm in range(nset):
-                    mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc[0]
-                    aow = numint._scale_ao(ao_mask[0], wv)
-                    vtmp = _d1_dot_(ao_mask[1:4], aow.T)
-                    dm_mask = dms[idm][idx[:,None],idx]
-                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+                    dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
+                    dm_mask = take_last2d(dms[idm], idx, out=dm_mask)
+                    res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
+                    exc1_ao[idm][:,idx] += res
                     #add_sparse(vmat[idm], vtmp, idx)
+            # numpy.save('exc1_ao_lda_new.npy', exc1_ao)
         elif xctype == 'GGA':
             ao_deriv = 2
+            aow_buf = cupy.empty(MIN_BLK_SIZE * nao * 3)
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
+                blk_size = len(weight)
+                nao_sub = len(idx)
+                rho = cupy.ndarray((nset, ncomp, blk_size), memptr=rho_buf.data)
+                aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
+                vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
+                res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
+
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, buf=rho)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                wv = cupy.multiply(weight, vxc, out=vxc)
+                wv[0] *= .5
+                vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow, out=vtmp)
                 for idm in range(nset):
-                    mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc
-                    wv[0] *= .5
-                    vtmp = _gga_grad_sum_(ao_mask, wv)
-                    dm_mask = dms[idm][idx[:,None],idx]
-                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+                    # print(ao_mask.shape, rho.shape, vxc.shape, wv.shape, vtmp.shape)
+                    dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
+                    dm_mask = take_last2d(dms[idm], idx, out=dm_mask)
+                    res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
+                    exc1_ao[idm][:,idx] += res
                     #add_sparse(vmat[idm], vtmp, idx)
+            # numpy.save('exc1_ao_gga_new.npy', exc1_ao)
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
 
         elif xctype == 'MGGA':
             ao_deriv = 2
+            aow_buf = cupy.empty(MIN_BLK_SIZE * nao * 3)
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
+                blk_size = len(weight)
+                nao_sub = len(idx)
+                rho = cupy.ndarray((nset, ncomp, blk_size), memptr=rho_buf.data)
+                aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
+                vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
+                res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
+            
+                mo_coeff_mask = mo_coeff[idx,:]
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False, buf=rho)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                wv = cupy.multiply(weight, vxc, out=vxc)
+                wv[0] *= .5
+                wv[4] *= .5  # for the factor 1/2 in tau
+                vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow, out=vtmp)
+                vtmp = _tau_grad_dot_(ao_mask, wv[4], buf=aow[0], out=vtmp)             
                 for idm in range(nset):
-                    mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc
-                    wv[0] *= .5
-                    wv[4] *= .5  # for the factor 1/2 in tau
-                    vtmp = _gga_grad_sum_(ao_mask, wv)
-                    vtmp += _tau_grad_dot_(ao_mask, wv[4])
                     #add_sparse(vmat[idm], vtmp, idx)
-                    dm_mask = dms[idm][idx[:,None],idx]
-                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+                    dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
+                    dm_mask = take_last2d(dms[idm], idx, out=dm_mask)
+                    res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
+                    exc1_ao[idm][:,idx] += res
+            # numpy.save('exc1_ao_mgga_new.npy', exc1_ao)
         log.timer_debug1('gradient of vxc', *t0)
+            
     return exc1_ao
 
 def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
@@ -241,7 +288,7 @@ def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao = mol.nao
     dms = cupy.asarray(dms).reshape(-1,nao,nao)
     nset = dms.shape[0]
-    dms = opt.sort_orbitals(dms, axis=[1,2])
+    dms = opt.sort_orbitals(dms, axis=[1,2])          # 多 GPU 切分与高效并行常需要统一/连续的轨道顺序
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     futures = []
@@ -253,9 +300,9 @@ def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 verbose=log.verbose, device_id=device_id)
             futures.append(future)
-    exc1_dist = [future.result() for future in futures]
+    exc1_dist = [future.result() for future in futures]  # 返回本设备的部分结果（列表 exc1_dist 收集了所有设备的分片/贡献
     exc1 = reduce_to_device(exc1_dist)
-    exc1 = opt.unsort_orbitals(exc1, axis=[2])
+    exc1 = opt.unsort_orbitals(exc1, axis=[2])   # 恢复原始轨道顺序
     if nset == 1:
         exc1 = exc1[0]
     log.timer_debug1('grad vxc', *t0)
@@ -318,73 +365,86 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     log.timer_debug1('grad nlc vxc', *t0)
     return None, -exc1
 
-def _make_dR_dao_w(ao, wv):
-    #:aow = numpy.einsum('nip,p->nip', ao[1:4], wv[0])
+def _make_dR_dao_w(ao, wv, buf=None):
+    #:buf = numpy.einsum('nip,p->nip', ao[1:4], wv[0])
     if not ao.flags.c_contiguous or ao.dtype != numpy.float64:
-        aow = cupy.empty_like(ao[:3])
-        aow[0] = numint._scale_ao(ao[1], wv[0])  # dX nabla_x
-        aow[1] = numint._scale_ao(ao[2], wv[0])  # dX nabla_y
-        aow[2] = numint._scale_ao(ao[3], wv[0])  # dX nabla_z
+        if buf is None:
+            buf = cupy.empty_like(ao[:3])
+        tmp = cupy.empty_like(ao[0])
+        buf[0] = numint._scale_ao(ao[1], wv[0], out=buf[0])  # dX nabla_x
+        buf[1] = numint._scale_ao(ao[2], wv[0], out=buf[1])  # dX nabla_y
+        buf[2] = numint._scale_ao(ao[3], wv[0], out=buf[2])  # dX nabla_z
         # XX, XY, XZ = 4, 5, 6
         # YX, YY, YZ = 5, 7, 8
         # ZX, ZY, ZZ = 6, 8, 9
-        aow[0] += numint._scale_ao(ao[4], wv[1])  # dX nabla_x
-        aow[0] += numint._scale_ao(ao[5], wv[2])  # dX nabla_y
-        aow[0] += numint._scale_ao(ao[6], wv[3])  # dX nabla_z
-        aow[1] += numint._scale_ao(ao[5], wv[1])  # dY nabla_x
-        aow[1] += numint._scale_ao(ao[7], wv[2])  # dY nabla_y
-        aow[1] += numint._scale_ao(ao[8], wv[3])  # dY nabla_z
-        aow[2] += numint._scale_ao(ao[6], wv[1])  # dZ nabla_x
-        aow[2] += numint._scale_ao(ao[8], wv[2])  # dZ nabla_y
-        aow[2] += numint._scale_ao(ao[9], wv[3])  # dZ nabla_z
-        return aow
+        buf[0] += numint._scale_ao(ao[4], wv[1], out=tmp)  # dX nabla_x
+        buf[0] += numint._scale_ao(ao[5], wv[2], out=tmp)  # dX nabla_y
+        buf[0] += numint._scale_ao(ao[6], wv[3], out=tmp)  # dX nabla_z
+        buf[1] += numint._scale_ao(ao[5], wv[1], out=tmp)  # dY nabla_x
+        buf[1] += numint._scale_ao(ao[7], wv[2], out=tmp)  # dY nabla_y
+        buf[1] += numint._scale_ao(ao[8], wv[3], out=tmp)  # dY nabla_z
+        buf[2] += numint._scale_ao(ao[6], wv[1], out=tmp)  # dZ nabla_x
+        buf[2] += numint._scale_ao(ao[8], wv[2], out=tmp)  # dZ nabla_y
+        buf[2] += numint._scale_ao(ao[9], wv[3], out=tmp)  # dZ nabla_z
+        return buf
 
     assert ao.flags.c_contiguous
     assert wv.flags.c_contiguous
 
     _, nao, ngrids = ao.shape
-    aow = cupy.empty([3,nao,ngrids])
+    if buf is None:
+        buf = cupy.empty([3,nao,ngrids])
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFT_make_dR_dao_w(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(aow.data.ptr, ctypes.c_void_p),
+        ctypes.cast(buf.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao.data.ptr, ctypes.c_void_p),
         ctypes.cast(wv.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids), ctypes.c_int(nao))
     if err != 0:
         raise RuntimeError('CUDA Error')
-    return aow
+    return buf
 
-def _d1_dot_(ao1, ao2, out=None):
+def _d1_dot_(ao1, ao2,alpha=1.0, beta=0.0, out=None):
     if out is None:
         dtype = numpy.result_type(ao1[0], ao2[0])
         out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]], dtype=dtype)
-    cupy.dot(ao1[0].conj(), ao2, out=out[0])
-    cupy.dot(ao1[1].conj(), ao2, out=out[1])
-    cupy.dot(ao1[2].conj(), ao2, out=out[2])
+    out = contract('bik,km->bim', ao1.conj(), ao2, alpha=alpha, beta=beta, out=out)
     return out
 
-def _gga_grad_sum_(ao, wv):
+def _gga_grad_sum_(ao, wv, buf=None, out=None):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
-    aow = numint._scale_ao(ao[:4], wv[:4])
-    vmat = _d1_dot_(ao[1:4], aow.T)
-    aow = _make_dR_dao_w(ao, wv[:4])
-    vmat += _d1_dot_(aow, ao[0].T)
+    if buf is None:
+        buf = cupy.empty((3, ao.shape[1], ao.shape[2]))
+    if out is None:
+        out = cupy.empty((3, ao.shape[1], ao.shape[1]))  
+    # 启用contract 函数使的能够原为加和
+    aow = numint._scale_ao(ao[:4], wv[:4], out=buf[0])
+    vmat = _d1_dot_(ao[1:4], aow.T, out=out)
+    aow = _make_dR_dao_w(ao, wv[:4], buf=buf)
+    vmat = _d1_dot_(aow, ao[0].T, beta=1, out=out)
     return vmat
 
 # XX, XY, XZ = 4, 5, 6
 # YX, YY, YZ = 5, 7, 8
 # ZX, ZY, ZZ = 6, 8, 9
-def _tau_grad_dot_(ao, wv):
+def _tau_grad_dot_(ao, wv, buf=None, out=None):
     '''The tau part of MGGA functional'''
-    aow = numint._scale_ao(ao[1], wv)
-    vmat = _d1_dot_([ao[4], ao[5], ao[6]], aow.T)
-    aow = numint._scale_ao(ao[2], wv)
-    vmat += _d1_dot_([ao[5], ao[7], ao[8]], aow.T)
-    aow = numint._scale_ao(ao[3], wv)
-    vmat += _d1_dot_([ao[6], ao[8], ao[9]], aow.T)
-    return vmat
+    if buf is None:
+        buf = cupy.zeros((ao.shape[1], ao.shape[2]))
+    if out is None:
+        out = cupy.zeros((3, ao.shape[1], ao.shape[1]))           # 存在累加机制，为了与源代码兼容，初始化时要赋值0
 
+    idx1 = [4, 5, 6]
+    idx2 = [5, 7, 8]
+    idx3 = [6, 8, 9]
+    aow = numint._scale_ao(ao[1], wv, out=buf)
+    vmat = _d1_dot_(ao[idx1], aow.T, beta=1, out=out)
+    aow = numint._scale_ao(ao[2], wv, out=buf)
+    vmat = _d1_dot_(ao[idx2], aow.T, beta=1, out=out)
+    aow = numint._scale_ao(ao[3], wv, out=buf)
+    vmat = _d1_dot_(ao[idx3], aow.T, beta=1, out=out)
+    return vmat
 
 def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           max_memory=2000, verbose=None):
