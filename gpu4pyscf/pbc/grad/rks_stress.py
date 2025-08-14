@@ -74,12 +74,15 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
         cell.precision = precision
     a = cell.lattice_vectors()
     r = cell.atom_coords()
+    if not gto.mole.is_au(cell.unit):
+        a *= lib.param.BOHR
+        r *= lib.param.BOHR
     e_strain = strain_tensor_dispalcement(x, y, disp)
-    cell1 = cell.set_geom_(r.dot(e_strain.T), unit='AU', inplace=False)
+    cell1 = cell.set_geom_(r.dot(e_strain.T), inplace=False)
     cell1.a = a.dot(e_strain.T)
 
     e_strain = strain_tensor_dispalcement(x, y, -disp)
-    cell2 = cell.set_geom_(r.dot(e_strain.T), unit='AU', inplace=False)
+    cell2 = cell.set_geom_(r.dot(e_strain.T), inplace=False)
     cell2.a = a.dot(e_strain.T)
 
     if cell.space_group_symmetry:
