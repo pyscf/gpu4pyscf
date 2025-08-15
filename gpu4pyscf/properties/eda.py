@@ -39,6 +39,7 @@ def merge_mol(mol_list):
     merged = mol_list[0]
     for i in range(1, n_frag):
         merged = conc_mol(merged, mol_list[i])
+    merged.stdout = mol_list[0].stdout # Same change as https://github.com/pyscf/pyscf/pull/2900
     return merged
 
 def _get_total_system_Fock_and_energy(mf_sum, dm, H1e):
