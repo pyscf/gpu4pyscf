@@ -130,7 +130,7 @@ def get_eda_classical_electrostatic_energy(mf_list, _make_mf, eda_cache):
             dm_j_resized = cp.zeros([nao_i + nao_j, nao_i + nao_j])
             dm_j_resized[nao_i : nao_i+nao_j, nao_i : nao_i+nao_j] = dm_j
 
-            mol_merged = conc_mol(mf_i.mol, mf_j.mol)
+            mol_merged = merge_mol([mf_i.mol, mf_j.mol])
             mf_merged = _make_mf(mol_merged, if_kernel = False)
             J_j = mf_merged.get_j(mol_merged, dm_i_resized)
             E_ee_ij = contract('ij,ij->', dm_j_resized, J_j)
