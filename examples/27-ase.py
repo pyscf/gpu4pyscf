@@ -16,18 +16,27 @@
 #  Example of ASE interface
 ###################################
 
+# more examples can be found in PySCF source code
+# examples/pbc/09-ase_geometry_optimization.py
+# examples/pbc/09-band_ase.py
+# examples/pbc/09-init_from_ase.py
+# examples/pbc/09-talk_to_ase.py
+
+
 from ase import Atoms
-from gpu4pyscf.tools import get_default_config
-from gpu4pyscf.tools.ase_interface import PySCFCalculator
+from pyscf.pbc.tools.pyscf_ase import ase_atoms_to_pyscf
+from gpu4pyscf.tools import get_default_config, method_from_config
+from gpu4pyscf.tools.ase_interface import PySCF
 
 atoms = Atoms('H2O', positions=[(0.76, 0.58, 0.0),
                                (-0.76, 0.58, 0.0),
                                (0.0, 0.0, 0.0)])
 
 # Default method: b3lyp/def2-tzvpp, DF, (99,590)
-config = get_default_config()     
-calc = PySCFCalculator(config)
-atoms.set_calculator(calc)
+config = get_default_config()
+config['atom'] = ase_atoms_to_pyscf(atoms)
+mf = method_from_config(config)
+atoms.calc = PySCF(method=mf)
 energy = atoms.get_potential_energy()
 forces = atoms.get_forces()
 
@@ -63,8 +72,9 @@ atoms = Atoms(symbols=symbols, positions=positions)
 config = get_default_config()
 config['charge'] = -1
 config['verbose'] = 0
-calc = PySCFCalculator(config)
-atoms.set_calculator(calc)
+config['atom'] = ase_atoms_to_pyscf(atoms)
+mf = method_from_config(config)
+atoms.calc = PySCF(method=mf)
 opt = Sella(
     atoms,
     internal=True,

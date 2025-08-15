@@ -14,68 +14,132 @@
 
 try:
     from ase.calculators.calculator import Calculator, all_properties
-    from ase import Atoms
-    from ase import units
 except ImportError:
     print("""ASE is not found. Please install ASE via
 pip3 install ase
           """)
     raise RuntimeError("ASE is not found")
+
 import numpy as np
-import copy
-from pyscf import gto
-from pyscf.lib import logger
+from ase.units import Debye
+from pyscf import lib
 from pyscf.data.nist import BOHR, HARTREE2EV
-from gpu4pyscf import scf, dft
+from pyscf.gto.mole import charge
+from pyscf.pbc.gto.cell import Cell
+from pyscf.pbc.tools.pyscf_ase import ase_atoms_to_pyscf
 
-from gpu4pyscf.tools import method_from_config
+# These functions are copied from the development branch of PySCF and will be
+# provided by the pyscf.pbc.tools.pyscf_ase module in PySCF 2.11.
 
-class PySCFCalculator(Calculator):
-    """
-    An ASE Calculator that uses GPU4PySCF for quantum chemistry calculations.
-    """
-    implemented_properties = ['energy', 'forces']
+def cell_from_ase(ase_atoms):
+    '''Convert ASE atoms to PySCF Cell instance. The lattice vectors and atomic
+    positions are defined in the Cell instance. It does not have any basis sets
+    or pseudopotentials assigned. The Cell instance is not initialized with 'build()'.
+    '''
+    cell = Cell()
+    cell.atom = ase_atoms_to_pyscf(ase_atoms)
+    cell.a = np.asarray(ase_atoms.cell)
+    return cell
 
-    def __init__(self, pyscf_config, 
+class PySCF(Calculator):
+    implemented_properties = ['energy', 'forces', 'stress',
+                              'dipole', 'magmom']
+
+    default_parameters = {}
+
+    def __init__(self, restart=None, ignore_bad_restart_file=False,
+                 label='PySCF', atoms=None, directory='.', method=None,
                  **kwargs):
+        """Construct PySCF-calculator object.
 
-        super().__init__(**kwargs)
-        self.pyscf_config = copy.deepcopy(pyscf_config)
+        Parameters
+        ==========
+        label: str
+            Prefix to use for filenames (label.in, label.txt, ...).
+            Default is 'PySCF'.
 
-    def calculate(self, atoms=None, properties=['energy', 'forces'], system_changes=all_properties):
+        method: A PySCF method class
         """
-        The main interface with ASE. This method is called automatically when
-        ASE requires energies/forces, etc.
-        """
-        # The Calculator base class requires calling this for bookkeeping
-        Calculator.calculate(self, atoms, properties, system_changes)
+        Calculator.__init__(self, restart, ignore_bad_restart_file,
+                            label, atoms, directory=directory, **kwargs)
 
-        # Extract geometry and atomic numbers from ASE
-        positions = atoms.get_positions()  # in self.unit
+        if not isinstance(method, lib.StreamObject):
+            raise RuntimeError(f'{method} must be an instance of a PySCF method')
+
+        self.method = method
+        self.pbc = hasattr(method, 'cell')
+        if self.pbc:
+            mol = method.cell
+        else:
+            mol = method.mol
+        if not mol.unit.startswith(('A','a')):
+            raise RuntimeError("PySCF unit must be A to work with ASE")
+        self.mol = mol
+        self.method_scan = None
+        if hasattr(method, 'as_scanner'):
+            # Scanner can utilize the initial guess from previous calculations
+            self.method_scan = method.as_scanner()
+
+    def set(self, **kwargs):
+        changed_parameters = Calculator.set(self, **kwargs)
+        if changed_parameters:
+            self.reset()
+
+    def calculate(self, atoms=None, properties=['energy'],
+                  system_changes=all_properties):
+        Calculator.calculate(self, atoms)
+
+        positions = atoms.get_positions()
         atomic_numbers = atoms.get_atomic_numbers()
-        atom = [(Z, tuple(pos)) for Z, pos in zip(atomic_numbers, positions)]
+        Z = np.array([charge(x) for x in self.mol.elements])
+        if all(Z == atomic_numbers):
+            _atoms = positions
+        else:
+            _atoms = list(zip(atomic_numbers, positions))
 
-        # Build the PySCF object
-        self.pyscf_config['atom'] = atom
-        self.pyscf_config['logfile'] = None
-        mf = method_from_config(self.pyscf_config)
+        if self.pbc:
+            self.mol.set_geom_(_atoms, a=atoms.cell)
+        else:
+            self.mol.set_geom_(_atoms)
 
-        # Run the SCF
-        mf.run()
-        if not mf.converged:
-            logger.error(mf, 'SCF failed to converge')
+        with_grad = 'forces' in properties or 'stress' in properties
+        with_energy = with_grad or 'energy' in properties or 'dipole' in properties
 
-        # Compute total energy
-        energy = mf.e_tot * HARTREE2EV
-        
-        gcalc = mf.nuc_grad_method()
+        if with_energy:
+            if self.method_scan is None:
+                self.mol.set_geom_(atoms)
+                self.method.reset(self.mol).run()
+                e_tot = self.method.e_tot
+                if not getattr(self.method, 'converged', True):
+                    raise RuntimeError(f'{self.method} not converged')
+            else:
+                e_tot = self.method_scan(self.mol)
+                if not self.method_scan.converged:
+                    raise RuntimeError(f'{self.method} not converged')
+            self.results['energy'] = e_tot * HARTREE2EV
 
-        grad_mat = gcalc.kernel()  # shape (natm, 3)
-        forces = -grad_mat * (HARTREE2EV / BOHR)
+        if self.method_scan is None:
+            base_method = self.method
+        else:
+            base_method = self.method_scan
 
-        # Store results
-        self.results = {
-            'energy': energy,
-            'forces': forces
-        }
-    
+        if with_grad:
+            grad_obj = base_method.Gradients()
+
+        if 'forces' in properties:
+            forces = -grad_obj.kernel()
+            self.results['forces'] = forces * (HARTREE2EV / BOHR)
+
+        if 'stress' in properties:
+            stress = grad_obj.get_stress()
+            self.results['stress'] = stress * (HARTREE2EV / BOHR)
+
+        if 'dipole' in properties:
+            if self.pbc:
+                raise NotImplementedError('dipole for PBC calculations')
+            # in Gaussian cgs unit
+            self.results['dipole'] = base_method.dip_moment() * Debye
+
+        if 'magmom' in properties:
+            magmom = self.mol.spin
+            self.results['magmom'] = magmom

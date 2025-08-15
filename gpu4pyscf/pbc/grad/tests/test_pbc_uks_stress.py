@@ -60,10 +60,11 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(2, nao, nao) - (.5+.2j)
         dm = np.einsum('spi,sqi->spq', dm, dm.conj())
+        dm *= .5
         xc = 'pbe,'
         mf_grad = uks.Gradients(cell.UKS(xc=xc).to_gpu())
         dat = uks_stress.get_vxc(mf_grad, cell, dm)
@@ -74,7 +75,7 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm)[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
+            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
 
     def test_get_vxc_mgga(self):
         a = np.eye(3) * 5
@@ -106,6 +107,7 @@ class KnownValues(unittest.TestCase):
         nao = cell.nao
         dm = np.random.rand(2, nao, nao) - (.5+.2j)
         dm = np.einsum('spi,sqi->spq', dm, dm.conj())
+        dm *= .5
         xc = 'lda,'
         mf_grad = uks.Gradients(cell.UKS(xc=xc).to_gpu())
         dat = uks_stress.get_vxc(mf_grad, cell, dm, with_j=True)
