@@ -168,6 +168,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
         nset = dms.shape[0]
+        mocc = mo_coeff[:,mo_occ>0]
+        nocc = mocc.shape[1]
 
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
@@ -191,6 +193,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         if xctype == 'LDA':
             ao_deriv = 1     # 输出ao在格点中的数值与导数，对与lda,vwn等xc函数，导数为3维
             aow_buf = cupy.empty(MIN_BLK_SIZE * nao)
+            rho_buf2 = cupy.empty(1*nocc*MIN_BLK_SIZE)
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 # 初始化 buffer
@@ -202,7 +205,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
 
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype, buf=rho)
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype, buf=rho_buf2, out=rho)
+                # rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype, out=rho)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0]        ## QYZ TODO: 这里是否能够构建缓冲区，需要修改eval_xc_eff 函数
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 aow = numint._scale_ao(ao_mask[0], wv, out=aow)                # (nao, ngrids_blk)
@@ -213,10 +217,27 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
                     exc1_ao[idm][:,idx] += res
                     #add_sparse(vmat[idm], vtmp, idx)
-            # numpy.save('exc1_ao_lda_new.npy', exc1_ao)
+            numpy.save('exc1_ao_lda_new.npy', exc1_ao)
+            '''
+            ao_deriv = 1
+            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
+                                                         grid_range=(grid_start, grid_end)):
+                for idm in range(nset):
+                    mo_coeff_mask = mo_coeff[idx,:]
+                    rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
+                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                    wv = weight * vxc[0]
+                    aow = numint._scale_ao(ao_mask[0], wv)
+                    vtmp = _d1_dot_(ao_mask[1:4], aow.T)
+                    dm_mask = dms[idm][idx[:,None],idx]
+                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+            numpy.save('exc1_ao_lda_ref.npy', exc1_ao)
+            '''
         elif xctype == 'GGA':
+
             ao_deriv = 2
             aow_buf = cupy.empty(MIN_BLK_SIZE * nao * 3)
+            rho_buf2 = cupy.empty(2*nocc*MIN_BLK_SIZE)
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
@@ -227,7 +248,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
 
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, buf=rho)
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, buf=rho_buf2, out=rho)
+                # rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, out=rho)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
@@ -239,13 +261,48 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
                     exc1_ao[idm][:,idx] += res
                     #add_sparse(vmat[idm], vtmp, idx)
-            # numpy.save('exc1_ao_gga_new.npy', exc1_ao)
+
+            numpy.save('exc1_ao_pbe_new.npy', exc1_ao)
+            '''
+            ao_deriv = 2
+            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
+                                                         grid_range=(grid_start, grid_end)):
+                for idm in range(nset):
+                    mo_coeff_mask = mo_coeff[idx,:]
+                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
+                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                    wv = weight * vxc
+                    wv[0] *= .5
+                    vtmp = _gga_grad_sum_(ao_mask, wv)
+                    dm_mask = dms[idm][idx[:,None],idx]
+                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+            numpy.save('exc1_ao_pbe_ref.npy', exc1_ao)
+            '''
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
 
         elif xctype == 'MGGA':
+            '''
+            ao_deriv = 2
+            for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
+                                                         grid_range=(grid_start, grid_end)):
+                for idm in range(nset):
+                    mo_coeff_mask = mo_coeff[idx,:]
+                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
+                    wv = weight * vxc
+                    wv[0] *= .5
+                    wv[4] *= .5  # for the factor 1/2 in tau
+                    vtmp = _gga_grad_sum_(ao_mask, wv)
+                    vtmp += _tau_grad_dot_(ao_mask, wv[4])
+                    #add_sparse(vmat[idm], vtmp, idx)
+                    dm_mask = dms[idm][idx[:,None],idx]
+                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+            numpy.save('exc1_ao_tpss_ref.npy', exc1_ao)
+            '''
             ao_deriv = 2
             aow_buf = cupy.empty(MIN_BLK_SIZE * nao * 3)
+            rho_buf2 = cupy.empty(2*nocc*MIN_BLK_SIZE)
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
@@ -256,7 +313,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
             
                 mo_coeff_mask = mo_coeff[idx,:]
-                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False, buf=rho)
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False, buf=rho_buf2, out=rho)
+                # rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False, out=rho)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
@@ -269,7 +327,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     dm_mask = take_last2d(dms[idm], idx, out=dm_mask)
                     res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
                     exc1_ao[idm][:,idx] += res
-            # numpy.save('exc1_ao_mgga_new.npy', exc1_ao)
+            numpy.save('exc1_ao_tpss_new.npy', exc1_ao)
+      
         log.timer_debug1('gradient of vxc', *t0)
             
     return exc1_ao
@@ -405,14 +464,17 @@ def _make_dR_dao_w(ao, wv, buf=None):
         raise RuntimeError('CUDA Error')
     return buf
 
-def _d1_dot_(ao1, ao2,alpha=1.0, beta=0.0, out=None):
+def _d1_dot_(ao1, ao2, alpha=1.0, beta=0.0, transpose=False, out=None):
     if out is None:
         dtype = numpy.result_type(ao1[0], ao2[0])
         out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]], dtype=dtype)
-    out = contract('bik,km->bim', ao1.conj(), ao2, alpha=alpha, beta=beta, out=out)
+    if not transpose:
+        out = contract('bik,km->bim', ao1.conj(), ao2, alpha=alpha, beta=beta, out=out)
+    else:
+        out = contract('bik,km->bmi', ao1.conj(), ao2, alpha=alpha, beta=beta, out=out)
     return out
 
-def _gga_grad_sum_(ao, wv, buf=None, out=None):
+def _gga_grad_sum_(ao, wv, accumulate=False, buf=None, out=None):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
     if buf is None:
         buf = cupy.empty((3, ao.shape[1], ao.shape[2]))
@@ -420,7 +482,10 @@ def _gga_grad_sum_(ao, wv, buf=None, out=None):
         out = cupy.empty((3, ao.shape[1], ao.shape[1]))  
     # 启用contract 函数使的能够原为加和
     aow = numint._scale_ao(ao[:4], wv[:4], out=buf[0])
-    vmat = _d1_dot_(ao[1:4], aow.T, out=out)
+    if not accumulate:
+        vmat = _d1_dot_(ao[1:4], aow.T, out=out)
+    else:
+        vmat = _d1_dot_(ao[1:4], aow.T, beta=1.0, out=out)
     aow = _make_dR_dao_w(ao, wv[:4], buf=buf)
     vmat = _d1_dot_(aow, ao[0].T, beta=1, out=out)
     return vmat
