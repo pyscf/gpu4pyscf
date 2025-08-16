@@ -81,7 +81,6 @@ class ROHF(hf.RHF):
     get_occ = hf.return_cupy_array(rohf_cpu.ROHF.get_occ)
     get_hcore = hf.RHF.get_hcore
     get_ovlp = hf.RHF.get_ovlp
-    get_veff = uhf.UHF.get_veff
     get_init_guess = uhf.UHF.get_init_guess
     init_guess_by_minao      = rohf_cpu.ROHF.init_guess_by_minao
     init_guess_by_atom       = rohf_cpu.ROHF.init_guess_by_atom
@@ -133,6 +132,20 @@ class ROHF(hf.RHF):
         elif isinstance(dm, cupy.ndarray) and dm.ndim == 2:
             dm = [dm*.5, dm*.5]
         return uhf.energy_elec(self, dm, h1e, vhf)
+
+    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+        if dm is None:
+            dm = self.make_rdm1()
+        elif getattr(dm, 'mo_coeff', None) is not None:
+            mo_coeff = cupy.repeat(dm.mo_coeff[None], 2, axis=0)
+            mo_occ = cupy.asarray([dm.mo_occ>0, dm.mo_occ==2],
+                                  dtype=np.double)
+            if dm.ndim == 2:  # RHF DM
+                dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        elif dm.ndim == 2:  # RHF DM
+            dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+        return uhf.UHF.get_veff(self, mol, dm, dm_last, vhf_last, hermi)
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
                  diis_start_cycle=None, level_shift_factor=None, damp_factor=None,

@@ -295,6 +295,19 @@ class KnownValues(unittest.TestCase):
         e_ref = mf.to_cpu().kernel()
         assert np.abs(e_tot - e_ref) < 1e-7
 
+    def test_rohf(self):
+        mol = pyscf.M(
+            atom='''
+            C 0.00000000 0.00000000 -0.60298508
+            O 0.00000000 0.00000000 0.60539399
+            H 0.00000000 0.93467313 -1.18217476
+            H 0.00000000 -0.93467313 -1.18217476''',
+            charge=1, spin=1, unit='B')
+        mf = mol.ROHF().to_gpu().run()
+        self.assertAlmostEqual(mf.e_tot, -107.61304925181142, 8)
+        ref = mf.to_cpu().run()
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
     # TODO:
     #test analyze
     #test mulliken_pop

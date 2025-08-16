@@ -171,6 +171,19 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_cpu - e_gpu)
         assert np.abs(e_cpu - e_gpu) < 1e-5
 
+    def test_roks(self):
+        mol = pyscf.M(
+            atom='''
+            C 0.00000000 0.00000000 -0.60298508
+            O 0.00000000 0.00000000 0.60539399
+            H 0.00000000 0.93467313 -1.18217476
+            H 0.00000000 -0.93467313 -1.18217476''',
+            charge=1, spin=1, unit='B')
+        mf = mol.ROKS(xc='b3lyp').to_gpu().run()
+        self.assertAlmostEqual(mf.e_tot, -108.14711706818548, 8)
+        ref = mf.to_cpu().run()
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()
