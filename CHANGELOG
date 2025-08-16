@@ -1,3 +1,24 @@
+v1.4.3 (2025-08-20)
+-------------------
+* New Features
+  - Geometry optimization for excited states using TDDFT-ris methods.
+  - Non-adiabatic coupling vectors for TDDFT-ris methods.
+  - Analytical gradients for DFT+U with k-point sampling.
+  - Stress tensor calculations for semi-local DFT with k-point sampling and at the gamma-point.
+  - ASE interface to support crystal lattice optimization.
+  - Multigrid v2 algorithm for meta-GGA functionals.
+* Improvements
+  - GPU kernels for PBC overlap and kinetic integrals.
+  - Reduced GPU memory usage for TDDFT-ris by storing tensors in host memory.
+  - In PBC methods, scaled k-points (fractional coordinates) are stored to
+    simplify lattice optimization calculations.
+  - A preconditioned Krylov solver to accelerate convergence in TDDFT and
+    dynamic polarizability calculations.
+* Fixes
+  - Basis decontraction issue for d and f orbitals.
+  - A bug in Multigrid v2 algorithm related to non-orthogonal lattices.
+  - Incorrect virtual orbital energies when level_shift was enabled.
+
 v1.4.2 (2025-07-20)
 -------------------
 * New Features
