@@ -272,7 +272,7 @@ class _DFHF:
                 ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
 
             else:
-                raise NotImplementedError(f"DF only supports R/U/RO KS.")
+                raise NotImplementedError("DF only supports R/U/RO KS.")
             t0 = logger.timer_debug1(self, 'jk total', *t0)
             return tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
 
@@ -283,7 +283,7 @@ class _DFHF:
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             return vj - vk * .5
         else:
-            raise NotImplementedError(f"DF only supports R/U/RO HF.")
+            raise NotImplementedError("DF only supports R/U/RO HF.")
 
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()
