@@ -652,8 +652,8 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
             vmat_dm = opt.unsort_orbitals(vmat_dm, axis=[3])
             for ia in range(_sorted_mol.natm):
                 p0, p1 = aoslices[ia][2:]
-                vmat_dm[ia] = contract('xypq,pq->xyp', ipip[:,:,:,p0:p1], dm0[:,p0:p1])
-                vmat_dm[ia] = contract('yxqp,pq->xyp', ipip[:,:,p0:p1], dm0[:,p0:p1])
+                vmat_dm[ia] = contract('xypq,pq->xyp', ipip[:,:,:,p0:p1], dm0[:,p0:p1], beta=1, out=vmat_dm[ia])
+                vmat_dm[ia] = contract('yxqp,pq->xyp', ipip[:,:,p0:p1], dm0[:,p0:p1], beta=1, out=vmat_dm[ia])
         # cupy.save('vmat_dm_tpss_new.npy', vmat_dm)
         t0 = log.timer_debug1(f'vxc_deriv2 on Device {device_id}', *t0)
         
