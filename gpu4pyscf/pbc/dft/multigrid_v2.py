@@ -800,7 +800,13 @@ def convert_xc_on_g_mesh_to_fock(
 def evaluate_xc_gradient_wrapper(
     gradient, pairs_info, xc_weights, dm_slice, img_phase, ignore_imag=True,
 ):
-    c_driver = libgpbc.evaluate_xc_gradient_driver
+    density_slices = xc_weights.shape[1]
+    if density_slices == 1:
+        c_driver = libgpbc.evaluate_xc_gradient_driver
+    elif density_slices == 2:
+        c_driver = libgpbc.evaluate_xc_with_tau_gradient_driver
+    else:
+        raise ValueError("Incorrect xc_weights.shape = {xc_weights.shape}")
 
     assert gradient.dtype == xc_weights.dtype
     assert gradient.dtype == dm_slice.dtype
@@ -877,7 +883,10 @@ def convert_xc_on_g_mesh_to_fock_gradient(
     dms = _format_dms(dm_kpts, kpts)
     n_atoms = cell.natm
 
-    xc_on_g_mesh = xc_on_g_mesh.reshape(-1, *mydf.mesh)
+    assert xc_on_g_mesh.ndim == 3
+    n_channels = xc_on_g_mesh.shape[0]
+    density_slices = xc_on_g_mesh.shape[1]
+    xc_on_g_mesh = xc_on_g_mesh.reshape(n_channels, density_slices, *mydf.mesh)
 
     if hermi != 1:
         raise NotImplementedError
@@ -886,6 +895,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
 
     for pairs in mydf.sorted_gaussian_pairs:
         interpolated_xc = xc_on_g_mesh[
+            :,
             :,
             pairs["fft_grid"][0][:, None, None],
             pairs["fft_grid"][1][:, None],
@@ -1312,11 +1322,22 @@ def get_veff_ip1(
     xc_for_fock = xc_for_fock.reshape(nset, -1, *mesh) * weight
     xc_for_fock = fft_in_place(xc_for_fock).reshape(nset, -1, ngrids)
 
-    if xc_type == "GGA":
+    if xc_type == "LDA":
+        pass
+    elif xc_type == "GGA":
         xc_for_fock = (
-            xc_for_fock[:, 0]
-            - contract("ngp, pg -> np", xc_for_fock[:,1:4], Gv) * 1j
-        ).reshape((nset, -1, ngrids))
+            xc_for_fock[:, 0] - contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
+        )
+        xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
+    elif xc_type == "MGGA":
+        xc_for_fock[:, 0] -= contract("ngp, pg -> np", xc_for_fock[:, 1:4], Gv) * 1j
+        xc_for_fock = cp.concatenate([
+            xc_for_fock[:, 0].reshape((nset, -1, ngrids)),
+            xc_for_fock[:, 4].reshape((nset, -1, ngrids)),
+        ], axis = 1)
+    else:
+        raise ValueError(f"Incorrect xc_type = {xc_type}")
+
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
