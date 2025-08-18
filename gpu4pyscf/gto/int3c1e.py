@@ -234,14 +234,16 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
     for p0, p1 in lib.prange(0, ngrids, ngrids_per_split):
         int3c_grid_slice = cp.zeros([p1-p0, nao, nao], order='C')
         for cp_ij_id, _ in enumerate(intopt.log_qs):
+            log_q_ij = intopt.log_qs[cp_ij_id]
+            if len(log_q_ij) == 0:
+                continue
+
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
             li = intopt.angular[cpi]
             lj = intopt.angular[cpj]
 
             stream = cp.cuda.get_current_stream()
-
-            log_q_ij = intopt.log_qs[cp_ij_id]
 
             nbins = 1
             bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
@@ -433,9 +435,11 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
 
     for p0, p1 in lib.prange(0, ngrids, ngrids_per_split):
         for cp_ij_id, _ in enumerate(intopt.log_qs):
-            stream = cp.cuda.get_current_stream()
-
             log_q_ij = intopt.log_qs[cp_ij_id]
+            if len(log_q_ij) == 0:
+                continue
+
+            stream = cp.cuda.get_current_stream()
 
             nbins = 1
             bins_locs_ij = np.array([0, len(log_q_ij)], dtype=np.int32)
