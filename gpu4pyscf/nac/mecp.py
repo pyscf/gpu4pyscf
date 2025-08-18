@@ -21,14 +21,13 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf import tdscf
 
 
+# TODO: Add support for S0/S1
 class ConicalIntersectionOptimizer:
     """
     Implements the direct method for locating the lowest energy point on a potential surface crossing,
     as described in Chemical Physics Letters 223 (1994) 269-274.
     
     This version uses pyscf.geomopt.geometric_solver as the optimizer.
-
-    TODO: Add support for S0/S1
     
     Args:
         td : A time-dependent HF or DFT object.
