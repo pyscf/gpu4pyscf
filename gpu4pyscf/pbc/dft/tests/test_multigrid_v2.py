@@ -261,6 +261,51 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
+    def test_get_vxc_mgga(self):
+        nao = cell_orth.nao
+        np.random.seed(2)
+        xc = 'r2scan'
+        dm = np.random.random((nao,nao)) - .5
+        dm = dm.dot(dm.T)
+        pcell = cell_orth.copy()
+        pcell.precision = 1e-11
+        mf = pcell.RKS(xc=xc)
+
+        n0, exc0, ref = mf._numint.nr_rks(pcell, mf.grids, xc, dm)
+        vj = mf.with_df.get_jk(dm, with_k=False)[0]
+        ref += vj
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
+        dm = np.array([dm, dm])
+        n0, exc0, ref = mf._numint.nr_uks(pcell, mf.grids, xc, dm)
+        vj = mf.with_df.get_jk(dm, with_k=False)[0]
+        ref += vj[0] + vj[1]
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
+    def test_get_vxc_mgga_nonorth(self):
+        nao = cell_nonorth.nao
+        np.random.seed(2)
+        xc = 'r2scan'
+        dm = np.random.random((nao,nao)) - .5
+        dm = dm.dot(dm.T)
+        pcell = cell_nonorth.copy()
+        pcell.precision = 1e-10
+        mf = pcell.RKS(xc=xc)
+
+        n0, exc0, ref = mf._numint.nr_rks(pcell, mf.grids, xc, dm)
+        vj = mf.with_df.get_jk(dm, with_k=False)[0]
+        ref += vj
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_nonorth).nr_rks(cell_nonorth, None, xc, dm, with_j=True)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
     def test_rks_lda(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -301,7 +346,6 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.87059063524272, 8)
 
-    @unittest.skip('MultiGrid for MGGA not implemented')
     def test_rks_mgga(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
