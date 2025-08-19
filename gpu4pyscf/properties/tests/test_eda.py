@@ -534,7 +534,25 @@ class KnownValues(unittest.TestCase):
 
         reference_dft_energies = np.array(reference_dft_result["energy"])
         test_dft_energies      = np.array(test_dft_result["energy"])
-        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-6
+
+        # Why do we need this special treatment, and why is this threshold so loose?
+        # The reason lies in the current density fitting implementation:
+        # We compute the full range and long range (omega = 0.3) 2-center integrals,
+        # and perform Chelosky decomposition on each of them.
+        # The long range 2-center matrix is singular. The CD supposes to fail,
+        # and we will switch to eigenvalue decomposition.
+        # Unfortunately for a small molecule like CH4, the CD happens not to fail,
+        # but the result is noisy.
+        # This results in a relatively big noise in the DFT energy.
+        # To avoid this problem, look for a try-except block with cholesky function call
+        # in gpu4pyscf/df/df.py, and turn off the try block, i.e. force the code to do
+        # eigenvalue decomposition.
+        # The correct solution to this problem is: instead of decomposing the long-range
+        # 2-center integral, decompose the combined (c1 SR + c2 LR) instead.
+        # TODO: Once that's done, we should rerun the reference and remove the following
+        # hack.
+        assert np.max(np.abs(test_dft_energies[0] - reference_dft_energies[0])) < 3e-6
+        assert np.max(np.abs(test_dft_energies[1:] - reference_dft_energies[1:])) < 1e-7
 
     def test_almo_eda_2_pbe0_charged(self):
         ### Q-Chem input difference
