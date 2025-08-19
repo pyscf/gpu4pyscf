@@ -593,13 +593,13 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
 
     # Determine the addresses of the non-vanished pairs and the diagonal indices
     # within these elements.
-    if cell.cart:
-        nf = (uniq_l + 1) * (uniq_l + 2) // 2
-    else:
+    nf = nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
+    if not cell.cart:
         nf = uniq_l * 2 + 1
         c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
     diag_addresses = [] # addresses wrt the compressed indices
     p0 = p1 = 0
+    max_pair_size = 0
     for i, j in bas_ij_cache:
         nfi = nf[i]
         nfj = nf[j]
@@ -618,6 +618,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             idx = np.where(ish == jsh)[0]
             addr = p0 + idx[:,None] * nfi**2 + np.arange(nfi**2)
             diag_addresses.append(addr.ravel())
+        max_pair_size = max(max_pair_size, nf_cart[i]*nf_cart[j] * n_pairs)
     non0_size = p1
 
     ao_pair_mapping = np.hstack(ao_pair_mapping)
@@ -644,13 +645,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
 
-    buflen = 0
-    nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
-    for (i, j), bas_ij in bas_ij_cache.items():
-        npairs = nf_cart[i] * nf_cart[j] * len(bas_ij[0])
-        buflen = max(buflen, npairs)
-    buf = np.empty(naux*buflen)
-
+    buf = np.empty(naux*max_pair_size)
     kern = libpbc.build_ft_aopair
     j3c_compressed = np.empty((naux,non0_size), dtype=np.float64)
     pair0 = pair1 = 0
@@ -869,7 +864,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             #:cderi[:,idx.ravel()] += j3c_tmp.get()
             _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
             idx = np.asarray(idx.ravel(), dtype=np.int32)
-            libpbc.take2d_add( # this copy back operation is really slow
+            libpbc.take2d_add( # this copy back operation is very slow
                 cderi.ctypes, _buf.ctypes, idx.ctypes,
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs), ctypes.c_int(len(idx))
             )

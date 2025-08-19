@@ -25,7 +25,7 @@ void int3c2e_000(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -34,25 +34,26 @@ void int3c2e_000(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -157,7 +158,7 @@ void int3c2e_100(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -166,25 +167,26 @@ void int3c2e_100(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -300,7 +302,7 @@ void int3c2e_110(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -309,25 +311,26 @@ void int3c2e_110(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -475,7 +478,7 @@ void int3c2e_200(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -484,25 +487,26 @@ void int3c2e_200(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -631,7 +635,7 @@ void int3c2e_210(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -640,25 +644,26 @@ void int3c2e_210(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -835,7 +840,7 @@ void int3c2e_220(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -844,25 +849,26 @@ void int3c2e_220(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -1112,7 +1118,7 @@ void int3c2e_001(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1121,25 +1127,26 @@ void int3c2e_001(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -1255,7 +1262,7 @@ void int3c2e_101(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1264,25 +1271,26 @@ void int3c2e_101(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -1427,7 +1435,7 @@ void int3c2e_111(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1436,25 +1444,26 @@ void int3c2e_111(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -1672,7 +1681,7 @@ void int3c2e_201(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1681,25 +1690,26 @@ void int3c2e_201(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -1878,7 +1888,7 @@ void int3c2e_211(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -1887,25 +1897,26 @@ void int3c2e_211(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -2217,7 +2228,7 @@ void int3c2e_221(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -2226,7 +2237,7 @@ void int3c2e_221(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
@@ -2237,20 +2248,21 @@ void int3c2e_221(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *Rpq = rjri + nksp_per_block * 3;
     __shared__ int img_counts_in_warp[WARPS];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int task0 = 0; task0 < ntasks; task0 += nksp_per_block) {
         int ijk_idx = task0 + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         __syncthreads();
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
@@ -2727,7 +2739,7 @@ void int3c2e_002(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -2736,25 +2748,26 @@ void int3c2e_002(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[16];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -2883,7 +2896,7 @@ void int3c2e_102(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -2892,25 +2905,26 @@ void int3c2e_102(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -3089,7 +3103,7 @@ void int3c2e_112(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -3098,25 +3112,26 @@ void int3c2e_112(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -3431,7 +3446,7 @@ void int3c2e_202(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = threadIdx.z * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -3440,25 +3455,26 @@ void int3c2e_202(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
     __shared__ int img_counts_in_warp[8];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
@@ -3702,7 +3718,7 @@ void int3c2e_212(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
     int warp_id = thread_id / WARP_SIZE;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * 32;
     int nksh = min(bounds.nksh - ksh0_this_block, 32);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -3711,7 +3727,7 @@ void int3c2e_212(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
     double omega = env[PTR_RANGE_OMEGA];
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + ksp_id;
@@ -3722,20 +3738,21 @@ void int3c2e_212(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
     double *Rpq = rjri + nksp_per_block * 3;
     __shared__ int img_counts_in_warp[WARPS];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int task0 = 0; task0 < ntasks; task0 += nksp_per_block) {
         int ijk_idx = task0 + ksp_id;
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         __syncthreads();
         int thread_id_in_warp = thread_id % WARP_SIZE;
         if (thread_id_in_warp == 0) {
@@ -4221,8 +4238,8 @@ int int3c2e_unrolled(double *out, PBCIntEnvVars *envs, PBCInt3c2eBounds *bounds)
 #endif
 
     dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
-    int sp_blocks = (n_prim_pairs + SPTAKS_PER_BLOCK*nsp_per_block - 1) /
-        (SPTAKS_PER_BLOCK*nsp_per_block);
+    int sp_blocks = (n_prim_pairs + SPTASKS_PER_BLOCK*nsp_per_block - 1) /
+        (SPTASKS_PER_BLOCK*nsp_per_block);
     int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
     dim3 blocks(sp_blocks, ksh_blocks);
     int buflen = nroots*2 * nksh_per_block * nsp_per_block;

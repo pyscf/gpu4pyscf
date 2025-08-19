@@ -411,7 +411,7 @@ def to_primitive_bas(cell):
 
     # This sorted_cell is a fictitious cell object, to define the
     # p2c_mapping for prim_cell. PTRs in sorted_cell are not initialized.
-    # This object should not be used for any integral kernel.
+    # This object should not be used for any integral kernels.
     sorted_cell = cell.copy()
     c_ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
     sorted_idx = np.repeat(np.arange(cell.nbas), cell._bas[:,NCTR_OF])
@@ -606,7 +606,7 @@ class SRInt3c2eOpt:
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff))
+                ctypes.c_float(log_cutoff), ctypes.c_int(0))
             if err != 0:
                 raise RuntimeError('bvk_overlap_img_counts failed')
 
@@ -619,7 +619,7 @@ class SRInt3c2eOpt:
             counts_sorting = (-ovlp_img_counts[bas_ij]).argsort()
             bas_ij = bas_ij[counts_sorting]
             ovlp_img_counts = ovlp_img_counts[bas_ij]
-            ovlp_img_offsets = cp.empty(ovlp_npairs+1, dtype=np.int32)
+            ovlp_img_offsets = cp.empty(ovlp_npairs+1, dtype=np.uint32)
             ovlp_img_offsets[0] = 0
             cp.cumsum(ovlp_img_counts, out=ovlp_img_offsets[1:])
             tot_imgs = int(ovlp_img_offsets[ovlp_npairs])
@@ -640,7 +640,7 @@ class SRInt3c2eOpt:
             nimgs_J = int(ovlp_img_counts[0])
             ovlp_img_counts = counts_sorting = None
 
-            img_counts = cp.zeros(ovlp_npairs, dtype=np.int32)
+            img_counts = cp.zeros(ovlp_npairs, dtype=np.uint32)
             ovlp_pair_sorting = cp.arange(len(bas_ij), dtype=np.int32)
             err = libpbc.sr_int3c2e_img_idx(
                 lib.c_null_ptr(),
@@ -671,7 +671,7 @@ class SRInt3c2eOpt:
             bas_ij = bas_ij[counts_sorting]
             ovlp_pair_sorting = counts_sorting
             img_counts = img_counts[counts_sorting]
-            offsets = cp.empty(n_pairs+1, dtype=np.int32)
+            offsets = cp.empty(n_pairs+1, dtype=np.uint32)
             cp.cumsum(img_counts, out=offsets[1:])
             offsets[0] = 0
             tot_imgs = int(offsets[n_pairs])
