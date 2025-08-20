@@ -37,6 +37,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params, group_basis
 from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
 from gpu4pyscf.pbc.df.int3c2e import (
@@ -241,7 +242,7 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
     return cderi, cderip
 
 def _weighted_coulG_LR(cell, Gv, omega, kws, kpt=np.zeros(3)):
-    coulG = pbctools.get_coulG(cell, kpt, exx=False, Gv=Gv, omega=abs(omega))
+    coulG = get_coulG(cell, kpt, exx=False, Gv=Gv, omega=abs(omega))
     coulG *= kws
     if is_zero(kpt):
         assert Gv[0].dot(Gv[0]) == 0
@@ -267,7 +268,7 @@ def _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, verbose=None):
     naux = aux_coeff.shape[1]
 
     def ft_ao_iter(kpt=np.zeros(3), kpts=None):
-        coulG = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws, kpt))
+        coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
         auxG_conj = None
         coeff = asarray(aux_coeff)
         avail_mem = get_avail_mem() * .8
@@ -360,7 +361,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     logger.debug2(auxcell, 'max_memory %s (MB)  blocksize %s', avail_mem, blksize)
 
     if uniq_kpts is None:
-        coulG_LR = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws))
+        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
         for p0, p1 in lib.prange(0, ngrids, blksize):
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1])
             auxG_conj = auxG.conj()
@@ -369,7 +370,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
             auxG = auxG_conj = None
     else:
         for k, kpt in enumerate(uniq_kpts):
-            coulG_LR = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws, kpt))
+            coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
             is_gamma_point = is_zero(kpt)
             for p0, p1 in lib.prange(0, ngrids, blksize):
                 auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt)
@@ -390,11 +391,13 @@ def _solve_cderi(cd_j2c, j3c, j2ctag):
         j3c = solve_triangular(cd_j2c, j3c.reshape(-1,naux).T, lower=True)
         return j3c.reshape(naux,nao,nao)
 
-# Generate overlap masks using the int3c2e.overlap_img_counts function.
-# This overlap mask will be used in the ft_aopair generation to generate the
-# non-zero elements indices. This mask ensures that non-zero pairs in the
-# int3c2e integrals are not overlooked by the ft_aopair kernel.
 def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
+    '''
+    Generate overlap masks using the int3c2e.overlap_img_counts function.
+    This overlap mask will be used in the ft_aopair to generate the non-zero
+    elements indices. This mask ensures that non-zero pairs in the int3c2e
+    integrals are not overlooked by the ft_aopair kernel.
+    '''
     cell = int3c2e_opt.cell
     pcell = int3c2e_opt.prim_cell
     p_nbas = pcell.nbas
@@ -619,7 +622,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
 
     buf = np.empty(naux*max_pair_size)
     kern = libpbc.build_ft_aopair
-    j3c_compressed = np.empty((naux,non0_size), dtype=np.float64)
+    cderi_compressed = np.empty((naux,non0_size), dtype=np.float64)
     pair0 = pair1 = 0
     for i, j in bas_ij_cache:
         li = uniq_l[i]
@@ -691,9 +694,9 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
 
         pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
         _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
-        j3c_compressed[:,pair0:pair1] = j3c_tmp.get(out=_buf)
+        cderi_compressed[:,pair0:pair1] = j3c_tmp.get(out=_buf)
         j3c_tmp = None
-    return j3c_compressed, aopair_offsets_lookup, cderi_idx
+    return cderi_compressed, aopair_offsets_lookup, cderi_idx
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
@@ -886,7 +889,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         #TODO: call multigrid.eval_vpplocG after removing its part2 contribution
         ZG = ft_ao.ft_ao(fakenuc, Gv).conj()
         ZG = ZG.dot(charges)
-        ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
+        ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
         if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
@@ -903,7 +906,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         SIz = cp.exp(-1j*rb[:,2,None] * basez)
         SIx *= cp.asarray(-cell.atom_charges())[:,None]
         ZG = cp.einsum('qx,qy,qz->xyz', SIx, SIy, SIz).ravel().conj()
-        ZG *= asarray(_weighted_coulG_LR(cell, Gv, omega, kws))
+        ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
 
     ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()
     sorted_cell = ft_opt.sorted_cell

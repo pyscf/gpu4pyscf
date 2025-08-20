@@ -117,9 +117,9 @@ def _Gv_wrap_around(cell, Gv, k, mesh):
     agree.
     '''
     b = cell.reciprocal_vectors()
-    box_edge = np.einsum('i,ij->ij', mesh, b)
+    box_edge = asarray(np.einsum('i,ij->ij', mesh, b))
     kG = asarray(k) + asarray(Gv)
-    reduced_coords = np.linalg.solve(box_edge.T, kG.T).T
+    reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
     if cell.dimension >= 1:
         kG[reduced_coords[:,0]> .5] -= box_edge[0]
         kG[reduced_coords[:,0]<-.5] += box_edge[0]
@@ -208,12 +208,12 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         return coulG
 
     if abs(k).sum() > 1e-9:
-        kG = asarray(k) + Gv
+        if wrap_around:
+            kG = _Gv_wrap_around(cell, Gv, k, mesh)
+        else:
+            kG = asarray(k) + Gv
     else:
         kG = Gv
-
-    if wrap_around and abs(k).sum() > 1e-9:
-        kG = _Gv_wrap_around(cell, kG)
 
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0

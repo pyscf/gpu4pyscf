@@ -221,6 +221,46 @@ C    D
     ref = build_cderi(cell, auxcell, omega=omega)[0]
     assert abs(ref[0,0] - out).max() < 1e-14
 
+def test_kpts_compressed():
+    from gpu4pyscf.pbc.df import rsdf_builder_o1 as rsdf_builder
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        #basis={'C1': ('ccpvdz',
+        #              [[2, [1.1, 1.]],
+        #              [3, [2., 1.]]]),
+        #       'C2': 'ccpvdz'},
+        basis=[[0, [1, 1]]],
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+#C    S
+#      2.1325940100           1.0000000000
+#C    P
+#      9.8364318200           1.0000000000
+#C    P
+#      3.3490545000           1.0000000000
+#C    P
+#      1.4947618600           1.0000000000
+#C    P
+#      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    nao = cell.nao
+    naux = auxcell.nao
+    omega = 0.3
+    kmesh = [6,1,1]
+    kpts = cell.make_kpts(kmesh)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts, omega=omega)
+
 def _get_2c2e_slow(auxcell, uniq_kpts, omega, with_long_range=True):
     from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
     from pyscf.pbc.lib.kpts_helper import is_zero
