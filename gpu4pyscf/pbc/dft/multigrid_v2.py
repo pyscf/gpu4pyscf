@@ -459,8 +459,8 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
     return mydf
 
 
-def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, compute_tau=False):
-    if compute_tau:
+def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, with_tau=False):
+    if with_tau:
         c_driver = libgpbc.evaluate_density_tau_driver
     else:
         c_driver = libgpbc.evaluate_density_driver
@@ -489,7 +489,7 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
     else:
         use_float_precision = ctypes.c_int(0)
 
-    if compute_tau:
+    if with_tau:
         density = cp.zeros((n_channels, 2, ) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
     else:
         density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
@@ -538,14 +538,14 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
     if mydf.sorted_gaussian_pairs is None:
         mydf.build(xc_type)
 
-    compute_tau = False
+    with_tau = False
     if xc_type == "LDA":
         density_slices = 1
     elif xc_type == "GGA":
         density_slices = 4
     elif xc_type == "MGGA":
         density_slices = 5
-        compute_tau = True
+        with_tau = True
     else:
         raise ValueError(f"Incorrect xc_type = {xc_type}")
 
@@ -598,12 +598,12 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
         density = (
             evaluate_density_wrapper(
-                pairs, coeff_sandwiched_density_matrix, img_phase, compute_tau = compute_tau
+                pairs, coeff_sandwiched_density_matrix, img_phase, with_tau = with_tau
             )
             * weight_per_grid_point
         )
 
-        if compute_tau:
+        if with_tau:
             assert density.shape[1] == 2
             tau = density[:, 1]
             density = density[:, 0]
@@ -618,7 +618,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
             pairs["fft_grid"][2],
         ] += density
 
-        if compute_tau:
+        if with_tau:
             tau = fft_in_place(tau)
 
             density_on_g_mesh[
@@ -636,18 +636,23 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
     return density_on_g_mesh
 
 
-def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase):
-    density_slices = xc_weights.shape[1]
-    if density_slices == 1:
-        c_driver = libgpbc.evaluate_xc_driver
-    elif density_slices == 2:
+def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
+    if with_tau:
+        assert xc_weights.ndim == 3+2 and xc_weights.shape[1] == 2
+        n_channels = xc_weights.shape[0]
+        density_slices = 2
+    else:
+        assert (xc_weights.ndim == 3+2 and xc_weights.shape[1] == 1) or (xc_weights.ndim == 3+1)
+        n_channels = xc_weights.shape[0]
+        density_slices = 1
+
+    if with_tau:
         c_driver = libgpbc.evaluate_xc_with_tau_driver
     else:
-        raise ValueError("Incorrect xc_weights.shape = {xc_weights.shape}")
+        c_driver = libgpbc.evaluate_xc_driver
     n_i_functions = len(pairs_info["coeff_in_localized"])
     n_j_functions = len(pairs_info["concatenated_coeff"])
 
-    n_channels = xc_weights.shape[0]
     phase_diff_among_images, image_pair_difference_index = img_phase
     n_k_points, n_difference_images = phase_diff_among_images.shape
     n_images = pairs_info["neighboring_images"].shape[0]
@@ -713,18 +718,33 @@ def convert_xc_on_g_mesh_to_fock(
     xc_on_g_mesh,
     hermi=1,
     kpts=None,
+    with_tau=False,
 ):
     cell = mydf.cell
     nao = cell.nao_nr()
 
-    # TODO: This logic will cause bugs with kpts
-    if xc_on_g_mesh.ndim < 3: # 1 for n_channels, 1 for rho/tau, 1 for ngrids
-        xc_on_g_mesh = xc_on_g_mesh[cp.newaxis, :] # n_channels == 1
-    if xc_on_g_mesh.ndim < 3:
-        xc_on_g_mesh = xc_on_g_mesh[cp.newaxis, :]
-    assert xc_on_g_mesh.ndim == 3
-    n_channels = xc_on_g_mesh.shape[0]
-    density_slices = xc_on_g_mesh.shape[1]
+    if with_tau:
+        if xc_on_g_mesh.ndim == 2:
+            assert xc_on_g_mesh.shape[0] == 2
+            n_channels = 1
+        elif xc_on_g_mesh.ndim == 3:
+            assert xc_on_g_mesh.shape[1] == 2
+            n_channels = xc_on_g_mesh.shape[0]
+        else:
+            raise ValueError("Incorrect shape of xc_on_g_mesh = {xc_on_g_mesh.shape}")
+        density_slices = 2
+    else:
+        if xc_on_g_mesh.ndim == 1:
+            n_channels = 1
+        elif xc_on_g_mesh.ndim == 2:
+            n_channels = xc_on_g_mesh.shape[0]
+        elif xc_on_g_mesh.ndim == 3:
+            assert xc_on_g_mesh.shape[1] == 1
+            n_channels = xc_on_g_mesh.shape[0]
+        else:
+            raise ValueError("Incorrect shape of xc_on_g_mesh = {xc_on_g_mesh.shape}")
+        density_slices = 1
+
     xc_on_g_mesh = xc_on_g_mesh.reshape(n_channels, density_slices, *mydf.mesh)
 
     if kpts is None:
@@ -757,7 +777,7 @@ def convert_xc_on_g_mesh_to_fock(
         n_ao_in_localized = len(pairs["ao_indices_in_localized"])
         libgpbc.update_dxyz_dabc(pairs["dxyz_dabc"].ctypes)
         img_phase = image_phase_for_kpts(cell, pairs["neighboring_images"], kpts)
-        fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc, img_phase)
+        fock_slice = evaluate_xc_wrapper(pairs, interpolated_xc, img_phase, with_tau=with_tau)
         fock_slice = cp.einsum("nkpq,pi->nkiq", fock_slice, pairs["coeff_in_localized"])
         fock_slice = cp.einsum("nkiq,qj->nkij", fock_slice, pairs["concatenated_coeff"])
 
@@ -798,15 +818,21 @@ def convert_xc_on_g_mesh_to_fock(
 
 
 def evaluate_xc_gradient_wrapper(
-    gradient, pairs_info, xc_weights, dm_slice, img_phase, ignore_imag=True,
+    gradient, pairs_info, xc_weights, dm_slice, img_phase, ignore_imag=True, with_tau=False
 ):
-    density_slices = xc_weights.shape[1]
-    if density_slices == 1:
-        c_driver = libgpbc.evaluate_xc_gradient_driver
-    elif density_slices == 2:
+    if with_tau:
+        assert xc_weights.ndim == 3+2 and xc_weights.shape[1] == 2
+        n_channels = xc_weights.shape[0]
+        density_slices = 2
+    else:
+        assert (xc_weights.ndim == 3+2 and xc_weights.shape[1] == 1) or (xc_weights.ndim == 3+1)
+        n_channels = xc_weights.shape[0]
+        density_slices = 1
+
+    if with_tau:
         c_driver = libgpbc.evaluate_xc_with_tau_gradient_driver
     else:
-        raise ValueError("Incorrect xc_weights.shape = {xc_weights.shape}")
+        c_driver = libgpbc.evaluate_xc_gradient_driver
 
     assert gradient.dtype == xc_weights.dtype
     assert gradient.dtype == dm_slice.dtype
@@ -877,6 +903,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
     dm_kpts,
     hermi=1,
     kpts=None,
+    with_tau=False,
 ):
     cell = mydf.cell
     dm_kpts = cp.asarray(dm_kpts, order="C")
@@ -944,6 +971,7 @@ def convert_xc_on_g_mesh_to_fock_gradient(
             coeff_sandwiched_density_matrix,
             img_phase,
             ignore_imag=True,
+            with_tau=with_tau,
         )
 
     return gradient
@@ -1141,7 +1169,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_for_fock[0] += coulomb_on_g_mesh
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
-    veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band)
+    veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum, vj=None, vk=None)
     t0 = log.timer("xc", *t0)
@@ -1248,7 +1276,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
-    veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band)
+    veff = convert_xc_on_g_mesh_to_fock(ni, xc_for_fock, hermi, kpts_band, with_tau = (xc_type == "MGGA"))
     veff = _format_jks(veff, dm_kpts, input_band, kpts)
     veff = tag_array(veff, ecoul=coulomb_energy, exc=xc_energy_sum, vj=None, vk=None)
     t0 = log.timer("xc", *t0)
@@ -1345,7 +1373,7 @@ def get_veff_ip1(
         xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG_part1(cell, mesh)
 
     veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
-        ni, xc_for_fock, dm_kpts, hermi, kpts_band
+        ni, xc_for_fock, dm_kpts, hermi, kpts_band, with_tau = (xc_type == "MGGA")
     )
 
     t0 = log.timer("veff_gradient", *t0)
