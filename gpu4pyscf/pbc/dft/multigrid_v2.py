@@ -640,11 +640,11 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
     if with_tau:
         assert xc_weights.ndim == 3+2 and xc_weights.shape[1] == 2
         n_channels = xc_weights.shape[0]
-        density_slices = 2
+        # density_slices = 2
     else:
         assert (xc_weights.ndim == 3+2 and xc_weights.shape[1] == 1) or (xc_weights.ndim == 3+1)
         n_channels = xc_weights.shape[0]
-        density_slices = 1
+        # density_slices = 1
 
     if with_tau:
         c_driver = libgpbc.evaluate_xc_with_tau_driver
@@ -823,11 +823,11 @@ def evaluate_xc_gradient_wrapper(
     if with_tau:
         assert xc_weights.ndim == 3+2 and xc_weights.shape[1] == 2
         n_channels = xc_weights.shape[0]
-        density_slices = 2
+        # density_slices = 2
     else:
         assert (xc_weights.ndim == 3+2 and xc_weights.shape[1] == 1) or (xc_weights.ndim == 3+1)
         n_channels = xc_weights.shape[0]
-        density_slices = 1
+        # density_slices = 1
 
     if with_tau:
         c_driver = libgpbc.evaluate_xc_with_tau_gradient_driver
