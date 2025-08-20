@@ -640,7 +640,7 @@ class SRInt3c2eOpt:
             nimgs_J = int(ovlp_img_counts[0])
             ovlp_img_counts = counts_sorting = None
 
-            img_counts = cp.zeros(ovlp_npairs, dtype=np.uint32)
+            img_counts = cp.zeros(ovlp_npairs, dtype=np.int32)
             ovlp_pair_sorting = cp.arange(len(bas_ij), dtype=np.int32)
             err = libpbc.sr_int3c2e_img_idx(
                 lib.c_null_ptr(),
