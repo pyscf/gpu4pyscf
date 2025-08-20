@@ -404,42 +404,21 @@ def to_primitive_bas(cell):
     pcell._env = prim_env
     prim_to_ctr_mapping = np.asarray(np.hstack(prim_to_ctr_mapping), dtype=np.int32)
 
+
+    sorted_cell, ao_idx, _, _, _, ft_cell_mapping = group_basis(
+        cell, tile=1, return_bas_mapping=True, sparse_coeff=True)
+    # prim_to_ctr_mapping map the primitive shells to the contracted shells of
+    # the original cell.  sorted_cell in ft_ao and other modules are sorted
+    # according to the (l, n-contraction) pattern. Each entry of ft_cell_mapping
+    # maps the shell of the original cell to the shell in sorted_cell.
+    prim_to_ctr_mapping = ft_cell_mapping[prim_to_ctr_mapping]
+
+    # Regroup the pcell shells based on angular momentum
     p_ls = pcell._bas[:,ANG_OF]
     lmax = p_ls.max()
     sorted_idx = np.hstack([np.where(p_ls==l)[0] for l in range(lmax+1)])
     pcell._bas = pcell._bas[sorted_idx]
-
-    # This sorted_cell is a fictitious cell object, to define the
-    # p2c_mapping for prim_cell. PTRs in sorted_cell are not initialized.
-    # This object should not be used for any integral kernels.
-    sorted_cell = cell.copy()
-    c_ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
-    sorted_idx = np.repeat(np.arange(cell.nbas), cell._bas[:,NCTR_OF])
-    sorted_idx = [sorted_idx[c_ls==l] for l in range(lmax+1)]
-    counts = [len(i) for i in sorted_idx]
-    sorted_idx = np.hstack(sorted_idx)
-    sorted_cell._bas = cell._bas[sorted_idx]
-    sorted_cell._bas[:,NCTR_OF] = 1
-
-    # prim shells are sorted in pcell. The mapping needs to be sorted accordingly.
-    # The lookup stores the mapping for each angular momentum
-    c_shell_offsets = np.append(0, np.cumsum(counts))
-    p2c_mapping = []
-    for l, offset in enumerate(c_shell_offsets[:-1]):
-        i, idx = np.unique(prim_to_ctr_mapping[p_ls==l], return_inverse=True)
-        assert all(i[:-1] < i[1:])
-        p2c_mapping.append(idx + offset)
-    p2c_mapping = np.asarray(np.hstack(p2c_mapping), dtype=np.int32)
-
-    # ao_idx transforms the AOs in sorted_cell into AOs in the original cell
-    if cell.cart:
-        dims = (c_ls + 1) * (c_ls + 2) // 2
-    else:
-        dims = c_ls * 2+ 1
-    ao_loc = np.append(np.int32(0), dims.cumsum(dtype=np.int32))
-    idx = np.hstack([np.where(c_ls==l)[0] for l in range(lmax+1)])
-    ao_idx = np.array_split(np.arange(cell.nao), ao_loc[1:-1])
-    ao_idx = np.hstack([ao_idx[i] for i in idx])
+    p2c_mapping = prim_to_ctr_mapping[sorted_idx]
     return pcell, sorted_cell, p2c_mapping, ao_idx
 
 class SRInt3c2eOpt:

@@ -435,31 +435,7 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     libpbc.condense_primitive_ovlp_mask(
         c_ovlp_mask.ctypes, p_ovlp_mask.ctypes, p2c_mapping.ctypes,
         ctypes.c_int(c_nbas), ctypes.c_int(p_nbas))
-
-    lmax = cell._bas[:,ANG_OF].max()
-    # generally contracted shells are convert to segement contracted shells in
-    # either cases
-    ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
-    nprims = np.repeat(cell._bas[:,NPRIM_OF], cell._bas[:,NCTR_OF])
-
-    #** Sort ovlp mask, to adapt the order in ft_aopair
-    # sorted_idx indicates how the contracted shells of the original cell are
-    # ordered in ft_aopair. See also the mole.group_basis function.
-    l_ctrs = np.column_stack((ls, -nprims))
-    _, inv_idx = np.unique(l_ctrs, return_inverse=True, axis=0)
-    ft_sorting_idx = np.argsort(inv_idx.ravel(), kind='stable')
-
-    idx = np.arange(len(ls))
-    int3c_sorting_idx = np.hstack([idx[ls==l] for l in range(lmax+1)])
-    rev_int3c_idx = np.empty_like(int3c_sorting_idx)
-    # sorted_cell._bas[rev_int3c_idx] => cell._bas
-    rev_int3c_idx[int3c_sorting_idx] = idx
-
-    # int3c2e._sorted_cell[mapping] => ft._sorted_cell
-    mapping = rev_int3c_idx[ft_sorting_idx]
-
-    ovlp_mask = c_ovlp_mask[mapping[:,None],mapping]
-    return ovlp_mask, mapping
+    return c_ovlp_mask
 
 def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
     log = logger.new_logger(ft_opt.cell, verbose)
@@ -559,22 +535,12 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     # that created by the ft_aopair module. This is to ensure ft_aopair
     # producing more non-zero integrals than that in the int3c2e function.
     cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
-    int3c2e_ovlp_mask, mapping = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
+    int3c2e_ovlp_mask = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
     int3c2e_ovlp_mask = cp.asarray(int3c2e_ovlp_mask, dtype=bool)
-
-    # ft._sorted_cell._bas[rev_mapping] => int3c._sorted_cell._bas
-    rev_mapping = np.empty_like(mapping)
-    rev_mapping[mapping] = np.arange(len(mapping))
 
     ft_opt = ft_ao.FTOpt(cell).build()
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
-
-    # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
-    # This lookup table will be used to generate the addresses for the
-    # non-zere sr_int3c2e integrals.
-    # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
-    aopair_offsets_lookup = np.zeros((nbas, nbas), dtype=np.int32)
 
     ao_pair_mapping = []
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
@@ -587,10 +553,13 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
                                        int3c2e_ovlp_mask, log)
     t1 = log.timer_debug2('generating bas_ij indices', *t1)
 
-    uniq_l = ft_opt.uniq_l_ctr[:,0]
-    l_ctr_offsets = ft_opt.l_ctr_offsets
-    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
+    # This lookup table will be used to generate the addresses for the
+    # non-zere sr_int3c2e integrals.
+    # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
+    aopair_offsets_lookup = np.zeros((nbas, nbas), dtype=np.int32)
 
+    uniq_l = ft_opt.uniq_l_ctr[:,0]
     # Determine the addresses of the non-vanished pairs and the diagonal indices
     # within these elements.
     nf = nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
@@ -644,6 +613,9 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux)))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
+
+    l_ctr_offsets = ft_opt.l_ctr_offsets
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
 
     buf = np.empty(naux*max_pair_size)
     kern = libpbc.build_ft_aopair
@@ -710,7 +682,6 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             # is flipped. By placing the nfj,nfi to the last dimension, the
             # non-zero elements address can be computed as
             #     offset + bas_ij_idx * (nfj*nfi) + np.arange(nfj*nfi)
-            # Address mapping can be achieved by adjustment for the offset.
             j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
         else:
             j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
@@ -722,7 +693,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
         j3c_compressed[:,pair0:pair1] = j3c_tmp.get(out=_buf)
         j3c_tmp = None
-    return j3c_compressed, aopair_offsets_lookup, rev_mapping, cderi_idx
+    return j3c_compressed, aopair_offsets_lookup, cderi_idx
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
@@ -782,13 +753,9 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
 
     if with_long_range:
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
-        # To add sr_int3c2e integrals to the corresponding elements in LR
-        # tensor, bas_mapping and aopair_offsets_lookup are utilized for indexing.
-        # bas_mapping[n] translates the shell n in sr_int3c2e.sorted_cell to
-        # that in ft_aopair.sorted_cell. aopair_offsets_lookup convertes the
-        # address in a dense tensor to compressed storage.
-        cderi, aopair_offsets_lookup, bas_mapping, cderi_idx = \
-                _lr_int3c2e_gamma_point(int3c2e_opt)
+        # aopair_offsets_lookup convertes the address in a dense tensor to
+        # compressed storage.
+        cderi, aopair_offsets_lookup, cderi_idx = _lr_int3c2e_gamma_point(int3c2e_opt)
         # LR int3c2e would generate more nao_pairs than the SR int3c2e!
         nao_pairs = cderi.shape[1]
         t1 = log.timer_debug1('LR int3c2e', *t1)
@@ -846,21 +813,9 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         ish += i0
         jsh += j0
         if with_long_range:
-            ish = bas_mapping[ish]
-            jsh = bas_mapping[jsh]
             ft_idx = aopair_offsets_lookup[ish,jsh]
             ij = np.arange(nfi*nfj, dtype=np.int32)
             idx = ij + ft_idx[:,None]
-            # Due to the bas_mapping from int3c2e_opt.cell to ft_opt.cell,
-            # the bas_ij pair for int3c2e_opt may correspond to the triu
-            # bas-pair in ft_opt.cell. For these bas_ij, a transpose on <i|j>
-            # should be applied to wrap the triu block to the tril block.
-            triu_mask = ish < jsh
-            ft_idx = ft_idx[triu_mask]
-            if len(ft_idx) > 0:
-                # Note: in each block, i is accessed in the inner loop
-                ijT = ij.reshape(nfj,nfi).T.ravel()
-                idx[triu_mask] = ijT + ft_idx[:,None]
             #:cderi[:,idx.ravel()] += j3c_tmp.get()
             _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
             idx = np.asarray(idx.ravel(), dtype=np.int32)

@@ -30,8 +30,9 @@ def test_int3c2e_gamma_point():
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
         ''',
-        basis={'C1': [[3, [1.1, 1.]],
-                      [4, [2., 1.]]],
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
                'C2': 'ccpvdz'},
         precision = 1e-8,
         a=np.diag([2.5, 1.9, 2.2])*3)
@@ -223,3 +224,5 @@ C    D
 
     dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
+
+test_int3c2e_gamma_point()

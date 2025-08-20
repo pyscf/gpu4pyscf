@@ -44,9 +44,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     int jsh = bas_ij % bvk_njsh;
     int cell0_ish = ish % nish + ish0;;
     int cell0_jsh = jsh % njsh + jsh0;;
-    if (cell0_ish < cell0_jsh &&
-        // filtering based on the contracted orbital-pairs than the primitive shells
-        p2c_mapping[cell0_ish] != p2c_mapping[cell0_jsh]) {
+    if (// filtering the tril pairs based on the contracted orbitals
+        p2c_mapping[cell0_ish] < p2c_mapping[cell0_jsh]) {
         return;
     }
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
@@ -389,7 +388,7 @@ int bvk_overlap_img_idx(int *img_idx, uint32_t *img_offsets, int *bas_ij_mapping
         *envs, exps, log_coeff, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in bvk_overlap_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
