@@ -45,7 +45,9 @@ def conj_images_in_bvk_cell(kmesh, return_pair=False):
     return np.column_stack((Ls_idx[mask], Ls_idx_conj[mask]))
 
 def kk_adapted_iter(kmesh):
-    '''Generates kpt which is adapted to the kpt_p in (ij|p)
+    '''Generates kpt which is adapted to the kpt_aux of the metric in RI
+    for (ij| RI |kl). The metric is computed as (-kpt_aux|kpt_aux) where
+    kpt_aux = kj - ki.
 
     This function provides the similar functionality as the
     pyscf.pbc.lib.kpts_helper.kk_adapted_iter .

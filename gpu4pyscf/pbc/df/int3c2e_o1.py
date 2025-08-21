@@ -656,12 +656,11 @@ class SRInt3c2eOpt:
             # composed as i*nbas+j (in C-order). c_pair_idx points to the
             # address of the first element.
             c_pair_idx = cp.asarray(cp.where(c_pair_mask)[0], dtype=np.int32)
-            n_ctr_pairs = len(c_pair_idx)
 
             # pair_mapping maps the primitive pair to the contracted pair
             pair_mapping_lookup = cp.empty(nctri*bvk_nctrj, dtype=np.int32)
-            pair_mapping_lookup[c_pair_idx] = cp.arange(n_ctr_pairs)
-            pair_mapping = cp.asarray(pair_mapping_lookup[reduced_pair_idx], dtype=np.int32)
+            pair_mapping_lookup[c_pair_idx] = cp.arange(len(c_pair_idx))
+            pair_mapping = pair_mapping_lookup[reduced_pair_idx]
             log.timer_debug1(f'pair_mapping [{li},{lj}]', *t1)
             return img_idx, img_offsets, bas_ij, pair_mapping, c_pair_idx
         return gen_img_idx

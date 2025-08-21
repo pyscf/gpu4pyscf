@@ -41,7 +41,7 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
     int nksp_per_block = nksh_per_block * nsp_per_block;
     int ksp_id = nksh_per_block * sp_id + ksh_id;
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
-    int warp_id = thread_id / WARP_SIZE;
+    int warp_id = thread_id / warpSize;
     int nimgs = envs.nimgs;
     int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * nksh_per_block;
@@ -100,7 +100,7 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
         int bas_ij = bounds.bas_ij_idx[pair_ij];
         uint32_t img0 = sp_img_offsets[pair_ij];
         __syncthreads();
-        int thread_id_in_warp = thread_id % WARP_SIZE;
+        int thread_id_in_warp = thread_id % warpSize;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
         }

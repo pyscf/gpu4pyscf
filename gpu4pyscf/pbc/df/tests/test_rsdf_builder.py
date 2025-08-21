@@ -16,6 +16,7 @@ import tempfile
 import numpy as np
 import cupy as cp
 import pyscf
+from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
@@ -232,13 +233,13 @@ def test_kpts_compressed():
         #              [3, [2., 1.]]]),
         #       'C2': 'ccpvdz'},
         basis=[[0, [1, 1]]],
-        a=np.diag([2.5, 1.9, 2.2])*3)
+        a=np.diag([2.5, 1.9, 2.2])*8)
 
     auxcell = cell.copy()
     auxcell.basis = {
-        'C1':'''
-C    S
-     12.9917624900           1.0000000000
+#        'C1':'''
+#C    S
+#     12.9917624900           1.0000000000
 #C    S
 #      2.1325940100           1.0000000000
 #C    P
@@ -249,17 +250,30 @@ C    S
 #      1.4947618600           1.0000000000
 #C    P
 #      0.5769010900           1.0000000000
-C    D
-      0.1995412500           1.0000000000 ''',
+#C    D
+#      0.1995412500           1.0000000000 ''',
         'C2':[[0, [.5, 1.]]],
     }
     auxcell.build()
     nao = cell.nao
     naux = auxcell.nao
     omega = 0.3
-    kmesh = [6,1,1]
+    kmesh = [2,1,1]
     kpts = cell.make_kpts(kmesh)
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts, omega=omega)
+    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    for kp in dat:
+        out = rsdf_builder.unpack_cderi_k(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        kj_idx, ki_idx = np.where(kk_conserv == kp)
+        for ki, kj in zip(ki_idx, kj_idx):
+            if (ki, kj) in ref:
+                _ref = ref[ki, kj]
+            else:
+                _ref = ref[kj, ki].conj().transpose(0,2,1)
+            assert abs(_ref - out[ki]).max() < 1e-12
 
 def _get_2c2e_slow(auxcell, uniq_kpts, omega, with_long_range=True):
     from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega

@@ -516,8 +516,7 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         log.debug1('task (%d, %d), n_pairs=%d', i, j, n_pairs)
     return bas_ij_cache
 
-# The long-range part of the cderi for gamma point. The resultant 3-index tensor
-# is compressed.
+# The long-range part of the cderi for gamma point. The cderi 3-index tensor is compressed.
 def _lr_int3c2e_gamma_point(int3c2e_opt):
     cell = int3c2e_opt.cell
     log = logger.new_logger(cell)
@@ -696,8 +695,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         j3c_tmp = None
     return cderi_compressed, aopair_offsets_lookup, cderi_idx
 
-# The long-range part of the cderi for k points. The resultant 3-index tensor
-# is compressed.
+# The long-range part of the cderi for k points. The 3-index cderi tensor is compressed.
 def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
     cell = int3c2e_opt.cell
     log = logger.new_logger(cell)
@@ -772,30 +770,27 @@ def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
     non0_size = p1
 
     ao_pair_mapping = np.hstack(ao_pair_mapping)
-    rows, cols = divmod(ao_pair_mapping, nao)
     diag_addresses = np.hstack(diag_addresses)
-    cderi_idx = (rows, cols, diag_addresses)
+    cderi_idx = (ao_pair_mapping, diag_addresses)
 
     log.debug1('cache auxG')
     nkpts = len(kpts)
     # To ensure the symmetry between conjugated k-points, it is important to
     # wrap around the high-freq Gv.
+    assert Gv[0].dot(Gv[0]) == 0
     Gk = (Gv + kpts[:,None]).reshape(-1, 3)
     Gk = _Gv_wrap_around(cell, Gk, cp.zeros(3), mesh)
     sorted_auxcell = int3c2e_opt.sorted_auxcell
     auxG = ft_ao.ft_ao(sorted_auxcell, Gk, sort_cell=False).reshape(nkpts,ngrids,-1)
-    coulG = _weighted_coulG_LR(auxcell, Gk, omega, 1).reshape(nkpts, ngrids)
+    coulG = get_coulG(cell, Gv=Gk, omega=abs(omega)).reshape(nkpts, ngrids)
     coulG *= kws
+    coulG[0,0] -= np.pi / omega**2 / cell.vol
     auxG_cache = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         aux_coeff = cd_j2c_cache[j2c_idx]
         auxG_conj = auxG[kp].conj().dot(aux_coeff)
         auxG_conj *= coulG[kp,:,None]
         auxG_cache[kp] = auxG_conj
-        #?if kp_conj is not None:
-        #?    auxG_conj = (auxG[kp_conj].dot(aux_coeff)).conj()
-        #?    auxG_conj *= coulG[kp_conj,:,None]
-        #?    auxG_cache[kp_conj] = auxG_conj
     auxG = aux_coeff = Gk = coulG = None
 
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
@@ -1196,7 +1191,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             ij = np.arange(nfi*nfj, dtype=np.int32)
             idx = ij + ft_idx[:,None]
             # libpbc.take2d_add supports only double type. To reuse this
-            # function, view the complex data as two adjcent doubles
+            # function, the complex data is viewed as two adjcent doubles
             idx = idx.reshape(-1, 1) * 2 + np.arange(2, dtype=np.int32)
             idx = np.asarray(idx.ravel(), dtype=np.int32)
         else:
@@ -1215,7 +1210,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
         nji = n_pairs * nfj * nfi
         j3c_block = cp.empty((nkpts,naux,nji), dtype=np.complex128)
         for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
-            k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
             j3c_tmp = evaluate(li, lj, k)[1]
             if j3c_tmp.size == 0:
                 continue
@@ -1224,6 +1218,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
                 j3c_tmp = contract('pi,rjpuLv->rjiuLv', c2s[li], j3c_tmp)
             j3c_tmp = contract('LKz,rjiuLv->Kvrujiz', expLkz, j3c_tmp)
             j3c_tmp = j3c_tmp.view(np.complex128).reshape(nkpts,-1,nji)
+            k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
             if with_long_range:
                 j3c_block[:,k0:k1,ft_idx] = j3c_tmp
             else:
@@ -1233,9 +1228,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             aux_coeff = cd_j2c_cache[j2c_idx]
             naux = aux_coeff.shape[1]
             cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
-            #if kp_conj is not None:
-            #    cderi[kp_conj] = contract('uv,up->vp', aux_coeff.conj(),
-            #                              j3c_block[kp_conj])
             _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
             if with_long_range:
                 _buf = cderi_k.get(out=_buf)
@@ -1251,9 +1243,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
 
     if not with_long_range:
         ao_pair_mapping = np.hstack(ao_pair_mapping)
-        rows, cols = divmod(ao_pair_mapping, nao)
-        diag_addresses = np.hstack(diag_addresses)
-        cderi_idx = (rows, cols, diag_addresses)
+        cderi_idx = (ao_pair_mapping, diag_addresses)
 
     cderip = None
     if not negative_metric_size:
@@ -1262,11 +1252,44 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             kp, kp_conj = kpt_iters[j2c_idx][:2]
             cderip[kp] = cderi[kp][-nauxp:]
             cderi [kp] = cderi[kp][:-nauxp]
-            #?if kp_conj is not None:
-            #?    cderip[kp_conj] = cderi[kp_conj][-nauxp:]
-            #?    cderi [kp_conj] = cderi[kp_conj][:-nauxp]
     t1 = log.timer_debug1('SR int3c2e', *t1)
     return cderi, cderip, cderi_idx
+
+def unpack_cderi_k(cderi_compressed, cderi_idx, k_aux, kk_conserv, expLk, nao):
+    r'''
+    Constructs a dense cderi tensor from a partially compressed cderi at a
+    specific k-point on the auxiliary dimension. The resulting tensor has the
+    shape [Nk, naux, nao, nao]. The first dimension corresponds to the sorted
+    kpts for orbital i in (ij|aux).
+
+    Args:
+        cderi_compressed :
+            Compressed cderi tensor of shape [naux, npair], where the
+            orbital-pair is compressed.
+        cderi_idx :
+            (pari_addresses, and diag_addresses) for the compressed orbital pairs.
+        k_aux (int):
+            The index of the k-point for the auxiliary dimension.
+        kk_conserv (ndarray):
+            kk = kk_conserv[ki,kj] satisfies kk = kj - ki + 2n\pi
+            This table can be created by k2gamma.double_translation_indices(kmesh)
+    '''
+    naux = cderi_compressed.shape[0]
+    ncells = expLk.shape[0]
+    cderi_k = cp.empty((naux, nao*ncells*nao))
+    cderi_k[:,cderi_idx[0]] = cderi_compressed
+    cderi_k = cderi_k.reshape(naux, nao, ncells, nao)
+
+    # Searching adapted k indices for (ij|aux)
+    # -ki + kj + k_aux = 2n\pi
+    kj_idx, ki_idx = np.where(kk_conserv == k_aux)
+    out = contract('kiLj,LK->Kkji', cderi_k, expLk.conj())
+    # Make kpt_j in expLk_j correspond to the sorted kpt_i
+    expLk_j = cp.empty_like(expLk)
+    expLk_j[:,ki_idx] = expLk
+    x, y = cp.tril_indices(nao)
+    out[:,:,x,y] = contract('pkL,LK->Kkp', cderi_k[:,x,:,y], expLk_j)
+    return out
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)
