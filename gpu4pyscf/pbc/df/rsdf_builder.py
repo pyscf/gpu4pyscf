@@ -398,12 +398,10 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     elements indices. This mask ensures that non-zero pairs in the int3c2e
     integrals are not overlooked by the ft_aopair kernel.
     '''
-    cell = int3c2e_opt.cell
     pcell = int3c2e_opt.prim_cell
     p_nbas = pcell.nbas
     p2c_mapping = cp.asarray(int3c2e_opt.prim_to_ctr_mapping, dtype=np.int32)
     ovlp_img_counts = cp.zeros((p_nbas,p_nbas), dtype=np.int32)
-    ls = pcell._bas[:,ANG_OF]
     exps, cs = extract_pgto_params(pcell, 'diffused')
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
@@ -440,7 +438,11 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
         ctypes.c_int(c_nbas), ctypes.c_int(p_nbas))
     return c_ovlp_mask
 
-def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
+def _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, verbose):
+    '''Cache significant orbital-pairs and their lattice sum images, similar to
+    the make_img_idx_cache in ft_ao.py. However, more orbital pairs will be
+    created by this function, as the orbital pairs are unioned with 3c2e
+    orbital-pairs.'''
     log = logger.new_logger(ft_opt.cell, verbose)
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
@@ -453,7 +455,21 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
     exps, cs = extract_pgto_params(sorted_cell, 'diffused')
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+    cutoff = ft_opt.estimate_cutoff_with_penalty()
     log_cutoff = math.log(cutoff)
+    aft_envs = ft_opt.aft_envs
+
+    int3c2e_ovlp_mask = cp.zeros((nbas, nbas), dtype=bool)
+    _, first_occurrence = np.unique(uniq_l, return_index=True)
+    l_offsets = np.append(l_ctr_offsets[first_occurrence], l_ctr_offsets[-1])
+    for (i, j), val in int3c2e_img_idx_cache.items():
+        i0, i1 = l_offsets[i:i+2]
+        j0, j1 = l_offsets[j:j+2]
+        # c_pair_idx stores the pair addresses within each sub-block
+        c_pair_idx = val[4]
+        sub_block = cp.zeros((i1-i0)*(j1-j0), dtype=bool)
+        sub_block[c_pair_idx] = True
+        int3c2e_ovlp_mask[i0:i1,j0:j1] = sub_block.reshape(i1-i0,j1-j0)
 
     permutation_symmetry = 1
     ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
@@ -477,6 +493,10 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
             raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
         mask = img_counts > 0
         mask |= int3c2e_ovlp_mask[ish0:ish1,jsh0:jsh1]
+        # bas_ij from this mask may contain orbital pairs that actually do not
+        # contribute to ft_aopair. Their img_counts are zeros.  Generally,
+        # ft_aopair would produce more non-zero integrals than that in the
+        # sr_int3c2e function. 
         bas_ij = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
         n_pairs = len(bas_ij)
         if n_pairs == 0:
@@ -518,9 +538,8 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         log.debug1('task (%d, %d), n_pairs=%d', i, j, n_pairs)
     return bas_ij_cache
 
-# The long-range part of the cderi for gamma point. The resultant 3-index tensor
-# is compressed.
-def _lr_int3c2e_gamma_point(int3c2e_opt):
+# The long-range part of the cderi for gamma point. The cderi 3-index tensor is compressed.
+def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
     cell = int3c2e_opt.cell
     log = logger.new_logger(cell)
     t1 = log.init_timer()
@@ -534,33 +553,23 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     ngrids = len(Gv)
     nao = cell.nao
 
-    # The cutoff from the int3c2e is utilized. This is generally smaller than
-    # that created by the ft_aopair module. This is to ensure ft_aopair
-    # producing more non-zero integrals than that in the int3c2e function.
-    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
-    int3c2e_ovlp_mask = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
-    int3c2e_ovlp_mask = cp.asarray(int3c2e_ovlp_mask, dtype=bool)
-
     ft_opt = ft_ao.FTOpt(cell).build()
+    bas_ij_cache = _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, log)
+    t1 = log.timer_debug2('generating bas_ij indices', *t1)
+
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
-
-    ao_pair_mapping = []
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
     sorted_ao_loc = ft_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
     ao_loc = ft_opt.ao_idx[sorted_ao_loc[:-1]]
-
-    aft_envs = ft_opt.aft_envs
-    bas_ij_cache = _make_img_idx_cache(ft_opt, aft_envs, cutoff,
-                                       int3c2e_ovlp_mask, log)
-    t1 = log.timer_debug2('generating bas_ij indices', *t1)
 
     # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
     # This lookup table will be used to generate the addresses for the
     # non-zere sr_int3c2e integrals.
     # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
     aopair_offsets_lookup = np.zeros((nbas, nbas), dtype=np.int32)
+    ao_pair_mapping = []
 
     uniq_l = ft_opt.uniq_l_ctr[:,0]
     # Determine the addresses of the non-vanished pairs and the diagonal indices
@@ -580,8 +589,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         n_pairs = len(bas_ij)
         p0, p1 = p1, p1 + nfij * n_pairs
         ish, jsh = divmod(bas_ij, nbas)
-        aopair_offsets_lookup[jsh,ish] = \
-                aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
+        aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
         # Note: corresponding to the storage order (npairs,nfj,nfi,nGv)
         iaddr = ao_loc[ish,None] + np.arange(nf[i])
         jaddr = ao_loc[jsh,None] + np.arange(nf[j])
@@ -654,7 +662,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             err = kern(
                 ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(1), # Compressing, remove zero elements
-                ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
+                ctypes.byref(ft_opt.aft_envs), (ctypes.c_int*3)(*scheme),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                 ctypes.c_int(n_pairs), ctypes.c_int(nGv),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
@@ -758,7 +766,8 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
         # aopair_offsets_lookup convertes the address in a dense tensor to
         # compressed storage.
-        cderi, aopair_offsets_lookup, cderi_idx = _lr_int3c2e_gamma_point(int3c2e_opt)
+        cderi, aopair_offsets_lookup, cderi_idx = \
+                _lr_int3c2e_gamma_point(int3c2e_opt, img_idx_cache)
         # LR int3c2e would generate more nao_pairs than the SR int3c2e!
         nao_pairs = cderi.shape[1]
         t1 = log.timer_debug1('LR int3c2e', *t1)
@@ -826,7 +835,6 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
                 cderi.ctypes, _buf.ctypes, idx.ctypes,
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs), ctypes.c_int(len(idx))
             )
-            idx = ft_idx = ij = ijT = triu_mask = None
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
             cderi[:,p0:p1] = j3c_tmp.get()
@@ -839,7 +847,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
                 # The addresses for the compressed tensor
                 addr = offset + idx[:,None] * nfi**2 + np.arange(nfi**2)
                 diag_addresses.append(addr.ravel())
-            offset += n_pairs * nfi * nfj
+            offset = p1
         j3c_tmp = ish = jsh = c_pair_idx = None
     cp.get_default_memory_pool().free_all_blocks()
     log.debug('Avail GPU mem = %s B', get_avail_mem())

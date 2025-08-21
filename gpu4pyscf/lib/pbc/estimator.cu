@@ -55,8 +55,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     float ai = exps[cell0_ish];
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -91,8 +91,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
         }
 
         float dr = sqrtf(rr_ij);
-        float dri = fj * dr;
-        float drj = fi * dr;
+        float dri = aj_aij * dr;
+        float drj = ai_aij * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
         float estimator = dri_fac + drj_fac - theta_ij_rr;
@@ -132,8 +132,8 @@ void overlap_img_idx_kernel(int *img_idx, uint32_t *img_offsets, int *bas_ij_map
     float ai = exps[cell0_ish];
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -169,8 +169,8 @@ void overlap_img_idx_kernel(int *img_idx, uint32_t *img_offsets, int *bas_ij_map
         }
 
         float dr = sqrtf(rr_ij);
-        float dri = fj * dr;
-        float drj = fi * dr;
+        float dri = aj_aij * dr;
+        float drj = ai_aij * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
         float estimator = dri_fac + drj_fac - theta_ij_rr;
@@ -227,8 +227,8 @@ void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_i
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
     float u = .5f / aij;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -238,6 +238,7 @@ void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_i
         omega = 0.1f;
     }
     float omega2 = omega * omega;
+    float omega_aij = omega2 / (omega2 + aij);
     // fac_guess = log(sqrt(2.x/(omega*sqrt(pi))) * ((2*li+1)*(2*lj+1)*(2*lk+1))**.5/(4*pi)**1.5)
     //           ~ between [0, 2]
     float fac_guess = .5f - logf(omega2)/4;
@@ -276,9 +277,9 @@ void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_i
         float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
         float theta_ij_rr = theta_ij * rr_ij;
 
-        float xij_0 = xjxi * fj + xi;
-        float yij_0 = yjyi * fj + yi;
-        float zij_0 = zjzi * fj + zi;
+        float xij_0 = xjxi * aj_aij + xi;
+        float yij_0 = yjyi * aj_aij + yi;
+        float zij_0 = zjzi * aj_aij + zi;
         for (int iL = 0; iL < nimgs; ++iL) {
             float xij = xij_0 + img_coords[iL*3+0];
             float yij = yij_0 + img_coords[iL*3+1];
@@ -303,10 +304,10 @@ void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_i
                 continue;
             }
 
-            float rt_aij = omega2 * sqrtf(rr_min) / aij;
+            float rt_aij = omega_aij * sqrtf(rr_min);
             float dr = sqrtf(rr_ij);
-            float dri = fj * dr + rt_aij;
-            float drj = fi * dr + rt_aij;
+            float dri = aj_aij * dr + rt_aij;
+            float drj = ai_aij * dr + rt_aij;
             float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
             float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
             float estimator = dri_fac + drj_fac - theta_rr_min;

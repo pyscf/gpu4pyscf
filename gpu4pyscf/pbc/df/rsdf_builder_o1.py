@@ -331,6 +331,43 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     j2ctag = 'ED'
     return j2c, j2c_negative, j2ctag
 
+def _decompose_j2c(j2c, prefer_ed=PREFER_ED, linear_dep_threshold=LINEAR_DEP_THR):
+    if not prefer_ed:
+        try:
+            return _cholesky_decomposed_metric(j2c)
+        except LinearDepencyError:
+            # Restore to ED if the j2c metric is found to be linearly dependent
+            pass
+    return _eigenvalue_decomposed_metric(j2c, linear_dep_threshold)
+
+def _cholesky_decomposed_metric(j2c):
+    '''Return L for j2c = L L^T'''
+    j2c_negative = None
+    j2ctag = 'CD'
+    # Cupy cholesky does not check positive-definite, seems returning nan in the
+    # resultant CD matrix silently.
+    j2c = cp.asarray(j2c, order='C')
+    j2c = cp.linalg.cholesky(j2c)
+    if cp.isnan(j2c[-1,-1]):
+        raise LinearDepencyError('j2c is not positive definite')
+    return j2c, j2c_negative, j2ctag
+
+def _eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
+    j2c = cp.asarray(j2c, order='C')
+    w, v = cp.linalg.eigh(j2c)
+    mask = w > linear_dep_threshold
+    # Note this implementation is different to the one in PySCF-2.10. In PySCf,
+    # j2c at a wrong k-point is passed to this function. v.conj() is called.
+    v1 = v[:,mask]
+    v1 *= w[mask]**-.5
+    j2c = v1
+    idx = cp.where(w < -linear_dep_threshold)[0]
+    j2c_negative = None
+    if len(idx) > 0:
+        j2c_negative = (v[:,idx] * (-w[idx])**-.5)
+    j2ctag = 'ED'
+    return j2c, j2c_negative, j2ctag
+
 def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True):
     # Compute SR Coulomb 2c2e
     if uniq_kpts is None:
@@ -438,9 +475,14 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
         ctypes.c_int(c_nbas), ctypes.c_int(p_nbas))
     return c_ovlp_mask
 
-def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
+def _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, verbose):
+    '''Cache significant orbital-pairs and their lattice sum images, similar to
+    the make_img_idx_cache in ft_ao.py. However, more orbital pairs will be
+    created by this function, as the orbital pairs are unioned with 3c2e
+    orbital-pairs.'''
     log = logger.new_logger(ft_opt.cell, verbose)
     sorted_cell = ft_opt.sorted_cell
+    ncells = np.prod(ft_opt.bvk_kmesh)
     nbas = sorted_cell.nbas
 
     uniq_l = ft_opt.uniq_l_ctr[:,0]
@@ -451,7 +493,23 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
     exps, cs = extract_pgto_params(sorted_cell, 'diffused')
     exps = cp.asarray(exps, dtype=np.float32)
     log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
+    cutoff = ft_opt.estimate_cutoff_with_penalty()
     log_cutoff = math.log(cutoff)
+    aft_envs = ft_opt.aft_envs
+
+    int3c2e_ovlp_mask = cp.zeros((nbas, ncells, nbas), dtype=bool)
+    l_ctr_counts = l_ctr_offsets[1:] - l_ctr_offsets[:-1]
+    lmax = uniq_l.max()
+    l_counts = [l_ctr_counts[uniq_l==l].sum() for l in range(lmax+1)]
+    l_offsets = np.append(0, np.cumsum(l_counts))
+    for (i, j), val in int3c2e_img_idx_cache.items():
+        i0, i1 = l_offsets[i:i+2]
+        j0, j1 = l_offsets[j:j+2]
+        # c_pair_idx stores the pair addresses within each sub-block
+        c_pair_idx = val[4]
+        sub_block = cp.zeros((i1-i0)*ncells*(j1-j0), dtype=bool)
+        sub_block[c_pair_idx] = True
+        int3c2e_ovlp_mask[i0:i1,:,j0:j1] = sub_block.reshape(i1-i0,ncells,j1-j0)
 
     permutation_symmetry = 1
     ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
@@ -463,7 +521,7 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
         nish = ish1 - ish0
         njsh = jsh1 - jsh0
-        img_counts = cp.zeros((nish,njsh), dtype=np.int32)
+        img_counts = cp.zeros((nish,ncells,njsh), dtype=np.int32)
         err = libpbc.overlap_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
@@ -474,7 +532,11 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         if err != 0:
             raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
         mask = img_counts > 0
-        mask |= int3c2e_ovlp_mask[ish0:ish1,jsh0:jsh1]
+        mask |= int3c2e_ovlp_mask[ish0:ish1,:,jsh0:jsh1]
+        # bas_ij from this mask may contain orbital pairs that actually do not
+        # contribute to ft_aopair. Their img_counts are zeros.  Generally,
+        # ft_aopair would produce more non-zero integrals than that in the
+        # sr_int3c2e function.
         bas_ij = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
         n_pairs = len(bas_ij)
         if n_pairs == 0:
@@ -507,17 +569,17 @@ def _make_img_idx_cache(ft_opt, aft_envs, cutoff, int3c2e_ovlp_mask, verbose):
         img_counts = counts_sorting = None
 
         # bas_ij stores the non-negligible primitive-pair indices.
-        ish, jsh = cp.unravel_index(bas_ij, (nish, njsh))
+        ish, J, jsh = cp.unravel_index(bas_ij, (nish, ncells, njsh))
         ish += ish0
         jsh += jsh0
-        bas_ij = cp.ravel_multi_index((ish, jsh), (nbas, nbas))
+        bas_ij = cp.ravel_multi_index((ish, J, jsh), (nbas, ncells, nbas))
         bas_ij = cp.asarray(bas_ij, dtype=np.int32)
         bas_ij_cache[i, j] = (bas_ij, img_offsets, img_idx)
         log.debug1('task (%d, %d), n_pairs=%d', i, j, n_pairs)
     return bas_ij_cache
 
 # The long-range part of the cderi for gamma point. The cderi 3-index tensor is compressed.
-def _lr_int3c2e_gamma_point(int3c2e_opt):
+def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
     cell = int3c2e_opt.cell
     log = logger.new_logger(cell)
     t1 = log.init_timer()
@@ -531,33 +593,23 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     ngrids = len(Gv)
     nao = cell.nao
 
-    # The cutoff from the int3c2e is utilized. This is generally smaller than
-    # that created by the ft_aopair module. This is to ensure ft_aopair
-    # producing more non-zero integrals than that in the int3c2e function.
-    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
-    int3c2e_ovlp_mask = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
-    int3c2e_ovlp_mask = cp.asarray(int3c2e_ovlp_mask, dtype=bool)
-
     ft_opt = ft_ao.FTOpt(cell).build()
+    bas_ij_cache = _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, log)
+    t1 = log.timer_debug2('generating bas_ij indices', *t1)
+
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
-
-    ao_pair_mapping = []
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
     sorted_ao_loc = ft_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
     ao_loc = ft_opt.ao_idx[sorted_ao_loc[:-1]]
-
-    aft_envs = ft_opt.aft_envs
-    bas_ij_cache = _make_img_idx_cache(ft_opt, aft_envs, cutoff,
-                                       int3c2e_ovlp_mask, log)
-    t1 = log.timer_debug2('generating bas_ij indices', *t1)
 
     # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
     # This lookup table will be used to generate the addresses for the
     # non-zere sr_int3c2e integrals.
     # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
     aopair_offsets_lookup = np.zeros((nbas, nbas), dtype=np.int32)
+    ao_pair_mapping = []
 
     uniq_l = ft_opt.uniq_l_ctr[:,0]
     # Determine the addresses of the non-vanished pairs and the diagonal indices
@@ -577,8 +629,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
         n_pairs = len(bas_ij)
         p0, p1 = p1, p1 + nfij * n_pairs
         ish, jsh = divmod(bas_ij, nbas)
-        aopair_offsets_lookup[jsh,ish] = \
-                aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
+        aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
         # Note: corresponding to the storage order (npairs,nfj,nfi,nGv)
         iaddr = ao_loc[ish,None] + np.arange(nf[i])
         jaddr = ao_loc[jsh,None] + np.arange(nf[j])
@@ -651,7 +702,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
             err = kern(
                 ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(1), # Compressing, remove zero elements
-                ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
+                ctypes.byref(ft_opt.aft_envs), (ctypes.c_int*3)(*scheme),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                 ctypes.c_int(n_pairs), ctypes.c_int(nGv),
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
@@ -696,11 +747,10 @@ def _lr_int3c2e_gamma_point(int3c2e_opt):
     return cderi_compressed, aopair_offsets_lookup, cderi_idx
 
 # The long-range part of the cderi for k points. The 3-index cderi tensor is compressed.
-def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
+def _lr_int3c2e_kk(int3c2e_opt, int3c2e_img_idx_cache, cd_j2c_cache, kpts, kpt_iters):
     cell = int3c2e_opt.cell
     log = logger.new_logger(cell)
     t1 = log.init_timer()
-    auxcell = int3c2e_opt.auxcell
     omega = abs(int3c2e_opt.omega)
 
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
@@ -708,35 +758,29 @@ def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
     mesh = cell.symmetrize_mesh(mesh)
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
-    nao = cell.nao
+    kmesh = int3c2e_opt.bvk_kmesh
+    bvk_ncells = np.prod(kmesh)
 
-    # The cutoff from the int3c2e is utilized. This is generally smaller than
-    # that created by the ft_aopair module. This is to ensure ft_aopair
-    # producing more non-zero integrals than that in the int3c2e function.
-    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
-    int3c2e_ovlp_mask = _int3c2e_overlap_mask(int3c2e_opt, cutoff)
-    int3c2e_ovlp_mask = cp.asarray(int3c2e_ovlp_mask, dtype=bool)
+    ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=kmesh).build()
+    bas_ij_cache = _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, log)
+    t1 = log.timer_debug2('generating bas_ij indices', *t1)
 
-    ft_opt = ft_ao.FTOpt(cell).build()
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
-
-    ao_pair_mapping = []
+    bvk_nbas = bvk_ncells * nbas
+    nao = cell.nao
+    bvk_nao = bvk_ncells * nao
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
     sorted_ao_loc = ft_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
     ao_loc = ft_opt.ao_idx[sorted_ao_loc[:-1]]
 
-    aft_envs = ft_opt.aft_envs
-    bas_ij_cache = _make_img_idx_cache(ft_opt, aft_envs, cutoff,
-                                       int3c2e_ovlp_mask, log)
-    t1 = log.timer_debug2('generating bas_ij indices', *t1)
-
     # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
     # This lookup table will be used to generate the addresses for the
     # non-zere sr_int3c2e integrals.
     # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
-    aopair_offsets_lookup = np.zeros((nbas, nbas), dtype=np.int32)
+    aopair_offsets_lookup = np.zeros(nbas*bvk_nbas, dtype=np.int32)
+    ao_pair_mapping = []
 
     uniq_l = ft_opt.uniq_l_ctr[:,0]
     # Determine the addresses of the non-vanished pairs and the diagonal indices
@@ -749,26 +793,25 @@ def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
     p0 = p1 = 0
     max_pair_size = 0
     for i, j in bas_ij_cache:
-        nfi = nf[i]
-        nfj = nf[j]
-        nfij = nfi * nfj
+        nfij = nf[i] * nf[j]
         bas_ij = bas_ij_cache[i, j][0].get()
         n_pairs = len(bas_ij)
         p0, p1 = p1, p1 + nfij * n_pairs
-        ish, jsh = divmod(bas_ij, nbas)
-        aopair_offsets_lookup[jsh,ish] = \
-                aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
+        aopair_offsets_lookup[bas_ij] = np.arange(p0, p1, nfij, dtype=np.int32)
+        ish, J, jsh = np.unravel_index(bas_ij, (nbas, bvk_ncells, nbas))
         # Note: corresponding to the storage order (npairs,nfj,nfi,nGv)
         iaddr = ao_loc[ish,None] + np.arange(nf[i])
         jaddr = ao_loc[jsh,None] + np.arange(nf[j])
-        ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+        ao_pair_mapping.append((iaddr[:,None,:] * bvk_nao + J[:,None,None] * nao +
+                                jaddr[:,:,None]).ravel())
         if i == j:
-            idx = np.where(ish == jsh)[0]
-            addr = p0 + idx[:,None] * nfi**2 + np.arange(nfi**2)
+            ii = np.where(ish == jsh)[0]
+            addr = p0 + ii[:,None] * nf[i]**2 + np.arange(nf[i]**2)
             diag_addresses.append(addr.ravel())
         max_pair_size = max(max_pair_size, nf_cart[i]*nf_cart[j] * n_pairs)
     non0_size = p1
 
+    aopair_offsets_lookup = aopair_offsets_lookup.reshape(nbas, bvk_ncells, nbas)
     ao_pair_mapping = np.hstack(ao_pair_mapping)
     diag_addresses = np.hstack(diag_addresses)
     cderi_idx = (ao_pair_mapping, diag_addresses)
@@ -787,7 +830,8 @@ def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
     coulG[0,0] -= np.pi / omega**2 / cell.vol
     auxG_cache = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-        aux_coeff = cd_j2c_cache[j2c_idx]
+        aux_coeff = cd_j2c_cache[j2c_idx] # at -(kj-ki) = conj(kp)
+        # auxG[kp_conj] != auxG[kp].conj()
         auxG_conj = auxG[kp].conj().dot(aux_coeff)
         auxG_conj *= coulG[kp,:,None]
         auxG_cache[kp] = auxG_conj
@@ -847,7 +891,7 @@ def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
                 err = kern(
                     ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(1), # Compressing, remove zero elements
-                    ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
+                    ctypes.byref(ft_opt.aft_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                     ctypes.c_int(n_pairs), ctypes.c_int(nGv),
                     ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
@@ -879,7 +923,7 @@ def _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters):
                 j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
             else:
                 j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
-                c2s_tmp1 = cp.ndarray((naux,n_pairs,nfj,nf[i]),
+                c2s_tmp1 = cp.ndarray((naux,n_pairs,nf[j],nfi),
                                       dtype=np.complex128, memptr=c2s_buf.data)
                 c2s_tmp2 = cp.ndarray((naux,n_pairs,nf[j],nf[i]),
                                       dtype=np.complex128, memptr=j3c_tmp.data)
@@ -952,7 +996,8 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
         # aopair_offsets_lookup convertes the address in a dense tensor to
         # compressed storage.
-        cderi, aopair_offsets_lookup, cderi_idx = _lr_int3c2e_gamma_point(int3c2e_opt)
+        cderi, aopair_offsets_lookup, cderi_idx = \
+                _lr_int3c2e_gamma_point(int3c2e_opt, img_idx_cache)
         # LR int3c2e would generate more nao_pairs than the SR int3c2e!
         nao_pairs = cderi.shape[1]
         t1 = log.timer_debug1('LR int3c2e', *t1)
@@ -978,7 +1023,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     offset = 0
     p0 = p1 = 0
     buf = np.empty(naux*buflen)
-    for li, lj in ij_tasks:
+    for li, lj in img_idx_cache:
         c_pair_idx, j3c_tmp = evaluate(li, lj)
         if len(c_pair_idx) == 0:
             continue
@@ -1078,7 +1123,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut*20)
 
     kpt_iters = list(kk_adapted_iter(kmesh))
-    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
+    # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
+    uniq_kpts = kpts[[x[1] for x in kpt_iters]]
     nkpts = len(uniq_kpts)
     bvk_ncells = np.prod(kmesh)
 
@@ -1093,11 +1139,12 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
     cd_j2c_cache = []
     negative_metric_size = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-        j2c_k = j2c[j2c_idx]
+        j2c_k = j2c[j2c_idx] # (kj-ki|-(kj-ki))
         if kp == kp_conj: # self conjugated
             # DF metric for self-conjugated k-point should be real
             j2c_k = j2c_k.real
-        cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
+        # ED to get the transformation for |aux[-(kj-ki)]>
+        cd_j2c, cd_j2c_negative, j2ctag = _decompose_j2c(
             j2c_k, prefer_ed, linear_dep_threshold)
 
         if cd_j2c_negative is not None:
@@ -1108,10 +1155,11 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             negative_metric_size[j2c_idx] = cd_j2c_negative.shape[1]
 
         if j2ctag == 'ED':
-            _aux_coeff = aux_coeff.dot(cd_j2c)
+            cd_j2c = aux_coeff.dot(cd_j2c)
         else:
-            _aux_coeff = solve_triangular(cd_j2c, aux_coeff.T, lower=True).T
-        cd_j2c_cache.append(_aux_coeff)
+            #:cd_j2c = aux_coeff.dot(cp.linalg.inv(cd_j2c.conj().T))
+            cd_j2c = solve_triangular(cd_j2c.conj(), aux_coeff.T, lower=True).T
+        cd_j2c_cache.append(cd_j2c)
     j2c = cd_j2c = cd_j2c_negative = None
 
     c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
@@ -1138,7 +1186,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
         # aopair_offsets_lookup convertes the address in a dense tensor to
         # compressed storage.
         cderi, aopair_offsets_lookup, cderi_idx = \
-                _lr_int3c2e_kk(int3c2e_opt, cd_j2c_cache, kpts, kpt_iters)
+                _lr_int3c2e_kk(int3c2e_opt, img_idx_cache, cd_j2c_cache, kpts, kpt_iters)
         # LR int3c2e would generate more nao_pairs than the SR int3c2e!
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
@@ -1151,6 +1199,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
         # in the original cell
         ao_loc = int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]]
         nao = cell.nao
+        bvk_nao = bvk_ncells * nao
         cderi = {}
         for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
             naux = cd_j2c_cache[j2c_idx].shape[1]
@@ -1162,19 +1211,22 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
 
     expLkz = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
     expLkz = expLkz.view(np.float64).reshape(bvk_ncells,nkpts,2)
+
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
-    naux = aux_loc[-1]
+    naux_cart = aux_loc[-1]
     ij_tasks = ((i, j) for i in range(lmax+1) for j in range(i+1))
     offset = 0
     p0 = p1 = 0
-    buf = np.empty(naux*buflen, dtype=np.complex128)
-    for li, lj in ij_tasks:
+    buf = np.empty(naux_cart*buflen, dtype=np.complex128)
+    for li, lj in img_idx_cache:
         c_pair_idx = img_idx_cache[li, lj][4]
         n_pairs = len(c_pair_idx)
         if n_pairs == 0:
             continue
+
         i0, i1 = c_l_offsets[li:li+2]
         j0, j1 = c_l_offsets[lj:lj+2]
+        nctri = c_shell_counts[li]
         nctrj = c_shell_counts[lj]
         if cell.cart:
             nfi = (li+1)*(li+2)//2
@@ -1182,12 +1234,12 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
         else:
             nfi = li * 2 + 1
             nfj = lj * 2 + 1
-        ish, jsh = divmod(c_pair_idx.get(), bvk_ncells*nctrj)
+        c_pair_idx = cp.asnumpy(c_pair_idx)
+        ish, J, jsh = np.unravel_index(c_pair_idx, (nctri, bvk_ncells, nctrj))
         ish += i0
-        jsh %= nctrj
         jsh += j0
         if with_long_range:
-            ft_idx = aopair_offsets_lookup[ish,jsh]
+            ft_idx = aopair_offsets_lookup[ish,J,jsh]
             ij = np.arange(nfi*nfj, dtype=np.int32)
             idx = ij + ft_idx[:,None]
             # libpbc.take2d_add supports only double type. To reuse this
@@ -1199,16 +1251,17 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             iaddr = ao_loc[ish,None] + np.arange(nfi)
             jaddr = ao_loc[jsh,None] + np.arange(nfj)
             # Note: corresponding to the storage order (npairs,nfj,nfi,naux)
-            ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+            ao_pair_mapping.append((iaddr[:,None,:] * bvk_nao + J[:,None,None] * nao +
+                                    jaddr[:,:,None]).ravel())
             if li == lj:
-                idx = np.where(ish == jsh)[0]
+                ii = np.where(ish == jsh)[0]
                 # The addresses for the compressed tensor
-                addr = offset + idx[:,None] * nfi**2 + np.arange(nfi**2)
+                addr = offset + ii[:,None] * nfi**2 + np.arange(nfi**2)
                 diag_addresses.append(addr.ravel())
             offset = p1
 
         nji = n_pairs * nfj * nfi
-        j3c_block = cp.empty((nkpts,naux,nji), dtype=np.complex128)
+        j3c_block = cp.empty((nkpts,naux_cart,nji), dtype=np.complex128)
         for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
             j3c_tmp = evaluate(li, lj, k)[1]
             if j3c_tmp.size == 0:
@@ -1219,26 +1272,22 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             j3c_tmp = contract('LKz,rjiuLv->Kvrujiz', expLkz, j3c_tmp)
             j3c_tmp = j3c_tmp.view(np.complex128).reshape(nkpts,-1,nji)
             k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
-            if with_long_range:
-                j3c_block[:,k0:k1,ft_idx] = j3c_tmp
-            else:
-                j3c_block[:,k0:k1] = j3c_tmp
+            j3c_block[:,k0:k1] = j3c_tmp
 
         for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-            aux_coeff = cd_j2c_cache[j2c_idx]
-            naux = aux_coeff.shape[1]
+            aux_coeff = cd_j2c_cache[j2c_idx] # at -(kj-ki)
             cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
             _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
             if with_long_range:
                 _buf = cderi_k.get(out=_buf)
-                nao_pairs = cderi[kp].shape[1]
+                nao_pairs = cderi[kp].shape[1] * 2 # *2 to view complex as doubles
                 libpbc.take2d_add( # this copy back operation is very slow
                     cderi[kp].ctypes, _buf.ctypes, idx.ctypes,
-                    ctypes.c_int(naux), ctypes.c_int(nao_pairs), ctypes.c_int(len(idx))
+                    ctypes.c_int(_buf.shape[0]), ctypes.c_int(nao_pairs),
+                    ctypes.c_int(len(idx))
                 )
             else:
                 cderi[kp][:,p0:p1] = cderi_k.get(out=_buf)
-
         j3c_tmp = j3c_block = None
 
     if not with_long_range:
@@ -1246,7 +1295,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
         cderi_idx = (ao_pair_mapping, diag_addresses)
 
     cderip = None
-    if not negative_metric_size:
+    if negative_metric_size:
         cderip = {}
         for j2c_idx, nauxp in negative_metric_size.items():
             kp, kp_conj = kpt_iters[j2c_idx][:2]
@@ -1255,7 +1304,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
     t1 = log.timer_debug1('SR int3c2e', *t1)
     return cderi, cderip, cderi_idx
 
-def unpack_cderi_k(cderi_compressed, cderi_idx, k_aux, kk_conserv, expLk, nao):
+def unpack_cderi_k(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
     r'''
     Constructs a dense cderi tensor from a partially compressed cderi at a
     specific k-point on the auxiliary dimension. The resulting tensor has the
@@ -1264,31 +1313,34 @@ def unpack_cderi_k(cderi_compressed, cderi_idx, k_aux, kk_conserv, expLk, nao):
 
     Args:
         cderi_compressed :
-            Compressed cderi tensor of shape [naux, npair], where the
-            orbital-pair is compressed.
+            Compressed cderi tensor dict. The key of the dict is a k-point
+            index corresponding to kpt_j-kpt_i. Each entry is a tensor of shape
+            [naux, npair], where the orbital-pair is compressed.
         cderi_idx :
             (pari_addresses, and diag_addresses) for the compressed orbital pairs.
-        k_aux (int):
-            The index of the k-point for the auxiliary dimension.
+        k_idx (int):
+            The index of the k-point = kpt_j - kpt_i
         kk_conserv (ndarray):
-            kk = kk_conserv[ki,kj] satisfies kk = kj - ki + 2n\pi
+            kk = kk_conserv[ki,kj] satisfies kpts[kk] = kpts[kj] - kpts[ki] + 2n\pi
             This table can be created by k2gamma.double_translation_indices(kmesh)
+            (kk_conserv == k_idx) gives all the ki,kj pairs that can produce k_idx.
     '''
-    naux = cderi_compressed.shape[0]
+    cderi_k = cderi_compressed[k_idx]
+    pair_address, diag_idx = cderi_idx
+    naux = cderi_k.shape[0]
     ncells = expLk.shape[0]
-    cderi_k = cp.empty((naux, nao*ncells*nao))
-    cderi_k[:,cderi_idx[0]] = cderi_compressed
-    cderi_k = cderi_k.reshape(naux, nao, ncells, nao)
+    cderi_tril = cp.zeros((naux, nao*ncells*nao), dtype=cderi_k.dtype)
+    cderi_tril[:,pair_address] = cderi_k
+    # diagonal blocks are accessed twice
+    cderi_tril[:,pair_address[diag_idx]] *= .5
+    cderi_tril = cderi_tril.reshape(naux, nao, ncells, nao)
 
     # Searching adapted k indices for (ij|aux)
-    # -ki + kj + k_aux = 2n\pi
-    kj_idx, ki_idx = np.where(kk_conserv == k_aux)
-    out = contract('kiLj,LK->Kkji', cderi_k, expLk.conj())
+    ki_idx, kj_idx = np.where(kk_conserv == k_idx)
+    out = contract('kjLi,LK->Kkij', cderi_tril, expLk.conj())
     # Make kpt_j in expLk_j correspond to the sorted kpt_i
-    expLk_j = cp.empty_like(expLk)
-    expLk_j[:,ki_idx] = expLk
-    x, y = cp.tril_indices(nao)
-    out[:,:,x,y] = contract('pkL,LK->Kkp', cderi_k[:,x,:,y], expLk_j)
+    expLk_j = expLk[:,kj_idx]
+    out = contract('kiLj,LK->Kkij', cderi_tril, expLk_j, beta=1., out=out)
     return out
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):

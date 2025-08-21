@@ -409,8 +409,7 @@ def to_primitive_bas(cell):
     pcell._env = prim_env
     prim_to_ctr_mapping = np.asarray(np.hstack(prim_to_ctr_mapping), dtype=np.int32)
 
-
-    sorted_cell, ao_idx, _, _, _, ft_cell_mapping = group_basis(
+    sorted_cell, ao_idx, _, uniq_l_ctr, l_ctr_counts, ft_cell_mapping = group_basis(
         cell, tile=1, return_bas_mapping=True, sparse_coeff=True)
     # prim_to_ctr_mapping map the primitive shells to the contracted shells of
     # the original cell.  sorted_cell in ft_ao and other modules are sorted
@@ -561,7 +560,7 @@ class SRInt3c2eOpt:
         # Search the most diffused functions on each atom
         aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
         aux_ls = auxcell._bas[:,ANG_OF]
-        r2_aux = np.log(aux_cs**2 / pcell.precision * 10**aux_ls) / aux_exps
+        r2_aux = np.log(aux_cs**2 / pcell.precision * 10**aux_ls + 1e-200) / aux_exps
         atoms = auxcell._bas[:,ATOM_OF]
         atom_aux_exps = np.full(pcell.natm, 1e8, dtype=np.float32)
         for ia in range(pcell.natm):
@@ -666,6 +665,7 @@ class SRInt3c2eOpt:
         return gen_img_idx
 
     def make_img_idx_cache(self, cutoff=None):
+        '''Cache significant orbital-pairs and their lattice sum images'''
         img_idx_cache = {}
         gen_img_idx = self.generate_img_idx(cutoff)
         l_counts = self.cell0_prim_l_counts
@@ -835,7 +835,7 @@ def estimate_rcut(cell, auxcell, omega):
     # the most diffused orbital basis
     cell_exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
-    r2_cell = np.log(cs**2 / precision * 10**ls) / cell_exps
+    r2_cell = np.log(cs**2 / precision * 10**ls + 1e-200) / cell_exps
     ai_idx = r2_cell.argmax()
     ai = cell_exps[ai_idx]
     aj = cell_exps

@@ -199,7 +199,21 @@ class FTOpt:
         init_constant(cell)
         return self
 
+    def estimate_cutoff_with_penalty(self):
+        cell = self.sorted_cell
+        rcut = cell.rcut
+        vol = cell.vol
+        cell_exp, _, cell_l = most_diffused_pgto(cell)
+        lsum = cell_l * 2 + 1
+        rad = vol**(-1./3) * rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*cell_exp*2) + surface
+        cutoff = cell.precision / lattice_sum_factor
+        logger.debug1(cell, 'ft_ao min_exp=%g cutoff=%g', cell_exp, cutoff)
+        return cutoff
+
     def make_img_idx_cache(self, permutation_symmetry, verbose=None):
+        '''Cache significant orbital-pairs and their lattice sum images'''
         log = logger.new_logger(self.cell, verbose)
         if self.aft_envs is None:
             self.build(verbose)
@@ -216,17 +230,8 @@ class FTOpt:
             bvk_ncells = 1
         else:
             bvk_ncells = np.prod(bvk_kmesh)
-
-        rcut = cell.rcut
-        vol = cell.vol
-        cell_exp, _, cell_l = most_diffused_pgto(cell)
-        lsum = cell_l * 2 + 1
-        rad = vol**(-1./3) * rcut + 1
-        surface = 4*np.pi * rad**2
-        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*cell_exp*2) + surface
-        cutoff = cell.precision / lattice_sum_factor
+        cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
-        log.debug1('ft_ao min_exp=%g cutoff=%g', cell_exp, cutoff)
 
         exps, cs = extract_pgto_params(cell, 'diffused')
         exps = cp.asarray(exps, dtype=np.float32)
@@ -458,7 +463,7 @@ class FTOpt:
 def most_diffused_pgto(cell):
     exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
-    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
+    r2 = np.log(cs**2 / cell.precision * 10**ls + 1e-200) / exps
     idx = r2.argmax()
     return exps[idx], cs[idx], ls[idx]
 

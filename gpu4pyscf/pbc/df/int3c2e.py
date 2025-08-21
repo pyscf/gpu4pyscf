@@ -708,7 +708,7 @@ class SRInt3c2eOpt:
             # pair_mapping maps the primitive pair to the contracted pair
             pair_mapping_lookup = cp.empty(bvk_nctri*bvk_nctrj, dtype=np.int32)
             pair_mapping_lookup[c_pair_idx] = cp.arange(n_ctr_pairs)
-            pair_mapping = asarray(pair_mapping_lookup[reduced_pair_idx], dtype=np.int32)
+            pair_mapping = pair_mapping_lookup[reduced_pair_idx]
             log.timer_debug1(f'pair_mapping [{li},{lj}]', *t1)
             return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
         return gen_img_idx
