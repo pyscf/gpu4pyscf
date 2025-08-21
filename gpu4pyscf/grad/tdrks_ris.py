@@ -29,7 +29,7 @@ from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
 from gpu4pyscf.tdscf.ris import get_auxmol
 
-def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     """
     Electronic part of TDA, TDDFT nuclear gradients
 
@@ -42,10 +42,9 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     """
     if td_grad.base.Ktrunc != 0.0:
         raise NotImplementedError('Ktrunc or frozen method is not supported yet')
-    if J_fit is None:
-        J_fit = td_grad.base.J_fit
-    if K_fit is None:
-        K_fit = td_grad.base.K_fit
+    J_fit = td_grad.base.J_fit
+    K_fit = td_grad.base.K_fit
+    theta = td_grad.base.theta
     if singlet is None:
         singlet = True
     log = logger.new_logger(td_grad, verbose)
@@ -94,7 +93,7 @@ def grad_elec(td_grad, x_y, theta=None, J_fit=None, K_fit=None, singlet=True, at
     mf_K = rks.RKS(mol).density_fit()
     mf_K.with_df.auxmol = auxmol_K
     
-    f1vo, f1oo, vxc1, k1ao = tdrks._contract_xc_kernel(td_grad, mf.xc, dmxpy, dmzoo, True, True, singlet)
+    f1oo, _, vxc1, _ = tdrks._contract_xc_kernel(td_grad, mf.xc, dmzoo, None, True, False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if with_k:
         vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
@@ -306,11 +305,11 @@ def get_extra_force(atom_id, envs):
 def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
     
     if omega != 0.0:
-        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, omega=omega, hermi=hermi)
-        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, omega=omega, hermi=hermi)
+        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, omega=omega, hermi=hermi, with_k=False)
+        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, omega=omega, hermi=hermi, with_j=False)
     else:
-        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, hermi=hermi)
-        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, hermi=hermi)
+        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, hermi=hermi, with_k=False)
+        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, hermi=hermi, with_j=False)
     vhf = vj * j_factor - vk * .5 * k_factor
     e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
     vhf = tag_array(vhf, aux=e1_aux)
@@ -357,16 +356,15 @@ class Gradients(tdrhf.Gradients):
             self.check_sanity()
         if self.verbose >= logger.INFO:
             self.dump_flags()
-        theta = self.base.theta
-        de = self.grad_elec(xy, theta, singlet, atmlst, verbose=self.verbose)
+        de = self.grad_elec(xy, singlet, atmlst, verbose=self.verbose)
         self.de = de = de + self.grad_nuc(atmlst=atmlst)
         if self.mol.symmetry:
             self.de = self.symmetrize(self.de, atmlst)
         self._finalize()
         return self.de
     @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, theta, singlet, atmlst=None, verbose=logger.info):
-        return grad_elec(self, xy, theta, singlet=singlet, atmlst=atmlst, verbose=self.verbose)
+    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.info):
+        return grad_elec(self, xy, singlet=singlet, atmlst=atmlst, verbose=self.verbose)
 
 
 Grad = Gradients
