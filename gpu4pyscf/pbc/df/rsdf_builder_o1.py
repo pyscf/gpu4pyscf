@@ -90,22 +90,8 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
                    linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-        bvk_kmesh = kmesh = np.ones(3, dtype=int)
-    else:
-        # The remote images may contribute to certain k-point mesh, contributing
-        # to the finite-size effects in HFX. For sufficiently large number of
-        # kpts, the truncation radious cell.rcut may cause finite-size errors.
-        kpts = kpts.reshape(-1, 3)
-        rcut = estimate_rcut(cell, auxcell, omega).max()
-        bvk_kmesh = kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
-        if len(kpts) != np.prod(kmesh):
-            # When targeting many kpts, num-kpts can be more than num-bvk-images.
-            # Using a large radius to regenerate MP kmesh. The new MP kmesh
-            # should cover all kpts.
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut*20)
-    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh)
+    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
 
     kpt_iters = list(kk_adapted_iter(kmesh))
@@ -115,7 +101,7 @@ def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
     t1 = log.timer('int2c2e', *t1)
 
     if with_long_range:
-        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
+        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
 
     prefer_ed = PREFER_ED
     if cell.dimension == 2:
@@ -195,16 +181,9 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
                        linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-        bvk_kmesh = np.ones(3, dtype=int)
-    else:
-        # Coulomb integrals requires smaller kmesh to converge finite-size effects.
-        # A relatively small bvk_kmesh can be used for Coulomb integrals.
-        kpts = kpts.reshape(-1, 3)
-        bvk_kmesh = kpts_to_kmesh(cell, kpts)
+    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
     # TODO: time-reversal symmetry in j3c, j2c
-    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, bvk_kmesh, j_only=True)
+    j3c = sr_aux_e2(cell, auxcell, -omega, kpts, kmesh, j_only=True)
     t1 = log.timer('pass1: int3c2e', *t0)
 
     log.debug('Generate auxcell 2c2e integrals')
@@ -216,7 +195,7 @@ def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tru
     cderi = {}
     cderip = {}
     if with_long_range:
-        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, bvk_kmesh, omega, log)
+        ft_ao_iter = _ft_ao_iter_generator(cell, auxcell, kmesh, omega, log)
         kpt = np.zeros(3)
         for pqG, auxG_conj in ft_ao_iter(kpt, kpts):
             # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
@@ -591,14 +570,18 @@ def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
     mesh = cell.symmetrize_mesh(mesh)
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
-    nao = cell.nao
+    kmesh = int3c2e_opt.bvk_kmesh
+    bvk_ncells = np.prod(kmesh)
 
-    ft_opt = ft_ao.FTOpt(cell).build()
+    ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=kmesh).build()
     bas_ij_cache = _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, log)
     t1 = log.timer_debug2('generating bas_ij indices', *t1)
 
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
+    nao = cell.nao
+    bvk_nbas = bvk_ncells * nbas
+    bvk_nao = bvk_ncells * nao
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
     sorted_ao_loc = ft_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
@@ -606,7 +589,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
 
     # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
     # This lookup table will be used to generate the addresses for the
-    # non-zere sr_int3c2e integrals.
+    # non-zero sr_int3c2e integrals.
     # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
     aopair_offsets_lookup = np.zeros((nbas, nbas), dtype=np.int32)
     ao_pair_mapping = []
@@ -642,9 +625,8 @@ def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
     non0_size = p1
 
     ao_pair_mapping = np.hstack(ao_pair_mapping)
-    rows, cols = divmod(ao_pair_mapping, nao)
     diag_addresses = np.hstack(diag_addresses)
-    cderi_idx = (rows, cols, diag_addresses)
+    cderi_idx = (ao_pair_mapping, diag_addresses)
 
     auxG_conj = None
     aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
@@ -683,6 +665,7 @@ def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
         nfij = nfi * nfj
         bas_ij, img_offsets, img_idx = bas_ij_cache[i, j]
         n_pairs = len(bas_ij)
+        pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
         j3c_tmp = cp.zeros((naux,nfij*n_pairs), dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -740,7 +723,6 @@ def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
             j3c_tmp = contract('pi,kmjp->kmji', c2s[li], j3c_tmp)
             j3c_tmp = j3c_tmp.reshape(naux,-1)
 
-        pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
         _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
         cderi_compressed[:,pair0:pair1] = j3c_tmp.get(out=_buf)
         j3c_tmp = None
@@ -767,8 +749,8 @@ def _lr_int3c2e_kk(int3c2e_opt, int3c2e_img_idx_cache, cd_j2c_cache, kpts, kpt_i
 
     sorted_cell = ft_opt.sorted_cell
     nbas = sorted_cell.nbas
-    bvk_nbas = bvk_ncells * nbas
     nao = cell.nao
+    bvk_nbas = bvk_ncells * nbas
     bvk_nao = bvk_ncells * nao
     # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
     # the original cell
@@ -777,7 +759,7 @@ def _lr_int3c2e_kk(int3c2e_opt, int3c2e_img_idx_cache, cd_j2c_cache, kpts, kpt_i
 
     # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
     # This lookup table will be used to generate the addresses for the
-    # non-zere sr_int3c2e integrals.
+    # non-zero sr_int3c2e integrals.
     # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
     aopair_offsets_lookup = np.zeros(nbas*bvk_nbas, dtype=np.int32)
     ao_pair_mapping = []
@@ -951,14 +933,13 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         prefer_ed = True
     cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
         j2c, prefer_ed, linear_dep_threshold)
-
-    nauxp = None
+    negative_metric_size = None
     if cd_j2c_negative is not None:
         # concatenate the ED eigenvectors so that the transformation for the two
         # vectors can be processed together
         assert cell.dimension == 2
         cd_j2c = cp.hstack(cd_j2c, cd_j2c_negative)
-        nauxp = cd_j2c_negative.shape[1]
+        negative_metric_size = cd_j2c_negative.shape[1]
     naux = cd_j2c.shape[1]
 
     aux_coeff = asarray(int3c2e_opt.aux_coeff)
@@ -971,7 +952,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     # auxiliary dimension. By doing this, the output integral tensor of these
     # functions are automatically transformed into the Cholesky decomposed tensor
     int3c2e_opt.aux_coeff = aux_coeff
-    cd_j2c = cd_j2c_negative = None
+    j2c = cd_j2c = cd_j2c_negative = None
 
     c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
     lmax = cell._bas[:,ANG_OF].max()
@@ -1002,7 +983,6 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         nao_pairs = cderi.shape[1]
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
-        t1 = log.init_timer()
         # ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
         # which allows the decompression for the CUDA kernel generated compressed_eri3c:
         # sparse_eri3c[ao_pair_mapping] => compressed_eri3c
@@ -1010,7 +990,8 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         diag_addresses = [] # addresses wrt the compressed indices
         # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset
         # in the original cell
-        ao_loc = int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]]
+        sorted_ao_loc = int3c2e_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
+        ao_loc = int3c2e_opt.ao_idx[sorted_ao_loc[:-1]]
         nao = cell.nao
         cderi = np.empty((naux, nao_pairs))
 
@@ -1082,46 +1063,193 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     cp.get_default_memory_pool().free_all_blocks()
     log.debug('Avail GPU mem = %s B', get_avail_mem())
 
-    if not with_long_range:
+    if with_long_range:
+        ao_pair_mapping, diag_addresses = cderi_idx
+    else:
         ao_pair_mapping = np.hstack(ao_pair_mapping)
-        rows, cols = divmod(ao_pair_mapping, nao)
         diag_addresses = np.hstack(diag_addresses)
-        cderi_idx = (rows, cols, diag_addresses)
+    rows, cols = divmod(ao_pair_mapping, nao)
+    cderi_idx = (rows, cols, diag_addresses)
     t1 = log.timer_debug1('SR int3c2e', *t1)
 
     cderip = None
-    if nauxp is not None:
+    if negative_metric_size is not None:
         # For low-dimensional systems, CDERI has negative eigenvectors
-        cderi, cderip = cderi[:-nauxp], cderi[-nauxp:]
+        cderi, cderip = cderi[:-negative_metric_size], cderi[-negative_metric_size:]
 
     t1 = log.timer_debug1('solving cderi', *t1)
     return cderi, cderip, cderi_idx
 
 def compressed_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
                             linear_dep_threshold=LINEAR_DEP_THR):
-    # TODO: reuse compressed_cderi_gamma_point, store real tensor for BvK cell
     raise NotImplementedError
+    log = logger.new_logger(cell)
+    t1 = log.init_timer()
+    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    kpt_iters = list(kk_adapted_iter(kmesh))
+    # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
+    uniq_kpts = kpts[[x[1] for x in kpt_iters]]
+    nkpts = len(uniq_kpts)
+    bvk_ncells = np.prod(kmesh)
+
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
+    aux_coeff = asarray(int3c2e_opt.aux_coeff)
+
+    log.debug('Generate auxcell 2c2e integrals')
+    j2c = _get_2c2e(auxcell, None, omega, with_long_range)
+    prefer_ed = PREFER_ED
+    if cell.dimension == 2:
+        prefer_ed = True
+    cd_j2c, cd_j2c_negative, j2ctag = _decompose_j2c(
+        j2c_k, prefer_ed, linear_dep_threshold)
+    negative_metric_size = None
+    if cd_j2c_negative is not None:
+        # concatenate the ED eigenvectors so that the transformation for the two
+        # vectors can be processed together
+        assert cell.dimension == 2
+        cd_j2c = cp.hstack(cd_j2c, cd_j2c_negative)
+        negative_metric_size = cd_j2c_negative.shape[1]
+    naux = cd_j2c.shape[1]
+    if j2ctag == 'ED':
+        cd_j2c = aux_coeff.dot(cd_j2c)
+    else:
+        cd_j2c = solve_triangular(cd_j2c, aux_coeff.T, lower=True).T
+    cd_j2c_cache.append(cd_j2c)
+    j2c = cd_j2c = cd_j2c_negative = None
+
+    c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
+    lmax = cell._bas[:,ANG_OF].max()
+    uniq_l = np.arange(lmax+1)
+    if cell.cart:
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    else:
+        nf = uniq_l * 2 + 1
+    c_l_offsets = np.append(0, np.cumsum(c_shell_counts))
+    lmax = cell._bas[:,ANG_OF].max()
+    c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
+
+    img_idx_cache = int3c2e_opt.make_img_idx_cache()
+    buflen = 0
+    nao_pairs = 0
+    for (li, lj), img_idx in img_idx_cache.items():
+        npairs = nf[li] * nf[lj] * len(img_idx[4])
+        nao_pairs += npairs
+        buflen = max(buflen, npairs)
+
+    if with_long_range:
+        # LR int3c2e generally creates more non-negligible Coulomb integrals.
+        # aopair_offsets_lookup convertes the address in a dense tensor to
+        # compressed storage.
+        cderi, aopair_offsets_lookup, cderi_idx = \
+                _lr_int3c2e_gamma_point(int3c2e_opt, img_idx_cache, cd_j2c_cache, kpts, kpt_iters)
+        # LR int3c2e would generate more nao_pairs than the SR int3c2e!
+        t1 = log.timer_debug1('LR int3c2e', *t1)
+    else:
+        # ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
+        # which allows the decompression for the CUDA kernel generated compressed_eri3c:
+        # sparse_eri3c[ao_pair_mapping] => compressed_eri3c
+        ao_pair_mapping = []
+        diag_addresses = [] # addresses wrt the compressed indices
+        # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset
+        # in the original cell
+        sorted_ao_loc = int3c2e_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
+        ao_loc = int3c2e_opt.ao_idx[sorted_ao_loc[:-1]]
+        nao = cell.nao
+        bvk_nao = bvk_ncells * nao
+        cderi = np.empty((naux,nao_pairs))
+
+    log.debug('Avail GPU mem = %s B', get_avail_mem())
+    evaluate = int3c2e_opt.int3c2e_evaluator(
+        verbose=log, img_idx_cache=img_idx_cache)
+
+    aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
+    naux_cart = aux_loc[-1]
+    ij_tasks = ((i, j) for i in range(lmax+1) for j in range(i+1))
+    offset = 0
+    p0 = p1 = 0
+    buf = np.empty(naux_cart*buflen)
+    for li, lj in img_idx_cache:
+        c_pair_idx = img_idx_cache[li, lj][4]
+        n_pairs = len(c_pair_idx)
+        if n_pairs == 0:
+            continue
+
+        i0, i1 = c_l_offsets[li:li+2]
+        j0, j1 = c_l_offsets[lj:lj+2]
+        nctri = c_shell_counts[li]
+        nctrj = c_shell_counts[lj]
+        if cell.cart:
+            nfi = (li+1)*(li+2)//2
+            nfj = (lj+1)*(lj+2)//2
+        else:
+            nfi = li * 2 + 1
+            nfj = lj * 2 + 1
+        c_pair_idx = cp.asnumpy(c_pair_idx)
+        ish, J, jsh = np.unravel_index(c_pair_idx, (nctri, bvk_ncells, nctrj))
+        ish += i0
+        jsh += j0
+        if with_long_range:
+            ft_idx = aopair_offsets_lookup[ish,J,jsh]
+            ij = np.arange(nfi*nfj, dtype=np.int32)
+            idx = ij + ft_idx[:,None]
+            idx = np.asarray(idx.ravel(), dtype=np.int32)
+        else:
+            p0, p1 = p1, p1 + nfi*nfj*n_pairs
+            iaddr = ao_loc[ish,None] + np.arange(nfi)
+            jaddr = ao_loc[jsh,None] + np.arange(nfj)
+            # Note: corresponding to the storage order (npairs,nfj,nfi,naux)
+            ao_pair_mapping.append((iaddr[:,None,:] * bvk_nao + J[:,None,None] * nao +
+                                    jaddr[:,:,None]).ravel())
+            if li == lj:
+                ii = np.where(ish == jsh)[0]
+                # The addresses for the compressed tensor
+                addr = offset + ii[:,None] * nfi**2 + np.arange(nfi**2)
+                diag_addresses.append(addr.ravel())
+            offset = p1
+
+        nji = n_pairs * nfj * nfi
+        j3c_block = cp.empty((naux_cart,nji))
+        for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
+            j3c_tmp = evaluate(li, lj, k)[1]
+            if j3c_tmp.size == 0:
+                continue
+            if not cell.cart:
+                j3c_tmp = contract('qj,rqpuLv->rjpuLv', c2s[lj], j3c_tmp)
+                j3c_tmp = contract('pi,rjpuLv->rjiuLv', c2s[li], j3c_tmp)
+            j3c_tmp = j3c_tmp.sum(axis=4).transpose(4,0,3,1,2)
+            k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
+            j3c_block[k0:k1] = j3c_tmp.reshape(-1,nji)
+
+        aux_coeff = cd_j2c
+        j3c_block = contract('uv,up->vp', aux_coeff, j3c_block)
+        _buf = buf[:j3c_block.size].reshape(j3c_block.shape)
+        if with_long_range:
+            _buf = j3c_block.get(out=_buf)
+            nao_pairs = cderi.shape[1]
+            libpbc.take2d_add( # this copy back operation is very slow
+                cderi.ctypes, _buf.ctypes, idx.ctypes,
+                ctypes.c_int(_buf.shape[0]), ctypes.c_int(nao_pairs),
+                ctypes.c_int(len(idx))
+            )
+        else:
+            cderi[:,p0:p1] = j3c_block.get(out=_buf)
+        j3c_tmp = j3c_block = None
+
+    if not with_long_range:
+        ao_pair_mapping = np.hstack(ao_pair_mapping)
+        cderi_idx = (ao_pair_mapping, diag_addresses)
+
+    cderip = None
+    if negative_metric_size:
+        cderip, cderi = cderi[-nauxp:], cderi[:-nauxp]
+    t1 = log.timer_debug1('SR int3c2e', *t1)
+    return cderi, cderip, cderi_idx
 
 def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
                         linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t1 = log.init_timer()
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-        kmesh = np.ones(3, dtype=int)
-    else:
-        # The remote images may contribute to certain k-point mesh, contributing
-        # to the finite-size effects in HFX. For sufficiently large number of
-        # kpts, the truncation radious cell.rcut may cause finite-size errors.
-        kpts = kpts.reshape(-1, 3)
-        rcut = estimate_rcut(cell, auxcell, omega).max()
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
-        if len(kpts) != np.prod(kmesh):
-            # When targeting many kpts, num-kpts can be more than num-bvk-images.
-            # Using a large radius to regenerate MP kmesh. The new MP kmesh
-            # should cover all kpts.
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut*20)
-
+    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
     kpt_iters = list(kk_adapted_iter(kmesh))
     # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
     uniq_kpts = kpts[[x[1] for x in kpt_iters]]
@@ -1197,13 +1325,14 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
         diag_addresses = [] # addresses wrt the compressed indices
         # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset
         # in the original cell
-        ao_loc = int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]]
+        sorted_ao_loc = int3c2e_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
+        ao_loc = int3c2e_opt.ao_idx[sorted_ao_loc[:-1]]
         nao = cell.nao
         bvk_nao = bvk_ncells * nao
         cderi = {}
         for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
             naux = cd_j2c_cache[j2c_idx].shape[1]
-            cderi[kp] = np.empty((naux,nao_pairs), dtype=np.compelx128)
+            cderi[kp] = np.empty((naux,nao_pairs), dtype=np.complex128)
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     evaluate = int3c2e_opt.int3c2e_evaluator(
@@ -1256,9 +1385,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             if li == lj:
                 ii = np.where(ish == jsh)[0]
                 # The addresses for the compressed tensor
-                addr = offset + ii[:,None] * nfi**2 + np.arange(nfi**2)
+                addr = p0 + ii[:,None] * nfi**2 + np.arange(nfi**2)
                 diag_addresses.append(addr.ravel())
-            offset = p1
 
         nji = n_pairs * nfj * nfi
         j3c_block = cp.empty((nkpts,naux_cart,nji), dtype=np.complex128)
@@ -1292,6 +1420,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
 
     if not with_long_range:
         ao_pair_mapping = np.hstack(ao_pair_mapping)
+        diag_addresses = np.hstack(diag_addresses)
         cderi_idx = (ao_pair_mapping, diag_addresses)
 
     cderip = None
@@ -1303,6 +1432,24 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
             cderi [kp] = cderi[kp][:-nauxp]
     t1 = log.timer_debug1('SR int3c2e', *t1)
     return cderi, cderip, cderi_idx
+
+def _kpts_to_kmesh(cell, auxcell, omega, kpts):
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+        kmesh = np.ones(3, dtype=int)
+    else:
+        # The remote images may contribute to certain k-point mesh, contributing
+        # to the finite-size effects in HFX. For sufficiently large number of
+        # kpts, the truncation radius cell.rcut may cause finite-size errors.
+        kpts = kpts.reshape(-1, 3)
+        rcut = estimate_rcut(cell, auxcell, omega).max()
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
+        if len(kpts) != np.prod(kmesh):
+            # When targeting many kpts, num-kpts can be more than num-bvk-images.
+            # Using a large radius to regenerate MP kmesh. The new MP kmesh
+            # should cover all kpts.
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut*20)
+    return kmesh, kpts
 
 def unpack_cderi_k(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
     r'''

@@ -445,6 +445,7 @@ def _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, verbose):
     orbital-pairs.'''
     log = logger.new_logger(ft_opt.cell, verbose)
     sorted_cell = ft_opt.sorted_cell
+    ncells = np.prod(ft_opt.bvk_kmesh)
     nbas = sorted_cell.nbas
 
     uniq_l = ft_opt.uniq_l_ctr[:,0]
@@ -459,17 +460,19 @@ def _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, verbose):
     log_cutoff = math.log(cutoff)
     aft_envs = ft_opt.aft_envs
 
-    int3c2e_ovlp_mask = cp.zeros((nbas, nbas), dtype=bool)
-    _, first_occurrence = np.unique(uniq_l, return_index=True)
-    l_offsets = np.append(l_ctr_offsets[first_occurrence], l_ctr_offsets[-1])
+    int3c2e_ovlp_mask = cp.zeros((nbas, ncells, nbas), dtype=bool)
+    l_ctr_counts = l_ctr_offsets[1:] - l_ctr_offsets[:-1]
+    lmax = uniq_l.max()
+    l_counts = [l_ctr_counts[uniq_l==l].sum() for l in range(lmax+1)]
+    l_offsets = np.append(0, np.cumsum(l_counts))
     for (i, j), val in int3c2e_img_idx_cache.items():
         i0, i1 = l_offsets[i:i+2]
         j0, j1 = l_offsets[j:j+2]
         # c_pair_idx stores the pair addresses within each sub-block
         c_pair_idx = val[4]
-        sub_block = cp.zeros((i1-i0)*(j1-j0), dtype=bool)
+        sub_block = cp.zeros((i1-i0)*ncells*(j1-j0), dtype=bool)
         sub_block[c_pair_idx] = True
-        int3c2e_ovlp_mask[i0:i1,j0:j1] = sub_block.reshape(i1-i0,j1-j0)
+        int3c2e_ovlp_mask[i0:i1,:,j0:j1] = sub_block.reshape(i1-i0,ncells,j1-j0)
 
     permutation_symmetry = 1
     ij_tasks = [(i, j) for i in range(n_groups) for j in range(i+1)]
@@ -481,7 +484,7 @@ def _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, verbose):
         jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
         nish = ish1 - ish0
         njsh = jsh1 - jsh0
-        img_counts = cp.zeros((nish,njsh), dtype=np.int32)
+        img_counts = cp.zeros((nish,ncells,njsh), dtype=np.int32)
         err = libpbc.overlap_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
@@ -492,11 +495,11 @@ def _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, verbose):
         if err != 0:
             raise RuntimeError(f'{ll_pattern} overlap_img_counts failed')
         mask = img_counts > 0
-        mask |= int3c2e_ovlp_mask[ish0:ish1,jsh0:jsh1]
+        mask |= int3c2e_ovlp_mask[ish0:ish1,:,jsh0:jsh1]
         # bas_ij from this mask may contain orbital pairs that actually do not
         # contribute to ft_aopair. Their img_counts are zeros.  Generally,
         # ft_aopair would produce more non-zero integrals than that in the
-        # sr_int3c2e function. 
+        # sr_int3c2e function.
         bas_ij = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
         n_pairs = len(bas_ij)
         if n_pairs == 0:
@@ -529,14 +532,64 @@ def _make_img_idx_cache(ft_opt, int3c2e_img_idx_cache, verbose):
         img_counts = counts_sorting = None
 
         # bas_ij stores the non-negligible primitive-pair indices.
-        ish, jsh = cp.unravel_index(bas_ij, (nish, njsh))
+        ish, J, jsh = cp.unravel_index(bas_ij, (nish, ncells, njsh))
         ish += ish0
         jsh += jsh0
-        bas_ij = cp.ravel_multi_index((ish, jsh), (nbas, nbas))
+        bas_ij = cp.ravel_multi_index((ish, J, jsh), (nbas, ncells, nbas))
         bas_ij = cp.asarray(bas_ij, dtype=np.int32)
         bas_ij_cache[i, j] = (bas_ij, img_offsets, img_idx)
         log.debug1('task (%d, %d), n_pairs=%d', i, j, n_pairs)
     return bas_ij_cache
+
+#?def _aopair_and_diag_address(ft_opt, bas_ij_cache):
+#?    sorted_cell = ft_opt.sorted_cell
+#?    nbas = sorted_cell.nbas
+#?    # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
+#?    # the original cell
+#?    sorted_ao_loc = ft_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
+#?    ao_loc = ft_opt.ao_idx[sorted_ao_loc[:-1]]
+#?
+#?    # Save the indices of non-zero FT integrals in the aopair_offsets_lookup.
+#?    # This lookup table will be used to generate the addresses for the
+#?    # non-zere sr_int3c2e integrals.
+#?    # aopair_offsets_lookup[ish,jsh] -> address in ft_aopair
+#?    aopair_offsets_lookup = np.zeros((nbas, nbas), dtype=np.int32)
+#?    ao_pair_mapping = []
+#?
+#?    uniq_l = ft_opt.uniq_l_ctr[:,0]
+#?    # Determine the addresses of the non-vanished pairs and the diagonal indices
+#?    # within these elements.
+#?    nf = nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
+#?    if not cell.cart:
+#?        nf = uniq_l * 2 + 1
+#?        c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
+#?    diag_addresses = [] # addresses wrt the compressed indices
+#?    p0 = p1 = 0
+#?    max_pair_size = 0
+#?    for i, j in bas_ij_cache:
+#?        nfi = nf[i]
+#?        nfj = nf[j]
+#?        nfij = nfi * nfj
+#?        bas_ij = bas_ij_cache[i, j][0].get()
+#?        n_pairs = len(bas_ij)
+#?        p0, p1 = p1, p1 + nfij * n_pairs
+#?        ish, jsh = divmod(bas_ij, nbas)
+#?        aopair_offsets_lookup[ish,jsh] = np.arange(p0, p1, nfij, dtype=np.int32)
+#?        # Note: corresponding to the storage order (npairs,nfj,nfi,nGv)
+#?        iaddr = ao_loc[ish,None] + np.arange(nf[i])
+#?        jaddr = ao_loc[jsh,None] + np.arange(nf[j])
+#?        ao_pair_mapping.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+#?        if i == j:
+#?            idx = np.where(ish == jsh)[0]
+#?            addr = p0 + idx[:,None] * nfi**2 + np.arange(nfi**2)
+#?            diag_addresses.append(addr.ravel())
+#?        max_pair_size = max(max_pair_size, nf_cart[i]*nf_cart[j] * n_pairs)
+#?    non0_size = p1
+#?
+#?    ao_pair_mapping = np.hstack(ao_pair_mapping)
+#?    rows, cols = divmod(ao_pair_mapping, nao)
+#?    diag_addresses = np.hstack(diag_addresses)
+#?    cderi_idx = (rows, cols, diag_addresses)
 
 # The long-range part of the cderi for gamma point. The cderi 3-index tensor is compressed.
 def _lr_int3c2e_gamma_point(int3c2e_opt, int3c2e_img_idx_cache):
@@ -780,7 +833,8 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         diag_addresses = [] # addresses wrt the compressed indices
         # Given shell Id in sorted_cell, this ao_loc maps shell to the AO offset
         # in the original cell
-        ao_loc = int3c2e_opt.ao_idx[int3c2e_opt.sorted_cell.ao_loc[:-1]]
+        sorted_ao_loc = int3c2e_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
+        ao_loc = int3c2e_opt.ao_idx[sorted_ao_loc[:-1]]
         nao = cell.nao
         cderi = np.empty((naux, nao_pairs))
 
@@ -793,7 +847,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     offset = 0
     p0 = p1 = 0
     buf = np.empty(naux*buflen)
-    for li, lj in ij_tasks:
+    for li, lj in img_idx_cache:
         c_pair_idx, j3c_tmp = evaluate(li, lj)
         if len(c_pair_idx) == 0:
             continue
@@ -837,7 +891,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             )
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
-            cderi[:,p0:p1] = j3c_tmp.get()
+            cderi[:,p0:p1] = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
             iaddr = ao_loc[ish,None] + np.arange(nfi)
             jaddr = ao_loc[jsh,None] + np.arange(nfj)
             # Note: corresponding to the storage order (npairs,nfj,nfi,naux)
@@ -845,9 +899,8 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             if li == lj:
                 idx = np.where(ish == jsh)[0]
                 # The addresses for the compressed tensor
-                addr = offset + idx[:,None] * nfi**2 + np.arange(nfi**2)
+                addr = p0 + idx[:,None] * nfi**2 + np.arange(nfi**2)
                 diag_addresses.append(addr.ravel())
-            offset = p1
         j3c_tmp = ish = jsh = c_pair_idx = None
     cp.get_default_memory_pool().free_all_blocks()
     log.debug('Avail GPU mem = %s B', get_avail_mem())
