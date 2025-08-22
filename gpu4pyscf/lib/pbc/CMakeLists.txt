@@ -7,7 +7,7 @@ add_library(pbc SHARED
   estimator.cu
   rys_roots_dat.cu
   nr_eval_gto.cu
-  sorting.c
+  sorting.c grid_integrate.c
 )
 
 set_target_properties(pbc PROPERTIES
