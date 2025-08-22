@@ -40,9 +40,9 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import cart2sph_by_l, extract_pgto_params, group_basis
 from gpu4pyscf.scf.jk import _scale_sp_ctr_coeff
-from gpu4pyscf.pbc.df.int3c2e_o1 import (
+from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, estimate_rcut,
-    SRInt3c2eOpt, PBCIntEnvVars)
+    SRInt3c2eOpt, SRInt3c2eOpt_v2, PBCIntEnvVars)
 
 OMEGA_MIN = 0.25
 
@@ -1092,7 +1092,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_rang
     nkpts = len(uniq_kpts)
     bvk_ncells = np.prod(kmesh)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt_v2(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
     aux_coeff = asarray(int3c2e_opt.aux_coeff)
 
     log.debug('Generate auxcell 2c2e integrals')
@@ -1256,7 +1256,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
     nkpts = len(uniq_kpts)
     bvk_ncells = np.prod(kmesh)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt_v2(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
     aux_coeff = asarray(int3c2e_opt.aux_coeff)
 
     log.debug('Generate auxcell 2c2e integrals')

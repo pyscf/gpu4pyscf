@@ -265,7 +265,6 @@ C    D
     out[:,i,j] = dat
 
     ref = build_cderi(cell, auxcell, omega=omega)[0]
-    print(abs(ref[0,0] - out).max())
     assert abs(ref[0,0] - out).max() < 1e-12
 
 def test_kpts_compressed():
@@ -443,3 +442,9 @@ def test_2c2e():
     dat = rsdf_builder._get_2c2e(cell, kpts, omega, with_long_range=True)
     ref = _get_2c2e_slow(cell, kpts, omega, with_long_range=True)
     assert abs(dat - cp.asarray(ref)).max() < 1e-10
+
+
+test_gamma_point_compressed()
+test_sr_gamma_point_compressed()
+test_kpts_compressed()
+test_sr_kpts_compressed()
