@@ -29,8 +29,8 @@
 
 namespace gpu4pyscf::gpbc::multi_grid {
 
-template <typename KernelType, int n_channels,
-          int i_angular, int j_angular, bool is_non_orthogonal>
+template <typename KernelType, int n_channels, int i_angular, int j_angular,
+          bool is_non_orthogonal>
 __global__ static void evaluate_density_kernel(
     KernelType *density, const KernelType *density_matrices,
     const int *non_trivial_pairs, const int *i_shells, const int *j_shells,
@@ -73,15 +73,15 @@ __global__ static void evaluate_density_kernel(
   const KernelType start_position_z =
       dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
 
-  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3]
-                           + dxyz_dabc[1] * dxyz_dabc[4]
-                           + dxyz_dabc[2] * dxyz_dabc[5];
-  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6]
-                           + dxyz_dabc[1] * dxyz_dabc[7]
-                           + dxyz_dabc[2] * dxyz_dabc[8];
-  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6]
-                           + dxyz_dabc[4] * dxyz_dabc[7]
-                           + dxyz_dabc[5] * dxyz_dabc[8];
+  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] +
+                             dxyz_dabc[1] * dxyz_dabc[4] +
+                             dxyz_dabc[2] * dxyz_dabc[5];
+  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] +
+                             dxyz_dabc[1] * dxyz_dabc[7] +
+                             dxyz_dabc[2] * dxyz_dabc[8];
+  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6] +
+                             dxyz_dabc[4] * dxyz_dabc[7] +
+                             dxyz_dabc[5] * dxyz_dabc[8];
 
   const int a_upper = min(a_start + BLOCK_DIM_XYZ, mesh_a) - a_start;
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
@@ -166,10 +166,12 @@ __global__ static void evaluate_density_kernel(
 
     const KernelType pair_prefactor =
         is_valid_pair
-            ? exp(-ij_exponent_in_prefactor - gaussian_exponent_at_reference) *
-                  i_coeff * j_coeff * common_fac_sp<KernelType, i_angular>() *
+            ? i_coeff * j_coeff * common_fac_sp<KernelType, i_angular>() *
                   common_fac_sp<KernelType, j_angular>()
             : 0;
+
+    const KernelType gaussian_starting_point =
+        exp(-(ij_exponent_in_prefactor + gaussian_exponent_at_reference) / 3.0);
 #pragma unroll
     for (int i_channel = 0; i_channel < n_channels; i_channel++) {
       const KernelType *density_matrix_pointer =
@@ -238,8 +240,8 @@ __global__ static void evaluate_density_kernel(
     KernelType j_cartesian[n_j_cartesian_functions];
     int a_index, b_index, c_index;
     KernelType x, y, z;
-    KernelType gaussian_x, gaussian_y, gaussian_z,
-               recursion_factor_a, recursion_factor_b, recursion_factor_c;
+    KernelType gaussian_x, gaussian_y, gaussian_z, recursion_factor_a,
+        recursion_factor_b, recursion_factor_c;
     KernelType recursion_factor_ab_pow_a = 1;
     KernelType recursion_factor_ac_pow_a = 1;
     KernelType recursion_factor_bc_pow_b = 1;
@@ -250,36 +252,38 @@ __global__ static void evaluate_density_kernel(
     } else {
       x = start_position_x;
     }
-    for (a_index = 0, gaussian_x = 1, recursion_factor_a = recursion_factor_a_start;
-         a_index < a_upper;
-         a_index++, gaussian_x *= recursion_factor_a,
-         recursion_factor_a *= exp_da_squared) {
+    for (a_index = 0, gaussian_x = gaussian_starting_point,
+        recursion_factor_a = recursion_factor_a_start;
+         a_index < a_upper; a_index++, gaussian_x *= recursion_factor_a,
+        recursion_factor_a *= exp_da_squared) {
 
       if constexpr (is_non_orthogonal) {
         recursion_factor_bc_pow_b = 1;
       } else {
         y = start_position_y;
       }
-      for (b_index = 0, gaussian_y = 1,
-           recursion_factor_b = recursion_factor_b_start;
-           b_index < b_upper;
-           b_index++, gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
-           recursion_factor_b *= exp_db_squared) {
+      for (b_index = 0, gaussian_y = gaussian_starting_point,
+          recursion_factor_b = recursion_factor_b_start;
+           b_index < b_upper; b_index++,
+          gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
+          recursion_factor_b *= exp_db_squared) {
 
         if constexpr (is_non_orthogonal) {
-          x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
-          y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
-          z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
+          x = start_position_x + a_index * dxyz_dabc[0] +
+              b_index * dxyz_dabc[3];
+          y = start_position_y + a_index * dxyz_dabc[1] +
+              b_index * dxyz_dabc[4];
+          z = start_position_z + a_index * dxyz_dabc[2] +
+              b_index * dxyz_dabc[5];
         } else {
           z = start_position_z;
         }
-        for (c_index = 0, gaussian_z = 1,
-             recursion_factor_c = recursion_factor_c_start;
-             c_index < c_upper;
-             c_index++, gaussian_z *= recursion_factor_c
-                                    * recursion_factor_ac_pow_a
-                                    * recursion_factor_bc_pow_b,
-             recursion_factor_c *= exp_dc_squared) {
+        for (c_index = 0, gaussian_z = gaussian_starting_point,
+            recursion_factor_c = recursion_factor_c_start;
+             c_index < c_upper; c_index++,
+            gaussian_z *= recursion_factor_c * recursion_factor_ac_pow_a *
+                                recursion_factor_bc_pow_b,
+            recursion_factor_c *= exp_dc_squared) {
 
           gto_cartesian<KernelType, i_angular>(i_cartesian, x - i_x, y - i_y,
                                                z - i_z);
@@ -367,14 +371,14 @@ __global__ static void evaluate_density_kernel(
 }
 
 #define density_kernel_macro(li, lj)                                           \
-  evaluate_density_kernel<KernelType, n_channels, li, lj,           \
-                          is_non_orthogonal><<<block_grid, block_size>>>(      \
-      density, density_matrices, non_trivial_pairs, i_shells, j_shells,        \
-      n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,           \
-      sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,         \
-      sorted_block_index, image_indices, vectors_to_neighboring_images,        \
-      n_images, image_pair_difference_index, n_difference_images, mesh_a,      \
-      mesh_b, mesh_c, atm, bas, env)
+  evaluate_density_kernel<KernelType, n_channels, li, lj, is_non_orthogonal>   \
+      <<<block_grid, block_size>>>(                                            \
+          density, density_matrices, non_trivial_pairs, i_shells, j_shells,    \
+          n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,       \
+          sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,     \
+          sorted_block_index, image_indices, vectors_to_neighboring_images,    \
+          n_images, image_pair_difference_index, n_difference_images, mesh_a,  \
+          mesh_b, mesh_c, atm, bas, env)
 
 #define density_kernel_case_macro(li, lj)                                      \
   case (li * 10 + lj):                                                         \
@@ -383,11 +387,11 @@ __global__ static void evaluate_density_kernel(
 
 template <typename KernelType, int n_channels, bool is_non_orthogonal>
 int evaluate_density_driver(
-    KernelType *density, const KernelType *density_matrices, const int i_angular,
-    const int j_angular, const int *non_trivial_pairs, const int *i_shells,
-    const int *j_shells, const int n_j_shells, const int *shell_to_ao_indices,
-    const int n_i_functions, const int n_j_functions,
-    const int *sorted_pairs_per_local_grid,
+    KernelType *density, const KernelType *density_matrices,
+    const int i_angular, const int j_angular, const int *non_trivial_pairs,
+    const int *i_shells, const int *j_shells, const int n_j_shells,
+    const int *shell_to_ao_indices, const int n_i_functions,
+    const int n_j_functions, const int *sorted_pairs_per_local_grid,
     const int *accumulated_n_pairs_per_local_grid,
     const int *sorted_block_index, const int n_contributing_blocks,
     const int *image_indices, const double *vectors_to_neighboring_images,
@@ -439,10 +443,11 @@ int evaluate_density_driver(
 template <typename KernelType, int n_channels, int i_angular, int j_angular,
           bool is_non_orthogonal>
 __global__ static void evaluate_xc_kernel(
-    KernelType *fock, const KernelType *xc_weights, const int *non_trivial_pairs,
-    const int *i_shells, const int *j_shells, const int n_j_shells,
-    const int *shell_to_ao_indices, const int n_i_functions,
-    const int n_j_functions, const int *sorted_pairs_per_local_grid,
+    KernelType *fock, const KernelType *xc_weights,
+    const int *non_trivial_pairs, const int *i_shells, const int *j_shells,
+    const int n_j_shells, const int *shell_to_ao_indices,
+    const int n_i_functions, const int n_j_functions,
+    const int *sorted_pairs_per_local_grid,
     const int *accumulated_n_pairs_per_local_grid,
     const int *sorted_block_index, const int *image_indices,
     const double *vectors_to_neighboring_images, const int n_images,
@@ -481,15 +486,15 @@ __global__ static void evaluate_xc_kernel(
   const KernelType start_position_z =
       dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
 
-  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3]
-                           + dxyz_dabc[1] * dxyz_dabc[4]
-                           + dxyz_dabc[2] * dxyz_dabc[5];
-  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6]
-                           + dxyz_dabc[1] * dxyz_dabc[7]
-                           + dxyz_dabc[2] * dxyz_dabc[8];
-  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6]
-                           + dxyz_dabc[4] * dxyz_dabc[7]
-                           + dxyz_dabc[5] * dxyz_dabc[8];
+  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] +
+                             dxyz_dabc[1] * dxyz_dabc[4] +
+                             dxyz_dabc[2] * dxyz_dabc[5];
+  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] +
+                             dxyz_dabc[1] * dxyz_dabc[7] +
+                             dxyz_dabc[2] * dxyz_dabc[8];
+  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6] +
+                             dxyz_dabc[4] * dxyz_dabc[7] +
+                             dxyz_dabc[5] * dxyz_dabc[8];
 
   const int a_upper = min(a_start + BLOCK_DIM_XYZ, mesh_a) - a_start;
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
@@ -556,7 +561,6 @@ __global__ static void evaluate_xc_kernel(
                            vectors_to_neighboring_images[image_index_i * 3 + 1];
     const KernelType i_z = env[i_coord_offset + 2] +
                            vectors_to_neighboring_images[image_index_i * 3 + 2];
-    const KernelType i_coeff = env[bas(PTR_COEFF, i_shell)];
 
     const KernelType j_exponent = env[bas(PTR_EXP, j_shell)];
     const int j_coord_offset = atm(PTR_COORD, bas(ATOM_OF, j_shell));
@@ -566,7 +570,6 @@ __global__ static void evaluate_xc_kernel(
                            vectors_to_neighboring_images[image_index_j * 3 + 1];
     const KernelType j_z = env[j_coord_offset + 2] +
                            vectors_to_neighboring_images[image_index_j * 3 + 2];
-    const KernelType j_coeff = env[bas(PTR_COEFF, j_shell)];
 
     const KernelType ij_exponent = i_exponent + j_exponent;
     const KernelType ij_exponent_in_prefactor =
@@ -586,12 +589,10 @@ __global__ static void evaluate_xc_kernel(
 
     const KernelType gaussian_exponent_at_reference =
         ij_exponent * distance_squared(x0, y0, z0);
-
-    const KernelType pair_prefactor =
+    const KernelType gaussian_starting_point =
         is_valid_pair
-            ? exp(-ij_exponent_in_prefactor - gaussian_exponent_at_reference) *
-                  i_coeff * j_coeff * common_fac_sp<KernelType, i_angular>() *
-                  common_fac_sp<KernelType, j_angular>()
+            ? exp(-(ij_exponent_in_prefactor + gaussian_exponent_at_reference) /
+                  3)
             : 0;
 
     const KernelType da_squared =
@@ -643,8 +644,8 @@ __global__ static void evaluate_xc_kernel(
     KernelType j_cartesian[n_j_cartesian_functions];
 
     KernelType x, y, z;
-    KernelType gaussian_x, gaussian_y, gaussian_z,
-               recursion_factor_a, recursion_factor_b, recursion_factor_c;
+    KernelType gaussian_x, gaussian_y, gaussian_z, recursion_factor_a,
+        recursion_factor_b, recursion_factor_c;
     KernelType recursion_factor_ab_pow_a = 1;
     KernelType recursion_factor_ac_pow_a = 1;
     KernelType recursion_factor_bc_pow_b = 1;
@@ -655,37 +656,38 @@ __global__ static void evaluate_xc_kernel(
     } else {
       x = start_position_x;
     }
-    for (a_index = 0, gaussian_x = 1,
-         recursion_factor_a = recursion_factor_a_start;
-         a_index < a_upper;
-         a_index++, gaussian_x *= recursion_factor_a,
-         recursion_factor_a *= exp_da_squared) {
+    for (a_index = 0, gaussian_x = gaussian_starting_point,
+        recursion_factor_a = recursion_factor_a_start;
+         a_index < a_upper; a_index++, gaussian_x *= recursion_factor_a,
+        recursion_factor_a *= exp_da_squared) {
 
       if constexpr (is_non_orthogonal) {
         recursion_factor_bc_pow_b = 1;
       } else {
         y = start_position_y;
       }
-      for (b_index = 0, gaussian_y = 1,
-           recursion_factor_b = recursion_factor_b_start;
-           b_index < b_upper;
-           b_index++, gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
-           recursion_factor_b *= exp_db_squared) {
+      for (b_index = 0, gaussian_y = gaussian_starting_point,
+          recursion_factor_b = recursion_factor_b_start;
+           b_index < b_upper; b_index++,
+          gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
+          recursion_factor_b *= exp_db_squared) {
 
         if constexpr (is_non_orthogonal) {
-          x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
-          y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
-          z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
+          x = start_position_x + a_index * dxyz_dabc[0] +
+              b_index * dxyz_dabc[3];
+          y = start_position_y + a_index * dxyz_dabc[1] +
+              b_index * dxyz_dabc[4];
+          z = start_position_z + a_index * dxyz_dabc[2] +
+              b_index * dxyz_dabc[5];
         } else {
           z = start_position_z;
         }
-        for (c_index = 0, gaussian_z = 1,
-             recursion_factor_c = recursion_factor_c_start;
-             c_index < c_upper;
-             c_index++, gaussian_z *= recursion_factor_c
-                                    * recursion_factor_ac_pow_a
-                                    * recursion_factor_bc_pow_b,
-             recursion_factor_c *= exp_dc_squared) {
+        for (c_index = 0, gaussian_z = gaussian_starting_point,
+            recursion_factor_c = recursion_factor_c_start;
+             c_index < c_upper; c_index++,
+            gaussian_z *= recursion_factor_c * recursion_factor_ac_pow_a *
+                                recursion_factor_bc_pow_b,
+            recursion_factor_c *= exp_dc_squared) {
           gto_cartesian<KernelType, i_angular>(i_cartesian, x - i_x, y - i_y,
                                                z - i_z);
           gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x, y - j_y,
@@ -743,7 +745,13 @@ __global__ static void evaluate_xc_kernel(
 
     if (is_valid_pair) {
       KernelType *fock_pointer = fock + image_difference_index * fock_stride +
-                                i_function * n_j_functions + j_function;
+                                 i_function * n_j_functions + j_function;
+
+      const KernelType i_coeff = env[bas(PTR_COEFF, i_shell)];
+      const KernelType j_coeff = env[bas(PTR_COEFF, j_shell)];
+      const KernelType pair_prefactor = i_coeff * j_coeff *
+                                        common_fac_sp<KernelType, i_angular>() *
+                                        common_fac_sp<KernelType, j_angular>();
 
 #pragma unroll
       for (int i_channel = 0; i_channel < n_channels; i_channel++) {
@@ -773,14 +781,14 @@ __global__ static void evaluate_xc_kernel(
 }
 
 #define xc_kernel_macro(li, lj)                                                \
-  evaluate_xc_kernel<KernelType, n_channels, li, lj,                \
-                     is_non_orthogonal><<<block_grid, block_size>>>(           \
-      fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells,     \
-      shell_to_ao_indices, n_i_functions, n_j_functions,                       \
-      sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,         \
-      sorted_block_index, image_indices, vectors_to_neighboring_images,        \
-      n_images, image_pair_difference_index, n_difference_images, mesh_a,      \
-      mesh_b, mesh_c, atm, bas, env)
+  evaluate_xc_kernel<KernelType, n_channels, li, lj, is_non_orthogonal>        \
+      <<<block_grid, block_size>>>(                                            \
+          fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells, \
+          shell_to_ao_indices, n_i_functions, n_j_functions,                   \
+          sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,     \
+          sorted_block_index, image_indices, vectors_to_neighboring_images,    \
+          n_images, image_pair_difference_index, n_difference_images, mesh_a,  \
+          mesh_b, mesh_c, atm, bas, env)
 
 #define xc_kernel_case_macro(li, lj)                                           \
   case (li * 10 + lj):                                                         \
