@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import ctypes
+import warnings
 
 import numpy as np
 import cupy as cp
@@ -220,7 +221,8 @@ def assign_pairs_to_blocks(
     mesh,
     atm,
     bas,
-    env
+    env,
+    has_warned_instability
 ):
     n_blocks = np.prod(n_blocks_abc)
     n_pairs_on_blocks = cp.zeros(n_blocks + 1, dtype=cp.int32)
@@ -245,8 +247,11 @@ def assign_pairs_to_blocks(
         cast_to_pointer(env)
     )
     has_unstable_pairs = (n_unstable_pairs_on_blocks[-1] > 0)
-    print(n_unstable_pairs_on_blocks)
-    
+    if not has_warned_instability and has_unstable_pairs:
+        warnings.warn("Numerical instability may occur due to presence of core electrons or insufficient ke_cutoff.")
+        has_warned_instability = True
+
+
     if err != 0:
         raise RuntimeError('count_pairs_on_blocks failed')
 
@@ -283,6 +288,7 @@ def assign_pairs_to_blocks(
         pairs_on_blocks,
         accumulated_n_pairs_per_block,
         sorted_block_index,
+        has_warned_instability
     )
 
 
@@ -413,6 +419,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
         env = cp.asarray(grouped_cell._env)
 
         t1 = log.timer_debug2("routines before screening", *t1)
+        has_warned_instability = False
         for i_angular, i_shells in zip(i_angulars_unique, sorted_i_shells):
             for j_angular, j_shells in zip(j_angulars_unique, sorted_j_shells):
                 (
@@ -446,6 +453,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
                     gaussian_pair_indices,
                     accumulated_counts,
                     sorted_contributing_blocks,
+                    has_warned_instability
                 ) = assign_pairs_to_blocks(
                     pairs_to_blocks_begin,
                     pairs_to_blocks_end,
@@ -459,7 +467,8 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
                     mesh,
                     atm,
                     bas,
-                    env
+                    env,
+                    has_warned_instability
                 )
                 t1 = log.timer_debug2(
                     "assigning pairs to blocks in angular pair"
