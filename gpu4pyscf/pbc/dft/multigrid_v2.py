@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import ctypes
+import warnings
 
 import numpy as np
 import cupy as cp
@@ -208,17 +209,49 @@ def screen_gaussian_pairs(
 
 
 def assign_pairs_to_blocks(
-    pairs_to_blocks_begin, pairs_to_blocks_end, n_blocks_abc, n_pairs, n_indices
+    pairs_to_blocks_begin,
+    pairs_to_blocks_end,
+    n_blocks_abc,
+    n_indices,
+    non_trivial_pairs,
+    i_shells,
+    j_shells,
+    image_indices,
+    vectors_to_neighboring_images,
+    mesh,
+    atm,
+    bas,
+    env,
+    has_warned_instability
 ):
     n_blocks = np.prod(n_blocks_abc)
-    n_pairs_on_blocks = cp.full(n_blocks + 1, 0, dtype=cp.int32)
+    n_pairs_on_blocks = cp.zeros(n_blocks + 1, dtype=cp.int32)
+    n_unstable_pairs_on_blocks = cp.zeros(n_blocks + 1, dtype = cp.int32)
     err = libgpbc.count_pairs_on_blocks(
         cast_to_pointer(n_pairs_on_blocks),
+        cast_to_pointer(n_unstable_pairs_on_blocks),
         cast_to_pointer(pairs_to_blocks_begin),
         cast_to_pointer(pairs_to_blocks_end),
         cast_to_pointer(n_blocks_abc),
-        ctypes.c_int(n_pairs),
+        ctypes.c_int(len(non_trivial_pairs)),
+        cast_to_pointer(non_trivial_pairs),
+        cast_to_pointer(i_shells),
+        cast_to_pointer(j_shells),
+        ctypes.c_int(len(j_shells)),
+        cast_to_pointer(image_indices),
+        cast_to_pointer(vectors_to_neighboring_images),
+        ctypes.c_int(len(vectors_to_neighboring_images)),
+        cast_to_pointer(mesh),
+        cast_to_pointer(atm),
+        cast_to_pointer(bas),
+        cast_to_pointer(env)
     )
+    has_unstable_pairs = (n_unstable_pairs_on_blocks[-1] > 0)
+    if not has_warned_instability and has_unstable_pairs:
+        warnings.warn("Numerical instability may occur due to presence of core electrons or insufficient ke_cutoff.")
+        has_warned_instability = True
+
+
     if err != 0:
         raise RuntimeError('count_pairs_on_blocks failed')
 
@@ -237,13 +270,25 @@ def assign_pairs_to_blocks(
         cast_to_pointer(pairs_to_blocks_end),
         cast_to_pointer(n_blocks_abc),
         ctypes.c_int(n_contributing_blocks),
-        ctypes.c_int(n_pairs),
+        ctypes.c_int(len(non_trivial_pairs)),
+        cast_to_pointer(non_trivial_pairs),
+        cast_to_pointer(i_shells),
+        cast_to_pointer(j_shells),
+        ctypes.c_int(len(j_shells)),
+        cast_to_pointer(image_indices),
+        cast_to_pointer(vectors_to_neighboring_images),
+        ctypes.c_int(len(vectors_to_neighboring_images)),
+        cast_to_pointer(mesh),
+        cast_to_pointer(atm),
+        cast_to_pointer(bas),
+        cast_to_pointer(env)
     )
 
     return (
         pairs_on_blocks,
         accumulated_n_pairs_per_block,
         sorted_block_index,
+        has_warned_instability
     )
 
 
@@ -293,6 +338,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
         )
 
         dxyz_dabc = lattice_vectors / mesh[:,None]
+        libgpbc.update_dxyz_dabc(dxyz_dabc.ctypes)
         n_blocks_abc = np.asarray(np.ceil(mesh / block_size), dtype=cp.int32)
         equivalent_cell_in_localized, coeff_in_localized = (
             subcell_in_localized_region.decontract_basis(to_cart=True, aggregate=True)
@@ -373,6 +419,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
         env = cp.asarray(grouped_cell._env)
 
         t1 = log.timer_debug2("routines before screening", *t1)
+        has_warned_instability = False
         for i_angular, i_shells in zip(i_angulars_unique, sorted_i_shells):
             for j_angular, j_shells in zip(j_angulars_unique, sorted_j_shells):
                 (
@@ -402,17 +449,26 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
                     contributing_block_ranges, axis=0
                 )
                 n_indices = int(cp.sum(n_contributing_blocks_per_pair))
-                n_pairs = len(screened_shell_pairs)
                 (
                     gaussian_pair_indices,
                     accumulated_counts,
                     sorted_contributing_blocks,
+                    has_warned_instability
                 ) = assign_pairs_to_blocks(
                     pairs_to_blocks_begin,
                     pairs_to_blocks_end,
                     n_blocks_abc,
-                    n_pairs,
                     n_indices,
+                    screened_shell_pairs,
+                    i_shells,
+                    j_shells,
+                    image_indices,
+                    vectors_to_neighboring_images,
+                    mesh,
+                    atm,
+                    bas,
+                    env,
+                    has_warned_instability
                 )
                 t1 = log.timer_debug2(
                     "assigning pairs to blocks in angular pair"

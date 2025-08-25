@@ -78,15 +78,15 @@ __global__ void evaluate_xc_kernel(
   const KernelType start_position_z =
       dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
 
-  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3]
-                           + dxyz_dabc[1] * dxyz_dabc[4]
-                           + dxyz_dabc[2] * dxyz_dabc[5];
-  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6]
-                           + dxyz_dabc[1] * dxyz_dabc[7]
-                           + dxyz_dabc[2] * dxyz_dabc[8];
-  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6]
-                           + dxyz_dabc[4] * dxyz_dabc[7]
-                           + dxyz_dabc[5] * dxyz_dabc[8];
+  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] +
+                             dxyz_dabc[1] * dxyz_dabc[4] +
+                             dxyz_dabc[2] * dxyz_dabc[5];
+  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] +
+                             dxyz_dabc[1] * dxyz_dabc[7] +
+                             dxyz_dabc[2] * dxyz_dabc[8];
+  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6] +
+                             dxyz_dabc[4] * dxyz_dabc[7] +
+                             dxyz_dabc[5] * dxyz_dabc[8];
 
   const int a_upper = min(a_start + BLOCK_DIM_XYZ, mesh_a) - a_start;
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
@@ -151,8 +151,8 @@ __global__ void evaluate_xc_kernel(
 
     const KernelType i_exponent = env[bas(PTR_EXP, i_shell)];
     const int i_coord_offset = atm(PTR_COORD, i_atom);
-    const KernelType i_x = env[i_coord_offset] +
-                           vectors_to_neighboring_images[image_index_i * 3];
+    const KernelType i_x =
+        env[i_coord_offset] + vectors_to_neighboring_images[image_index_i * 3];
     const KernelType i_y = env[i_coord_offset + 1] +
                            vectors_to_neighboring_images[image_index_i * 3 + 1];
     const KernelType i_z = env[i_coord_offset + 2] +
@@ -161,8 +161,8 @@ __global__ void evaluate_xc_kernel(
 
     const KernelType j_exponent = env[bas(PTR_EXP, j_shell)];
     const int j_coord_offset = atm(PTR_COORD, j_atom);
-    const KernelType j_x = env[j_coord_offset] +
-                           vectors_to_neighboring_images[image_index_j * 3];
+    const KernelType j_x =
+        env[j_coord_offset] + vectors_to_neighboring_images[image_index_j * 3];
     const KernelType j_y = env[j_coord_offset + 1] +
                            vectors_to_neighboring_images[image_index_j * 3 + 1];
     const KernelType j_z = env[j_coord_offset + 2] +
@@ -188,11 +188,14 @@ __global__ void evaluate_xc_kernel(
     const KernelType gaussian_exponent_at_reference =
         ij_exponent * distance_squared(x0, y0, z0);
 
-    const KernelType pair_prefactor =
+    const KernelType pair_prefactor = i_coeff * j_coeff *
+                                      common_fac_sp<KernelType, i_angular>() *
+                                      common_fac_sp<KernelType, j_angular>();
+
+    const KernelType gaussian_starting_point =
         is_valid_pair
-            ? exp(-ij_exponent_in_prefactor - gaussian_exponent_at_reference) *
-                  i_coeff * j_coeff * common_fac_sp<KernelType, i_angular>() *
-                  common_fac_sp<KernelType, j_angular>()
+            ? exp(-(ij_exponent_in_prefactor + gaussian_exponent_at_reference) /
+                  3)
             : 0;
 
 #pragma unroll
@@ -256,8 +259,8 @@ __global__ void evaluate_xc_kernel(
     KernelType i_cartesian_gradient[n_dimensions * n_i_cartesian_functions];
     KernelType j_cartesian_gradient[n_dimensions * n_j_cartesian_functions];
     KernelType x, y, z;
-    KernelType gaussian_x, gaussian_y, gaussian_z,
-               recursion_factor_a, recursion_factor_b, recursion_factor_c;
+    KernelType gaussian_x, gaussian_y, gaussian_z, recursion_factor_a,
+        recursion_factor_b, recursion_factor_c;
     KernelType recursion_factor_ab_pow_a = 1;
     KernelType recursion_factor_ac_pow_a = 1;
     KernelType recursion_factor_bc_pow_b = 1;
@@ -268,41 +271,42 @@ __global__ void evaluate_xc_kernel(
     } else {
       x = start_position_x;
     }
-    for (a_index = 0, gaussian_x = 1,
-         recursion_factor_a = recursion_factor_a_start;
-         a_index < a_upper;
-         a_index++, gaussian_x *= recursion_factor_a,
-         recursion_factor_a *= exp_da_squared) {
+    for (a_index = 0, gaussian_x = gaussian_starting_point,
+        recursion_factor_a = recursion_factor_a_start;
+         a_index < a_upper; a_index++, gaussian_x *= recursion_factor_a,
+        recursion_factor_a *= exp_da_squared) {
 
       if constexpr (is_non_orthogonal) {
         recursion_factor_bc_pow_b = 1;
       } else {
         y = start_position_y;
       }
-      for (b_index = 0, gaussian_y = 1,
-           recursion_factor_b = recursion_factor_b_start;
-           b_index < b_upper;
-           b_index++, gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
-           recursion_factor_b *= exp_db_squared) {
+      for (b_index = 0, gaussian_y = gaussian_starting_point,
+          recursion_factor_b = recursion_factor_b_start;
+           b_index < b_upper; b_index++,
+          gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
+          recursion_factor_b *= exp_db_squared) {
 
         if constexpr (is_non_orthogonal) {
-          x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
-          y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
-          z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
+          x = start_position_x + a_index * dxyz_dabc[0] +
+              b_index * dxyz_dabc[3];
+          y = start_position_y + a_index * dxyz_dabc[1] +
+              b_index * dxyz_dabc[4];
+          z = start_position_z + a_index * dxyz_dabc[2] +
+              b_index * dxyz_dabc[5];
         } else {
           z = start_position_z;
         }
-        for (c_index = 0, gaussian_z = 1,
-             recursion_factor_c = recursion_factor_c_start;
-             c_index < c_upper;
-             c_index++, gaussian_z *= recursion_factor_c
-                                    * recursion_factor_ac_pow_a
-                                    * recursion_factor_bc_pow_b,
-             recursion_factor_c *= exp_dc_squared) {
-          multi_grid::gto_cartesian<KernelType, i_angular>(i_cartesian,
-                                                           x - i_x, y - i_y, z - i_z);
-          multi_grid::gto_cartesian<KernelType, j_angular>(j_cartesian,
-                                                           x - j_x, y - j_y, z - j_z);
+        for (c_index = 0, gaussian_z = gaussian_starting_point,
+            recursion_factor_c = recursion_factor_c_start;
+             c_index < c_upper; c_index++,
+            gaussian_z *= recursion_factor_c * recursion_factor_ac_pow_a *
+                                recursion_factor_bc_pow_b,
+            recursion_factor_c *= exp_dc_squared) {
+          multi_grid::gto_cartesian<KernelType, i_angular>(i_cartesian, x - i_x,
+                                                           y - i_y, z - i_z);
+          multi_grid::gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x,
+                                                           y - j_y, z - j_z);
           gradient::gto_cartesian<KernelType, i_angular>(
               i_cartesian_gradient, i_cartesian, x - i_x, y - i_y, z - i_z,
               i_exponent);
@@ -507,15 +511,15 @@ __global__ void evaluate_xc_with_tau_kernel(
   const KernelType start_position_z =
       dxyz_dabc[2] * a_start + dxyz_dabc[5] * b_start + dxyz_dabc[8] * c_start;
 
-  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3]
-                           + dxyz_dabc[1] * dxyz_dabc[4]
-                           + dxyz_dabc[2] * dxyz_dabc[5];
-  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6]
-                           + dxyz_dabc[1] * dxyz_dabc[7]
-                           + dxyz_dabc[2] * dxyz_dabc[8];
-  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6]
-                           + dxyz_dabc[4] * dxyz_dabc[7]
-                           + dxyz_dabc[5] * dxyz_dabc[8];
+  const KernelType a_dot_b = dxyz_dabc[0] * dxyz_dabc[3] +
+                             dxyz_dabc[1] * dxyz_dabc[4] +
+                             dxyz_dabc[2] * dxyz_dabc[5];
+  const KernelType a_dot_c = dxyz_dabc[0] * dxyz_dabc[6] +
+                             dxyz_dabc[1] * dxyz_dabc[7] +
+                             dxyz_dabc[2] * dxyz_dabc[8];
+  const KernelType b_dot_c = dxyz_dabc[3] * dxyz_dabc[6] +
+                             dxyz_dabc[4] * dxyz_dabc[7] +
+                             dxyz_dabc[5] * dxyz_dabc[8];
 
   const int a_upper = min(a_start + BLOCK_DIM_XYZ, mesh_a) - a_start;
   const int b_upper = min(b_start + BLOCK_DIM_XYZ, mesh_b) - b_start;
@@ -551,11 +555,11 @@ __global__ void evaluate_xc_with_tau_kernel(
     KernelType xc_tau_value = 0;
     if (!out_of_boundary) {
       xc_rho_value =
-          xc_weights[(i_channel * 2 + 0) * xc_weights_stride
-                     + a_index * mesh_b * mesh_c + b_index * mesh_c + c_index];
+          xc_weights[(i_channel * 2 + 0) * xc_weights_stride +
+                     a_index * mesh_b * mesh_c + b_index * mesh_c + c_index];
       xc_tau_value =
-          xc_weights[(i_channel * 2 + 1) * xc_weights_stride
-                     + a_index * mesh_b * mesh_c + b_index * mesh_c + c_index];
+          xc_weights[(i_channel * 2 + 1) * xc_weights_stride +
+                     a_index * mesh_b * mesh_c + b_index * mesh_c + c_index];
     }
 
     xc_values[(i_channel * 2 + 0) * n_threads + thread_id] = xc_rho_value;
@@ -585,8 +589,8 @@ __global__ void evaluate_xc_with_tau_kernel(
 
     const KernelType i_exponent = env[bas(PTR_EXP, i_shell)];
     const int i_coord_offset = atm(PTR_COORD, i_atom);
-    const KernelType i_x = env[i_coord_offset] +
-                           vectors_to_neighboring_images[image_index_i * 3];
+    const KernelType i_x =
+        env[i_coord_offset] + vectors_to_neighboring_images[image_index_i * 3];
     const KernelType i_y = env[i_coord_offset + 1] +
                            vectors_to_neighboring_images[image_index_i * 3 + 1];
     const KernelType i_z = env[i_coord_offset + 2] +
@@ -595,8 +599,8 @@ __global__ void evaluate_xc_with_tau_kernel(
 
     const KernelType j_exponent = env[bas(PTR_EXP, j_shell)];
     const int j_coord_offset = atm(PTR_COORD, j_atom);
-    const KernelType j_x = env[j_coord_offset] +
-                           vectors_to_neighboring_images[image_index_j * 3];
+    const KernelType j_x =
+        env[j_coord_offset] + vectors_to_neighboring_images[image_index_j * 3];
     const KernelType j_y = env[j_coord_offset + 1] +
                            vectors_to_neighboring_images[image_index_j * 3 + 1];
     const KernelType j_z = env[j_coord_offset + 2] +
@@ -622,11 +626,14 @@ __global__ void evaluate_xc_with_tau_kernel(
     const KernelType gaussian_exponent_at_reference =
         ij_exponent * distance_squared(x0, y0, z0);
 
-    const KernelType pair_prefactor =
+    const KernelType pair_prefactor = i_coeff * j_coeff *
+                                      common_fac_sp<KernelType, i_angular>() *
+                                      common_fac_sp<KernelType, j_angular>();
+
+    const KernelType gaussian_starting_point =
         is_valid_pair
-            ? exp(-ij_exponent_in_prefactor - gaussian_exponent_at_reference) *
-                  i_coeff * j_coeff * common_fac_sp<KernelType, i_angular>() *
-                  common_fac_sp<KernelType, j_angular>()
+            ? exp(-(ij_exponent_in_prefactor + gaussian_exponent_at_reference) /
+                  3.0)
             : 0;
 
 #pragma unroll
@@ -649,7 +656,8 @@ __global__ void evaluate_xc_with_tau_kernel(
                                (i_function + i_function_index) * n_j_functions +
                                j_function + j_function_index];
 
-          prefactor[i_channel * n_i_cartesian_functions * n_j_cartesian_functions +
+          prefactor[i_channel * n_i_cartesian_functions *
+                        n_j_cartesian_functions +
                     i_function_index * n_j_cartesian_functions +
                     j_function_index] = pair_prefactor * density_matrix_value;
         }
@@ -688,11 +696,15 @@ __global__ void evaluate_xc_with_tau_kernel(
     KernelType j_cartesian[n_j_cartesian_functions];
     KernelType i_cartesian_gradient[n_dimensions * n_i_cartesian_functions];
     KernelType j_cartesian_gradient[n_dimensions * n_j_cartesian_functions];
-    KernelType i_cartesian_second_derivative[((n_dimensions + 1) * n_dimensions / 2) * n_i_cartesian_functions];
-    KernelType j_cartesian_second_derivative[((n_dimensions + 1) * n_dimensions / 2) * n_j_cartesian_functions];
+    KernelType
+        i_cartesian_second_derivative[((n_dimensions + 1) * n_dimensions / 2) *
+                                      n_i_cartesian_functions];
+    KernelType
+        j_cartesian_second_derivative[((n_dimensions + 1) * n_dimensions / 2) *
+                                      n_j_cartesian_functions];
     KernelType x, y, z;
-    KernelType gaussian_x, gaussian_y, gaussian_z,
-               recursion_factor_a, recursion_factor_b, recursion_factor_c;
+    KernelType gaussian_x, gaussian_y, gaussian_z, recursion_factor_a,
+        recursion_factor_b, recursion_factor_c;
     KernelType recursion_factor_ab_pow_a = 1;
     KernelType recursion_factor_ac_pow_a = 1;
     KernelType recursion_factor_bc_pow_b = 1;
@@ -703,41 +715,42 @@ __global__ void evaluate_xc_with_tau_kernel(
     } else {
       x = start_position_x;
     }
-    for (a_index = 0, gaussian_x = 1,
-         recursion_factor_a = recursion_factor_a_start;
-         a_index < a_upper;
-         a_index++, gaussian_x *= recursion_factor_a,
-         recursion_factor_a *= exp_da_squared) {
+    for (a_index = 0, gaussian_x = gaussian_starting_point,
+        recursion_factor_a = recursion_factor_a_start;
+         a_index < a_upper; a_index++, gaussian_x *= recursion_factor_a,
+        recursion_factor_a *= exp_da_squared) {
 
       if constexpr (is_non_orthogonal) {
         recursion_factor_bc_pow_b = 1;
       } else {
         y = start_position_y;
       }
-      for (b_index = 0, gaussian_y = 1,
-           recursion_factor_b = recursion_factor_b_start;
-           b_index < b_upper;
-           b_index++, gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
-           recursion_factor_b *= exp_db_squared) {
+      for (b_index = 0, gaussian_y = gaussian_starting_point,
+          recursion_factor_b = recursion_factor_b_start;
+           b_index < b_upper; b_index++,
+          gaussian_y *= recursion_factor_b * recursion_factor_ab_pow_a,
+          recursion_factor_b *= exp_db_squared) {
 
         if constexpr (is_non_orthogonal) {
-          x = start_position_x + a_index * dxyz_dabc[0] + b_index * dxyz_dabc[3];
-          y = start_position_y + a_index * dxyz_dabc[1] + b_index * dxyz_dabc[4];
-          z = start_position_z + a_index * dxyz_dabc[2] + b_index * dxyz_dabc[5];
+          x = start_position_x + a_index * dxyz_dabc[0] +
+              b_index * dxyz_dabc[3];
+          y = start_position_y + a_index * dxyz_dabc[1] +
+              b_index * dxyz_dabc[4];
+          z = start_position_z + a_index * dxyz_dabc[2] +
+              b_index * dxyz_dabc[5];
         } else {
           z = start_position_z;
         }
-        for (c_index = 0, gaussian_z = 1,
-             recursion_factor_c = recursion_factor_c_start;
-             c_index < c_upper;
-             c_index++, gaussian_z *= recursion_factor_c
-                                    * recursion_factor_ac_pow_a
-                                    * recursion_factor_bc_pow_b,
-             recursion_factor_c *= exp_dc_squared) {
-          multi_grid::gto_cartesian<KernelType, i_angular>(i_cartesian,
-                                                           x - i_x, y - i_y, z - i_z);
-          multi_grid::gto_cartesian<KernelType, j_angular>(j_cartesian,
-                                                           x - j_x, y - j_y, z - j_z);
+        for (c_index = 0, gaussian_z = gaussian_starting_point,
+            recursion_factor_c = recursion_factor_c_start;
+             c_index < c_upper; c_index++,
+            gaussian_z *= recursion_factor_c * recursion_factor_ac_pow_a *
+                                recursion_factor_bc_pow_b,
+            recursion_factor_c *= exp_dc_squared) {
+          multi_grid::gto_cartesian<KernelType, i_angular>(i_cartesian, x - i_x,
+                                                           y - i_y, z - i_z);
+          multi_grid::gto_cartesian<KernelType, j_angular>(j_cartesian, x - j_x,
+                                                           y - j_y, z - j_z);
           gradient::gto_cartesian<KernelType, i_angular>(
               i_cartesian_gradient, i_cartesian, x - i_x, y - i_y, z - i_z,
               i_exponent);
@@ -745,23 +758,25 @@ __global__ void evaluate_xc_with_tau_kernel(
               j_cartesian_gradient, j_cartesian, x - j_x, y - j_y, z - j_z,
               j_exponent);
           second_derivative::gto_cartesian<KernelType, i_angular>(
-            i_cartesian_second_derivative, x - i_x, y - i_y, z - i_z, i_exponent);
+              i_cartesian_second_derivative, x - i_x, y - i_y, z - i_z,
+              i_exponent);
           second_derivative::gto_cartesian<KernelType, j_angular>(
-            j_cartesian_second_derivative, x - j_x, y - j_y, z - j_z, j_exponent);
+              j_cartesian_second_derivative, x - j_x, y - j_y, z - j_z,
+              j_exponent);
 
           const KernelType gaussian = gaussian_x * gaussian_y * gaussian_z;
 #pragma unroll
           for (int i_channel = 0; i_channel < n_channels; i_channel++) {
             const KernelType xc_rho_value =
-                gaussian *
-                xc_values[(i_channel * 2 + 0) * n_threads
-                          + a_index * n_xy_threads
-                          + b_index * BLOCK_DIM_XYZ + c_index];
+                gaussian * xc_values[(i_channel * 2 + 0) * n_threads +
+                                     a_index * n_xy_threads +
+                                     b_index * BLOCK_DIM_XYZ + c_index];
             const KernelType xc_tau_value =
                 gaussian *
-                xc_values[(i_channel * 2 + 1) * n_threads
-                          + a_index * n_xy_threads
-                          + b_index * BLOCK_DIM_XYZ + c_index] / 2;
+                xc_values[(i_channel * 2 + 1) * n_threads +
+                          a_index * n_xy_threads + b_index * BLOCK_DIM_XYZ +
+                          c_index] /
+                2;
 
 #pragma unroll
             for (int i_function_index = 0;
@@ -771,88 +786,143 @@ __global__ void evaluate_xc_with_tau_kernel(
               for (int j_function_index = 0;
                    j_function_index < n_j_cartesian_functions;
                    j_function_index++) {
-                const KernelType prefactor_ij = prefactor[
-                  i_channel * n_ij
-                  + i_function_index * n_j_cartesian_functions + j_function_index];
+                const KernelType prefactor_ij =
+                    prefactor[i_channel * n_ij +
+                              i_function_index * n_j_cartesian_functions +
+                              j_function_index];
 
-                i_atom_gradient[0] -= prefactor_ij * (
-                  xc_rho_value
-                  * i_cartesian_gradient[0 * n_i_cartesian_functions + i_function_index]
-                  * j_cartesian[j_function_index]
-                  + xc_tau_value * (
-                      i_cartesian_second_derivative[0 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[0 * n_j_cartesian_functions + j_function_index]
-                    + i_cartesian_second_derivative[1 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[1 * n_j_cartesian_functions + j_function_index]
-                    + i_cartesian_second_derivative[2 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[2 * n_j_cartesian_functions + j_function_index]
-                  )
-                );
-                j_atom_gradient[0] -= prefactor_ij * (
-                  xc_rho_value
-                  * j_cartesian_gradient[0 * n_j_cartesian_functions + j_function_index]
-                  * i_cartesian[i_function_index]
-                  + xc_tau_value * (
-                      j_cartesian_second_derivative[0 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[0 * n_i_cartesian_functions + i_function_index]
-                    + j_cartesian_second_derivative[1 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[1 * n_i_cartesian_functions + i_function_index]
-                    + j_cartesian_second_derivative[2 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[2 * n_i_cartesian_functions + i_function_index]
-                  )
-                );
-                i_atom_gradient[1] -= prefactor_ij * (
-                  xc_rho_value
-                  * i_cartesian_gradient[1 * n_i_cartesian_functions + i_function_index]
-                  * j_cartesian[j_function_index]
-                  + xc_tau_value * (
-                      i_cartesian_second_derivative[1 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[0 * n_j_cartesian_functions + j_function_index]
-                    + i_cartesian_second_derivative[3 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[1 * n_j_cartesian_functions + j_function_index]
-                    + i_cartesian_second_derivative[4 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[2 * n_j_cartesian_functions + j_function_index]
-                  )
-                );
-                j_atom_gradient[1] -= prefactor_ij * (
-                  xc_rho_value
-                  * j_cartesian_gradient[1 * n_j_cartesian_functions + j_function_index]
-                  * i_cartesian[i_function_index]
-                  + xc_tau_value * (
-                      j_cartesian_second_derivative[1 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[0 * n_i_cartesian_functions + i_function_index]
-                    + j_cartesian_second_derivative[3 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[1 * n_i_cartesian_functions + i_function_index]
-                    + j_cartesian_second_derivative[4 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[2 * n_i_cartesian_functions + i_function_index]
-                  )
-                );
-                i_atom_gradient[2] -= prefactor_ij * (
-                  xc_rho_value
-                  * i_cartesian_gradient[2 * n_i_cartesian_functions + i_function_index]
-                  * j_cartesian[j_function_index]
-                  + xc_tau_value * (
-                      i_cartesian_second_derivative[2 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[0 * n_j_cartesian_functions + j_function_index]
-                    + i_cartesian_second_derivative[4 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[1 * n_j_cartesian_functions + j_function_index]
-                    + i_cartesian_second_derivative[5 * n_i_cartesian_functions + i_function_index]
-                    * j_cartesian_gradient[2 * n_j_cartesian_functions + j_function_index]
-                  )
-                );
-                j_atom_gradient[2] -= prefactor_ij * (
-                  xc_rho_value
-                  * j_cartesian_gradient[2 * n_j_cartesian_functions + j_function_index]
-                  * i_cartesian[i_function_index]
-                  + xc_tau_value * (
-                      j_cartesian_second_derivative[2 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[0 * n_i_cartesian_functions + i_function_index]
-                    + j_cartesian_second_derivative[4 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[1 * n_i_cartesian_functions + i_function_index]
-                    + j_cartesian_second_derivative[5 * n_j_cartesian_functions + j_function_index]
-                    * i_cartesian_gradient[2 * n_i_cartesian_functions + i_function_index]
-                  )
-                );
+                i_atom_gradient[0] -=
+                    prefactor_ij *
+                    (xc_rho_value *
+                         i_cartesian_gradient[0 * n_i_cartesian_functions +
+                                              i_function_index] *
+                         j_cartesian[j_function_index] +
+                     xc_tau_value *
+                         (i_cartesian_second_derivative
+                                  [0 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[0 * n_j_cartesian_functions +
+                                                   j_function_index] +
+                          i_cartesian_second_derivative
+                                  [1 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[1 * n_j_cartesian_functions +
+                                                   j_function_index] +
+                          i_cartesian_second_derivative
+                                  [2 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[2 * n_j_cartesian_functions +
+                                                   j_function_index]));
+                j_atom_gradient[0] -=
+                    prefactor_ij *
+                    (xc_rho_value *
+                         j_cartesian_gradient[0 * n_j_cartesian_functions +
+                                              j_function_index] *
+                         i_cartesian[i_function_index] +
+                     xc_tau_value *
+                         (j_cartesian_second_derivative
+                                  [0 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[0 * n_i_cartesian_functions +
+                                                   i_function_index] +
+                          j_cartesian_second_derivative
+                                  [1 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[1 * n_i_cartesian_functions +
+                                                   i_function_index] +
+                          j_cartesian_second_derivative
+                                  [2 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[2 * n_i_cartesian_functions +
+                                                   i_function_index]));
+                i_atom_gradient[1] -=
+                    prefactor_ij *
+                    (xc_rho_value *
+                         i_cartesian_gradient[1 * n_i_cartesian_functions +
+                                              i_function_index] *
+                         j_cartesian[j_function_index] +
+                     xc_tau_value *
+                         (i_cartesian_second_derivative
+                                  [1 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[0 * n_j_cartesian_functions +
+                                                   j_function_index] +
+                          i_cartesian_second_derivative
+                                  [3 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[1 * n_j_cartesian_functions +
+                                                   j_function_index] +
+                          i_cartesian_second_derivative
+                                  [4 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[2 * n_j_cartesian_functions +
+                                                   j_function_index]));
+                j_atom_gradient[1] -=
+                    prefactor_ij *
+                    (xc_rho_value *
+                         j_cartesian_gradient[1 * n_j_cartesian_functions +
+                                              j_function_index] *
+                         i_cartesian[i_function_index] +
+                     xc_tau_value *
+                         (j_cartesian_second_derivative
+                                  [1 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[0 * n_i_cartesian_functions +
+                                                   i_function_index] +
+                          j_cartesian_second_derivative
+                                  [3 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[1 * n_i_cartesian_functions +
+                                                   i_function_index] +
+                          j_cartesian_second_derivative
+                                  [4 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[2 * n_i_cartesian_functions +
+                                                   i_function_index]));
+                i_atom_gradient[2] -=
+                    prefactor_ij *
+                    (xc_rho_value *
+                         i_cartesian_gradient[2 * n_i_cartesian_functions +
+                                              i_function_index] *
+                         j_cartesian[j_function_index] +
+                     xc_tau_value *
+                         (i_cartesian_second_derivative
+                                  [2 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[0 * n_j_cartesian_functions +
+                                                   j_function_index] +
+                          i_cartesian_second_derivative
+                                  [4 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[1 * n_j_cartesian_functions +
+                                                   j_function_index] +
+                          i_cartesian_second_derivative
+                                  [5 * n_i_cartesian_functions +
+                                   i_function_index] *
+                              j_cartesian_gradient[2 * n_j_cartesian_functions +
+                                                   j_function_index]));
+                j_atom_gradient[2] -=
+                    prefactor_ij *
+                    (xc_rho_value *
+                         j_cartesian_gradient[2 * n_j_cartesian_functions +
+                                              j_function_index] *
+                         i_cartesian[i_function_index] +
+                     xc_tau_value *
+                         (j_cartesian_second_derivative
+                                  [2 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[0 * n_i_cartesian_functions +
+                                                   i_function_index] +
+                          j_cartesian_second_derivative
+                                  [4 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[1 * n_i_cartesian_functions +
+                                                   i_function_index] +
+                          j_cartesian_second_derivative
+                                  [5 * n_j_cartesian_functions +
+                                   j_function_index] *
+                              i_cartesian_gradient[2 * n_i_cartesian_functions +
+                                                   i_function_index]));
               }
             }
           }
@@ -893,20 +963,19 @@ __global__ void evaluate_xc_with_tau_kernel(
   }
 }
 
-#define xc_with_tau_gradient_kernel_macro(li, lj)                                \
-  evaluate_xc_with_tau_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
-      <<<block_grid, block_size>>>(                                              \
-          gradient, xc_weights, density_matrices, non_trivial_pairs, i_shells,   \
-          j_shells, n_j_shells, shell_to_ao_indices, n_i_functions,              \
-          n_j_functions, sorted_pairs_per_local_grid,                            \
-          accumulated_n_pairs_per_local_grid, sorted_block_index,                \
-          image_indices, vectors_to_neighboring_images, n_images,                \
-          image_pair_difference_index, n_difference_images, mesh_a, mesh_b,      \
-          mesh_c, atm, bas, env)
+#define xc_with_tau_gradient_kernel_macro(li, lj)                              \
+  evaluate_xc_with_tau_kernel<KernelType, n_channels, li, lj,                  \
+                              is_non_orthogonal><<<block_grid, block_size>>>(  \
+      gradient, xc_weights, density_matrices, non_trivial_pairs, i_shells,     \
+      j_shells, n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions, \
+      sorted_pairs_per_local_grid, accumulated_n_pairs_per_local_grid,         \
+      sorted_block_index, image_indices, vectors_to_neighboring_images,        \
+      n_images, image_pair_difference_index, n_difference_images, mesh_a,      \
+      mesh_b, mesh_c, atm, bas, env)
 
-#define xc_with_tau_gradient_kernel_case_macro(li, lj)                           \
-  case (li * 10 + lj):                                                           \
-    xc_with_tau_gradient_kernel_macro(li, lj);                                   \
+#define xc_with_tau_gradient_kernel_case_macro(li, lj)                         \
+  case (li * 10 + lj):                                                         \
+    xc_with_tau_gradient_kernel_macro(li, lj);                                 \
     break
 
 template <typename KernelType, int n_channels, bool is_non_orthogonal>

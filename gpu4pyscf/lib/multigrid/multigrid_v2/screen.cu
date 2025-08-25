@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <complex.h>
 #include <gint/cuda_alloc.cuh>
 #include <gint/gint.h>
 #include <stdio.h>
@@ -35,13 +36,13 @@ extern "C" {
     break
 
 int count_non_trivial_pairs(int *n_counts, const int i_angular,
-                             const int j_angular, const int *i_shells,
-                             const int n_i_shells, const int *j_shells,
-                             const int n_j_shells,
-                             const double *vectors_to_neighboring_images,
-                             const int n_images, const int *mesh,
-                             const int *atm, const int *bas, const double *env,
-                             const double threshold_in_log) {
+                            const int j_angular, const int *i_shells,
+                            const int n_i_shells, const int *j_shells,
+                            const int n_j_shells,
+                            const double *vectors_to_neighboring_images,
+                            const int n_images, const int *mesh, const int *atm,
+                            const int *bas, const double *env,
+                            const double threshold_in_log) {
   dim3 block_size(16, 16);
   dim3 block_grid((n_i_shells * n_images + 15) / 16,
                   (n_j_shells * n_images + 15) / 16);
@@ -98,15 +99,15 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
     break
 
 int screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
-                           int *pairs_to_blocks_begin, int *pairs_to_blocks_end,
-                           const int i_angular, const int j_angular,
-                           const int *i_shells, const int n_i_shells,
-                           const int *j_shells, const int n_j_shells,
-                           const int n_pairs,
-                           const double *vectors_to_neighboring_images,
-                           const int n_images, const int *mesh, const int *atm,
-                           const int *bas, const double *env,
-                           const double threshold_in_log) {
+                          int *pairs_to_blocks_begin, int *pairs_to_blocks_end,
+                          const int i_angular, const int j_angular,
+                          const int *i_shells, const int n_i_shells,
+                          const int *j_shells, const int n_j_shells,
+                          const int n_pairs,
+                          const double *vectors_to_neighboring_images,
+                          const int n_images, const int *mesh, const int *atm,
+                          const int *bas, const double *env,
+                          const double threshold_in_log) {
   dim3 block_size(16, 16);
   dim3 block_grid((n_i_shells * n_images + 15) / 16,
                   (n_j_shells * n_images + 15) / 16);
@@ -155,9 +156,15 @@ int screen_gaussian_pairs(int *shell_pair_indices, int *image_indices,
 }
 
 int count_pairs_on_blocks(int *n_pairs_per_block,
-                           const int *pairs_to_blocks_begin,
-                           const int *pairs_to_blocks_end,
-                           const int n_blocks[3], const int n_pairs) {
+                          int *n_unstable_pairs_per_block,
+                          const int *pairs_to_blocks_begin,
+                          const int *pairs_to_blocks_end, const int n_blocks[3],
+                          const int n_pairs, const int *non_trivial_pairs,
+                          const int *i_shells, const int *j_shells,
+                          const int n_j_shells, const int *image_indices,
+                          const double *vectors_to_neighboring_images,
+                          const int n_images, const int mesh[3], const int *atm,
+                          const int *bas, const double *env) {
   const int n_blocks_a = n_blocks[0];
   const int n_blocks_b = n_blocks[1];
   const int n_blocks_c = n_blocks[2];
@@ -166,18 +173,23 @@ int count_pairs_on_blocks(int *n_pairs_per_block,
   const dim3 block_grid(n_blocks_c, n_blocks_b, n_blocks_a);
   gpu4pyscf::gpbc::multi_grid::
       count_pairs_on_blocks_kernel<<<block_grid, block_size>>>(
-          n_pairs_per_block, pairs_to_blocks_begin, pairs_to_blocks_end,
-          n_pairs);
+          n_pairs_per_block, n_unstable_pairs_per_block, pairs_to_blocks_begin,
+          pairs_to_blocks_end, n_pairs, non_trivial_pairs, i_shells, j_shells,
+          n_j_shells, image_indices, vectors_to_neighboring_images, n_images,
+          mesh[0], mesh[1], mesh[2], atm, bas, env);
 
   return checkCudaErrors(cudaPeekAtLastError());
 }
 
-void put_pairs_on_blocks(int *pairs_on_blocks,
-                         const int *accumulated_n_pairs_per_block,
-                         const int *sorted_block_index,
-                         const int *pairs_to_blocks_begin,
-                         const int *pairs_to_blocks_end, const int n_blocks[3],
-                         const int n_contributing_blocks, const int n_pairs) {
+void put_pairs_on_blocks(
+    int *pairs_on_blocks, const int *accumulated_n_pairs_per_block,
+    const int *sorted_block_index, const int *pairs_to_blocks_begin,
+    const int *pairs_to_blocks_end, const int n_blocks[3],
+    const int n_contributing_blocks, const int n_pairs,
+    const int *non_trivial_pairs, const int *i_shells, const int *j_shells,
+    const int n_j_shells, const int *image_indices,
+    const double *vectors_to_neighboring_images, const int n_images,
+    const int mesh[3], const int *atm, const int *bas, const double *env) {
   const int n_blocks_a = n_blocks[0];
   const int n_blocks_b = n_blocks[1];
   const int n_blocks_c = n_blocks[2];
@@ -188,7 +200,9 @@ void put_pairs_on_blocks(int *pairs_on_blocks,
       put_pairs_on_blocks_kernel<<<block_grid, block_size>>>(
           pairs_on_blocks, accumulated_n_pairs_per_block, sorted_block_index,
           pairs_to_blocks_begin, pairs_to_blocks_end, n_blocks_a, n_blocks_b,
-          n_blocks_c, n_pairs);
+          n_blocks_c, n_pairs, non_trivial_pairs, i_shells, j_shells,
+          n_j_shells, image_indices, vectors_to_neighboring_images, n_images,
+          mesh[0], mesh[1], mesh[2], atm, bas, env);
 
   checkCudaErrors(cudaPeekAtLastError());
 }
