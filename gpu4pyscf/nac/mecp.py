@@ -84,7 +84,7 @@ class MECPScanner:
         # 1. Run SCF and TD-SCF calculations for the new geometry using scanners
         # This is the safe and recommended way to handle geometry changes.
         e_tot = self._mf_scanner(mol)
-        e_td = self._td_scanner(mol)
+        self._td_scanner(mol)
         self.converged = all(self._td_scanner.converged)
 
         if (isinstance(self.td, (tdscf.rhf.TDA, tdscf.rhf.TDHF,
