@@ -18,7 +18,7 @@ import pyscf
 from pyscf import dft
 from gpu4pyscf import tdscf
 from pyscf.data.nist import HARTREE2EV
-from gpu4pyscf.nac.mecp import ConicalIntersectionOptimizer
+from gpu4pyscf.nac.mecp import MECPScanner, ConicalIntersectionOptimizer
 
 atom = """
  H   0.451616   0.760462   1.270585
@@ -120,9 +120,10 @@ class KnownValues(unittest.TestCase):
         delta_e1 = e1[1] - e1[0]
         delta_e2 = e2[1] - e2[0]
 
-        ci_optimizer.get_eff_energy_and_gradient() # calculate the energy and effective gradient.
-
-        assert np.linalg.norm(ci_optimizer._last_grad) <= 2.0E-5
+        ci_optimizer_new = ConicalIntersectionOptimizer(tdf, states=(1, 2), crossing_type='n-2')
+        mecp_obj = MECPScanner(ci_optimizer_new)
+        g_bar = mecp_obj(optimized_mol)[1]
+        assert np.linalg.norm(g_bar) <= 5.0E-5
         assert e_mecp <= 2.0E-5
         assert delta_e1 >= 1.0E-5
         assert delta_e2 <= 1.0E-5
