@@ -39,12 +39,10 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         assert mydf.is_gamma_point
         mydf.build()
         t0 = log.timer_debug1('Init get_jk', *t0)
-    assert hermi == 1
     assert dm.dtype == np.float64
     assert with_j or with_k
 
     out_shape = dm.shape
-    out_cupy = isinstance(dm, cp.ndarray)
     nao = out_shape[-1]
     assert nao == mydf.nao
     dms = cp.asarray(dm).reshape(-1,nao,nao)
@@ -56,7 +54,10 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         ao_pair_mapping, diag = mydf._cderi_idx
         rows, cols = divmod(ao_pair_mapping, nao)
         dm_sparse = dms[:,rows,cols]
-        dm_sparse *= 2
+        if hermi == 1:
+            dm_sparse *= 2
+        else:
+            dm_sparse += dms[:,cols,rows]
         dm_sparse[:,diag] *= .5
 
     if getattr(dm, 'mo_coeff', None) is not None:
@@ -83,7 +84,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
                 _occ_coeff = [cp.asarray(x) for x in occ_coeff]
                 vk = cp.zeros_like(dms)
             for cderi, cderi_sparse in mydf.loop(blksize=blksize, unpack=with_k,
-                                                 aux_range_iter=aux_iter):
+                                                 aux_iter=aux_iter):
                 if with_j:
                     rhoj = _dm_sparse.dot(cderi_sparse)
                     vj_packed += rhoj.dot(cderi_sparse.T)
@@ -107,7 +108,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
                 _dms = cp.asarray(dms)
                 vk = cp.zeros_like(dms)
             for cderi, cderi_sparse in mydf.loop(blksize=blksize, unpack=with_k,
-                                                 aux_range_iter=aux_iter):
+                                                 aux_iter=aux_iter):
                 if with_j:
                     rhoj = _dm_sparse.dot(cderi_sparse)
                     vj_packed += rhoj.dot(cderi_sparse.T)
@@ -129,7 +130,6 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         vj = cp.zeros_like(dms)
         vj[:,cols,rows] = vj[:,rows,cols] = vj_packed
         vj = vj.reshape(out_shape)
-        if not out_cupy: vj = vj.get()
 
     if with_k:
         vk = [k for j, k in results]
@@ -137,7 +137,6 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         if exxdiv == 'ewald':
             _ewald_exxdiv_for_G0(mydf.cell, np.zeros(3), dms, vk)
         vk = vk.reshape(out_shape)
-        if not out_cupy: vk = vk.get()
 
     t1 = log.timer_debug1('vj and vk', *t1)
     return vj, vk

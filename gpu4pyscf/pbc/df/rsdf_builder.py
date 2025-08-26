@@ -1025,7 +1025,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     # Follow the output format in compressed_cderi_kk
     cderi = {0: cderi}
     if cderip is not None:
-        cderip = {0: cderi}
+        cderip = {0: cderip}
     t1 = log.timer_debug1('SR int3c2e', *t1)
     cderi_idx = (ao_pair_mapping, diag_addresses)
     return cderi, cderip, cderi_idx
@@ -1148,7 +1148,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_rang
     # Follow the output format in compressed_cderi_kk
     cderi = {0: cderi}
     if cderip is not None:
-        cderip = {0: cderi}
+        cderip = {0: cderip}
     t1 = log.timer_debug1('SR int3c2e', *t1)
     cderi_idx = (ao_pair_mapping, diag_addresses)
     return cderi, cderip, cderi_idx
@@ -1389,12 +1389,18 @@ def unpack_cderi_k(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
     assert expLk.dtype == np.complex128
     # Searching adapted k indices for (ij|aux)
     ki_idx, kj_idx = np.where(kk_conserv == k_idx)
-    expLk_iz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
-    # Make kpt_j in expLk_j correspond to the sorted kpt_i
-    expLk_jz = expLk[:,kj_idx].view(np.float64).reshape(nL,nkpts,2)
-    out = contract('kjLi,LKz->Kkijz', cderi_tril, expLk_iz)
-    out = contract('kiLj,LKz->Kkijz', cderi_tril, expLk_jz, beta=1., out=out)
-    return out.view(np.complex128)[:,:,:,:,0]
+    if cderi_tril.dtype == np.complex128:
+        out = contract('kjLi,LK->Kkij', cderi_tril, expLk.conj())
+        # Make kpt_j in expLk_j correspond to the sorted kpt_i
+        expLk_j = expLk[:,kj_idx]
+        out = contract('kiLj,LK->Kkij', cderi_tril, expLk_j, beta=1., out=out)
+    else:
+        expLk_iz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
+        expLk_jz = expLk[:,kj_idx].view(np.float64).reshape(nL,nkpts,2)
+        out = contract('kjLi,LKz->Kkijz', cderi_tril, expLk_iz)
+        out = contract('kiLj,LKz->Kkijz', cderi_tril, expLk_jz, beta=1., out=out)
+        out = out.view(np.complex128)[:,:,:,:,0]
+    return out
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)

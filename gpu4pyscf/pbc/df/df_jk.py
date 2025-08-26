@@ -78,8 +78,8 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
     ao_pair_mapping, diag = mydf._cderi_idx
-    dm_sparse[:,ao_pair_mapping[diag]] *= .5
-    dm_sparse = dm_sparse[:,ao_pair_mapping].real.copy()
+    dm_sparse = dm_sparse[:,ao_pair_mapping]
+    dm_sparse[:,diag] *= .5
 
     avail_mem = get_avail_mem() * .8
     npairs = len(ao_pair_mapping)
@@ -189,7 +189,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     k_adapt_dic = {}
     for kp, kp_conj, ki_idx, kj_idx in kpts_helper.kk_adapted_iter(mydf.kmesh):
         # ki_idx is already sorted
-        k_adapt_dic[kp] = (kp_conj, ki_idx, kj_idx)
+        k_adapt_dic[kp] = kp_conj, kj_idx
 
     if (is_zero(kpts) and is_zero(kpts_band) and
         not np.iscomplexobj(dm_kpts)):
@@ -202,14 +202,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         vk = cp.zeros(_dms.shape, dtype=dtype)
         for kp, Lpq, sign in mydf.sr_loop(blksize, compact=False,
                                           aux_iter=aux_iter):
-            kp_conj, ki, kj = k_adapt_dic[kp]
-            #TODO: utilize kk_adapted_iter with time_reversal_symmetry, as that in aft_jk
-            #tmp = contract('nLkl,snjk->snLjl', Lpq[kj], _dms[:,ki])
-            #vk[:,kj] += contract('nLji,snLjl->snil', Lpq[kj].conj(), tmp, alpha=sign)
-            #if kp != kp_conj:
-            #    tmp = contract('nLkl,snli->snLki', Lpq[kj], _dms[:,kj])
-            #    vk[:,ki] += contract('snLki,nLji->snkj', tmp, Lpq[kj].conj(),
-            #                         alpha=sign)
+            kp_conj, kj = k_adapt_dic[kp]
             tmp = contract('nLij,snjk->snLik', Lpq, _dms[:,kj], alpha=sign)
             Lpq_conj = Lpq.conj()
             contract('nLlk,snLik->snil', Lpq_conj, tmp, beta=1, out=vk)

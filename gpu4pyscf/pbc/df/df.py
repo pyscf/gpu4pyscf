@@ -128,6 +128,7 @@ class GDF(lib.StreamObject):
         self.dump_flags()
         auxcell = df_cpu.make_auxcell(cell, self.auxbasis, self.exp_to_discard)
         self.auxcell = auxcell
+        self.nao = cell.nao
 
         kpts = self.kpts
         if self.is_gamma_point:
@@ -282,12 +283,9 @@ class GDF(lib.StreamObject):
             rows, cols = divmod(ao_pair_mapping, nao)
             buf_cderi = cp.zeros([blksize,nao,nao])
 
-        buf1 = cp.empty(blksize*npairs, dtype=cderi_sparse.dtype)
         out2 = None
         for p0, p1 in aux_iter:
-            out = cderi_sparse[p0:p1,:]
-            if not isinstance(cderi_sparse, cp.ndarray):
-                out = out.get(out=buf1[:out.size].reshape(out.shape))
+            out = asarray(cderi_sparse[p0:p1])
             if unpack:
                 out2 = buf_cderi[:p1-p0]
                 out2[:,cols,rows] = out2[:,rows,cols] = out
