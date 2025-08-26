@@ -108,7 +108,7 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
                 _dms = cp.asarray(dms)
                 vk = cp.zeros_like(dms)
             for cderi, cderi_sparse in mydf.loop_gamma_point(
-                blksize, unpack=with_k, aux_iter=aux_iter):
+                    blksize, unpack=with_k, aux_iter=aux_iter):
                 if with_j:
                     rhoj = _dm_sparse.dot(cderi_sparse)
                     vj_packed += rhoj.dot(cderi_sparse.T)
