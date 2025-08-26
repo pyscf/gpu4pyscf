@@ -183,8 +183,6 @@ def _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory):
 
     ni = mf._numint
     xctype = ni._xc_type(mf.xc)
-    shls_slice = (0, mol.nbas)
-    ao_loc = mol.ao_loc_nr()
 
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -337,9 +335,9 @@ def _make_dR_rho1(ao, ao_dm0, atm_id, aoslices, xctype, buf=None, rho1=None):
     ngrids = ao[0].shape[1]
 
     if xctype == 'GGA':
-            ncomp = 4
+        ncomp = 4
     elif xctype == 'MGGA':
-            ncomp = 5
+        ncomp = 5
     else:
         raise RuntimeError
     if buf is None:
@@ -388,7 +386,6 @@ def _make_dR_rho1(ao, ao_dm0, atm_id, aoslices, xctype, buf=None, rho1=None):
     return rho1
 
 def _d1d2_dot_(vmat, mol, ao1, ao2, mask, ao_loc, dR1_on_bra=True):
-    shls_slice = None
     if dR1_on_bra:  # (d/dR1 bra) * (d/dR2 ket)
         for d1 in range(3):
             for d2 in range(3):
@@ -410,7 +407,6 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     _sorted_mol = opt._sorted_mol
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()
-    shls_slice = (0, mol.nbas)
     ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
@@ -1290,8 +1286,6 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     _sorted_mol = opt._sorted_mol
     xctype = ni._xc_type(mf.xc)
     aoslices = mol.aoslice_by_atom()
-    shls_slice = (0, mol.nbas)
-    ao_loc = mol.ao_loc_nr()
 
     ngrids_glob = grids.coords.shape[0]
     grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)

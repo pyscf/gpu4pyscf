@@ -960,6 +960,8 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 wv[:,:,0] *= .5 
             if xctype == 'MGGA':
                 wv[:,:,[0,4]] *= .5
+        else:
+            excsum = np.zeros(nset)
         exc = den = vxc = rho_tot = weights = None
         t0 = log.timer_debug1(f'eval vxc on Device {device_id}', *t0)
         vmata = cupy.zeros((nset, nao, nao))
@@ -1659,7 +1661,7 @@ def batch_square_inplace(a, out=None):
     out += a[2] * a[2]
     return out
 
-def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None, buf=None):
+def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None, spin=0, buf=None):
     '''
     Different from PySCF, this function employ cuda version libxc
     buf: {'sigma1', 'rho2','sigma3','tau2'}   sigma1 for 闭壳层 其余都是开壳层计算需要用到的中间变量
@@ -1667,7 +1669,12 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
     if omega is None: omega = ni.omega
     if xctype is None: xctype = ni._xc_type(xc_code)
 
-    spin_polarized = rho.ndim >= 2 and rho.shape[0] == 2
+    if spin is None:
+        spin_polarized = rho.ndim >= 2 and rho.shape[0] == 2
+        if spin_polarized:
+            spin = 1
+        else:
+            spin = 0
     xcfuns = ni._init_xcfuns(xc_code, spin_polarized)
     if buf is None: buf = {}
     inp = {}
@@ -1700,7 +1707,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
             rho2[:,1] = rho[1,0]
             inp['rho'] = rho2
             sigma3 = buf.get('sigam3', None)
-            if sigma3  is None or sigma3.shape != (ngrids, 3):
+            if sigma3 is None or sigma3.shape != (ngrids, 3):
                 sigma3  = buf['sigma3 '] = cupy.empty((ngrids, 3))
             sigma3[:, 0] = batch_square_inplace(rho[0, 1:4], out=sigma3[:, 0])
             sigma3[:, 1] = cupy.multiply(rho[0, 1], rho[1, 1], out=sigma3[:, 1])

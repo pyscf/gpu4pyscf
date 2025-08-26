@@ -415,6 +415,8 @@ def _d1_dot_(ao1, ao2, alpha=1.0, beta=0.0, transpose=False, out=None):
     if out is None:
         dtype = numpy.result_type(ao1[0], ao2[0])
         out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]], dtype=dtype)
+    ao1 = cupy.asarray(ao1)
+    ao2 = cupy.asarray(ao2)
     if not transpose:
         out = contract('bik,km->bim', ao1.conj(), ao2, alpha=alpha, beta=beta, out=out)
     else:
@@ -424,10 +426,9 @@ def _d1_dot_(ao1, ao2, alpha=1.0, beta=0.0, transpose=False, out=None):
 def _gga_grad_sum_(ao, wv, accumulate=False, buf=None, out=None):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
     if buf is None:
-        buf = cupy.empty((3, ao.shape[1], ao.shape[2]))
+        buf = cupy.empty((3, ao.shape[1], ao.shape[2]), dtype=ao.dtype)
     if out is None:
-        out = cupy.empty((3, ao.shape[1], ao.shape[1]))  
-    # 启用contract 函数使的能够原为加和
+        out = cupy.empty((3, ao.shape[1], ao.shape[1]), dtype=ao.dtype)  
     aow = numint._scale_ao(ao[:4], wv[:4], out=buf[0])
     if not accumulate:
         vmat = _d1_dot_(ao[1:4], aow.T, out=out)
