@@ -1589,7 +1589,6 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 def cache_xc_kernel(ni, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
                     max_memory=2000):
     '''Compute the 0th order density, Vxc and fxc. They can be used in TDDFT, DFT hessian module etc.'''
-    #### QYZ： 注意这个函数也没有用到buffer
     log = logger.new_logger(mol, mol.verbose)
     xctype = ni._xc_type(xc_code)
     if xctype == 'GGA':
@@ -1664,7 +1663,7 @@ def batch_square_inplace(a, out=None):
 def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None, spin=0, buf=None):
     '''
     Different from PySCF, this function employ cuda version libxc
-    buf: {'sigma1', 'rho2','sigma3','tau2'}   sigma1 for 闭壳层 其余都是开壳层计算需要用到的中间变量
+    buf: {'sigma1', 'rho2','sigma3','tau2'}
     '''
     if omega is None: omega = ni.omega
     if xctype is None: xctype = ni._xc_type(xc_code)
