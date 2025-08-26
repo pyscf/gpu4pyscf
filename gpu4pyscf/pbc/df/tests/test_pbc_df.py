@@ -250,6 +250,28 @@ class KnownValues(unittest.TestCase):
         vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-8
 
+    @unittest.skip('pbc-gdf does not support different k-mesh in get_jk and build')
+    def test_get_k4(self):
+        kpts = cell.make_kpts([6,1,1])
+        mydf  = GDF(cell, kpts=kpts).build()
+
+        kpts = cell.make_kpts([3,1,1])
+        nkpts = len(kpts)
+        mydf0 = df_cpu.GDF(cell, kpts=kpts).build()
+
+        nao = cell.nao
+        np.random.seed(12)
+        nocc = 2
+        mo = (np.random.random((nkpts,nao,nocc)) +
+              np.random.random((nkpts,nao,nocc))*1j)
+        mo_occ = np.ones((nkpts,nocc))
+        dm = np.einsum('kpi,kqi->kpq', mo, mo.conj())
+        dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
+
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        assert abs(vk.get() - kref).max() < 1e-8
+
 if __name__ == '__main__':
     print("Full Tests for PBC DF")
     unittest.main()

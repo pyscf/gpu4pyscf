@@ -59,7 +59,7 @@ PREFER_ED = False
 
 THREADS = 256
 
-def build_cderi(cell, auxcell, kpts=None, j_only=False,
+def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
                 omega=None, linear_dep_threshold=LINEAR_DEP_THR,
                 compress=False):
     '''
@@ -90,23 +90,28 @@ def build_cderi(cell, auxcell, kpts=None, j_only=False,
     elif j_only:
         if compress:
             return compressed_cderi_j_only(
-                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+                cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
         else:
             return build_cderi_j_only(
-                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+                cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
     else:
         if compress:
             return compressed_cderi_kk(
-                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+                cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
         else:
             return build_cderi_kk(
-                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+                cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
 
-def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
-                   linear_dep_threshold=LINEAR_DEP_THR):
+def build_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
+                   with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    if kmesh is None:
+        kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    else:
+        kpts = kpts.reshape(-1, 3)
+    bvk_ncells = np.prod(kmesh)
+    assert len(kpts) == bvk_ncells
     j3c = sr_aux_e2(cell, auxcell, -omega, kpts, kmesh)
     t1 = log.timer('pass1: int3c2e', *t0)
 
@@ -193,11 +198,16 @@ def build_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True
     t1 = log.timer('pass2: solve cderi', *t1)
     return cderi, cderip
 
-def build_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
-                       linear_dep_threshold=LINEAR_DEP_THR):
+def build_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
+                       with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t0 = log.init_timer()
-    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    if kmesh is None:
+        kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    else:
+        kpts = kpts.reshape(-1, 3)
+    bvk_ncells = np.prod(kmesh)
+    assert len(kpts) == bvk_ncells
     # TODO: time-reversal symmetry in j3c, j2c
     j3c = sr_aux_e2(cell, auxcell, -omega, kpts, kmesh, j_only=True)
     t1 = log.timer('pass1: int3c2e', *t0)
@@ -1030,12 +1040,16 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     cderi_idx = (ao_pair_mapping, diag_addresses)
     return cderi, cderip, cderi_idx
 
-def compressed_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
-                            linear_dep_threshold=LINEAR_DEP_THR):
+def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
+                            with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t1 = log.init_timer()
-    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    if kmesh is None:
+        kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    else:
+        kpts = kpts.reshape(-1, 3)
     bvk_ncells = np.prod(kmesh)
+    assert len(kpts) == bvk_ncells
 
     int3c2e_opt = SRInt3c2eOpt_v2(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
     log.debug('Generate auxcell 2c2e integrals')
@@ -1153,16 +1167,20 @@ def compressed_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_rang
     cderi_idx = (ao_pair_mapping, diag_addresses)
     return cderi, cderip, cderi_idx
 
-def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
-                        linear_dep_threshold=LINEAR_DEP_THR):
+def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
+                        with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
     t1 = log.init_timer()
-    kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    if kmesh is None:
+        kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
+    else:
+        kpts = kpts.reshape(-1, 3)
+    bvk_ncells = np.prod(kmesh)
+    assert len(kpts) == bvk_ncells
     kpt_iters = list(kk_adapted_iter(kmesh))
     # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
     uniq_kpts = kpts[[x[1] for x in kpt_iters]]
     nkpts = len(uniq_kpts)
-    bvk_ncells = np.prod(kmesh)
 
     int3c2e_opt = SRInt3c2eOpt_v2(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
 
@@ -1297,7 +1315,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
 def _kpts_to_kmesh(cell, auxcell, omega, kpts):
     if kpts is None:
         kpts = np.zeros((1, 3))
-        kmesh = np.ones(3, dtype=int)
+        kmesh = [1] * 3
     else:
         # The remote images may contribute to certain k-point mesh, contributing
         # to the finite-size effects in HFX. For sufficiently large number of
@@ -1353,7 +1371,7 @@ def _precontract_j2c_aux_coeff(auxcell, aux_coeff, kpts, omega, with_long_range,
         cd_j2c_cache.append(cd_j2c)
     return cd_j2c_cache, negative_metric_size
 
-def unpack_cderi_k(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
+def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
     r'''
     Constructs a dense cderi tensor from a partially compressed cderi at a
     specific k-point on the auxiliary dimension. The resulting tensor has the

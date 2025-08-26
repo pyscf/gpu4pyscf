@@ -57,7 +57,7 @@ def density_fit(mf, auxbasis=None, with_df=None):
     return mf
 
 
-def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
+def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     log = logger.new_logger(mydf)
     t0 = log.init_timer()
     assert kpts_band is None or kpts_band is kpts
@@ -94,8 +94,8 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     def proc():
         _dm_sparse = cp.asarray(dm_sparse)
         vj_packed = cp.zeros_like(dm_sparse)
-        for k_aux, Lpq, sign in mydf.sr_loop(blksize, compact=True,
-                                             aux_iter=aux_iter):
+        for k_aux, Lpq, sign in mydf.loop(blksize, unpack=False, kpts=kpts,
+                                          aux_iter=aux_iter):
             rho = sign * _dm_sparse.dot(Lpq.T)
             vj_packed += rho.dot(Lpq)
         return vj_packed
@@ -103,7 +103,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     results = multi_gpu.run(proc, non_blocking=True)
     vj_packed = multi_gpu.array_reduce(results, inplace=True)
     kk_conserv = k2gamma.double_translation_indices(mydf.kmesh)
-    vj = rsdf_builder.unpack_cderi_k(
+    vj = rsdf_builder.unpack_cderi(
         vj_packed, mydf._cderi_idx, 0, kk_conserv, expLk, nao)
     if is_zero(kpts_band) and not np.iscomplexobj(dms):
         vj = vj.real
@@ -111,10 +111,10 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     return _format_jks(vj, dm_kpts, input_band, kpts)
 
 
-def get_j_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=np.zeros((1,3)), kpts_band=None):
+def get_j_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None):
     raise NotImplementedError
 
-def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
+def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                exxdiv=None):
     cell = mydf.cell
     log = logger.new_logger(mydf)
@@ -200,8 +200,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     def proc():
         _dms = cp.asarray(dms)
         vk = cp.zeros(_dms.shape, dtype=dtype)
-        for kp, Lpq, sign in mydf.sr_loop(blksize, compact=False,
-                                          aux_iter=aux_iter):
+        for kp, Lpq, sign in mydf.loop(blksize, kpts=kpts, aux_iter=aux_iter):
             kp_conj, kj = k_adapt_dic[kp]
             tmp = contract('nLij,snjk->snLik', Lpq, _dms[:,kj], alpha=sign)
             Lpq_conj = Lpq.conj()
@@ -219,7 +218,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     log.timer('get_k_kpts', *t0)
     return _format_jks(vk, dm_kpts, input_band, kpts)
 
-def get_k_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=np.zeros((1,3)), kpts_band=None,
+def get_k_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None,
                       exxdiv=None):
     raise NotImplementedError
 
@@ -252,7 +251,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     if with_k:
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
-    for Lpq, sign in mydf.sr_loop(0, 0, False):
+    for Lpq, sign in mydf.loop(0, 0, False):
         if with_j:
             #:rho_coeff = np.einsum('Lpq,xqp->xL', Lpq, dms)
             #:vj += np.dot(rho_coeff, Lpq.reshape(-1,nao**2))

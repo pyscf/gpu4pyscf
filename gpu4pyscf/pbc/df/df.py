@@ -133,13 +133,13 @@ class GDF(lib.StreamObject):
         kpts = self.kpts
         if self.is_gamma_point:
             assert kpts is None or is_zero(kpts)
-            self.kmesh = np.zeros(3, dtype=int)
+            self.kmesh = [1] * 3
         else:
             self.kmesh = kpts_to_kmesh(cell, kpts)
 
         t1 = (logger.process_clock(), logger.perf_counter())
         self._cderi, self._cderip, self._cderi_idx = rsdf_builder.build_cderi(
-            cell, auxcell, kpts, j_only=j_only,
+            cell, auxcell, kpts, self.kmesh, j_only=j_only,
             linear_dep_threshold=self.linear_dep_threshold, compress=True)
         t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
@@ -147,7 +147,7 @@ class GDF(lib.StreamObject):
     has_kpts = df_cpu.GDF.has_kpts
     weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
     pw_loop = NotImplemented
-    ft_loop = df_cpu.GDF.ft_loop
+    ft_loop = NotImplemented
     range_coulomb = aft_cpu.AFTDFMixin.range_coulomb
 
     def get_naoaux(self):
@@ -155,25 +155,26 @@ class GDF(lib.StreamObject):
             self.build(j_only=self._j_only)
         return max(x.shape[0] for x in self._cderi.values())
 
-    def sr_loop(self, blksize, compact=True, aux_iter=None):
+    def loop(self, blksize, unpack=True, kpts=None, aux_iter=None):
         '''Iterator for the 3-index cderi tensor over the auxliary dimension.
 
         Kwargs:
-            compact :
-                If compact is specified, the output is a compressed CDERI
-                tensor. Otherwise, the output is a dense tensor with shape
-                [nkpts,*,nao,nao].
+            unpack :
+                If specified, the compressed CDERI is decompressed, providing
+                a dense tensor with shape [nkpts,*,nao,nao].
             aux_iter :
                 Allows multiple GPU executors to share the producer, dynamically
                 loading the tesnor blocks as needed.
         '''
+        cell = self.cell
         if self._cderi is None:
             self.build(j_only=self._j_only)
-        cell = self.cell
+        if kpts is not None:
+            assert len(kpts) == np.prod(self.kmesh)
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
-        if not compact:
+        if unpack:
             kmesh = self.kmesh
             expLk = fft_matrix(kmesh)
             nao = cell.nao
@@ -183,14 +184,14 @@ class GDF(lib.StreamObject):
             out = asarray(self._cderi[k_aux][p0:p1,:])
             if out.size == 0:
                 return
-            if not compact:
-                out = rsdf_builder.unpack_cderi_k(
+            if unpack:
+                out = rsdf_builder.unpack_cderi(
                     out, self._cderi_idx, k_aux, kk_conserv, expLk, nao)
             yield k_aux, out, 1
             if p0 == 0 and cell.dimension == 2 and k_aux in self._cderip:
                 out = asarray(self._cderip[k_aux])
-                if not compact:
-                    out = rsdf_builder.unpack_cderi_k(
+                if unpack:
+                    out = rsdf_builder.unpack_cderi(
                         out, self._cderi_idx, k_aux, kk_conserv, expLk, nao)
                 yield k_aux, out, -1
 
@@ -254,7 +255,7 @@ class GDF(lib.StreamObject):
     get_blksize = mol_df.DF.get_blksize
 
     # TOOD: refactor and reuse the loop method in the molecule df module
-    def loop(self, blksize=None, unpack=True, aux_iter=None):
+    def loop_gamma_point(self, blksize, unpack=True, aux_iter=None):
         ''' loop over cderi and unpack the CDERI in (Lij) format
 
         Kwargs:
@@ -268,9 +269,6 @@ class GDF(lib.StreamObject):
         '''
         assert is_zero(self.kpts)
         cell = self.cell
-
-        if blksize is None:
-            blksize = self.get_blksize()
         cderi_sparse = self._cderi[0]
         naux, npairs = cderi_sparse.shape
         if aux_iter is None:
