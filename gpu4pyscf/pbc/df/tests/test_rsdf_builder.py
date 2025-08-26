@@ -214,11 +214,12 @@ C    D
     omega = 0.3
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(cell, auxcell, omega=omega)
     nao = cell.nao
-    i, j, diag = idx
+    ij, diag = idx
+    i, j = divmod(ij, nao)
     naux = auxcell.nao
     out = cp.zeros((naux,nao,nao))
-    out[:,j,i] = dat
-    out[:,i,j] = dat
+    out[:,j,i] = dat[0]
+    out[:,i,j] = dat[0]
 
     ref = build_cderi(cell, auxcell, omega=omega)[0]
     assert abs(ref[0,0] - out).max() < 1e-12
@@ -259,11 +260,12 @@ C    D
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(
         cell, auxcell, omega=omega, with_long_range=False)
     nao = cell.nao
-    i, j, diag = idx
+    ij, diag = idx
+    i, j = divmod(ij, nao)
     naux = auxcell.nao
     out = cp.zeros((naux,nao,nao))
-    out[:,j,i] = dat
-    out[:,i,j] = dat
+    out[:,j,i] = dat[0]
+    out[:,i,j] = dat[0]
 
     ref = build_cderi(cell, auxcell, omega=omega)[0]
     assert abs(ref[0,0] - out).max() < 1e-12
@@ -310,7 +312,7 @@ C    D
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi_k(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -339,7 +341,7 @@ def test_kpts_compressed1():
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi_k(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -369,7 +371,7 @@ def test_kpts_compressed2():
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi_k(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -423,7 +425,7 @@ C    D
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
     for kp in sorted(dat):
-        out = rsdf_builder.unpack_cderi_k(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
         ki_idx, kj_idx = np.where(kk_conserv == kp)
         for ki, kj in zip(ki_idx, kj_idx):
             if (ki, kj) in ref:
@@ -476,7 +478,7 @@ C    D
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
 
-    out = rsdf_builder.unpack_cderi_k(dat, idx, 0, kk_conserv, expLk, nao)
+    out = rsdf_builder.unpack_cderi(dat[0], idx, 0, kk_conserv, expLk, nao)
     for ki in range(nkpts):
         _ref = ref[ki, ki]
         assert abs(_ref - out[ki]).max() < 1e-11
@@ -526,7 +528,7 @@ C    D
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
 
-    out = rsdf_builder.unpack_cderi_k(dat, idx, 0, kk_conserv, expLk, nao)
+    out = rsdf_builder.unpack_cderi(dat[0], idx, 0, kk_conserv, expLk, nao)
     for ki in range(nkpts):
         _ref = ref[ki, ki]
         assert abs(_ref - out[ki]).max() < 1e-11
