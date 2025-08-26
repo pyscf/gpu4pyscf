@@ -60,7 +60,11 @@ PREFER_ED = False
 THREADS = 256
 
 def build_cderi(cell, auxcell, kpts=None, j_only=False,
-                omega=None, linear_dep_threshold=LINEAR_DEP_THR):
+                omega=None, linear_dep_threshold=LINEAR_DEP_THR,
+                compress=False):
+    '''
+    Create density fitting integral tensor
+    '''
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
     with_long_range = cell.omega == 0
@@ -77,14 +81,26 @@ def build_cderi(cell, auxcell, kpts=None, j_only=False,
         omega = abs(cell.omega)
 
     if kpts is None or is_zero(kpts):
-        return build_cderi_gamma_point(
-            cell, auxcell, omega, with_long_range, linear_dep_threshold)
+        if compress:
+            return compressed_cderi_gamma_point(
+                cell, auxcell, omega, with_long_range, linear_dep_threshold)
+        else:
+            return build_cderi_gamma_point(
+                cell, auxcell, omega, with_long_range, linear_dep_threshold)
     elif j_only:
-        return build_cderi_j_only(
-            cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+        if compress:
+            return compressed_cderi_j_only(
+                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+        else:
+            return build_cderi_j_only(
+                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
     else:
-        return build_cderi_kk(
-            cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+        if compress:
+            return compressed_cderi_kk(
+                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
+        else:
+            return build_cderi_kk(
+                cell, auxcell, kpts, omega, with_long_range, linear_dep_threshold)
 
 def build_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
                    linear_dep_threshold=LINEAR_DEP_THR):
@@ -998,18 +1014,20 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             )
         else:
             p0, p1 = p1, p1 + nfi*nfj*n_pairs
-            cderi[:,p0:p1] = j3c_tmp.get()
+            cderi[:,p0:p1] = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
         j3c_tmp = ish = jsh = c_pair_idx = None
     log.debug('Avail GPU mem = %s B', get_avail_mem())
-    t1 = log.timer_debug1('SR int3c2e', *t1)
 
     cderip = None
     for k, nauxp in negative_metric_size.items():
         # For low-dimensional systems, CDERI has negative eigenvectors
         cderip, cderi = cderi[-nauxp:], cderi[:-nauxp]
-    t1 = log.timer_debug1('solving cderi', *t1)
-    rows, cols = divmod(ao_pair_mapping, cell.nao)
-    cderi_idx = (rows, cols, diag_addresses)
+    # Follow the output format in compressed_cderi_kk
+    cderi = {0: cderi}
+    if cderip is not None:
+        cderip = {0: cderi}
+    t1 = log.timer_debug1('SR int3c2e', *t1)
+    cderi_idx = (ao_pair_mapping, diag_addresses)
     return cderi, cderip, cderi_idx
 
 def compressed_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=True,
@@ -1127,6 +1145,10 @@ def compressed_cderi_j_only(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_rang
     cderip = None
     for k, nauxp in negative_metric_size.items():
         cderip, cderi = cderi[-nauxp:], cderi[:-nauxp]
+    # Follow the output format in compressed_cderi_kk
+    cderi = {0: cderi}
+    if cderip is not None:
+        cderip = {0: cderi}
     t1 = log.timer_debug1('SR int3c2e', *t1)
     cderi_idx = (ao_pair_mapping, diag_addresses)
     return cderi, cderip, cderi_idx
@@ -1259,6 +1281,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, omega=OMEGA_MIN, with_long_range=Tr
                 cderi[kp][:,p0:p1] = cderi_k.get(out=_buf)
         j3c_tmp = j3c_block = None
 
+    cderi[0] = np.asarray(cderi[0].real, order='C')
+
     cderip = None
     if negative_metric_size:
         cderip = {}
@@ -1351,20 +1375,26 @@ def unpack_cderi_k(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
     '''
     pair_address, diag_idx = cderi_idx
     naux = cderi_compressed.shape[0]
-    ncells = expLk.shape[0]
-    cderi_tril = cp.zeros((naux, nao*ncells*nao), dtype=cderi_compressed.dtype)
+    nL, nkpts = expLk.shape
+    cderi_tril = cp.zeros((naux, nao*nL*nao), dtype=cderi_compressed.dtype)
     cderi_tril[:,pair_address] = cderi_compressed
     # diagonal blocks are accessed twice
     cderi_tril[:,pair_address[diag_idx]] *= .5
-    cderi_tril = cderi_tril.reshape(naux, nao, ncells, nao)
+    cderi_tril = cderi_tril.reshape(naux, nao, nL, nao)
+    if expLk.size == 1: # gamma point
+        out = cderi_tril[:,:,0,:].copy()
+        out += cderi_tril[:,:,0,:].transpose(0,2,1)
+        return out.reshape(1,naux,nao,nao)
 
+    assert expLk.dtype == np.complex128
     # Searching adapted k indices for (ij|aux)
     ki_idx, kj_idx = np.where(kk_conserv == k_idx)
-    out = contract('kjLi,LK->Kkij', cderi_tril, expLk.conj())
+    expLk_iz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
     # Make kpt_j in expLk_j correspond to the sorted kpt_i
-    expLk_j = expLk[:,kj_idx]
-    out = contract('kiLj,LK->Kkij', cderi_tril, expLk_j, beta=1., out=out)
-    return out
+    expLk_jz = expLk[:,kj_idx].view(np.float64).reshape(nL,nkpts,2)
+    out = contract('kjLi,LKz->Kkijz', cderi_tril, expLk_iz)
+    out = contract('kiLj,LKz->Kkijz', cderi_tril, expLk_jz, beta=1., out=out)
+    return out.view(np.complex128)[:,:,:,:,0]
 
 def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     log = logger.new_logger(cell, verbose)

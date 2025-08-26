@@ -23,9 +23,13 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, unpack_tril
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, get_avail_mem
 from gpu4pyscf.pbc.df.fft_jk import _ewald_exxdiv_for_G0, _format_dms, _format_jks
+from gpu4pyscf.pbc.df import rsdf_builder
+from gpu4pyscf.pbc.lib import kpts_helper
 
 def density_fit(mf, auxbasis=None, with_df=None):
     '''Generate density-fitting SCF object
@@ -62,54 +66,48 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
         mydf.build(j_only=True, kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_j_kpts', *t0)
 
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
-    if mydf.auxcell is None:
-        # If mydf._cderi is the file that generated from another calculation,
-        # guess naux based on the contents of the integral file.
-        naux = mydf.get_naoaux()
-    else:
-        naux = mydf.auxcell.nao_nr()
-    nao_pair = nao * (nao+1) // 2
+    # Alter the contraction order for
+    # rho = einsum('piLj,LK,Kji->p', cderi, expLk, dm)
+    # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
+    expLk = kpts_helper.fft_matrix(mydf.kmesh)
+    dm_sparse = contract('LK,nKji->niLj', expLk, dms)
+    contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
+    dm_sparse = dm_sparse.reshape(nset, -1)
+    ao_pair_mapping, diag = mydf._cderi_idx
+    dm_sparse[:,ao_pair_mapping[diag]] *= .5
+    dm_sparse = dm_sparse[:,ao_pair_mapping].real.copy()
 
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
-    nband = len(kpts_band)
+    avail_mem = get_avail_mem() * .8
+    npairs = len(ao_pair_mapping)
+    blksize = avail_mem/16 / ((nkpts+1)*npairs)
+    if blksize < 16:
+        raise RuntimeError('Insufficient GPU memory')
+    blksize = min(int(blksize), mydf.blockdim)
+    logger.debug2(mydf, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
+    naux = mydf.get_naoaux()
+    aux_iter = iter((0, p0, p1) for p0, p1 in lib.prange(0, naux, blksize))
 
-    rho = cp.zeros((nset,naux), dtype=np.complex128)
-    for k in range(nkpts):
-        p1 = 0
-        for Lpq, sign in mydf.sr_loop(k, k, False):
-            Lpq = Lpq.reshape(-1,nao,nao)
-            p0, p1 = p1, p1+Lpq.shape[0]
-            rho[:,p0:p1] += sign * contract('Lpq,xqp->xL', Lpq, dms[:,k])
-    t1 = log.timer_debug1('get_j pass 1', *t0)
+    def proc():
+        _dm_sparse = cp.asarray(dm_sparse)
+        vj_packed = cp.zeros_like(dm_sparse)
+        for k_aux, Lpq, sign in mydf.sr_loop(blksize, compact=True,
+                                             aux_iter=aux_iter):
+            rho = sign * _dm_sparse.dot(Lpq.T)
+            vj_packed += rho.dot(Lpq)
+        return vj_packed
 
-    rho *= 1./nkpts
-    if hermi == 0:
-        aos2symm = False
-        vj = cp.zeros((nset,nband,nao**2), dtype=np.complex128)
-    else:
-        aos2symm = True
-        vj = cp.zeros((nset,nband,nao_pair), dtype=np.complex128)
-
-    for k, kpt in enumerate(kpts_band):
-        p1 = 0
-        for Lpq, sign in mydf.sr_loop(k, k, aos2symm):
-            nrow = Lpq.shape[0]
-            p0, p1 = p1, p1+nrow
-            Lpq = Lpq.reshape(nrow, -1)
-            vj[:,k] += cp.dot(rho[:,p0:p1], Lpq)
-    t1 = log.timer_debug1('get_j pass 2', *t1)
-
-    if aos2symm:
-        vj = unpack_tril(vj.reshape(-1,nao_pair))
-    j_real = is_zero(kpts_band) and not np.iscomplexobj(dms)
-    if j_real:
+    results = multi_gpu.run(proc, non_blocking=True)
+    vj_packed = multi_gpu.array_reduce(results, inplace=True)
+    kk_conserv = k2gamma.double_translation_indices(mydf.kmesh)
+    vj = rsdf_builder.unpack_cderi_k(
+        vj_packed, mydf._cderi_idx, 0, kk_conserv, expLk, nao)
+    if is_zero(kpts_band) and not np.iscomplexobj(dms):
         vj = vj.real
-    vj = vj.reshape(nset,nband,nao,nao)
-
-    log.timer('get_j', *t0)
-
+    vj *= 1./nkpts
     return _format_jks(vj, dm_kpts, input_band, kpts)
 
 
@@ -133,12 +131,13 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         mydf.build(kpts_band=kpts_band)
         t0 = log.timer_debug1('Init get_k_kpts', *t0)
 
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    nband = len(kpts_band)
+
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
 
-    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
-    nband = len(kpts_band)
     vk = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
 
     ''' math
@@ -174,44 +173,56 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     # K_pq = ( p{k1} i{k2} | i{k2} q{k1} )
     # input dm is not Hermitian/PSD --> build K from dm
     log.debug2('get_k_kpts: build K from dm')
-    if mydf._cderi is None:
-        mydf.build()
-    def make_kpt(ki, kj, swap_2e):
-        if (ki, kj) not in mydf._cderi:
-            kj, ki = ki, kj
-        for Lpq, sign in mydf.sr_loop(ki, kj, compact=False):
-            Lpq = Lpq.reshape(-1, nao, nao)
-            tmp = contract('njk,Lkl->nLjl', dms[:,ki], Lpq)
-            if sign > 0:
-                vk[:,kj] += contract('Lji,nLjl->nil', Lpq.conj(), tmp)
-            else:
-                vk[:,kj] -= contract('Lji,nLjl->nil', Lpq.conj(), tmp)
 
-            if swap_2e:
-                tmp = contract('Lkl,nli->nLki', Lpq, dms[:,kj])
-                if sign > 0:
-                    vk[:,ki] += contract('nLki,Lji->nkj', tmp, Lpq.conj())
-                else:
-                    vk[:,ki] -= contract('nLki,Lji->nkj', tmp, Lpq.conj())
-
-    t1 = log.init_timer()
-    if kpts_band is not kpts:  # normal k-points HF/DFT
-        raise NotImplementedError
-    #TODO: utilize kk_adapted_iter with time_reversal_symmetry, as that in aft_jk
-    for ki in range(nkpts):
-        for kj in range(ki):
-            make_kpt(ki, kj, True)
-        make_kpt(ki, ki, False)
-        t1 = log.timer_debug1('get_k_kpts: make_kpt ki>=kj (%d,*)'%ki, *t1)
+    avail_mem = get_avail_mem() * .8
+    ao_pair_mapping = mydf._cderi_idx[0]
+    npairs = len(ao_pair_mapping)
+    blksize = avail_mem/16 / (nkpts*(npairs+nao**2*3))
+    if blksize < 16:
+        raise RuntimeError('Insufficient GPU memory')
+    blksize = min(int(blksize), mydf.blockdim)
+    logger.debug2(mydf, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
+    naux = mydf.get_naoaux()
+    aux_iter = iter((kp, p0, p1)
+                    for p0, p1 in lib.prange(0, naux, blksize)
+                    for kp in mydf._cderi)
+    k_adapt_dic = {}
+    for kp, kp_conj, ki_idx, kj_idx in kpts_helper.kk_adapted_iter(mydf.kmesh):
+        # ki_idx is already sorted
+        k_adapt_dic[kp] = (kp_conj, ki_idx, kj_idx)
 
     if (is_zero(kpts) and is_zero(kpts_band) and
         not np.iscomplexobj(dm_kpts)):
-        vk = vk.real
-    vk *= 1./nkpts
+        dtype = np.float64
+    else:
+        dtype = np.complex128
 
+    def proc():
+        _dms = cp.asarray(dms)
+        vk = cp.zeros(_dms.shape, dtype=dtype)
+        for kp, Lpq, sign in mydf.sr_loop(blksize, compact=False,
+                                          aux_iter=aux_iter):
+            kp_conj, ki, kj = k_adapt_dic[kp]
+            #TODO: utilize kk_adapted_iter with time_reversal_symmetry, as that in aft_jk
+            #tmp = contract('nLkl,snjk->snLjl', Lpq[kj], _dms[:,ki])
+            #vk[:,kj] += contract('nLji,snLjl->snil', Lpq[kj].conj(), tmp, alpha=sign)
+            #if kp != kp_conj:
+            #    tmp = contract('nLkl,snli->snLki', Lpq[kj], _dms[:,kj])
+            #    vk[:,ki] += contract('snLki,nLji->snkj', tmp, Lpq[kj].conj(),
+            #                         alpha=sign)
+            tmp = contract('nLij,snjk->snLik', Lpq, _dms[:,kj], alpha=sign)
+            Lpq_conj = Lpq.conj()
+            contract('nLlk,snLik->snil', Lpq_conj, tmp, beta=1, out=vk)
+            if kp != kp_conj:
+                tmp = contract('nLij,snli->snLlj', Lpq, _dms, alpha=sign, out=tmp)
+                vk[:,kj] += contract('nLlk,snLlj->snkj', Lpq_conj, tmp)
+        return vk
+
+    results = multi_gpu.run(proc, non_blocking=True)
+    vk = multi_gpu.array_reduce(results, inplace=True)
+    vk *= 1./nkpts
     if exxdiv == 'ewald':
         _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band)
-
     log.timer('get_k_kpts', *t0)
     return _format_jks(vk, dm_kpts, input_band, kpts)
 

@@ -300,7 +300,6 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    naux = auxcell.nao
     omega = 0.3
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
@@ -353,7 +352,6 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    naux = auxcell.nao
     omega = 0.3
     cell.omega = auxcell.omega = -omega
     kmesh = [3,1,1]
@@ -408,7 +406,6 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    naux = auxcell.nao
     omega = 0.3
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
@@ -457,7 +454,6 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    naux = auxcell.nao
     omega = 0.3
     cell.omega = auxcell.omega = -omega
     kmesh = [3,1,1]

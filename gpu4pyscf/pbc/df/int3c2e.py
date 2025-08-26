@@ -841,7 +841,6 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
     '''
     def generate_img_idx(self, cutoff=None, verbose=None):
         log = logger.new_logger(self.cell, verbose)
-        cput0 = log.init_timer()
         int3c2e_envs = self.int3c2e_envs
         pcell = self.prim_cell
         auxcell = self.sorted_auxcell
@@ -925,7 +924,6 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             log.debug1('pairs=%d tot_imgs=%d. lattice-sum: largest=%d, medium=%d',
                        ovlp_npairs, tot_imgs, ovlp_img_counts[0],
                        ovlp_img_counts[ovlp_npairs//2])
-            t1 = log.timer_debug1('int3c2e_img_idx', *t0)
             ovlp_img_counts = counts_sorting = None
 
             # bas_ij stores the non-negligible primitive-pair indices.
@@ -955,7 +953,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             pair_mapping_lookup = cp.empty(nctri*bvk_nctrj, dtype=np.int32)
             pair_mapping_lookup[c_pair_idx] = cp.arange(len(c_pair_idx))
             pair_mapping = pair_mapping_lookup[reduced_pair_idx]
-            log.timer_debug1(f'pair_mapping [{li},{lj}]', *t1)
+            log.timer_debug1(f'pair_mapping [{li},{lj}]', *t0)
             return img_idx, img_offsets, bas_ij, pair_mapping, c_pair_idx
         return gen_img_idx
 
