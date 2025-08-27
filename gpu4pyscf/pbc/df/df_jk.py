@@ -232,50 +232,10 @@ def get_k_kpts_kshift(mydf, dm_kpts, kshift, hermi=0, kpts=None, kpts_band=None,
 def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
            kpts_band=None, with_j=True, with_k=True, exxdiv=None):
     '''JK for given k-point'''
-    log = logger.new_logger(mydf)
-    t0 = log.init_timer()
-    assert is_zero(kpt)
+    from gpu4pyscf.pbc.df import df_jk_real
     assert kpts_band is None
-    if mydf._cderi is None:
-        mydf.build(j_only=not with_k, kpts_band=kpts_band)
-        t0 = log.timer_debug1('Init get_jk', *t0)
-
-    cell = mydf.cell
-    dm = cp.asarray(dm, order='C')
-    dms = _format_dms(dm, kpt.reshape(1, 3))
-    nset, _, nao = dms.shape[:3]
-    dms = dms.reshape(nset,nao,nao)
-    vj = vk = None
-    if with_j:
-        vj = cp.zeros((nset,nao,nao), dtype=np.complex128)
-    if with_k:
-        vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
-
-    for Lpq, sign in mydf.loop(0, 0, False):
-        if with_j:
-            #:rho_coeff = np.einsum('Lpq,xqp->xL', Lpq, dms)
-            #:vj += np.dot(rho_coeff, Lpq.reshape(-1,nao**2))
-            rho = contract('Lpq,xqp->xL', Lpq, dms)
-            vj += sign * contract('xL,Lpq->xpq', rho, Lpq)
-        if with_k:
-            tmp = contract('njk,Lkl->nLjl', dms, Lpq)
-            if sign > 0:
-                vk += contract('Lji,nLjl->nil', Lpq.conj(), tmp)
-            else:
-                vk -= contract('Lji,nLjl->nil', Lpq.conj(), tmp)
-
-    if with_j:
-        j_real = is_zero(kpt) and hermi == 1
-        if j_real:
-            vj = vj.real
-        vj = vj.reshape(dm.shape)
-    if with_k:
-        k_real = is_zero(kpt) and not np.iscomplexobj(dms)
-        if k_real:
-            vk = vk.real
-        if exxdiv == 'ewald':
-            _ewald_exxdiv_for_G0(cell, kpt, dms, vk)
-        vk = vk.reshape(dm.shape)
-
-    log.timer('sr jk', *t0)
-    return vj, vk
+    if is_zero(kpt):
+        if mydf._cderi is None:
+            mydf.build()
+        return df_jk_real.get_jk(mydf, dm, hermi, with_j, with_k, exxdiv)
+    raise NotImplementedError(f'get_jk for single k-point {kpt}')
