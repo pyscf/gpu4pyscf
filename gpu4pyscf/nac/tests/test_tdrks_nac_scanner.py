@@ -56,12 +56,16 @@ class KnownValues(unittest.TestCase):
         td.kernel()
         nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
         nac1.states=(0,1)
-        nac1.kernel()
+        nac_benchmark = nac1.kernel()
+        nac_benchmark_de = nac_benchmark[0]
 
         nac_scanner = nac1.as_scanner()
         new_nac = nac_scanner(mol1)
-
-        assert (new_nac[1]*nac1.de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac1.de) > 0.99
+        assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
+        new_nac = nac_scanner(mol)
+        assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
+        new_nac = nac_scanner(mol1)
+        assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
 
     def test_nac_scanner_ee(self):
         mf = dft.RKS(mol, xc="b3lyp").to_gpu()
@@ -70,12 +74,16 @@ class KnownValues(unittest.TestCase):
         td.kernel()
         nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
         nac1.states=(1,2)
-        nac1.kernel()
+        nac_benchmark = nac1.kernel()
+        nac_benchmark_de = nac_benchmark[0]
 
         nac_scanner = nac1.as_scanner()
         new_nac = nac_scanner(mol1)
-
-        assert (new_nac[1]*nac1.de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac1.de) > 0.99
+        assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
+        new_nac = nac_scanner(mol)
+        assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
+        new_nac = nac_scanner(mol1)
+        assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
 
 
 if __name__ == "__main__":

@@ -655,8 +655,11 @@ class NAC(lib.StreamObject):
 
 class NAC_Scanner(lib.GradScanner):
 
+    _keys = ['sign']
+
     def __init__(self, nac_instance, states=None):
         lib.GradScanner.__init__(self, nac_instance)
+        self.sign = 1.0
         if states is not None:
             self.states = states
         else:
@@ -702,8 +705,6 @@ class NAC_Scanner(lib.GradScanner):
         nocc = int((mo_occ > 0).sum())
         nvir = nmo - nocc
 
-        sign = 1.0
-
         if states[0] != 0:
             idx_i = np.argmax(np.abs(xi0))
             idxo_i = idx_i//nvir 
@@ -713,8 +714,8 @@ class NAC_Scanner(lib.GradScanner):
             sign_mo_occ_idx_i = sign_array[mo_occ_idx_i]
             sign_mo_vir_idx_i = sign_array[mo_vir_idx_i + nocc]
             if xi0[idxo_i, idxv_i]/xi1[mo_occ_idx_i, mo_vir_idx_i] < 0:
-                sign *= -1.0
-            sign *= sign_mo_occ_idx_i*sign_mo_vir_idx_i
+                self.sign *= -1.0
+            self.sign *= sign_mo_occ_idx_i*sign_mo_vir_idx_i
         idx_j = np.argmax(np.abs(xj0))
         idxo_j = idx_j//nvir
         idxv_j = idx_j%nvir
@@ -723,14 +724,14 @@ class NAC_Scanner(lib.GradScanner):
         sign_mo_occ_idx_j = sign_array[mo_occ_idx_j]
         sign_mo_vir_idx_j = sign_array[mo_vir_idx_j + nocc]
         if xj0[idxo_j, idxv_j]/xj1[mo_occ_idx_j, mo_vir_idx_j] < 0:
-            sign *= -1.0
-        sign *= sign_mo_occ_idx_j*sign_mo_vir_idx_j
-        sign = float(sign)
+            self.sign *= -1.0
+        self.sign *= sign_mo_occ_idx_j*sign_mo_vir_idx_j
+        self.sign = float(self.sign)
         e_tot = self.e_tot
         
         de, de_scaled, de_etf, de_etf_scaled= self.kernel(**kwargs)
-        de = de*sign
-        de_scaled = de_scaled*sign
-        de_etf = de_etf*sign
-        de_etf_scaled = de_etf_scaled*sign
+        de = de*self.sign
+        de_scaled = de_scaled*self.sign
+        de_etf = de_etf*self.sign
+        de_etf_scaled = de_etf_scaled*self.sign
         return e_tot, de, de_scaled, de_etf, de_etf_scaled
