@@ -68,7 +68,7 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
         atmlst = range(mol.natm)
         e_diag, xy_diag = diagonalize_tda(a)
         x = xy_diag[:, 0].reshape(nocc, nvir)*np.sqrt(0.5)
-        de_td = grad_elec(tdgrad, (x, 0), theta=td.theta, J_fit=td.J_fit, K_fit=td.K_fit)
+        de_td = grad_elec(tdgrad, (x, 0))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
     else:
         atmlst = range(mol.natm)
@@ -81,7 +81,7 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
         x = x.reshape(nocc, nvir)
         y = y.reshape(nocc, nvir)
     
-        de_td = grad_elec(tdgrad, (x, y), theta=td.theta, J_fit=td.J_fit, K_fit=td.K_fit)
+        de_td = grad_elec(tdgrad, (x, y))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
     return gradient_ana

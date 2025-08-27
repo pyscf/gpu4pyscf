@@ -110,7 +110,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-    f1voI, f1ooIJ, vxc1, k1aoIJ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyI, dmzooIJ, True, 
+    f1ooIJ, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmzooIJ, None, True, 
         False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
@@ -243,8 +243,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp((z1ao + z1ao.T))
-    fock_matrix = mf.get_fock()
-    fock_mo = reduce(cp.dot, (mo_coeff.T, fock_matrix, mo_coeff))
+    fock_mo = cp.diag(mo_energy)
     TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
     TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
     TFvo = cp.dot(TIJvv, fock_mo[nocc:,:nocc])

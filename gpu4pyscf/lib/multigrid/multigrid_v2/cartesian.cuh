@@ -345,4 +345,255 @@ gto_cartesian(T gradient_values[], const T original_values[], const T fx,
   }
 }
 } // namespace gradient
+
+
+namespace second_derivative {
+template <typename T, int ANG>
+__forceinline__ __device__ void
+gto_cartesian(T output[], const T x, const T y, const T z, const T exponent) {
+  // Output in (derivative, orbital)
+  // Where derivative in the order of xx, xy, xz, yy, yz, zz
+  // And orbital in the order of x,y,z; xx,xy,xz,yy,yz,zz; xxx,xxy,xxz,xyy,xyz,xzz,yyy,yyz,yzz,zzz; etc.
+
+  const T aa = exponent * 2;
+  const T aa2 = aa * aa;
+  const T x2 = x * x;
+  const T y2 = y * y;
+  const T z2 = z * z;
+
+  if constexpr (ANG == 0) {
+    output[0] = aa*(aa*x2 - 1);
+    output[1] = aa2*x*y;
+    output[2] = aa2*x*z;
+    output[3] = aa*(aa*y2 - 1);
+    output[4] = aa2*y*z;
+    output[5] = aa*(aa*z2 - 1);
+  } else if constexpr (ANG == 1) {
+    output[ 0] = aa*x*(aa*x2 - 3);
+    output[ 1] = aa*y*(aa*x2 - 1);
+    output[ 2] = aa*z*(aa*x2 - 1);
+    output[ 3] = aa*y*(aa*x2 - 1);
+    output[ 4] = aa*x*(aa*y2 - 1);
+    output[ 5] = aa2*x*y*z;
+    output[ 6] = aa*z*(aa*x2 - 1);
+    output[ 7] = aa2*x*y*z;
+    output[ 8] = aa*x*(aa*z2 - 1);
+    output[ 9] = aa*x*(aa*y2 - 1);
+    output[10] = aa*y*(aa*y2 - 3);
+    output[11] = aa*z*(aa*y2 - 1);
+    output[12] = aa2*x*y*z;
+    output[13] = aa*z*(aa*y2 - 1);
+    output[14] = aa*y*(aa*z2 - 1);
+    output[15] = aa*x*(aa*z2 - 1);
+    output[16] = aa*y*(aa*z2 - 1);
+    output[17] = aa*z*(aa*z2 - 3);
+  } else if constexpr (ANG == 2) {
+    const T x4 = x2 * x2;
+    const T y4 = y2 * y2;
+    const T z4 = z2 * z2;
+    output[ 0] = aa2*x4 - 5*aa*x2 + 2;
+    output[ 1] = aa*x*y*(aa*x2 - 3);
+    output[ 2] = aa*x*z*(aa*x2 - 3);
+    output[ 3] = aa*y2*(aa*x2 - 1);
+    output[ 4] = aa*y*z*(aa*x2 - 1);
+    output[ 5] = aa*z2*(aa*x2 - 1);
+    output[ 6] = aa*x*y*(aa*x2 - 2);
+    output[ 7] = (aa*x2 - 1)*(aa*y2 - 1);
+    output[ 8] = aa*y*z*(aa*x2 - 1);
+    output[ 9] = aa*x*y*(aa*y2 - 2);
+    output[10] = aa*x*z*(aa*y2 - 1);
+    output[11] = aa2*x*y*z2;
+    output[12] = aa*x*z*(aa*x2 - 2);
+    output[13] = aa*y*z*(aa*x2 - 1);
+    output[14] = (aa*x2 - 1)*(aa*z2 - 1);
+    output[15] = aa2*x*y2*z;
+    output[16] = aa*x*y*(aa*z2 - 1);
+    output[17] = aa*x*z*(aa*z2 - 2);
+    output[18] = aa*x2*(aa*y2 - 1);
+    output[19] = aa*x*y*(aa*y2 - 3);
+    output[20] = aa*x*z*(aa*y2 - 1);
+    output[21] = aa2*y4 - 5*aa*y2 + 2;
+    output[22] = aa*y*z*(aa*y2 - 3);
+    output[23] = aa*z2*(aa*y2 - 1);
+    output[24] = aa2*x2*y*z;
+    output[25] = aa*x*z*(aa*y2 - 1);
+    output[26] = aa*x*y*(aa*z2 - 1);
+    output[27] = aa*y*z*(aa*y2 - 2);
+    output[28] = (aa*y2 - 1)*(aa*z2 - 1);
+    output[29] = aa*y*z*(aa*z2 - 2);
+    output[30] = aa*x2*(aa*z2 - 1);
+    output[31] = aa*x*y*(aa*z2 - 1);
+    output[32] = aa*x*z*(aa*z2 - 3);
+    output[33] = aa*y2*(aa*z2 - 1);
+    output[34] = aa*y*z*(aa*z2 - 3);
+    output[35] = aa2*z4 - 5*aa*z2 + 2;
+  } else if constexpr (ANG == 3) {
+    const T x3 = x * x2;
+    const T y3 = y * y2;
+    const T z3 = z * z2;
+    const T x4 = x2 * x2;
+    const T y4 = y2 * y2;
+    const T z4 = z2 * z2;
+    output[ 0] = x*(aa2*x4 - 7*aa*x2 + 6);
+    output[ 1] = y*(aa2*x4 - 5*aa*x2 + 2);
+    output[ 2] = z*(aa2*x4 - 5*aa*x2 + 2);
+    output[ 3] = aa*x*y2*(aa*x2 - 3);
+    output[ 4] = aa*x*y*z*(aa*x2 - 3);
+    output[ 5] = aa*x*z2*(aa*x2 - 3);
+    output[ 6] = aa*y3*(aa*x2 - 1);
+    output[ 7] = aa*y2*z*(aa*x2 - 1);
+    output[ 8] = aa*y*z2*(aa*x2 - 1);
+    output[ 9] = aa*z3*(aa*x2 - 1);
+    output[10] = aa*x2*y*(aa*x2 - 3);
+    output[11] = x*(aa*x2 - 2)*(aa*y2 - 1);
+    output[12] = aa*x*y*z*(aa*x2 - 2);
+    output[13] = y*(aa*x2 - 1)*(aa*y2 - 2);
+    output[14] = z*(aa*x2 - 1)*(aa*y2 - 1);
+    output[15] = aa*y*z2*(aa*x2 - 1);
+    output[16] = aa*x*y2*(aa*y2 - 3);
+    output[17] = aa*x*y*z*(aa*y2 - 2);
+    output[18] = aa*x*z2*(aa*y2 - 1);
+    output[19] = aa2*x*y*z3;
+    output[20] = aa*x2*z*(aa*x2 - 3);
+    output[21] = aa*x*y*z*(aa*x2 - 2);
+    output[22] = x*(aa*x2 - 2)*(aa*z2 - 1);
+    output[23] = aa*y2*z*(aa*x2 - 1);
+    output[24] = y*(aa*x2 - 1)*(aa*z2 - 1);
+    output[25] = z*(aa*x2 - 1)*(aa*z2 - 2);
+    output[26] = aa2*x*y3*z;
+    output[27] = aa*x*y2*(aa*z2 - 1);
+    output[28] = aa*x*y*z*(aa*z2 - 2);
+    output[29] = aa*x*z2*(aa*z2 - 3);
+    output[30] = aa*x3*(aa*y2 - 1);
+    output[31] = aa*x2*y*(aa*y2 - 3);
+    output[32] = aa*x2*z*(aa*y2 - 1);
+    output[33] = x*(aa2*y4 - 5*aa*y2 + 2);
+    output[34] = aa*x*y*z*(aa*y2 - 3);
+    output[35] = aa*x*z2*(aa*y2 - 1);
+    output[36] = y*(aa2*y4 - 7*aa*y2 + 6);
+    output[37] = z*(aa2*y4 - 5*aa*y2 + 2);
+    output[38] = aa*y*z2*(aa*y2 - 3);
+    output[39] = aa*z3*(aa*y2 - 1);
+    output[40] = aa2*x3*y*z;
+    output[41] = aa*x2*z*(aa*y2 - 1);
+    output[42] = aa*x2*y*(aa*z2 - 1);
+    output[43] = aa*x*y*z*(aa*y2 - 2);
+    output[44] = x*(aa*y2 - 1)*(aa*z2 - 1);
+    output[45] = aa*x*y*z*(aa*z2 - 2);
+    output[46] = aa*y2*z*(aa*y2 - 3);
+    output[47] = y*(aa*y2 - 2)*(aa*z2 - 1);
+    output[48] = z*(aa*y2 - 1)*(aa*z2 - 2);
+    output[49] = aa*y*z2*(aa*z2 - 3);
+    output[50] = aa*x3*(aa*z2 - 1);
+    output[51] = aa*x2*y*(aa*z2 - 1);
+    output[52] = aa*x2*z*(aa*z2 - 3);
+    output[53] = aa*x*y2*(aa*z2 - 1);
+    output[54] = aa*x*y*z*(aa*z2 - 3);
+    output[55] = x*(aa2*z4 - 5*aa*z2 + 2);
+    output[56] = aa*y3*(aa*z2 - 1);
+    output[57] = aa*y2*z*(aa*z2 - 3);
+    output[58] = y*(aa2*z4 - 5*aa*z2 + 2);
+    output[59] = z*(aa2*z4 - 7*aa*z2 + 6);
+  } else if constexpr (ANG == 4) {
+    const T x3 = x * x2;
+    const T y3 = y * y2;
+    const T z3 = z * z2;
+    const T x4 = x2 * x2;
+    const T y4 = y2 * y2;
+    const T z4 = z2 * z2;
+    output[ 0] = x2*(aa2*x4 - 9*aa*x2 + 12);
+    output[ 1] = x*y*(aa2*x4 - 7*aa*x2 + 6);
+    output[ 2] = x*z*(aa2*x4 - 7*aa*x2 + 6);
+    output[ 3] = y2*(aa2*x4 - 5*aa*x2 + 2);
+    output[ 4] = y*z*(aa2*x4 - 5*aa*x2 + 2);
+    output[ 5] = z2*(aa2*x4 - 5*aa*x2 + 2);
+    output[ 6] = aa*x*y3*(aa*x2 - 3);
+    output[ 7] = aa*x*y2*z*(aa*x2 - 3);
+    output[ 8] = aa*x*y*z2*(aa*x2 - 3);
+    output[ 9] = aa*x*z3*(aa*x2 - 3);
+    output[10] = aa*y4*(aa*x2 - 1);
+    output[11] = aa*y3*z*(aa*x2 - 1);
+    output[12] = aa*y2*z2*(aa*x2 - 1);
+    output[13] = aa*y*z3*(aa*x2 - 1);
+    output[14] = aa*z4*(aa*x2 - 1);
+    output[15] = aa*x3*y*(aa*x2 - 4);
+    output[16] = x2*(aa*x2 - 3)*(aa*y2 - 1);
+    output[17] = aa*x2*y*z*(aa*x2 - 3);
+    output[18] = x*y*(aa*x2 - 2)*(aa*y2 - 2);
+    output[19] = x*z*(aa*x2 - 2)*(aa*y2 - 1);
+    output[20] = aa*x*y*z2*(aa*x2 - 2);
+    output[21] = y2*(aa*x2 - 1)*(aa*y2 - 3);
+    output[22] = y*z*(aa*x2 - 1)*(aa*y2 - 2);
+    output[23] = z2*(aa*x2 - 1)*(aa*y2 - 1);
+    output[24] = aa*y*z3*(aa*x2 - 1);
+    output[25] = aa*x*y3*(aa*y2 - 4);
+    output[26] = aa*x*y2*z*(aa*y2 - 3);
+    output[27] = aa*x*y*z2*(aa*y2 - 2);
+    output[28] = aa*x*z3*(aa*y2 - 1);
+    output[29] = aa2*x*y*z4;
+    output[30] = aa*x3*z*(aa*x2 - 4);
+    output[31] = aa*x2*y*z*(aa*x2 - 3);
+    output[32] = x2*(aa*x2 - 3)*(aa*z2 - 1);
+    output[33] = aa*x*y2*z*(aa*x2 - 2);
+    output[34] = x*y*(aa*x2 - 2)*(aa*z2 - 1);
+    output[35] = x*z*(aa*x2 - 2)*(aa*z2 - 2);
+    output[36] = aa*y3*z*(aa*x2 - 1);
+    output[37] = y2*(aa*x2 - 1)*(aa*z2 - 1);
+    output[38] = y*z*(aa*x2 - 1)*(aa*z2 - 2);
+    output[39] = z2*(aa*x2 - 1)*(aa*z2 - 3);
+    output[40] = aa2*x*y4*z;
+    output[41] = aa*x*y3*(aa*z2 - 1);
+    output[42] = aa*x*y2*z*(aa*z2 - 2);
+    output[43] = aa*x*y*z2*(aa*z2 - 3);
+    output[44] = aa*x*z3*(aa*z2 - 4);
+    output[45] = aa*x4*(aa*y2 - 1);
+    output[46] = aa*x3*y*(aa*y2 - 3);
+    output[47] = aa*x3*z*(aa*y2 - 1);
+    output[48] = x2*(aa2*y4 - 5*aa*y2 + 2);
+    output[49] = aa*x2*y*z*(aa*y2 - 3);
+    output[50] = aa*x2*z2*(aa*y2 - 1);
+    output[51] = x*y*(aa2*y4 - 7*aa*y2 + 6);
+    output[52] = x*z*(aa2*y4 - 5*aa*y2 + 2);
+    output[53] = aa*x*y*z2*(aa*y2 - 3);
+    output[54] = aa*x*z3*(aa*y2 - 1);
+    output[55] = y2*(aa2*y4 - 9*aa*y2 + 12);
+    output[56] = y*z*(aa2*y4 - 7*aa*y2 + 6);
+    output[57] = z2*(aa2*y4 - 5*aa*y2 + 2);
+    output[58] = aa*y*z3*(aa*y2 - 3);
+    output[59] = aa*z4*(aa*y2 - 1);
+    output[60] = aa2*x4*y*z;
+    output[61] = aa*x3*z*(aa*y2 - 1);
+    output[62] = aa*x3*y*(aa*z2 - 1);
+    output[63] = aa*x2*y*z*(aa*y2 - 2);
+    output[64] = x2*(aa*y2 - 1)*(aa*z2 - 1);
+    output[65] = aa*x2*y*z*(aa*z2 - 2);
+    output[66] = aa*x*y2*z*(aa*y2 - 3);
+    output[67] = x*y*(aa*y2 - 2)*(aa*z2 - 1);
+    output[68] = x*z*(aa*y2 - 1)*(aa*z2 - 2);
+    output[69] = aa*x*y*z2*(aa*z2 - 3);
+    output[70] = aa*y3*z*(aa*y2 - 4);
+    output[71] = y2*(aa*y2 - 3)*(aa*z2 - 1);
+    output[72] = y*z*(aa*y2 - 2)*(aa*z2 - 2);
+    output[73] = z2*(aa*y2 - 1)*(aa*z2 - 3);
+    output[74] = aa*y*z3*(aa*z2 - 4);
+    output[75] = aa*x4*(aa*z2 - 1);
+    output[76] = aa*x3*y*(aa*z2 - 1);
+    output[77] = aa*x3*z*(aa*z2 - 3);
+    output[78] = aa*x2*y2*(aa*z2 - 1);
+    output[79] = aa*x2*y*z*(aa*z2 - 3);
+    output[80] = x2*(aa2*z4 - 5*aa*z2 + 2);
+    output[81] = aa*x*y3*(aa*z2 - 1);
+    output[82] = aa*x*y2*z*(aa*z2 - 3);
+    output[83] = x*y*(aa2*z4 - 5*aa*z2 + 2);
+    output[84] = x*z*(aa2*z4 - 7*aa*z2 + 6);
+    output[85] = aa*y4*(aa*z2 - 1);
+    output[86] = aa*y3*z*(aa*z2 - 3);
+    output[87] = y2*(aa2*z4 - 5*aa*z2 + 2);
+    output[88] = y*z*(aa2*z4 - 7*aa*z2 + 6);
+    output[89] = z2*(aa2*z4 - 9*aa*z2 + 12);
+  } else {
+    output[0] = NAN;
+  }
+}
+} // namespace second_derivative
 } // namespace gpu4pyscf::gpbc
