@@ -636,8 +636,6 @@ class NAC(lib.StreamObject):
     def solvent_response(self, dm):
         return 0.0
 
-    as_scanner = NotImplemented
-
     to_gpu = lib.to_gpu
 
     def reset(self, mol):
