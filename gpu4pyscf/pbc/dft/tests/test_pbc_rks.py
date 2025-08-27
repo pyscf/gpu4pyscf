@@ -109,8 +109,9 @@ class KnownValues(unittest.TestCase):
 
         with_df = mf.with_df
         auxcell = with_df.auxcell
-        i, j, diag = with_df._cderi_idx
+        ij, diag = with_df._cderi_idx
         nao = cell.nao
+        i, j = divmod(ij, nao)
         naux = auxcell.nao
         out = cp.zeros((naux,nao,nao))
         out[:,j,i] = out[:,i,j] = with_df._cderi[0]

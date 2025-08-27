@@ -1136,10 +1136,13 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             j3c_tmp = evaluate(li, lj, k)[1]
             if j3c_tmp.size == 0:
                 continue
+            # It is possible to optimize the j-only case by performing the
+            # lattice sum over bvk cell within the GPU kernel.
+            j3c_tmp = j3c_tmp.sum(axis=4)
             if not cell.cart:
-                j3c_tmp = contract('qj,rqpuLv->rjpuLv', c2s[lj], j3c_tmp)
-                j3c_tmp = contract('pi,rjpuLv->rjiuLv', c2s[li], j3c_tmp)
-            j3c_tmp = j3c_tmp.sum(axis=4).transpose(4,0,3,1,2)
+                j3c_tmp = contract('qj,rqpuv->rjpuv', c2s[lj], j3c_tmp)
+                j3c_tmp = contract('pi,rjpuv->rjiuv', c2s[li], j3c_tmp)
+            j3c_tmp = j3c_tmp.transpose(4,0,3,1,2)
             k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
             j3c_block[k0:k1] = j3c_tmp.reshape(-1,nji)
 

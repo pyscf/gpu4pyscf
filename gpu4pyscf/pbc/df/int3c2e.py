@@ -1108,6 +1108,7 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     return nksh_per_block, gout_stride, nsp_per_block
 
 # This modified rcut estimation function will be available in pyscf-2.8 or newer
+# TODO: improve the rcut estimation for PBCsr_int3c2e_latsum23 kernel
 def estimate_rcut(cell, auxcell, omega):
     '''Estimate rcut for 3c2e SR-integrals'''
     if cell.nbas == 0 or auxcell.nbas == 0:
