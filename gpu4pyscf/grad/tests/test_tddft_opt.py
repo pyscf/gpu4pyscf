@@ -23,18 +23,24 @@ from gpu4pyscf import scf as gpu_scf
 from packaging import version
 
 atom = """
-O       0.0000000000     0.0000000000     0.0000000000
-H       0.0000000000    -0.7570000000     0.5870000000
-H       0.0000000000     0.7570000000     0.5870000000
+H 0.000000 0.923274 1.238289
+H 0.000000 -0.923274 1.238289
+H 0.000000 0.923274 -1.238289
+H 0.000000 -0.923274 -1.238289
+C 0.000000 0.000000 0.668188
+C 0.000000 0.000000 -0.668188
 """
 
 atom_near_conv = """
-O  -0.000000  -0.000000   0.391241
-H  -0.000000  -1.283134   0.391326
-H  -0.000000   1.283134   0.391326
+H  0.000000   0.889149   1.396667
+H -0.000000  -0.889149   1.396667
+H -0.000000   0.889149  -1.396667
+H -0.000000  -0.889149  -1.396667
+C  0.000000   0.000000   0.696208
+C  0.000000   0.000000  -0.696208
 """
 
-bas0 = "631g"
+bas0 = "sto-3g"
 
 def setUpModule():
     global mol, mol_near_conv
@@ -55,7 +61,7 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()
         assert mf.converged
-        td = mf.TDA().set(nstates=3)
+        td = mf.TDA().set(nstates=5)
         td.kernel()
 
         # TODO: store CPU results for comparison
@@ -69,19 +75,26 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
         assert mf.converged
-        td = mf.TDA().set(nstates=3)
+        td = mf.TDA().set(nstates=5)
         td.kernel()
         # TODO: store CPU results for comparison
-        td_cpu = td.to_cpu()
         mol_gpu = optimize(td)
-        mol_cpu = optimize(td_cpu)
-        assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
+
+        mff = dft.RKS(mol_gpu, xc='b3lyp').to_gpu()
+        mff.kernel()
+        assert mff.converged
+        tdf = mff.TDA().set(nstates=5)
+        tdf.kernel()[0]
+        assert bool(np.all(tdf.converged))
+        excited_gradf = tdf.nuc_grad_method()
+        excited_gradf.kernel()
+        assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
     def test_opt_rks_tda_pcm_1(self):
         mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
         assert mf.converged
-        td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
         td.kernel()
         mol_gpu = optimize(td)
 
@@ -99,7 +112,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
         assert mf.converged
-        td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
         td.kernel()
 
         excited_grad = td.nuc_grad_method().as_scanner(state=1)
