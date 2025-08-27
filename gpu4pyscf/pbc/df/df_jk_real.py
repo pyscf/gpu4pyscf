@@ -83,16 +83,22 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
             if with_k:
                 _occ_coeff = [cp.asarray(x) for x in occ_coeff]
                 vk = cp.zeros_like(dms)
-            for cderi, cderi_sparse in mydf.loop_gamma_point(
+            for cderi, cderi_sparse, sign in mydf.loop_gamma_point(
                     blksize, unpack=with_k, aux_iter=aux_iter):
                 if with_j:
                     rhoj = _dm_sparse.dot(cderi_sparse)
-                    vj_packed += rhoj.dot(cderi_sparse.T)
+                    if sign > 0:
+                        vj_packed += rhoj.dot(cderi_sparse.T)
+                    else:
+                        vj_packed -= rhoj.dot(cderi_sparse.T)
                 if with_k:
                     for i in range(nset):
                         rhok = contract('Lji,jk->Lki', cderi, _occ_coeff[i])
                         rhok = rhok.reshape([-1,nao])
-                        vk[i] += cp.dot(rhok.T, rhok)
+                        if sign > 0:
+                            vk[i] += cp.dot(rhok.T, rhok)
+                        else:
+                            vk[i] -= cp.dot(rhok.T, rhok)
                         rhok = None
             return vj_packed, vk
     else:
@@ -107,15 +113,18 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
             if with_k:
                 _dms = cp.asarray(dms)
                 vk = cp.zeros_like(dms)
-            for cderi, cderi_sparse in mydf.loop_gamma_point(
+            for cderi, cderi_sparse, sign in mydf.loop_gamma_point(
                     blksize, unpack=with_k, aux_iter=aux_iter):
                 if with_j:
                     rhoj = _dm_sparse.dot(cderi_sparse)
-                    vj_packed += rhoj.dot(cderi_sparse.T)
+                    if sign > 0:
+                        vj_packed += rhoj.dot(cderi_sparse.T)
+                    else:
+                        vj_packed -= rhoj.dot(cderi_sparse.T)
                 cderi_sparse = rhoj = None
                 if with_k:
                     for k in range(nset):
-                        rhok = contract('Lij,jk->Lki', cderi, _dms[k])
+                        rhok = contract('Lij,jk->Lki', cderi, _dms[k], alpha=sign)
                         contract('Lki,Lkj->ij', rhok, cderi, beta=1, out=vk[k])
                         rhok = None
                 cderi = None

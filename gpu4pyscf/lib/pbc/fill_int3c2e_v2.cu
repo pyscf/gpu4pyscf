@@ -247,6 +247,10 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
     int nbas = envs.cell0_nbas * ncells;
     int num_pages = _filter_images(page_pool, &envs, &bounds, pair_ij,
                                    kcount0, kcount1, log_cutoff);
+    if (num_pages >= PAGES_PER_BLOCK) {
+        printf("Page overflow\n");
+        __trap();
+    }
     __shared__ int img_max;
     for (int page_id = thread_xz; page_id < num_pages+thread_xz; page_id += threads_xz) { 
         __syncthreads();

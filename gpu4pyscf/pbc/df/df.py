@@ -287,14 +287,14 @@ class GDF(lib.StreamObject):
             if unpack:
                 out2 = buf_cderi[:p1-p0]
                 out2[:,cols,rows] = out2[:,rows,cols] = out
-            yield out2, out.T
+            yield out2, out.T, 1
 
             if p0 == 0 and cell.dimension == 2:
                 out = asarray(self._cderip[0])
                 if unpack:
                     out2 = buf_cderi[:1]
                     out2[:,cols,rows] = out2[:,rows,cols] = out
-                yield out2, out.T
+                yield out2, out.T, -1
 
     to_gpu = utils.to_gpu
     device = utils.device

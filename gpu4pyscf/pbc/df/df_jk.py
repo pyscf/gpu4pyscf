@@ -103,8 +103,13 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     results = multi_gpu.run(proc, non_blocking=True)
     vj_packed = multi_gpu.array_reduce(results, inplace=True)
     kk_conserv = k2gamma.double_translation_indices(mydf.kmesh)
+    # The ao-pair in vj_packed has the same storage order like the ao-pair in
+    # cderi tensor. It can be unpacked using rsdf_builder.unpack_cderi. This
+    # function returns a tensor sorted as [nkpt,naux,nao,nao]. vj for multiple
+    # dms should be stored as [ndm,nkpt,nao,nao].
     vj = rsdf_builder.unpack_cderi(
         vj_packed, mydf._cderi_idx, 0, kk_conserv, expLk, nao)
+    vj = vj.transpose(1,0,2,3)
     if is_zero(kpts_band) and not np.iscomplexobj(dms):
         vj = vj.real
     vj *= 1./nkpts
