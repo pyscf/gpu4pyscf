@@ -19,7 +19,7 @@ This module is under development.
 from functools import reduce
 import cupy as cp
 import numpy as np
-from pyscf import lib
+from pyscf import lib, gto
 import pyscf
 from gpu4pyscf.lib import logger
 from pyscf.grad import rhf as rhf_grad_cpu
@@ -31,6 +31,46 @@ from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
 from pyscf.scf import _vhf
+from scipy.optimize import linear_sum_assignment
+
+
+def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
+    if mo_coeff_b.shape != mo_coeff.shape:
+        raise ValueError("Mo coeff b and mo coeff must have the same shape.")
+    if s12_ao.shape[0] != s12_ao.shape[1] or s12_ao.shape[0] != mo_coeff_b.shape[0]:
+        raise ValueError("S12 ao must be a square matrix with the same shape as mo coeff b.")
+    mo_overlap_matrix = mo_coeff_b.T @ s12_ao @ mo_coeff
+    abs_mo_overlap = cp.abs(mo_overlap_matrix)
+    cost_matrix = -abs_mo_overlap
+    below_threshold_mask = abs_mo_overlap < threshold
+    infinity_cost = mo_coeff_b.shape[1] + 1
+    cost_matrix[below_threshold_mask] = infinity_cost
+    
+    row_ind, col_ind = linear_sum_assignment(cost_matrix.get())
+
+    matching_indices = col_ind
+    
+    mo2_reordered = mo_coeff[:, matching_indices]
+
+    final_chosen_overlaps = abs_mo_overlap[row_ind, col_ind]
+    invalid_matches_mask = final_chosen_overlaps < threshold
+    
+    if cp.any(invalid_matches_mask):
+        num_invalid = cp.sum(invalid_matches_mask)
+        print(
+            f"{num_invalid} orbital below threshold {threshold}."
+            "This may indicate significant changes in the properties of these orbitals between the two structures."
+        )
+        invalid_indices = cp.where(invalid_matches_mask)[0]
+        for idx in invalid_indices:
+            print(f"Warning: reference coeff #{idx}'s best match is {final_chosen_overlaps[idx]:.4f} (below threshold {threshold})")
+    s_mo_new = mo_coeff_b.T @ s12_ao @ mo2_reordered
+    sign_array = cp.ones(s_mo_new.shape[-1])
+    for i in range(s_mo_new.shape[-1]):
+        if s_mo_new[i,i] < 0.0:
+            mo2_reordered[:,i] *= -1
+            sign_array[i] = -1
+    return mo2_reordered, matching_indices, sign_array
 
 
 def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -600,4 +640,99 @@ class NAC(lib.StreamObject):
 
     to_gpu = lib.to_gpu
 
+    def reset(self, mol):
+        self.base.reset(mol)
+        self.mol = mol
+        return self
 
+    def as_scanner(nacv_instance, states=None):
+        if isinstance(nacv_instance, lib.GradScanner):
+            return nacv_instance
+
+        logger.info(nacv_instance, 'Create scanner for %s', nacv_instance.__class__)
+        name = nacv_instance.__class__.__name__ + NAC_Scanner.__name_mixin__
+        return lib.set_class(NAC_Scanner(nacv_instance, states),
+                            (NAC_Scanner, nacv_instance.__class__), name)
+
+
+class NAC_Scanner(lib.GradScanner):
+
+    def __init__(self, nac_instance, states=None):
+        lib.GradScanner.__init__(self, nac_instance)
+        if states is not None:
+            self.states = states
+        else:
+            self.states = nac_instance.states
+
+    def __call__(self, mol_or_geom, states=None, **kwargs):
+        mol0 = self.mol.copy()
+        mo_coeff0 = self.base._scf.mo_coeff
+
+        if isinstance(mol_or_geom, gto.MoleBase):
+            assert mol_or_geom.__class__ == gto.Mole
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+
+        if states is None:
+            states = self.states
+        else:
+            self.states = states
+        if states[0] != 0:
+            xi0, yi0 = self.base.xy[states[0]-1]
+        xj0, yj0 = self.base.xy[states[1]-1]
+
+        td_scanner = self.base
+
+        assert td_scanner.device == 'gpu'
+        assert self.device == 'gpu'
+        td_scanner(mol)
+        
+        s = gto.intor_cross('int1e_ovlp', mol0, mol)
+        mo_coeff = cp.asarray(self.base._scf.mo_coeff)
+        s = cp.asarray(s)
+        mo2_reordered, matching_indices, sign_array = match_and_reorder_mos(s, mo_coeff0, mo_coeff, threshold=0.4)
+        if states[0] != 0:
+            xi1, yi1 = self.base.xy[states[0]-1]
+        xj1, yj1 = self.base.xy[states[1]-1]
+        mo2_reordered = cp.asarray(mo2_reordered)
+        mo_coeff0 = cp.asarray(mo_coeff0)
+        mo_occ = cp.asarray(self.base._scf.mo_occ)
+        nao, nmo = mo_coeff.shape
+        nocc = int((mo_occ > 0).sum())
+        nvir = nmo - nocc
+
+        sign = 1.0
+
+        if states[0] != 0:
+            idx_i = np.argmax(np.abs(xi0))
+            idxo_i = idx_i//nvir 
+            idxv_i = idx_i%nvir
+            mo_occ_idx_i = matching_indices[idxo_i]
+            mo_vir_idx_i = matching_indices[idxv_i+nocc] - nocc
+            sign_mo_occ_idx_i = sign_array[mo_occ_idx_i]
+            sign_mo_vir_idx_i = sign_array[mo_vir_idx_i + nocc]
+            if xi0[idxo_i, idxv_i]/xi1[mo_occ_idx_i, mo_vir_idx_i] < 0:
+                sign *= -1.0
+            sign *= sign_mo_occ_idx_i*sign_mo_vir_idx_i
+        idx_j = np.argmax(np.abs(xj0))
+        idxo_j = idx_j//nvir
+        idxv_j = idx_j%nvir
+        mo_occ_idx_j = matching_indices[idxo_j]
+        mo_vir_idx_j = matching_indices[idxv_j+nocc] - nocc
+        sign_mo_occ_idx_j = sign_array[mo_occ_idx_j]
+        sign_mo_vir_idx_j = sign_array[mo_vir_idx_j + nocc]
+        if xj0[idxo_j, idxv_j]/xj1[mo_occ_idx_j, mo_vir_idx_j] < 0:
+            sign *= -1.0
+        sign *= sign_mo_occ_idx_j*sign_mo_vir_idx_j
+        sign = float(sign)
+        e_tot = self.e_tot
+        
+        de, de_scaled, de_etf, de_etf_scaled= self.kernel(**kwargs)
+        de = de*sign
+        de_scaled = de_scaled*sign
+        de_etf = de_etf*sign
+        de_etf_scaled = de_etf_scaled*sign
+        return e_tot, de, de_scaled, de_etf, de_etf_scaled
