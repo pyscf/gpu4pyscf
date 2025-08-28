@@ -1660,7 +1660,7 @@ def batch_square_inplace(a, out=None):
     out += a[2] * a[2]
     return out
 
-def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None, spin=0, buf=None):
+def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None, spin=None, buf=None):
     '''
     Different from PySCF, this function employ cuda version libxc
     buf: {'sigma1', 'rho2','sigma3','tau2'}
@@ -1674,7 +1674,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None
             spin = 1
         else:
             spin = 0
-    xcfuns = ni._init_xcfuns(xc_code, spin_polarized)
+    xcfuns = ni._init_xcfuns(xc_code, spin)
     if buf is None: buf = {}
     inp = {}
     if not spin_polarized:
