@@ -181,7 +181,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     log.debug2('get_k_kpts: build K from dm')
 
     avail_mem = get_avail_mem() * .8
-    ao_pair_mapping = mydf._cderi_idx[0]
     blksize = avail_mem/16 / (nkpts*nao**2*3)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
