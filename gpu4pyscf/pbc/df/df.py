@@ -37,7 +37,7 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, pack_tril, get_avail_mem, asarray)
+    return_cupy_array, pack_tril, get_avail_mem, asarray, ndarray)
 from gpu4pyscf.lib.memcpy import copy_array
 from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
@@ -141,6 +141,10 @@ class GDF(lib.StreamObject):
         self._cderi, self._cderip, self._cderi_idx = rsdf_builder.build_cderi(
             cell, auxcell, kpts, self.kmesh, j_only=j_only,
             linear_dep_threshold=self.linear_dep_threshold, compress=True)
+        ao_pair_mapping, diag_idx = self._cderi_idx
+        self._cderi_idx = asarray(ao_pair_mapping), asarray(diag_idx)
+        logger.debug1(self, 'len(cderi)=%d len(ao_pair)=%d len(diag)=%d',
+                      len(self._cderi), len(ao_pair_mapping), len(diag_idx))
         t1 = logger.timer_debug1(self, 'j3c', *t1)
         return self
 
@@ -155,7 +159,8 @@ class GDF(lib.StreamObject):
             self.build(j_only=self._j_only)
         return max(x.shape[0] for x in self._cderi.values())
 
-    def loop(self, blksize, unpack=True, kpts=None, aux_iter=None):
+    def loop(self, blksize, unpack=True, kpts=None, aux_iter=None, buf=None,
+             out=None):
         '''Iterator for the 3-index cderi tensor over the auxliary dimension.
 
         Kwargs:
@@ -175,15 +180,15 @@ class GDF(lib.StreamObject):
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
+        ao_pair_mapping = self._cderi_idx[0]
+        npairs = len(ao_pair_mapping)
         if unpack:
             expLk = fft_matrix(self.kmesh)
             nao = cell.nao
             kk_conserv = k2gamma.double_translation_indices(self.kmesh)
-            out_buf = cp.empty((2,blksize*nkpts*nao**2), dtype=np.complex128)
+            out_buf = ndarray(blksize*nkpts*nao**2, np.complex128, buffer=out)
 
-        ao_pair_mapping = self._cderi_idx[0]
-        npairs = len(ao_pair_mapping)
-        cderi_buf = cp.empty(blksize*nkpts*npairs, dtype=np.complex128)
+        cderi_buf = ndarray(blksize*nkpts*npairs, np.complex128, buffer=out)
         for k_aux, p0, p1 in aux_iter:
             tmp = self._cderi[k_aux][p0:p1,:]
             if tmp.size == 0:
@@ -193,7 +198,7 @@ class GDF(lib.StreamObject):
             if unpack:
                 out = rsdf_builder.unpack_cderi(
                     out, self._cderi_idx, k_aux, kk_conserv, expLk, nao,
-                    buf=out_buf[0], out=out_buf[1])
+                    buf=buf, out=out_buf)
             yield k_aux, out, 1
             if p0 == 0 and cell.dimension == 2 and k_aux in self._cderip:
                 out = asarray(self._cderip[k_aux])

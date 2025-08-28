@@ -94,8 +94,9 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     def proc():
         _dm_sparse = cp.asarray(dm_sparse)
         vj_packed = cp.zeros_like(dm_sparse)
+        buf = cp.empty(nkpts*blksize*npairs, dtype=np.complex128)
         for k_aux, Lpq, sign in mydf.loop(blksize, unpack=False, kpts=kpts,
-                                          aux_iter=aux_iter):
+                                          aux_iter=aux_iter, out=buf):
             rho = sign * _dm_sparse.dot(Lpq.T)
             vj_packed += rho.dot(Lpq)
         return vj_packed
@@ -181,8 +182,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     avail_mem = get_avail_mem() * .8
     ao_pair_mapping = mydf._cderi_idx[0]
-    npairs = len(ao_pair_mapping)
-    blksize = avail_mem/16 / (nkpts*(npairs+nao**2*3))
+    blksize = avail_mem/16 / (nkpts*nao**2*3)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)
@@ -205,14 +205,19 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     def proc():
         _dms = cp.asarray(dms)
         vk = cp.zeros(_dms.shape, dtype=dtype)
-        for kp, Lpq, sign in mydf.loop(blksize, kpts=kpts, aux_iter=aux_iter):
+        buf = cp.empty((3, nkpts*blksize*nao**2), dtype=dtype)
+        for kp, Lpq, sign in mydf.loop(blksize, kpts=kpts, aux_iter=aux_iter,
+                                       buf=buf[1], out=buf[0]):
             kp_conj, kj = k_adapt_dic[kp]
-            tmp = contract('nLij,snjk->snLik', Lpq, _dms[:,kj], alpha=sign)
-            Lpq_conj = Lpq.conj()
-            contract('nLlk,snLik->snil', Lpq_conj, tmp, beta=1, out=vk)
-            if kp != kp_conj:
-                tmp = contract('nLij,snli->snLlj', Lpq, _dms, alpha=sign, out=tmp)
-                vk[:,kj] += contract('nLlk,snLlj->snkj', Lpq_conj, tmp)
+            Lpq_conj = cp.ndarray(Lpq.shape, dtype=dtype, memptr=buf[1].data)
+            Lpq_conj = cp.conjugate(Lpq, out=Lpq_conj)
+            tmp = cp.ndarray(Lpq.shape, dtype=dtype, memptr=buf[2].data)
+            for i in range(nset):
+                tmp = contract('nLij,njk->nLik', Lpq, _dms[i,kj], alpha=sign, out=tmp)
+                contract('nLlk,nLik->nil', Lpq_conj, tmp, beta=1, out=vk[i])
+                if kp != kp_conj:
+                    tmp = contract('nLij,nli->nLlj', Lpq, _dms[i], alpha=sign, out=tmp)
+                    vk[i,kj] += contract('nLlk,nLlj->nkj', Lpq_conj, tmp)
         return vk
 
     results = multi_gpu.run(proc, non_blocking=True)

@@ -834,6 +834,15 @@ def empty_mapped(shape, dtype=float, order='C'):
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
     return out
 
+def ndarray(shape, dtype, buffer=None):
+    '''
+    Construct CuPy ndarray object using the NumPy ndarray API
+    '''
+    if buffer is None:
+        return cupy.empty(shape, dtype)
+    else:
+        return cupy.ndarray(shape, dtype, memptr=buffer.data)
+
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
     '''

@@ -33,7 +33,7 @@ from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, asarray, sandwich_dot)
+    contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -703,9 +703,9 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
 
-    buf = np.empty(naux*max_pair_size)
+    buf = empty_mapped(naux*max_pair_size)
     kern = libpbc.build_ft_aopair
-    cderi_compressed = np.empty((naux,non0_size), dtype=np.float64)
+    cderi_compressed = empty_mapped((naux,non0_size), dtype=np.float64)
     pair0 = pair1 = 0
     for i, j in bas_ij_cache:
         li = uniq_l[i]
@@ -839,11 +839,12 @@ def _lr_int3c2e_kk(ft_opt, bas_ij_cache, cd_j2c_cache, auxcell, omega, kpts, kpt
     GvT_buf = cp.zeros(Gv.size+THREADS)
     j3c_buf = cp.empty(naux_max*max_pair_size, dtype=np.complex128)
     c2s_buf = cp.empty_like(j3c_buf)
-    buf = np.empty(j3c_buf.size, dtype=np.complex128)
+    buf = empty_mapped(j3c_buf.size, dtype=np.complex128)
     cderi_compressed = {}
     for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
         naux = auxG_cache[kp].shape[1]
-        cderi_compressed[kp] = np.empty((naux,non0_size), dtype=np.complex128)
+        cderi_compressed[kp] = empty_mapped((naux,non0_size), dtype=np.complex128)
+    t1 = log.timer_debug1('initialize lr_int3c2e', *t1)
     pair0 = pair1 = 0
     for i, j in bas_ij_cache:
         li = uniq_l[i]
@@ -967,7 +968,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         ao_pair_mapping, diag_addresses = _int3c2e_pair_and_diag_indices(
             int3c2e_opt, img_idx_cache)
         nao_pairs = len(ao_pair_mapping)
-        cderi = np.empty((naux, nao_pairs))
+        cderi = empty_mapped((naux, nao_pairs))
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     evaluate = int3c2e_opt.int3c2e_evaluator(
@@ -978,7 +979,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
     for (li, lj), img_idx in img_idx_cache.items():
         npairs = nf[li] * nf[lj] * len(img_idx[4])
         buflen = max(buflen, npairs)
-    buf = np.empty(naux*buflen)
+    buf = empty_mapped(naux*buflen)
     p0 = p1 = 0
     for li, lj in img_idx_cache:
         c_pair_idx, j3c_tmp = evaluate(li, lj)
@@ -1089,7 +1090,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         ao_pair_mapping, diag_addresses = _int3c2e_pair_and_diag_indices(
             int3c2e_opt, img_idx_cache)
         nao_pairs = len(ao_pair_mapping)
-        cderi = np.empty((naux, nao_pairs))
+        cderi = empty_mapped((naux, nao_pairs))
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     evaluate = int3c2e_opt.int3c2e_evaluator(
@@ -1100,7 +1101,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     for (li, lj), img_idx in img_idx_cache.items():
         npairs = nf[li] * nf[lj] * len(img_idx[4])
         buflen = max(buflen, npairs)
-    buf = np.empty(naux_cart*buflen)
+    buf = empty_mapped(naux_cart*buflen)
     p0 = p1 = 0
     for li, lj in img_idx_cache:
         c_pair_idx = img_idx_cache[li, lj][4]
@@ -1224,7 +1225,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         cderi = {}
         for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
             naux = cd_j2c_cache[j2c_idx].shape[1]
-            cderi[kp] = np.empty((naux,nao_pairs), dtype=np.complex128)
+            cderi[kp] = empty_mapped((naux,nao_pairs), dtype=np.complex128)
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     evaluate = int3c2e_opt.int3c2e_evaluator(
@@ -1239,7 +1240,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     for (li, lj), img_idx in img_idx_cache.items():
         npairs = nf[li] * nf[lj] * len(img_idx[4])
         buflen = max(buflen, npairs)
-    buf = np.empty(naux_cart*buflen, dtype=np.complex128)
+    buf = empty_mapped(naux_cart*buflen, dtype=np.complex128)
     p0 = p1 = 0
     for li, lj in img_idx_cache:
         c_pair_idx = img_idx_cache[li, lj][4]
@@ -1398,31 +1399,23 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
     pair_address, diag_idx = cderi_idx
     naux = cderi_compressed.shape[0]
     nL, nkpts = expLk.shape
-    if buf is None:
-        cderi_tril = cp.zeros((naux, nao*nL*nao), dtype=cderi_compressed.dtype)
-    else:
-        cderi_tril = cp.ndarray((naux, nao*nL*nao), dtype=cderi_compressed.dtype, memptr=buf.data)
-        cderi_tril.fill(0.)
+    cderi_tril = ndarray((naux, nao*nL*nao), cderi_compressed.dtype, buffer=buf)
+    cderi_tril.fill(0.)
     cderi_tril[:,pair_address] = cderi_compressed
     # diagonal blocks are accessed twice
     cderi_tril[:,pair_address[diag_idx]] *= .5
     cderi_tril = cderi_tril.reshape(naux, nao, nL, nao)
     if expLk.size == 1: # gamma point
-        if out is None:
-            out = cderi_tril[:,:,0,:].copy()
-        else:
-            out = cp.ndarray((naux,nao,nao), dtype=np.float64, memptr=out.data)
-            out[:] = cderi_tril[:,:,0,:]
+        out = ndarray((naux,nao,nao), np.float64, buffer=out)
+        out[:] = cderi_tril[:,:,0,:]
         out += cderi_tril[:,:,0,:].transpose(0,2,1)
         return out.reshape(1,naux,nao,nao)
 
     assert expLk.dtype == np.complex128
     # Searching adapted k indices for (ij|aux)
     ki_idx, kj_idx = np.where(kk_conserv == k_idx)
-    if out is None:
-        out = cp.empty(nkpts*naux*nao**2, dtype=np.complex128)
     if cderi_tril.dtype == np.complex128:
-        out = cp.ndarray((nkpts,naux,nao,nao), dtype=np.complex128, memptr=out.data)
+        out = ndarray((nkpts,naux,nao,nao), dtype=np.complex128, buffer=out)
         out = contract('kjLi,LK->Kkij', cderi_tril, expLk.conj(), out=out)
         # Make kpt_j in expLk_j correspond to the sorted kpt_i
         expLk_j = expLk[:,kj_idx]
@@ -1430,7 +1423,7 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
     else:
         expLk_iz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
         expLk_jz = expLk[:,kj_idx].view(np.float64).reshape(nL,nkpts,2)
-        out = cp.ndarray((nkpts,naux,nao,nao,2), dtype=np.float64, memptr=out.data)
+        out = ndarray((nkpts,naux,nao,nao,2), dtype=np.float64, buffer=out)
         out = contract('kjLi,LKz->Kkijz', cderi_tril, expLk_iz, out=out)
         out = contract('kiLj,LKz->Kkijz', cderi_tril, expLk_jz, beta=1., out=out)
         out = out.view(np.complex128)[:,:,:,:,0]
