@@ -48,7 +48,7 @@ __device__ __forceinline__ unsigned get_smid() {
 #define allocate_page() (page_pool + atomicAdd(&num_pages, 1))
 
 __device__ __forceinline__
-int _filter_images(ImgIdxPage *page_pool, PBCIntEnvVars *envs, PBCInt3c2eBounds *bounds,
+int _filter_images(ImgIdxPage *page_pool, PBCIntEnvVars &envs, PBCInt3c2eBounds &bounds,
                    int pair_ij, int kcount0, int kcount1, float log_cutoff)
 {
     int thread_xy = threadIdx.x + blockDim.x * threadIdx.y;
@@ -59,25 +59,25 @@ int _filter_images(ImgIdxPage *page_pool, PBCIntEnvVars *envs, PBCInt3c2eBounds 
         num_pages = 0;
     }
     __syncthreads();
-    if (pair_ij < bounds->n_prim_pairs) {
-        int nimgs = envs->nimgs;
-        int *bas = envs->bas;
-        double *env = envs->env;
-        double *img_coords = envs->img_coords;
-        int li = bounds->li;
-        int lj = bounds->lj;
-        int kprim = bounds->kprim;
-        int nksh = bounds->nksh;
-        int nbas_aux = bounds->naux;
-        int ksh0 = bounds->ksh0;
-        int bas_ij = bounds->bas_ij_idx[pair_ij];
-        int nbas = envs->cell0_nbas * envs->bvk_ncells;
+    if (pair_ij < bounds.n_prim_pairs) {
+        int nimgs = envs.nimgs;
+        int *bas = envs.bas;
+        double *env = envs.env;
+        double *img_coords = envs.img_coords;
+        int li = bounds.li;
+        int lj = bounds.lj;
+        int kprim = bounds.kprim;
+        int nksh = bounds.nksh;
+        int nbas_aux = bounds.naux;
+        int ksh0 = bounds.ksh0;
+        int bas_ij = bounds.bas_ij_idx[pair_ij];
+        int nbas = envs.cell0_nbas * envs.bvk_ncells;
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        uint32_t *sp_img_offsets = bounds->img_offsets;
+        uint32_t *sp_img_offsets = bounds.img_offsets;
         uint32_t img0 = sp_img_offsets[pair_ij];
         int nimgs_j = sp_img_offsets[pair_ij+1] - img0;
-        int *ovlp_img_idx = bounds->img_idx + img0;
+        int *ovlp_img_idx = bounds.img_idx + img0;
         float ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
         float aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
         float ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
@@ -245,7 +245,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
     page_pool += get_smid() * PAGES_PER_BLOCK;
     int pair_ij = sp_id + sp0_this_block;
     int nbas = envs.cell0_nbas * ncells;
-    int num_pages = _filter_images(page_pool, &envs, &bounds, pair_ij,
+    int num_pages = _filter_images(page_pool, envs, bounds, pair_ij,
                                    kcount0, kcount1, log_cutoff);
     if (num_pages >= PAGES_PER_BLOCK) {
         printf("Page overflow\n");
@@ -280,6 +280,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
         double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
         double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
         double aij = ai + aj;
+        double aj_aij = aj / aij;
+        double theta_ij = ai * aj_aij;
         double cicj = ci * cj;
         if (page_id < num_pages) {
             img_counts = page->nimgs;
@@ -318,8 +320,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                 double yjyi = rj[1] + yjL - ri[1];
                 double zjzi = rj[2] + zjL - ri[2];
                 double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
                 double Kab = theta_ij * rr_ij;
                 double fac_ij = exp(-Kab);
                 if (gout_id == 0) {

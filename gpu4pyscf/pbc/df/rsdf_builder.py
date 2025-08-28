@@ -1374,7 +1374,8 @@ def _precontract_j2c_aux_coeff(auxcell, aux_coeff, kpts, omega, with_long_range,
         cd_j2c_cache.append(cd_j2c)
     return cd_j2c_cache, negative_metric_size
 
-def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
+def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
+                 buf=None, out=None):
     r'''
     Constructs a dense cderi tensor from a partially compressed cderi at a
     specific k-point on the auxiliary dimension. The resulting tensor has the
@@ -1397,28 +1398,40 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao):
     pair_address, diag_idx = cderi_idx
     naux = cderi_compressed.shape[0]
     nL, nkpts = expLk.shape
-    cderi_tril = cp.zeros((naux, nao*nL*nao), dtype=cderi_compressed.dtype)
+    if buf is None:
+        cderi_tril = cp.zeros((naux, nao*nL*nao), dtype=cderi_compressed.dtype)
+    else:
+        cderi_tril = cp.ndarray((naux, nao*nL*nao), dtype=cderi_compressed.dtype, memptr=buf.data)
+        cderi_tril.fill(0.)
     cderi_tril[:,pair_address] = cderi_compressed
     # diagonal blocks are accessed twice
     cderi_tril[:,pair_address[diag_idx]] *= .5
     cderi_tril = cderi_tril.reshape(naux, nao, nL, nao)
     if expLk.size == 1: # gamma point
-        out = cderi_tril[:,:,0,:].copy()
+        if out is None:
+            out = cderi_tril[:,:,0,:].copy()
+        else:
+            out = cp.ndarray((naux,nao,nao), dtype=np.float64, memptr=out.data)
+            out[:] = cderi_tril[:,:,0,:]
         out += cderi_tril[:,:,0,:].transpose(0,2,1)
         return out.reshape(1,naux,nao,nao)
 
     assert expLk.dtype == np.complex128
     # Searching adapted k indices for (ij|aux)
     ki_idx, kj_idx = np.where(kk_conserv == k_idx)
+    if out is None:
+        out = cp.empty(nkpts*naux*nao**2, dtype=np.complex128)
     if cderi_tril.dtype == np.complex128:
-        out = contract('kjLi,LK->Kkij', cderi_tril, expLk.conj())
+        out = cp.ndarray((nkpts,naux,nao,nao), dtype=np.complex128, memptr=out.data)
+        out = contract('kjLi,LK->Kkij', cderi_tril, expLk.conj(), out=out)
         # Make kpt_j in expLk_j correspond to the sorted kpt_i
         expLk_j = expLk[:,kj_idx]
         out = contract('kiLj,LK->Kkij', cderi_tril, expLk_j, beta=1., out=out)
     else:
         expLk_iz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
         expLk_jz = expLk[:,kj_idx].view(np.float64).reshape(nL,nkpts,2)
-        out = contract('kjLi,LKz->Kkijz', cderi_tril, expLk_iz)
+        out = cp.ndarray((nkpts,naux,nao,nao,2), dtype=np.float64, memptr=out.data)
+        out = contract('kjLi,LKz->Kkijz', cderi_tril, expLk_iz, out=out)
         out = contract('kiLj,LKz->Kkijz', cderi_tril, expLk_jz, beta=1., out=out)
         out = out.view(np.complex128)[:,:,:,:,0]
     return out

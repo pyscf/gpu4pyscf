@@ -186,7 +186,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)
-    logger.debug2(mydf, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
+    logger.debug1(mydf, 'max_memory %d MB, blksize %d', avail_mem*1e-6, blksize)
     naux = mydf.get_naoaux()
     aux_iter = iter((kp, p0, p1)
                     for p0, p1 in lib.prange(0, naux, blksize)

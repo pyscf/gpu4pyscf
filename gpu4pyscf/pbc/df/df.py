@@ -169,24 +169,31 @@ class GDF(lib.StreamObject):
         cell = self.cell
         if self._cderi is None:
             self.build(j_only=self._j_only)
+        nkpts = np.prod(self.kmesh)
         if kpts is not None:
-            assert len(kpts) == np.prod(self.kmesh)
+            assert len(kpts) == nkpts
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
         if unpack:
-            kmesh = self.kmesh
-            expLk = fft_matrix(kmesh)
+            expLk = fft_matrix(self.kmesh)
             nao = cell.nao
-            kk_conserv = k2gamma.double_translation_indices(kmesh)
+            kk_conserv = k2gamma.double_translation_indices(self.kmesh)
+            out_buf = cp.empty((2,blksize*nkpts*nao**2), dtype=np.complex128)
 
+        ao_pair_mapping = self._cderi_idx[0]
+        npairs = len(ao_pair_mapping)
+        cderi_buf = cp.empty(blksize*nkpts*npairs, dtype=np.complex128)
         for k_aux, p0, p1 in aux_iter:
-            out = asarray(self._cderi[k_aux][p0:p1,:])
-            if out.size == 0:
+            tmp = self._cderi[k_aux][p0:p1,:]
+            if tmp.size == 0:
                 return
+            out = cp.ndarray(tmp.shape, dtype=tmp.dtype, memptr=cderi_buf.data)
+            out.set(tmp)
             if unpack:
                 out = rsdf_builder.unpack_cderi(
-                    out, self._cderi_idx, k_aux, kk_conserv, expLk, nao)
+                    out, self._cderi_idx, k_aux, kk_conserv, expLk, nao,
+                    buf=out_buf[0], out=out_buf[1])
             yield k_aux, out, 1
             if p0 == 0 and cell.dimension == 2 and k_aux in self._cderip:
                 out = asarray(self._cderip[k_aux])
