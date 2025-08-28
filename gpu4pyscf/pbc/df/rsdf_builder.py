@@ -1406,7 +1406,7 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
     cderi_tril[:,pair_address[diag_idx]] *= .5
     cderi_tril = cderi_tril.reshape(naux, nao, nL, nao)
     if expLk.size == 1: # gamma point
-        out = ndarray((naux,nao,nao), np.float64, buffer=out)
+        out = ndarray((naux,nao,nao), cderi_compressed.dtype, buffer=out)
         out[:] = cderi_tril[:,:,0,:]
         out += cderi_tril[:,:,0,:].transpose(0,2,1)
         return out.reshape(1,naux,nao,nao)
