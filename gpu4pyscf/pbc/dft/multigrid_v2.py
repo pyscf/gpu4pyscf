@@ -540,15 +540,17 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
         density_matrix_with_translation.real, order="C"
     )
 
-    if dm_slice.dtype == cp.float32:
+    if density_matrix_with_translation_real_part.dtype == cp.float32:
         use_float_precision = ctypes.c_int(1)
     else:
+        assert density_matrix_with_translation_real_part.dtype == cp.float64
         use_float_precision = ctypes.c_int(0)
+    assert density_matrix_with_translation_real_part.size < np.iinfo(np.int32).max
 
     if with_tau:
-        density = cp.zeros((n_channels, 2, ) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
+        density = cp.zeros((n_channels, 2, ) + tuple(pairs_info["mesh"]), dtype=density_matrix_with_translation_real_part.dtype)
     else:
-        density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
+        density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=density_matrix_with_translation_real_part.dtype)
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
