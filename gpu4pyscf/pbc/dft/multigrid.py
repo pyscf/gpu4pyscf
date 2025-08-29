@@ -135,18 +135,18 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
 
     init_constant(cell)
     kern = libmgrid.MG_eval_rho_orth
-    rhoG = None
+    rhoG = cp.zeros((nset, *ni.mesh), dtype=np.complex128)
 
-    for sub_tasks in tasks:
-        if not sub_tasks: continue
-        task = sub_tasks[0]
-        mesh = task.mesh
-        ngrids = np.prod(mesh)
-        rhoR = cp.zeros((nset, *mesh))
-        for i in range(nset):
+    for i in range(nset):
+        for sub_tasks in tasks:
+            if not sub_tasks: continue
+            task = sub_tasks[0]
+            mesh = task.mesh
+            ngrids = np.prod(mesh)
+            rhoR = cp.zeros(mesh)
             for task in sub_tasks:
                 err = kern(
-                    ctypes.cast(rhoR[i].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms[i].data.ptr, ctypes.c_void_p),
                     mg_envs, ctypes.c_int(task.l), ctypes.c_int(task.n_radius),
                     (ctypes.c_int*3)(*task.mesh),
@@ -157,13 +157,10 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
                 if err != 0:
                     raise RuntimeError(f'MG_eval_rho_orth kernel for l={task.l} failed')
 
-        weight = 1./nkpts * cell.vol/ngrids
-        rho_freq = tools.fft(rhoR.reshape(nset, *mesh), mesh)
-        rho_freq *= weight
-        if rhoG is None:
-            rhoG = rho_freq.reshape(-1, *mesh)
-        else:
-            _takebak_4d(rhoG, rho_freq.reshape(-1, *mesh), mesh)
+            weight = 1./nkpts * cell.vol/ngrids
+            rho_freq = tools.fft(rhoR, mesh)
+            rho_freq *= weight
+            _takebak_4d(rhoG[i:i+1], rho_freq.reshape(-1, *mesh), mesh)
     # TODO: for diffused basis functions lower than minimal Ecut, compute the
     # rhoR using normal FFTDF code
     log.timer_debug1('eval_rhoG', *t0)
@@ -280,25 +277,25 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     # TODO: might be complex array when tddft amplitudes are complex
     vj = cp.zeros((nset,nao,nao))
 
-    for sub_tasks in tasks:
-        if not sub_tasks: continue
-        task = sub_tasks[0]
-        mesh = task.mesh
-        ngrids = np.prod(mesh)
-        sub_vG = _take_4d(vG, mesh).reshape(nset,ngrids)
-        v_rs = tools.ifft(sub_vG, mesh).reshape(nset,ngrids)
-        imag_max = abs(v_rs.imag).max()
-        if imag_max > 1e-5:
-            msg = f'Imaginary values {imag_max} in potential. mesh {mesh} might be insufficient'
-            #raise RuntimeError(msg)
-            logger.warn(cell, msg)
+    for i in range(nset):
+        for sub_tasks in tasks:
+            if not sub_tasks: continue
+            task = sub_tasks[0]
+            mesh = task.mesh
+            ngrids = np.prod(mesh)
+            sub_vG = _take_4d(vG[i:i+1], mesh).reshape(ngrids)
+            v_rs = tools.ifft(sub_vG, mesh).reshape(ngrids)
+            imag_max = abs(v_rs.imag).max()
+            if imag_max > 1e-5:
+                msg = f'Imaginary values {imag_max} in potential. mesh {mesh} might be insufficient'
+                #raise RuntimeError(msg)
+                logger.warn(cell, msg)
 
-        vR = cp.asarray(v_rs.real, order='C')
-        for i in range(nset):
+            vR = cp.asarray(v_rs.real, order='C')
             for task in sub_tasks:
                 err = kern(
                     ctypes.cast(vj[i].data.ptr, ctypes.c_void_p),
-                    ctypes.cast(vR[i].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(vR.data.ptr, ctypes.c_void_p),
                     mg_envs, ctypes.c_int(task.l), ctypes.c_int(task.n_radius),
                     (ctypes.c_int*3)(*task.mesh),
                     ctypes.c_uint32(len(task.shl_pair_idx)),
