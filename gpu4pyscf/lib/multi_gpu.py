@@ -173,9 +173,12 @@ def lru_cache(size):
 
 def synchronize(devices=None):
     '''Synchronize cross all devices and all streams'''
-    if devices is None:
-        for s in _streams:
-            s.synchronize()
-    else:
-        for device_id in devices:
-            cp.cuda.Device(device_id).synchronize()
+    if num_devices > 1:
+        if devices is None:
+            for s in _streams:
+                s.synchronize()
+        else:
+            for device_id in devices:
+                cp.cuda.Device(device_id).synchronize()
+
+    cp.cuda.get_current_stream().synchronize()
