@@ -180,7 +180,8 @@ class GDF(lib.StreamObject):
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
-        ao_pair_mapping = self._cderi_idx[0]
+        ao_pair_mapping, diag_idx = self._cderi_idx
+        cderi_idx = cp.asarray(ao_pair_mapping), cp.asarray(diag_idx)
         npairs = len(ao_pair_mapping)
         if unpack:
             expLk = fft_matrix(self.kmesh)
@@ -197,14 +198,14 @@ class GDF(lib.StreamObject):
             out.set(tmp)
             if unpack:
                 out = rsdf_builder.unpack_cderi(
-                    out, self._cderi_idx, k_aux, kk_conserv, expLk, nao,
+                    out, cderi_idx, k_aux, kk_conserv, expLk, nao,
                     buf=buf, out=out_buf)
             yield k_aux, out, 1
             if p0 == 0 and cell.dimension == 2 and k_aux in self._cderip:
                 out = asarray(self._cderip[k_aux])
                 if unpack:
                     out = rsdf_builder.unpack_cderi(
-                        out, self._cderi_idx, k_aux, kk_conserv, expLk, nao)
+                        out, cderi_idx, k_aux, kk_conserv, expLk, nao)
                 yield k_aux, out, -1
 
     def get_pp(self, kpts=None):

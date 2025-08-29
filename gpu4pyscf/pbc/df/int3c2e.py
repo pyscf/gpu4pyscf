@@ -204,11 +204,9 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     _env = cp.array(_scale_sp_ctr_coeff(bvkcell), dtype=np.float64)
     ao_loc = bvkcell.ao_loc_nr(cart=True)
     ao_loc_gpu = cp.array(ao_loc, dtype=np.int32)
-    int3c2e_envs = PBCIntEnvVars(
+    int3c2e_envs = PBCIntEnvVars.new(
         sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
-        _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
-        ao_loc_gpu.data.ptr, Ls.data.ptr,
-    )
+        _atm, _bas, _env, ao_loc_gpu, Ls)
 
     bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
     shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
@@ -457,7 +455,7 @@ class SRInt3c2eOpt:
         self.bvk_kmesh = bvk_kmesh
 
         self.rcut = None
-        self.int3c2e_envs = None
+        self._int3c2e_envs = None
         self.bvk_cell = None
         self.bvkmesh_Ls = None
 
@@ -506,15 +504,8 @@ class SRInt3c2eOpt:
         bvk_ao_loc = bvkcell.ao_loc
         aux_loc = auxcell.ao_loc
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
-        int3c2e_envs = PBCIntEnvVars(
-            pcell.natm, pcell.nbas, bvk_ncells, nimgs,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
-            ao_loc.data.ptr, Ls.data.ptr,
-        )
-        # Keep a reference to these arrays, prevent releasing them upon returning the closure
-        int3c2e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
-        self.int3c2e_envs = int3c2e_envs
-
+        self._int3c2e_envs = PBCIntEnvVars.new(
+            pcell.natm, pcell.nbas, bvk_ncells, nimgs, _atm, _bas, _env, ao_loc, Ls)
         init_constant(pcell)
         err = libpbc.PBCsr_int3c2e_latsum23_init(ctypes.c_int(SHM_SIZE))
         if err != 0:
@@ -523,6 +514,13 @@ class SRInt3c2eOpt:
         log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
         log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
         return self
+
+    @property
+    def int3c2e_envs(self):
+        _int3c2e_envs = self._int3c2e_envs
+        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs._device:
+            return self._int3c2e_envs
+        return _int3c2e_envs.copy()
 
     def estimate_cutoff_with_penalty(self):
         pcell = self.prim_cell
@@ -738,7 +736,7 @@ class SRInt3c2eOpt:
 
     def int3c2e_evaluator(self, verbose=None, img_idx_cache=None):
         log = logger.new_logger(self.cell, verbose)
-        if self.int3c2e_envs is None:
+        if self.bvkmesh_Ls is None:
             self.build(verbose)
         auxcell = self.sorted_auxcell
         bvkcell = self.bvkcell
@@ -756,6 +754,7 @@ class SRInt3c2eOpt:
         uniq_l = np.arange(lmax+1)
         nfcart = (uniq_l + 1) * (uniq_l + 2) // 2
         kern = libpbc.fill_int3c2e
+        int3c2e_envs = self.int3c2e_envs
 
         if img_idx_cache is None:
             img_idx_cache = self.make_img_idx_cache()
@@ -790,7 +789,7 @@ class SRInt3c2eOpt:
                 log.debug2(f'prim_pairs={n_prim_pairs} int3c2e_scheme for %s: %s', lll, scheme)
                 err = kern(
                     ctypes.cast(eri3c[k0:].data.ptr, ctypes.c_void_p),
-                    ctypes.byref(self.int3c2e_envs),
+                    ctypes.byref(int3c2e_envs),
                     (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*6)(*shls_slice),
                     ctypes.c_int(naux),
@@ -972,7 +971,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
 
     def int3c2e_evaluator(self, verbose=None, img_idx_cache=None, cutoff=None):
         log = logger.new_logger(self.cell, verbose)
-        if self.int3c2e_envs is None:
+        if self.bvkmesh_Ls is None:
             self.build(verbose)
         bvkcell = self.bvkcell
         l_ctr_aux_offsets = self.l_ctr_aux_offsets
@@ -997,6 +996,8 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
 
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
+
+        int3c2e_envs = self.int3c2e_envs
 
         def evaluate_j3c(li, lj, k):
             ish0, ish1 = p_shell_l_offsets[li:li+2]
@@ -1024,7 +1025,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             log.debug2(f'prim_pairs={n_prim_pairs} int3c2e_scheme for %s: %s', lll, scheme)
             err = kern(
                 ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
-                ctypes.byref(self.int3c2e_envs),
+                ctypes.byref(int3c2e_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                 (ctypes.c_int*3)(*scheme),
                 (ctypes.c_int*6)(*shls_slice),

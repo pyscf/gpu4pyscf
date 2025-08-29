@@ -19,7 +19,7 @@ import cupy as cp
 import numpy as np
 from pyscf.lib import prange
 from gpu4pyscf.lib.memcpy import p2p_transfer
-from gpu4pyscf.__config__ import num_devices
+from gpu4pyscf.__config__ import num_devices, _streams
 
 __all__ = [
     'run', 'map', 'reduce', 'array_reduce', 'array_broadcast', 'lru_cache'
@@ -58,26 +58,23 @@ def map(func, tasks, args=(), kwargs={}, schedule='dynamic') -> list:
     if num_devices == 1:
         return [func(t, *args, *kwargs) for t in tasks]
 
-    tasks = list(enumerate(tasks))
-    result = [None] * len(tasks)
+    tasks = enumerate(tasks)
+    result = {}
 
     def consumer():
         if schedule == 'dynamic':
             stream = cp.cuda.stream.get_current_stream()
-            while tasks:
-                try:
-                    key, t = tasks.pop()
-                except IndexError:
-                    return
+            for key, t in tasks:
                 result[key] = func(t, *args, **kwargs)
                 stream.synchronize()
         else:
+            _tasks = list(tasks)
             device_id = cp.cuda.device.get_device_id()
-            for key, t in tasks[device_id::num_devices]:
+            for key, t in _tasks[device_id::num_devices]:
                 result[key] = func(t, *args, **kwargs)
 
     run(consumer, non_blocking=True)
-    return result
+    return [v for k, v in sorted(result.items())]
 
 def reduce(func, tasks, args=(), kwargs={}, schedule='dynamic'):
     '''Processes tasks on multiple GPU devices and returns the sum of the results.

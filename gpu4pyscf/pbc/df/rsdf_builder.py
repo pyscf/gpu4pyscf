@@ -34,6 +34,7 @@ from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
+from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -819,110 +820,124 @@ def _lr_int3c2e_kk(ft_opt, bas_ij_cache, cd_j2c_cache, auxcell, omega, kpts, kpt
     nf = nf_cart = (uniq_l + 1) * (uniq_l + 2) // 2
     if not cell.cart:
         nf = uniq_l * 2 + 1
-        c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
     l_ctr_offsets = ft_opt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
     max_pair_size = 0
     non0_size = 0
+    p0 = p1 = 0
+    ao_pair_offsets = {}
     for i, j in bas_ij_cache:
         n_pairs = len(bas_ij_cache[i, j][0])
         max_pair_size = max(max_pair_size, nf_cart[i]*nf_cart[j] * n_pairs)
-        non0_size += nf[i] * nf[j] * n_pairs
+        p0, p1 = p1, p1 + nf[i] * nf[j] * n_pairs
+        ao_pair_offsets[i, j] = p0, p1
+    non0_size = p1
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux_max)))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
 
-    kern = libpbc.build_ft_aopair
-    # Padding zeros, allowing idle threads to access Gv over the bounds.
-    GvT_buf = cp.zeros(Gv.size+THREADS)
-    j3c_buf = cp.empty(naux_max*max_pair_size, dtype=np.complex128)
-    c2s_buf = cp.empty_like(j3c_buf)
-    buf = empty_mapped(j3c_buf.size, dtype=np.complex128)
     cderi_compressed = {}
     for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
         naux = auxG_cache[kp].shape[1]
         cderi_compressed[kp] = empty_mapped((naux,non0_size), dtype=np.complex128)
     t1 = log.timer_debug1('initialize lr_int3c2e', *t1)
-    pair0 = pair1 = 0
-    for i, j in bas_ij_cache:
-        li = uniq_l[i]
-        lj = uniq_l[j]
-        ll_pattern = f'{l_symb[i]}{l_symb[j]}'
-        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-        jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-        nfi = nf_cart[i]
-        nfj = nf_cart[j]
-        nfij = nfi * nfj
-        bas_ij, img_offsets, img_idx = bas_ij_cache[i, j]
-        n_pairs = len(bas_ij)
-        pair0, pair1 = pair1, pair1 + n_pairs * nf[i] * nf[j]
 
-        pqG_buf = cp.empty((nfij*n_pairs, Gblksize), dtype=np.complex128)
-        for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
-            auxG_conj = auxG_cache[kp]
-            naux = auxG_conj.shape[1]
-            j3c_tmp = cp.ndarray((naux,nfij*n_pairs), dtype=np.complex128,
-                                 memptr=j3c_buf.data)
-            j3c_tmp[:] = 0
-            for p0, p1 in lib.prange(0, ngrids, Gblksize):
-                nGv = p1 - p0
-                auxG_c = auxG_conj[p0:p1]
-                GvT = GvT_buf[:nGv*3].reshape(3,nGv)
-                GvT.set(Gv[p0:p1].T)
-                GvT[:] += asarray(kpts[kp,:,None])
+    tasks = iter(bas_ij_cache)
+    def proc():
+        if not cell.cart:
+            c2s = [cart2sph_by_l(l) for l in range(uniq_l.max()+1)]
+        _auxG_cache = {k: cp.asarray(v) for k, v in auxG_cache.items()}
+        _bas_ij_cache = {k: [cp.asarray(x) for x in v]
+                         for k, v in bas_ij_cache.items()}
+        kern = libpbc.build_ft_aopair
+        aft_envs = ft_opt.aft_envs
+        # Padding zeros, allowing idle threads to access Gv over the bounds.
+        GvT_buf = cp.zeros(Gv.size+THREADS)
+        j3c_buf = cp.empty(naux_max*max_pair_size, dtype=np.complex128)
+        c2s_buf = cp.empty_like(j3c_buf)
+        buf = empty_mapped(j3c_buf.size, dtype=np.complex128)
+        for i, j in tasks:
+            li = uniq_l[i]
+            lj = uniq_l[j]
+            ll_pattern = f'{l_symb[i]}{l_symb[j]}'
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            nfi = nf_cart[i]
+            nfj = nf_cart[j]
+            nfij = nfi * nfj
+            bas_ij, img_offsets, img_idx = _bas_ij_cache[i, j]
+            n_pairs = len(bas_ij)
 
-                pqG = cp.ndarray((nfij*n_pairs,nGv), dtype=np.complex128,
-                                 memptr=pqG_buf.data)
-                scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
-                log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
-                err = kern(
-                    ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(1), # Compressing, remove zero elements
-                    ctypes.byref(ft_opt.aft_envs), (ctypes.c_int*3)(*scheme),
-                    (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                    ctypes.c_int(n_pairs), ctypes.c_int(nGv),
-                    ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                    sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-                    sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-                    sorted_cell._env.ctypes)
-                if err != 0:
-                    raise RuntimeError(f'build_ft_ao_compressed kernel for {ll_pattern} failed')
-                # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
-                # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
-                # are assumed to be real
-                contract('Gr,pG->rp', auxG_c, pqG, beta=1., out=j3c_tmp)
+            pqG_buf = cp.empty((nfij*n_pairs, Gblksize), dtype=np.complex128)
+            for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
+                auxG_conj = _auxG_cache[kp]
+                naux = auxG_conj.shape[1]
+                j3c_tmp = cp.ndarray((naux,nfij*n_pairs), dtype=np.complex128,
+                                     memptr=j3c_buf.data)
+                j3c_tmp[:] = 0
+                for p0, p1 in lib.prange(0, ngrids, Gblksize):
+                    nGv = p1 - p0
+                    auxG_c = auxG_conj[p0:p1]
+                    GvT = GvT_buf[:nGv*3].reshape(3,nGv)
+                    GvT.set(Gv[p0:p1].T)
+                    GvT[:] += asarray(kpts[kp,:,None])
 
-            if cell.cart:
-                j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
-                # Note: bas_ij_idx for the LR part and the SR int3c2e are different.
-                # In the (nfj,nfi,n_pairs) storage, the address of the non-zero
-                # elements are accessed as
-                #     offset + np.arange(nfj*nfi) * len(bas_ij_idx) + bas_ij_idx
-                # The differences in bas_ij_idx for LR and SR part will complicates
-                # the address mapping.  To simplify the mapping, the storage order
-                # is flipped. By placing the nfj,nfi to the last dimension, the
-                # non-zero elements address can be computed as
-                #     offset + bas_ij_idx * (nfj*nfi) + np.arange(nfj*nfi)
-                # Address mapping can be achieved by adjustment for the offset.
-                j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
-            else:
-                j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
-                c2s_tmp1 = cp.ndarray((naux,n_pairs,nf[j],nfi),
-                                      dtype=np.complex128, memptr=c2s_buf.data)
-                c2s_tmp2 = cp.ndarray((naux,n_pairs,nf[j],nf[i]),
-                                      dtype=np.complex128, memptr=j3c_tmp.data)
-                j3c_tmp = contract('qj,kqpm->kmjp', c2s[lj], j3c_tmp, out=c2s_tmp1)
-                j3c_tmp = contract('pi,kmjp->kmji', c2s[li], j3c_tmp, out=c2s_tmp2)
-                j3c_tmp = j3c_tmp.reshape(naux,-1)
+                    pqG = cp.ndarray((nfij*n_pairs,nGv), dtype=np.complex128,
+                                     memptr=pqG_buf.data)
+                    scheme = ft_ao.ft_ao_scheme(cell, li, lj, nGv)
+                    log.debug2('ft_ao_scheme for %s: %s', ll_pattern, scheme)
+                    err = kern(
+                        ctypes.cast(pqG.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(1), # Compressing, remove zero elements
+                        ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
+                        (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
+                        ctypes.c_int(n_pairs), ctypes.c_int(nGv),
+                        ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+                        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
+                        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
+                        sorted_cell._env.ctypes)
+                    if err != 0:
+                        raise RuntimeError(f'build_ft_ao_compressed kernel for {ll_pattern} failed')
+                    # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+                    # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
+                    # are assumed to be real
+                    contract('Gr,pG->rp', auxG_c, pqG, beta=1., out=j3c_tmp)
 
-            _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
-            cderi_compressed[kp][:,pair0:pair1] = j3c_tmp.get(out=_buf)
-        t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
+                if cell.cart:
+                    j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+                    # Note: bas_ij_idx for the LR part and the SR int3c2e are different.
+                    # In the (nfj,nfi,n_pairs) storage, the address of the non-zero
+                    # elements are accessed as
+                    #     offset + np.arange(nfj*nfi) * len(bas_ij_idx) + bas_ij_idx
+                    # The differences in bas_ij_idx for LR and SR part will complicates
+                    # the address mapping.  To simplify the mapping, the storage order
+                    # is flipped. By placing the nfj,nfi to the last dimension, the
+                    # non-zero elements address can be computed as
+                    #     offset + bas_ij_idx * (nfj*nfi) + np.arange(nfj*nfi)
+                    # Address mapping can be achieved by adjustment for the offset.
+                    j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
+                else:
+                    j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+                    c2s_tmp1 = cp.ndarray((naux,n_pairs,nf[j],nfi),
+                                          dtype=np.complex128, memptr=c2s_buf.data)
+                    c2s_tmp2 = cp.ndarray((naux,n_pairs,nf[j],nf[i]),
+                                          dtype=np.complex128, memptr=j3c_tmp.data)
+                    j3c_tmp = contract('qj,kqpm->kmjp', c2s[lj], j3c_tmp, out=c2s_tmp1)
+                    j3c_tmp = contract('pi,kmjp->kmji', c2s[li], j3c_tmp, out=c2s_tmp2)
+                    j3c_tmp = j3c_tmp.reshape(naux,-1)
+
+                _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
+                pair0, pair1 = ao_pair_offsets[i, j]
+                cderi_compressed[kp][:,pair0:pair1] = j3c_tmp.get(out=_buf)
+            #t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
+
+    multi_gpu.run(proc, non_blocking=True)
+
     return cderi_compressed
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
@@ -946,7 +961,6 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         nf = (uniq_l + 1) * (uniq_l + 2) // 2
     else:
         nf = uniq_l * 2 + 1
-        c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
     img_idx_cache = int3c2e_opt.make_img_idx_cache()
 
@@ -971,63 +985,73 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         cderi = empty_mapped((naux, nao_pairs))
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
-    evaluate = int3c2e_opt.int3c2e_evaluator(
-        verbose=log, img_idx_cache=img_idx_cache)
-
-    t1 = log.timer_debug1('initialize int3c2e_kernel', *t1)
     buflen = 0
+    p0 = p1 = 0
+    ao_pair_offsets = {}
     for (li, lj), img_idx in img_idx_cache.items():
         npairs = nf[li] * nf[lj] * len(img_idx[4])
         buflen = max(buflen, npairs)
-    buf = empty_mapped(naux*buflen)
-    p0 = p1 = 0
-    for li, lj in img_idx_cache:
-        c_pair_idx, j3c_tmp = evaluate(li, lj)
-        if len(c_pair_idx) == 0:
-            continue
+        p0, p1 = p1, p1 + npairs
+        ao_pair_offsets[li, lj] = p0, p1
 
-        i0, i1 = c_l_offsets[li:li+2]
-        j0, j1 = c_l_offsets[lj:lj+2]
-        nctrj = c_shell_counts[lj]
-        nfi = (li+1)*(li+2)//2
-        nfj = (lj+1)*(lj+2)//2
-        n_pairs = len(c_pair_idx)
-        j3c_tmp = j3c_tmp.reshape(-1,nfi*nfj*n_pairs)
-        j3c_tmp = aux_coeff.T.dot(j3c_tmp)
+    tasks = iter(img_idx_cache)
+    def proc():
+        if not cell.cart:
+            c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
+        aux_coeff = cp.asarray(cd_j2c_cache[0])
+        _img_idx_cache = {k: [cp.asarray(x) for x in v]
+                          for k, v in img_idx_cache.items()}
+        evaluate = int3c2e_opt.int3c2e_evaluator(
+            verbose=log, img_idx_cache=_img_idx_cache)
+        buf = empty_mapped(naux*buflen)
+        for li, lj in tasks:
+            c_pair_idx, j3c_tmp = evaluate(li, lj)
+            if len(c_pair_idx) == 0:
+                continue
 
-        if cell.cart:
-            j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
-            # Flip the storage order to simplify address mapping. See the
-            # comments in the _lr_int3c2e_gamma_point function
-            j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
-        else:
-            j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
-            j3c_tmp = contract('qj,kqpm->kmjp', c2s[lj], j3c_tmp)
-            j3c_tmp = contract('pi,kmjp->kmji', c2s[li], j3c_tmp)
-            nfi = li * 2 + 1
-            nfj = lj * 2 + 1
-            j3c_tmp = j3c_tmp.reshape(naux,-1)
+            i0, i1 = c_l_offsets[li:li+2]
+            j0, j1 = c_l_offsets[lj:lj+2]
+            nctrj = c_shell_counts[lj]
+            nfi = (li+1)*(li+2)//2
+            nfj = (lj+1)*(lj+2)//2
+            n_pairs = len(c_pair_idx)
+            j3c_tmp = j3c_tmp.reshape(-1,nfi*nfj*n_pairs)
+            j3c_tmp = aux_coeff.T.dot(j3c_tmp)
 
-        c_pair_idx = cp.asnumpy(c_pair_idx)
-        ish, jsh = divmod(c_pair_idx, nctrj)
-        ish += i0
-        jsh += j0
-        if with_long_range:
-            ft_idx = aopair_offsets_lookup[ish,0,jsh]
-            ij = np.arange(nfi*nfj, dtype=np.int32)
-            idx = ij + ft_idx[:,None]
-            #:cderi[:,idx.ravel()] += j3c_tmp.get()
-            _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
-            idx = np.asarray(idx.ravel(), dtype=np.int32)
-            libpbc.take2d_add( # this copy back operation is very slow
-                cderi.ctypes, _buf.ctypes, idx.ctypes,
-                ctypes.c_int(naux), ctypes.c_int(nao_pairs), ctypes.c_int(len(idx))
-            )
-        else:
-            p0, p1 = p1, p1 + nfi*nfj*n_pairs
-            cderi[:,p0:p1] = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
-        j3c_tmp = ish = jsh = c_pair_idx = None
-    log.debug('Avail GPU mem = %s B', get_avail_mem())
+            if cell.cart:
+                j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+                # Flip the storage order to simplify address mapping. See the
+                # comments in the _lr_int3c2e_gamma_point function
+                j3c_tmp = j3c_tmp.transpose(0,3,1,2).reshape(naux,-1)
+            else:
+                j3c_tmp = j3c_tmp.reshape(naux,nfj,nfi,n_pairs)
+                j3c_tmp = contract('qj,kqpm->kmjp', c2s[lj], j3c_tmp)
+                j3c_tmp = contract('pi,kmjp->kmji', c2s[li], j3c_tmp)
+                nfi = li * 2 + 1
+                nfj = lj * 2 + 1
+                j3c_tmp = j3c_tmp.reshape(naux,-1)
+
+            c_pair_idx = cp.asnumpy(c_pair_idx)
+            ish, jsh = divmod(c_pair_idx, nctrj)
+            ish += i0
+            jsh += j0
+            if with_long_range:
+                ft_idx = aopair_offsets_lookup[ish,0,jsh]
+                ij = np.arange(nfi*nfj, dtype=np.int32)
+                idx = ij + ft_idx[:,None]
+                #:cderi[:,idx.ravel()] += j3c_tmp.get()
+                _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
+                idx = np.asarray(idx.ravel(), dtype=np.int32)
+                libpbc.take2d_add( # this copy back operation is very slow
+                    cderi.ctypes, _buf.ctypes, idx.ctypes,
+                    ctypes.c_int(naux), ctypes.c_int(nao_pairs), ctypes.c_int(len(idx))
+                )
+            else:
+                p0, p1 = ao_pair_offsets[li, lj]
+                cderi[:,p0:p1] = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
+            j3c_tmp = ish = jsh = c_pair_idx = None
+
+    multi_gpu.run(proc, non_blocking=True)
 
     cderip = None
     for k, nauxp in negative_metric_size.items():
@@ -1068,7 +1092,6 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         nf = (uniq_l + 1) * (uniq_l + 2) // 2
     else:
         nf = uniq_l * 2 + 1
-    c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
     img_idx_cache = int3c2e_opt.make_img_idx_cache()
 
@@ -1093,72 +1116,83 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         cderi = empty_mapped((naux, nao_pairs))
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
-    evaluate = int3c2e_opt.int3c2e_evaluator(
-        verbose=log, img_idx_cache=img_idx_cache)
-
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
     buflen = 0
+    p0 = p1 = 0
+    ao_pair_offsets = {}
     for (li, lj), img_idx in img_idx_cache.items():
         npairs = nf[li] * nf[lj] * len(img_idx[4])
         buflen = max(buflen, npairs)
-    buf = empty_mapped(naux_cart*buflen)
-    p0 = p1 = 0
-    for li, lj in img_idx_cache:
-        c_pair_idx = img_idx_cache[li, lj][4]
-        n_pairs = len(c_pair_idx)
-        if n_pairs == 0:
-            continue
+        p0, p1 = p1, p1 + npairs
+        ao_pair_offsets[li, lj] = p0, p1
 
-        i0, i1 = c_l_offsets[li:li+2]
-        j0, j1 = c_l_offsets[lj:lj+2]
-        nctri = c_shell_counts[li]
-        nctrj = c_shell_counts[lj]
-        if cell.cart:
-            nfi = (li+1)*(li+2)//2
-            nfj = (lj+1)*(lj+2)//2
-        else:
-            nfi = li * 2 + 1
-            nfj = lj * 2 + 1
-        c_pair_idx = cp.asnumpy(c_pair_idx)
-        ish, J, jsh = np.unravel_index(c_pair_idx, (nctri, bvk_ncells, nctrj))
-        ish += i0
-        jsh += j0
-        if with_long_range:
-            ft_idx = aopair_offsets_lookup[ish,J,jsh]
-            ij = np.arange(nfi*nfj, dtype=np.int32)
-            idx = ij + ft_idx[:,None]
-            idx = np.asarray(idx.ravel(), dtype=np.int32)
-        else:
-            p0, p1 = p1, p1 + nfi*nfj*n_pairs
-
-        nji = n_pairs * nfj * nfi
-        j3c_block = cp.empty((naux_cart,nji))
-        for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
-            j3c_tmp = evaluate(li, lj, k)[1]
-            if j3c_tmp.size == 0:
+    tasks = iter(img_idx_cache)
+    def proc():
+        if not cell.cart:
+            c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
+        aux_coeff = cp.asarray(cd_j2c_cache[0])
+        _img_idx_cache = {k: [cp.asarray(x) for x in v]
+                          for k, v in img_idx_cache.items()}
+        evaluate = int3c2e_opt.int3c2e_evaluator(
+            verbose=log, img_idx_cache=_img_idx_cache)
+        buf = empty_mapped(naux_cart*buflen)
+        for li, lj in tasks:
+            c_pair_idx = img_idx_cache[li, lj][4]
+            n_pairs = len(c_pair_idx)
+            if n_pairs == 0:
                 continue
-            # It is possible to optimize the j-only case by performing the
-            # lattice sum over bvk cell within the GPU kernel.
-            j3c_tmp = j3c_tmp.sum(axis=4)
-            if not cell.cart:
-                j3c_tmp = contract('qj,rqpuv->rjpuv', c2s[lj], j3c_tmp)
-                j3c_tmp = contract('pi,rjpuv->rjiuv', c2s[li], j3c_tmp)
-            j3c_tmp = j3c_tmp.transpose(4,0,3,1,2)
-            k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
-            j3c_block[k0:k1] = j3c_tmp.reshape(-1,nji)
 
-        j3c_block = contract('uv,up->vp', aux_coeff, j3c_block)
-        _buf = buf[:j3c_block.size].reshape(j3c_block.shape)
-        if with_long_range:
-            _buf = j3c_block.get(out=_buf)
-            libpbc.take2d_add( # this copy back operation is very slow
-                cderi.ctypes, _buf.ctypes, idx.ctypes,
-                ctypes.c_int(_buf.shape[0]), ctypes.c_int(nao_pairs),
-                ctypes.c_int(len(idx))
-            )
-        else:
-            cderi[:,p0:p1] = j3c_block.get(out=_buf)
-        j3c_tmp = j3c_block = None
+            i0, i1 = c_l_offsets[li:li+2]
+            j0, j1 = c_l_offsets[lj:lj+2]
+            nctri = c_shell_counts[li]
+            nctrj = c_shell_counts[lj]
+            if cell.cart:
+                nfi = (li+1)*(li+2)//2
+                nfj = (lj+1)*(lj+2)//2
+            else:
+                nfi = li * 2 + 1
+                nfj = lj * 2 + 1
+            c_pair_idx = cp.asnumpy(c_pair_idx)
+            ish, J, jsh = np.unravel_index(c_pair_idx, (nctri, bvk_ncells, nctrj))
+            ish += i0
+            jsh += j0
+            if with_long_range:
+                ft_idx = aopair_offsets_lookup[ish,J,jsh]
+                ij = np.arange(nfi*nfj, dtype=np.int32)
+                idx = ij + ft_idx[:,None]
+                idx = np.asarray(idx.ravel(), dtype=np.int32)
+
+            nji = n_pairs * nfj * nfi
+            j3c_block = cp.empty((naux_cart,nji))
+            for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
+                j3c_tmp = evaluate(li, lj, k)[1]
+                if j3c_tmp.size == 0:
+                    continue
+                # It is possible to optimize the j-only case by performing the
+                # lattice sum over bvk cell within the GPU kernel.
+                j3c_tmp = j3c_tmp.sum(axis=4)
+                if not cell.cart:
+                    j3c_tmp = contract('qj,rqpuv->rjpuv', c2s[lj], j3c_tmp)
+                    j3c_tmp = contract('pi,rjpuv->rjiuv', c2s[li], j3c_tmp)
+                j3c_tmp = j3c_tmp.transpose(4,0,3,1,2)
+                k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
+                j3c_block[k0:k1] = j3c_tmp.reshape(-1,nji)
+
+            j3c_block = contract('uv,up->vp', aux_coeff, j3c_block)
+            _buf = buf[:j3c_block.size].reshape(j3c_block.shape)
+            if with_long_range:
+                _buf = j3c_block.get(out=_buf)
+                libpbc.take2d_add( # this copy back operation is very slow
+                    cderi.ctypes, _buf.ctypes, idx.ctypes,
+                    ctypes.c_int(_buf.shape[0]), ctypes.c_int(nao_pairs),
+                    ctypes.c_int(len(idx))
+                )
+            else:
+                p0, p1 = ao_pair_offsets[li, lj]
+                cderi[:,p0:p1] = j3c_block.get(out=_buf)
+            j3c_tmp = j3c_block = None
+
+    multi_gpu.run(proc, non_blocking=True)
 
     cderip = None
     for k, nauxp in negative_metric_size.items():
@@ -1201,7 +1235,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         nf = (uniq_l + 1) * (uniq_l + 2) // 2
     else:
         nf = uniq_l * 2 + 1
-    c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
 
     img_idx_cache = int3c2e_opt.make_img_idx_cache()
 
@@ -1228,80 +1261,91 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             cderi[kp] = empty_mapped((naux,nao_pairs), dtype=np.complex128)
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
-    evaluate = int3c2e_opt.int3c2e_evaluator(
-        verbose=log, img_idx_cache=img_idx_cache)
-
-    expLkz = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
-    expLkz = expLkz.view(np.float64).reshape(bvk_ncells,nkpts,2)
-
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
     naux_cart = aux_loc[-1]
     buflen = 0
+    p0 = p1 = 0
+    ao_pair_offsets = {}
     for (li, lj), img_idx in img_idx_cache.items():
         npairs = nf[li] * nf[lj] * len(img_idx[4])
         buflen = max(buflen, npairs)
-    buf = empty_mapped(naux_cart*buflen, dtype=np.complex128)
-    p0 = p1 = 0
-    for li, lj in img_idx_cache:
-        c_pair_idx = img_idx_cache[li, lj][4]
-        n_pairs = len(c_pair_idx)
-        if n_pairs == 0:
-            continue
+        p0, p1 = p1, p1 + npairs
+        ao_pair_offsets[li, lj] = p0, p1
 
-        i0, i1 = c_l_offsets[li:li+2]
-        j0, j1 = c_l_offsets[lj:lj+2]
-        nctri = c_shell_counts[li]
-        nctrj = c_shell_counts[lj]
-        if cell.cart:
-            nfi = (li+1)*(li+2)//2
-            nfj = (lj+1)*(lj+2)//2
-        else:
-            nfi = li * 2 + 1
-            nfj = lj * 2 + 1
-        c_pair_idx = cp.asnumpy(c_pair_idx)
-        ish, J, jsh = np.unravel_index(c_pair_idx, (nctri, bvk_ncells, nctrj))
-        ish += i0
-        jsh += j0
-        if with_long_range:
-            ft_idx = aopair_offsets_lookup[ish,J,jsh]
-            ij = np.arange(nfi*nfj, dtype=np.int32)
-            idx = ij + ft_idx[:,None]
-            # libpbc.take2d_add supports only double type. To reuse this
-            # function, the complex data is viewed as two adjcent doubles
-            idx = idx.reshape(-1, 1) * 2 + np.arange(2, dtype=np.int32)
-            idx = np.asarray(idx.ravel(), dtype=np.int32)
-        else:
-            p0, p1 = p1, p1 + nfi*nfj*n_pairs
+    tasks = iter(img_idx_cache)
+    def proc():
+        if not cell.cart:
+            c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
+        _cd_j2c_cache = [cp.asarray(x) for x in cd_j2c_cache]
+        _img_idx_cache = {k: [cp.asarray(x) for x in v]
+                          for k, v in img_idx_cache.items()}
+        evaluate = int3c2e_opt.int3c2e_evaluator(
+            verbose=log, img_idx_cache=_img_idx_cache)
 
-        nji = n_pairs * nfj * nfi
-        j3c_block = cp.empty((nkpts,naux_cart,nji), dtype=np.complex128)
-        for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
-            j3c_tmp = evaluate(li, lj, k)[1]
-            if j3c_tmp.size == 0:
+        expLkz = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
+        expLkz = expLkz.view(np.float64).reshape(bvk_ncells,nkpts,2)
+        buf = empty_mapped(naux_cart*buflen, dtype=np.complex128)
+        for li, lj in tasks:
+            c_pair_idx = _img_idx_cache[li, lj][4]
+            n_pairs = len(c_pair_idx)
+            if n_pairs == 0:
                 continue
-            if not cell.cart:
-                j3c_tmp = contract('qj,rqpuLv->rjpuLv', c2s[lj], j3c_tmp)
-                j3c_tmp = contract('pi,rjpuLv->rjiuLv', c2s[li], j3c_tmp)
-            j3c_tmp = contract('LKz,rjiuLv->Kvrujiz', expLkz, j3c_tmp)
-            j3c_tmp = j3c_tmp.view(np.complex128).reshape(nkpts,-1,nji)
-            k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
-            j3c_block[:,k0:k1] = j3c_tmp
 
-        for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-            aux_coeff = cd_j2c_cache[j2c_idx] # at -(kj-ki)
-            cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
-            _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
-            if with_long_range:
-                _buf = cderi_k.get(out=_buf)
-                nao_pairs = cderi[kp].shape[1] * 2 # *2 to view complex as doubles
-                libpbc.take2d_add( # this copy back operation is very slow
-                    cderi[kp].ctypes, _buf.ctypes, idx.ctypes,
-                    ctypes.c_int(_buf.shape[0]), ctypes.c_int(nao_pairs),
-                    ctypes.c_int(len(idx))
-                )
+            i0, i1 = c_l_offsets[li:li+2]
+            j0, j1 = c_l_offsets[lj:lj+2]
+            nctri = c_shell_counts[li]
+            nctrj = c_shell_counts[lj]
+            if cell.cart:
+                nfi = (li+1)*(li+2)//2
+                nfj = (lj+1)*(lj+2)//2
             else:
-                cderi[kp][:,p0:p1] = cderi_k.get(out=_buf)
-        j3c_tmp = j3c_block = None
+                nfi = li * 2 + 1
+                nfj = lj * 2 + 1
+            c_pair_idx = cp.asnumpy(c_pair_idx)
+            ish, J, jsh = np.unravel_index(c_pair_idx, (nctri, bvk_ncells, nctrj))
+            ish += i0
+            jsh += j0
+            if with_long_range:
+                ft_idx = aopair_offsets_lookup[ish,J,jsh]
+                ij = np.arange(nfi*nfj, dtype=np.int32)
+                idx = ij + ft_idx[:,None]
+                # libpbc.take2d_add supports only double type. To reuse this
+                # function, the complex data is viewed as two adjcent doubles
+                idx = idx.reshape(-1, 1) * 2 + np.arange(2, dtype=np.int32)
+                idx = np.asarray(idx.ravel(), dtype=np.int32)
+
+            nji = n_pairs * nfj * nfi
+            j3c_block = cp.empty((nkpts,naux_cart,nji), dtype=np.complex128)
+            for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
+                j3c_tmp = evaluate(li, lj, k)[1]
+                if j3c_tmp.size == 0:
+                    continue
+                if not cell.cart:
+                    j3c_tmp = contract('qj,rqpuLv->rjpuLv', c2s[lj], j3c_tmp)
+                    j3c_tmp = contract('pi,rjpuLv->rjiuLv', c2s[li], j3c_tmp)
+                j3c_tmp = contract('LKz,rjiuLv->Kvrujiz', expLkz, j3c_tmp)
+                j3c_tmp = j3c_tmp.view(np.complex128).reshape(nkpts,-1,nji)
+                k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
+                j3c_block[:,k0:k1] = j3c_tmp
+
+            for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
+                aux_coeff = _cd_j2c_cache[j2c_idx] # at -(kj-ki)
+                cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
+                _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
+                if with_long_range:
+                    _buf = cderi_k.get(out=_buf)
+                    nao_pairs = cderi[kp].shape[1] * 2 # *2 to view complex as doubles
+                    libpbc.take2d_add( # this copy back operation is very slow
+                        cderi[kp].ctypes, _buf.ctypes, idx.ctypes,
+                        ctypes.c_int(_buf.shape[0]), ctypes.c_int(nao_pairs),
+                        ctypes.c_int(len(idx))
+                    )
+                else:
+                    p0, p1 = ao_pair_offsets[li, lj]
+                    cderi[kp][:,p0:p1] = cderi_k.get(out=_buf)
+            j3c_tmp = j3c_block = None
+
+    multi_gpu.run(proc, non_blocking=True)
 
     cderi[0] = np.asarray(cderi[0].real, order='C')
 
