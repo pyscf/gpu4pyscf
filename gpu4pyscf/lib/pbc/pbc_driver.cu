@@ -629,7 +629,7 @@ int build_ft_ao(double *out, PBCIntEnvVars *envs, int ngrids, double *grids,
 
 int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
                  int naux, int n_prim_pairs, int n_ctr_pairs,
-                 int *bas_ij_idx, int *pair_mapping, int *img_idx, int *img_offsets,
+                 int *bas_ij_idx, int *pair_mapping, int *img_idx, uint32_t *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
     uint16_t ish0 = shls_slice[0];
@@ -667,7 +667,7 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
         int gout_stride = scheme[1];
         int nsp_per_block = scheme[2];
         dim3 threads(nksh_per_block, gout_stride, nsp_per_block);
-        int tasks_per_block = SPTAKS_PER_BLOCK * nsp_per_block;
+        int tasks_per_block = SPTASKS_PER_BLOCK * nsp_per_block;
         int sp_blocks = (n_prim_pairs + tasks_per_block - 1) / tasks_per_block;
         int ksh_blocks = (nksh + nksh_per_block - 1) / nksh_per_block;
         dim3 blocks(sp_blocks, ksh_blocks);

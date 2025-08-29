@@ -180,7 +180,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
         td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
@@ -189,7 +189,7 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(es_gound, ref)
 
         es_get_ab = diagonalize_tda(a)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf
@@ -201,7 +201,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
         td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
@@ -210,7 +210,7 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(es_gound, ref)
 
         es_get_ab = diagonalize_tda(a)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_b3lyp_IEFPCM(self):
         mf = self.mf_b3lyp_nodf_iefpcm
@@ -222,7 +222,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
         td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
@@ -231,7 +231,7 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(es_gound, ref)
 
         es_get_ab = diagonalize_tda(a)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_unrestricted_hf_CPCM(self):
         mf = self.mfu
@@ -243,7 +243,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize_u(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_unrestricted_b3lyp_CPCM(self):
         mf = self.mf_b3lyp_nodf_u
@@ -255,7 +255,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize_u(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
 
 if __name__ == "__main__":

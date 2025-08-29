@@ -26,16 +26,15 @@
 
 __global__ static
 void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
-                               int ish0, int jsh0, int nish, int njsh,
+                               int ish0, int jsh0, int nish, int njsh, int npairs,
                                PBCIntEnvVars envs, float *exps,
                                float *log_coeff, float log_cutoff)
 {
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    int bvk_nish = envs.bvk_ncells * nish;
-    int bvk_njsh = envs.bvk_ncells * njsh;
-    if (bas_ij >= bvk_nish*bvk_njsh) {
+    if (bas_ij >= npairs) {
         return;
     }
+    int bvk_njsh = envs.bvk_ncells * njsh;
     int nimgs = envs.nimgs;
     int *atm = envs.atm;
     int *bas = envs.bas;
@@ -45,9 +44,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     int jsh = bas_ij % bvk_njsh;
     int cell0_ish = ish % nish + ish0;;
     int cell0_jsh = jsh % njsh + jsh0;;
-    if (cell0_ish < cell0_jsh &&
-        // filtering based on the contracted orbital-pairs than the primitive shells
-        p2c_mapping[cell0_ish] != p2c_mapping[cell0_jsh]) {
+    if (// filtering the tril pairs based on the contracted orbitals
+        p2c_mapping[cell0_ish] < p2c_mapping[cell0_jsh]) {
         return;
     }
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
@@ -57,8 +55,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     float ai = exps[cell0_ish];
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -93,8 +91,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
         }
 
         float dr = sqrtf(rr_ij);
-        float dri = fj * dr;
-        float drj = fi * dr;
+        float dri = aj_aij * dr;
+        float drj = ai_aij * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
         float estimator = dri_fac + drj_fac - theta_ij_rr;
@@ -106,7 +104,7 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
 }
 
 __global__ static
-void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
+void overlap_img_idx_kernel(int *img_idx, uint32_t *img_offsets, int *bas_ij_mapping,
                             int npairs, int ish0, int jsh0, int nish, int njsh,
                             PBCIntEnvVars envs, float *exps, float *log_coeff,
                             float log_cutoff)
@@ -134,8 +132,8 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     float ai = exps[cell0_ish];
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -171,8 +169,8 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         }
 
         float dr = sqrtf(rr_ij);
-        float dri = fj * dr;
-        float drj = fi * dr;
+        float dri = aj_aij * dr;
+        float drj = ai_aij * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
         float estimator = dri_fac + drj_fac - theta_ij_rr;
@@ -188,7 +186,7 @@ __global__ __maxnreg__(64) static
 #else
 __global__ static
 #endif
-void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_mapping,
+void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_ij_mapping,
                            int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
                            int npairs, int ish0, int jsh0, int nish, int njsh,
                            PBCIntEnvVars envs, float *exps, float *log_coeff,
@@ -229,8 +227,8 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
     float u = .5f / aij;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -240,6 +238,7 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
         omega = 0.1f;
     }
     float omega2 = omega * omega;
+    float omega_aij = omega2 / (omega2 + aij);
     // fac_guess = log(sqrt(2.x/(omega*sqrt(pi))) * ((2*li+1)*(2*lj+1)*(2*lk+1))**.5/(4*pi)**1.5)
     //           ~ between [0, 2]
     float fac_guess = .5f - logf(omega2)/4;
@@ -254,7 +253,7 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
     double *rj = env + atm[bas[jsh*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
 
     if (img_idx != NULL) {
-        int *img_offsets = counts_or_offsets;
+        uint32_t *img_offsets = counts_or_offsets;
         img_idx += img_offsets[pair_id];
     }
     int ovlp_pair_id = pair_sorting[pair_id];
@@ -278,9 +277,9 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
         float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
         float theta_ij_rr = theta_ij * rr_ij;
 
-        float xij_0 = xjxi * fj + xi;
-        float yij_0 = yjyi * fj + yi;
-        float zij_0 = zjzi * fj + zi;
+        float xij_0 = xjxi * aj_aij + xi;
+        float yij_0 = yjyi * aj_aij + yi;
+        float zij_0 = zjzi * aj_aij + zi;
         for (int iL = 0; iL < nimgs; ++iL) {
             float xij = xij_0 + img_coords[iL*3+0];
             float yij = yij_0 + img_coords[iL*3+1];
@@ -305,10 +304,10 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
                 continue;
             }
 
-            float rt_aij = omega2 * sqrtf(rr_min) / aij;
+            float rt_aij = omega_aij * sqrtf(rr_min);
             float dr = sqrtf(rr_ij);
-            float dri = fj * dr + rt_aij;
-            float drj = fi * dr + rt_aij;
+            float dri = aj_aij * dr + rt_aij;
+            float drj = ai_aij * dr + rt_aij;
             float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
             float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
             float estimator = dri_fac + drj_fac - theta_rr_min;
@@ -321,7 +320,7 @@ void sr_int3c2e_img_kernel(int *img_idx, int *counts_or_offsets, int *bas_ij_map
         }
     }
     if (img_idx == NULL) {
-        int *img_counts = counts_or_offsets;
+        uint32_t *img_counts = counts_or_offsets;
         img_counts[pair_id] = counts;
     }
 }
@@ -347,7 +346,7 @@ void conc_img_idx_kernel(int *output, int *offsets, int *idx_sparse,
 extern "C" {
 int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
                            PBCIntEnvVars *envs, float *exps, float *log_coeff,
-                           float log_cutoff)
+                           float log_cutoff, int ish_in_cell0)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -357,9 +356,13 @@ int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
     int njsh = jsh1 - jsh0;
     constexpr int threads = 512;
     int ncells = envs->bvk_ncells;
-    int blocks = (ncells*nish*ncells*njsh + threads-1)/threads;
+    int npairs = nish*ncells*njsh;
+    if (!ish_in_cell0) {
+        npairs *= ncells;
+    }
+    int blocks = (npairs + threads-1)/threads;
     overlap_img_counts_kernel<<<blocks, threads>>>(
-        img_counts, p2c_mapping, ish0, jsh0, nish, njsh,
+        img_counts, p2c_mapping, ish0, jsh0, nish, njsh, npairs,
         *envs, exps, log_coeff, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -369,7 +372,7 @@ int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
     return 0;
 }
 
-int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
+int bvk_overlap_img_idx(int *img_idx, uint32_t *img_offsets, int *bas_ij_mapping,
                         int npairs, int *shls_slice, PBCIntEnvVars *envs,
                         float *exps, float *log_coeff, float log_cutoff)
 {
@@ -386,12 +389,12 @@ int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         *envs, exps, log_coeff, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in bvk_overlap_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
 }
-int sr_int3c2e_img_idx(int *img_idx, int *counts_or_offsets, int *bas_ij_mapping,
+int sr_int3c2e_img_idx(int *img_idx, uint32_t *counts_or_offsets, int *bas_ij_mapping,
                        int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
                        int npairs, int *shls_slice, PBCIntEnvVars *envs,
                        float *exps, float *log_coeff, float *atom_aux_exps,

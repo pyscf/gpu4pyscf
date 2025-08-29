@@ -104,13 +104,9 @@ class _Int1eOpt:
         _env = cp.array(_scale_sp_ctr_coeff(bvkcell), dtype=np.float64)
         ao_loc = bvkcell.ao_loc_nr(cart=True)
         ao_loc_gpu = cp.array(ao_loc, dtype=np.int32)
-        int1e_envs = PBCIntEnvVars(
+        self.int1e_envs = PBCIntEnvVars.new(
             sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
-            ao_loc_gpu.data.ptr, Ls.data.ptr,
-        )
-        int1e_envs._env_ref_holder = (_atm, _bas, _env, ao_loc_gpu, Ls)
-        self.int1e_envs = int1e_envs
+            _atm, _bas, _env, ao_loc_gpu, Ls)
 
     def generate_shl_pairs(self, hermi=1):
         sorted_cell = self.sorted_cell
