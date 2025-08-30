@@ -85,8 +85,8 @@ def _jk_task(mol, dms, mo_coeff, mo_occ, vhfopt, task_list, hermi=0,
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
-        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
-                                                 log_cutoff-log_max_dm)
+        tile_mappings = _make_tril_tile_mappings(
+            l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, vhfopt.tile)
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
         info = cp.empty(2, dtype=np.uint32)

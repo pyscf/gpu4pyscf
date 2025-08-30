@@ -85,17 +85,20 @@ typedef struct {
     int lj;
     int lk;
     int ll;
-    //int lij; The two attributes magically changes the registers usage
-    //int lkl;
     int nfi;
     int nfj;
     int nfk;
     int nfl;
+    int ntiles_i;
+    int ntiles_j;
+    int ntiles_k;
+    int ntiles_l;
     int nroots;
     int stride_j;
     int stride_k;
     int stride_l;
     int g_size;
+    int reserved_shm_size; // in int32 unit
     int iprim;
     int jprim;
     int kprim;

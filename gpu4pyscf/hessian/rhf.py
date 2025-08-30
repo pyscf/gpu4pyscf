@@ -200,8 +200,8 @@ def _ejk_ip2_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
-        tile_mappings = _make_tril_tile_mappings(l_ctr_bas_loc, vhfopt.tile_q_cond,
-                                                 log_cutoff-log_max_dm)
+        tile_mappings = _make_tril_tile_mappings(
+            l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, vhfopt.tile)
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
@@ -450,7 +450,7 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
         tril_tile_mappings = _make_tril_tile_mappings(
-            l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, 1)
+            l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, vhfopt.tile)
         workers = gpu_specs['multiProcessorCount']
         QUEUE_DEPTH = 65536
         pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
