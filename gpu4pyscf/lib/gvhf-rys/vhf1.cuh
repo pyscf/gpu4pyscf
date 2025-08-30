@@ -65,11 +65,19 @@ typedef struct {
 } JKMatrix;
 
 typedef struct {
+    double *vk;
+    double *dm;
+    double lr_factor; // Long-range part of HF exchange
+    double sr_factor; // Song-range part of HF exchange
+    int n_dm;
+} KMatrix;
+
+typedef struct {
     double *ejk;
     double *dm;
     double j_factor;
     double k_factor;
-    uint16_t n_dm;
+    int n_dm;
 } JKEnergy;
 
 typedef struct {
@@ -77,6 +85,8 @@ typedef struct {
     int lj;
     int lk;
     int ll;
+    //int lij; The two attributes magically changes the registers usage
+    //int lkl;
     int nfi;
     int nfj;
     int nfk;
@@ -90,16 +100,26 @@ typedef struct {
     int jprim;
     int kprim;
     int lprim;
-    union {int ntile_ij_pairs; int npairs_ij;};
-    union {int ntile_kl_pairs; int npairs_kl;};
-    union {int *tile_ij_mapping; int *pair_ij_mapping;};
-    union {int *tile_kl_mapping; int *pair_kl_mapping;};
+    int npairs_ij;
+    int npairs_kl;
+    int *pair_ij_mapping;
+    int *pair_kl_mapping;
     float *q_cond;
-    float *tile_q_cond;
     float *s_estimator;
     float *dm_cond;
     float cutoff;
 } BoundsInfo;
+
+typedef struct {
+    uint8_t ioff;
+    uint8_t joff;
+    uint8_t koff;
+    uint8_t loff;
+} GXYZOffset;
+
+typedef struct {
+    GXYZOffset goff[256];
+} GXYZOffsets;
 
 typedef struct {
     uint16_t i;
@@ -120,13 +140,6 @@ typedef struct {
     uint8_t z;
     uint8_t fold2yz;
 } Fold3Index;
-
-typedef struct {
-    uint8_t ioff;
-    uint8_t joff;
-    uint8_t koff;
-    uint8_t loff;
-} GXYZOffsets;
 #endif
 
 #ifdef __CUDACC__
