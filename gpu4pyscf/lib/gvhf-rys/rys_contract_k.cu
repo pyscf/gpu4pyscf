@@ -281,22 +281,27 @@ void dot_dm(double *vk, double *dm, double *gout,
 __global__
 void rys_k_kernel_o0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
-    int *bas_kl_idx = pool + get_smid() * QUEUE_DEPTH;
-    int ntasks;
-    double omega = envs.env[PTR_RANGE_OMEGA];
-    if (omega >= 0) {
-        ntasks = _fill_k_tasks(bas_kl_idx, envs, bounds);
-    } else {
-        ntasks = _fill_sr_k_tasks(bas_kl_idx, envs, bounds);
-    }
-    if (ntasks == 0) {
-        return;
-    }
     // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int *bas_kl_idx = pool + get_smid() * QUEUE_DEPTH;
+    __shared__ int ntasks;
+    __shared__ double omega;
+    if (sq_id == 0 && gout_id == 0) {
+        ntasks = 0;
+        omega = envs.env[PTR_RANGE_OMEGA];
+    }
+    __syncthreads();
+    if (omega >= 0) {
+        _fill_k_tasks(&ntasks, bas_kl_idx, envs, bounds);
+    } else {
+        _fill_sr_k_tasks(&ntasks, bas_kl_idx, envs, bounds);
+    }
+    if (ntasks == 0) {
+        return;
+    }
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -450,7 +455,6 @@ void rys_k_kernel_o0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *po
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                double omega = env[PTR_RANGE_OMEGA];
                 int nroots = bounds.nroots;
                 rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -769,22 +773,27 @@ __global__
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                   int *pool, GXYZOffsets *gxyz_offsets)
 {
-    int *bas_kl_idx = pool + get_smid() * QUEUE_DEPTH;
-    int ntasks;
-    double omega = envs.env[PTR_RANGE_OMEGA];
-    if (omega >= 0) {
-        ntasks = _fill_k_tasks(bas_kl_idx, envs, bounds);
-    } else {
-        ntasks = _fill_sr_k_tasks(bas_kl_idx, envs, bounds);
-    }
-    if (ntasks == 0) {
-        return;
-    }
     // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int *bas_kl_idx = pool + get_smid() * QUEUE_DEPTH;
+    __shared__ int ntasks;
+    __shared__ double omega;
+    if (sq_id == 0 && gout_id == 0) {
+        ntasks = 0;
+        omega = envs.env[PTR_RANGE_OMEGA];
+    }
+    __syncthreads();
+    if (omega >= 0) {
+        _fill_k_tasks(&ntasks, bas_kl_idx, envs, bounds);
+    } else {
+        _fill_sr_k_tasks(&ntasks, bas_kl_idx, envs, bounds);
+    }
+    if (ntasks == 0) {
+        return;
+    }
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -948,7 +957,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
-                double omega = env[PTR_RANGE_OMEGA];
                 int nroots = bounds.nroots;
                 rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, gout_id, gout_stride);
                 int lij = li + lj;

@@ -22,8 +22,9 @@
 
 #include "vhf1.cuh"
 
-__device__
-static int _fill_k_tasks(int *bas_kl_idx, RysIntEnvVars &envs, BoundsInfo bounds)
+__device__ static
+void _fill_k_tasks(int *ntasks, int *bas_kl_idx,
+                   RysIntEnvVars &envs, BoundsInfo bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
@@ -38,11 +39,6 @@ static int _fill_k_tasks(int *bas_kl_idx, RysIntEnvVars &envs, BoundsInfo bounds
     float q_ij = q_cond[bas_ij];
     float kl_cutoff = cutoff - q_ij;
 
-    __shared__ int ntasks;
-    if (t_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         int q_kl = q_cond[bas_kl];
@@ -59,19 +55,20 @@ static int _fill_k_tasks(int *bas_kl_idx, RysIntEnvVars &envs, BoundsInfo bounds
              dm_cond[jsh*nbas+ksh] > d_cutoff ||
              dm_cond[ish*nbas+lsh] > d_cutoff ||
              dm_cond[jsh*nbas+lsh] > d_cutoff)) {
-            int off = atomicAdd(&ntasks, 1);
+            int off = atomicAdd(ntasks, 1);
             bas_kl_idx[off] = bas_kl;
         }
     }
+    __syncthreads();
     // pad data to avoid overflow
     if (threadIdx.y == 0) {
-        bas_kl_idx[ntasks+t_id] = pair_kl_mapping[0];
+        bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];
     }
-    return ntasks;
 }
 
-__device__
-static int _fill_sr_k_tasks(int *bas_kl_idx, RysIntEnvVars &envs, BoundsInfo &bounds)
+__device__ static
+void _fill_sr_k_tasks(int *ntasks, int *bas_kl_idx,
+                      RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
@@ -120,11 +117,6 @@ static int _fill_sr_k_tasks(int *bas_kl_idx, RysIntEnvVars &envs, BoundsInfo &bo
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
 
-    __shared__ int ntasks;
-    if (t_id == 0) {
-        ntasks = 0;
-    }
-    __syncthreads();
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         int q_kl = q_cond[bas_kl];
@@ -178,13 +170,13 @@ static int _fill_sr_k_tasks(int *bas_kl_idx, RysIntEnvVars &envs, BoundsInfo &bo
                  dm_cond[jsh*nbas+ksh] > d_cutoff ||
                  dm_cond[ish*nbas+lsh] > d_cutoff ||
                  dm_cond[jsh*nbas+lsh] > d_cutoff)) {
-                int off = atomicAdd(&ntasks, 1);
+                int off = atomicAdd(ntasks, 1);
                 bas_kl_idx[off] = bas_kl;
             }
         }
     }
+    __syncthreads();
     if (threadIdx.y == 0) {
-        bas_kl_idx[ntasks+t_id] = pair_kl_mapping[0];
+        bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];
     }
-    return ntasks;
 }
