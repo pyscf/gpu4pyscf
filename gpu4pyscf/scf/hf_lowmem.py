@@ -105,7 +105,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     if log.verbose >= logger.DEBUG1:
         mem_avail = log.print_mem_info()
         log.debug1('available GPU memory after SCF initialization: %.3f GB', mem_avail/1e9)
-    t1 = log.timer_debug1('SCF initialization', *cput1)
+    t1 = log.timer('SCF initialization', *cput1)
     natm = mol.natm
 
     for cycle in range(mf.max_cycle):
@@ -134,7 +134,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         norm_gorb = cp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         fock = None
         e_tot = mf.energy_tot(dm, h1e, vhf)
-        t1 = log.timer_debug1('SCF iteration', *t0)
+        t1 = log.timer(f'cycle={cycle+1}', *t0)
         log.info('cycle= %d E= %.15g  delta_E= %4.3g',
                  cycle+1, e_tot, e_tot-last_hf_e)
 

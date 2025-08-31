@@ -104,7 +104,7 @@ class RKS(rks.RKS):
         dm = None
         vxc = pack_tril(vxc)
         log.debug('nelec by numeric integration = %s', n)
-        cput1 = log.timer_debug1('vxc tot', *cput0)
+        cput1 = log.timer('vxc', *cput0)
 
         omega = mol.omega
         if omega in self._opt_gpu:
@@ -169,7 +169,7 @@ class RKS(rks.RKS):
             vk = vk.get()
 
         vxc = vxc.get()
-        log.timer_debug1('veff', *cput0)
+        log.timer('veff', *cput0)
         vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
         return vxc
 

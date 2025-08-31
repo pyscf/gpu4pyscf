@@ -253,7 +253,7 @@ class _DFHF:
                     exc += enlc
                     vxc += vnlc
                     logger.debug(self, 'nelec with nlc grids = %s', n)
-                t0 = logger.timer_debug1(self, 'vxc tot', *t0)
+                t0 = logger.timer(self, 'vxc', *t0)
 
                 if not ni.libxc.is_hybrid_xc(self.xc):
                     vj = self.get_j(mol, dm, hermi)
@@ -273,7 +273,7 @@ class _DFHF:
 
             else:
                 raise NotImplementedError("DF only supports R/U/RO KS.")
-            t0 = logger.timer_debug1(self, 'jk total', *t0)
+            t0 = logger.timer(self, 'veff', *t0)
             return tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
 
         if isinstance(self, (uhf.UHF, rohf.ROHF)):

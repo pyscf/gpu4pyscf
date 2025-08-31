@@ -208,7 +208,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
-    t1 = log.timer_debug1('total prep', *t0)
+    t1 = log.timer('SCF initialization', *t0)
     scf_conv = False
 
     # Skip SCF iterations. Compute only the total energy of the initial density
@@ -257,7 +257,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         e_tot = mf.energy_tot(dm, h1e, vhf)
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
-        t1 = log.timer_debug1('total', *t0)
+        t1 = log.timer(f'cycle={cycle+1}', *t0)
+
         log.info('cycle= %d E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
                  cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
