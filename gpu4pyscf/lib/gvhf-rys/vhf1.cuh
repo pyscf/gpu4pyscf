@@ -89,16 +89,11 @@ typedef struct {
     int nfj;
     int nfk;
     int nfl;
-    int ntiles_i;
-    int ntiles_j;
-    int ntiles_k;
-    int ntiles_l;
     int nroots;
     int stride_j;
     int stride_k;
     int stride_l;
     int g_size;
-    int reserved_shm_size; // in int32 unit
     int iprim;
     int jprim;
     int kprim;
