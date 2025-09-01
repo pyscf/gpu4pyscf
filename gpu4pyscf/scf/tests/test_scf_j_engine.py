@@ -161,8 +161,10 @@ H  -5.8042 -1.0067 12.1503
     nao = mol.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    ref = jk.get_j(mol, dm).get()
-    #ref = get_jk(mol, dm, with_k=False)[0]
+    try:
+        ref = jk.get_j(mol, dm).get()
+    except AttributeError:
+        ref = get_jk(mol, dm, with_k=False)[0]
 
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
@@ -197,7 +199,10 @@ H  -5.8042 -1.0067 12.1503
         unit='B',)
 
     dm = np.eye(mol.nao)
-    ref = jk.get_j(mol, dm).get()
+    try:
+        ref = jk.get_j(mol, dm).get()
+    except AttributeError:
+        ref = get_jk(mol, dm, with_k=False)[0]
 
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()
@@ -206,8 +211,10 @@ H  -5.8042 -1.0067 12.1503
     mol.cart = True
     mol.build(0, 0)
     dm = np.eye(mol.nao)
-    ref = jk.get_j(mol, dm).get()
-    #ref = get_jk(mol, dm, with_k=False)[0]
+    try:
+        ref = jk.get_j(mol, dm).get()
+    except AttributeError:
+        ref = get_jk(mol, dm, with_k=False)[0]
 
     vj = j_engine.get_j(mol, dm)
     vj1 = vj.get()

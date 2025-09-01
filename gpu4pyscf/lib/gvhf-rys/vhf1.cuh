@@ -69,6 +69,7 @@ typedef struct {
     double *dm;
     double lr_factor; // Long-range part of HF exchange
     double sr_factor; // Song-range part of HF exchange
+    double omega;
     int n_dm;
 } KMatrix;
 
@@ -106,13 +107,17 @@ typedef struct {
     float *s_estimator;
     float *dm_cond;
     float cutoff;
+    int ntiles_i;
+    int ntiles_j;
+    int ntiles_k;
+    int ntiles_l;
 } BoundsInfo;
 
 typedef struct {
-    uint8_t ioff;
-    uint8_t joff;
-    uint8_t koff;
-    uint8_t loff;
+    int8_t ioff;
+    int8_t joff;
+    int8_t koff;
+    int8_t loff;
 } GXYZOffset;
 
 typedef struct {
