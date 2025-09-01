@@ -65,6 +65,15 @@ typedef struct {
 } JKMatrix;
 
 typedef struct {
+    double *vk;
+    double *dm;
+    double lr_factor; // Long-range part of HF exchange
+    double sr_factor; // Song-range part of HF exchange
+    double omega;
+    int n_dm;
+} KMatrix;
+
+typedef struct {
     double *ejk;
     double *dm;
     double j_factor;
