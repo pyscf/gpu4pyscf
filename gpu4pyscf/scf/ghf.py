@@ -109,7 +109,7 @@ class GHF(hf.SCF):
         dmab = dm[:,:nao,nao:]
         dmba = dm[:,nao:,:nao]
         dm = cp.vstack((dmaa, dmbb, dmab, dmba))
-        ktmp = hf._get_jk(self, mol, dm, hermi=0, with_j=False, omega=omega)[1]
+        ktmp = super().get_k(mol, dm, hermi=0, omega=omega)
         ktmp = ktmp.reshape(4,n_dm,nao,nao)
         vk = cp.zeros((n_dm,nso,nso), dm.dtype)
         vk[:,:nao,:nao] = ktmp[0]

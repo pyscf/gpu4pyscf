@@ -46,8 +46,7 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         if with_k: vk = vk.get()
     return vj, vk
 
-def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True,
-            omega=None):
+def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True, omega=None):
     if omega is None:
         omega = mol.omega
     vhfopt = mf._opt_gpu.get(omega)
@@ -730,7 +729,14 @@ class SCF(pyscf_lib.StreamObject):
         return vj
 
     def get_k(self, mol=None, dm=None, hermi=1, omega=None):
-        return self.get_jk(mol, dm, hermi, with_j=False, omega=omega)[1]
+        if omega is None:
+            omega = mol.omega
+        vhfopt = self._opt_gpu.get(omega)
+        with mol.with_range_coulomb(omega):
+            if vhfopt is None:
+                vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
+            vk = jk.get_k(mol, dm, hermi, vhfopt, verbose)
+        return vk
 
 class KohnShamDFT:
     '''

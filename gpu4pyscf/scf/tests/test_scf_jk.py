@@ -201,3 +201,26 @@ def test_jk_hermi0_l5():
         assert abs(lib.fp(vj) - -61.28856847097108) < 1e-9
     except AttributeError:
         pass
+
+def test_k_hermi1():
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        basis=('def2-tzvp', [[4, [1, 1]]]),
+        unit='B',)
+
+    np.random.seed(9)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao)
+    dm = dm.dot(dm.T)
+
+    ref = jk.get_jk(mol, dm, hermi=1)[1].get()
+    vk = jk.get_k(mol, dm, hermi=1).get()
+    assert abs(vk - ref).max() < 1e-9
+    assert abs(lib.fp(vk) - 5580.092102968194) < 1e-9

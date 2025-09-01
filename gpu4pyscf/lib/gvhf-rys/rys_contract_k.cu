@@ -386,7 +386,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
-    __shared__ double rj[3];
+    __shared__ double rjri[3];
     __shared__ double aij_cache[2];
     int nbas = envs.nbas;
     if (t_id == 0) {
@@ -400,16 +400,16 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
     if (t_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         ri[t_id] = env[ri_ptr+t_id];
-        rj[t_id] = env[rj_ptr+t_id];
+        rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
     }
     __syncthreads();
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     int threads = nsq_per_block * gout_stride;
     for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
@@ -501,9 +501,9 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                 double aj_aij = aj / aij;
                 double akl = akl_cache[0];
                 double al_akl = akl_cache[nsq_per_block];
-                double xij = ri[0] + (rj[0]-ri[0]) * aj_aij;
-                double yij = ri[1] + (rj[1]-ri[1]) * aj_aij;
-                double zij = ri[2] + (rj[2]-ri[2]) * aj_aij;
+                double xij = ri[0] + (rjri[0]) * aj_aij;
+                double yij = ri[1] + (rjri[1]) * aj_aij;
+                double zij = ri[2] + (rjri[2]) * aj_aij;
                 double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
@@ -552,7 +552,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                         // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                         for (int n = gout_id; n < 3; n += gout_stride) {
                             double *_gx = gx + n * g_size * nsq_per_block;
-                            double Rpa = (rj[n]-ri[n]) * aj_aij;
+                            double Rpa = (rjri[n]) * aj_aij;
                             double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
                             s0x = _gx[0];
                             s1x = c0x * s0x;
@@ -641,7 +641,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                             for (int m = gout_id; m < lkl3; m += gout_stride) {
                                 int k = m / 3;
                                 int _ix = m % 3;
-                                double xjxi = rj[_ix]-ri[_ix];
+                                double xjxi = rjri[_ix];
                                 double *_gx = gx + (_ix*g_size + k*stride_k) * nsq_per_block;
                                 for (int j = 0; j < lj; ++j) {
                                     int ij = lij + j*li; // = (lij-j) + j*stride_j;

@@ -235,14 +235,10 @@ class RHF(hf.RHF):
         hcore = hf.get_hcore(mol)
         return pack_tril(hcore).get()
 
-    def get_jk(self, mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None):
-        raise NotImplementedError
-
-    def get_j(self, mol=None, dm=None, hermi=1, omega=None):
-        raise NotImplementedError
-
-    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
-        raise NotImplementedError
+    def get_jk(self, mol, dm, hermi=1, with_j=True, with_k=True, omega=None):
+        vj = self.get_j(mol, dm, hermi, omega)
+        vk = self.get_k(mol, dm, hermi, omega)
+        return vj, vk
 
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
         '''Constructus the lower-triangular part of the Veff matrix.'''
@@ -267,7 +263,7 @@ class RHF(hf.RHF):
         vhf, vj = vj, None
 
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
-        vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
+        vk = vhfopt.get_k(dm, hermi, log)
         assert vk.ndim == 3
         vk = vhfopt.apply_coeff_CT_mat_C(vk)
         vk *= -.5
