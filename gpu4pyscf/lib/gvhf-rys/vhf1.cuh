@@ -45,8 +45,7 @@
 #define PI_FAC          34.98683665524972497
 
 
-#ifndef HAVE_DEFINED_INTENVVAS_H
-#define HAVE_DEFINED_INTENVVAS_H
+#pragma once
 typedef struct {
     uint16_t natm;
     uint16_t nbas;
@@ -143,7 +142,13 @@ typedef struct {
     uint8_t z;
     uint8_t fold2yz;
 } Fold3Index;
-#endif
+
+__device__ __forceinline__ unsigned get_smid()
+{
+    unsigned smid;
+    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
+    return smid;
+}
 
 #ifdef __CUDACC__
 extern __constant__ int c_g_pair_idx[];

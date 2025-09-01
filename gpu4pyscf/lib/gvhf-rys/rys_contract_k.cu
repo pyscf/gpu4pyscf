@@ -77,29 +77,6 @@ __constant__ int _c_cartesian_lexical_xyz[] = {
     0, 0, 4,
 };
 
-__constant__ int c_cart_xyz_ff[300] = {
-    15,  0,  0, 14,  1,  0, 14,  0,  1, 13,  2,  0, 13,  1,  1,
-    13,  0,  2, 12,  3,  0, 12,  2,  1, 12,  1,  2, 12,  0,  3,
-    11,  4,  0, 10,  5,  0, 10,  4,  1,  9,  6,  0,  9,  5,  1,
-     9,  4,  2,  8,  7,  0,  8,  6,  1,  8,  5,  2,  8,  4,  3,
-    11,  0,  4, 10,  1,  4, 10,  0,  5,  9,  2,  4,  9,  1,  5,
-     9,  0,  6,  8,  3,  4,  8,  2,  5,  8,  1,  6,  8,  0,  7,
-     7,  8,  0,  6,  9,  0,  6,  8,  1,  5, 10,  0,  5,  9,  1,
-     5,  8,  2,  4, 11,  0,  4, 10,  1,  4,  9,  2,  4,  8,  3,
-     7,  4,  4,  6,  5,  4,  6,  4,  5,  5,  6,  4,  5,  5,  5,
-     5,  4,  6,  4,  7,  4,  4,  6,  5,  4,  5,  6,  4,  4,  7,
-     7,  0,  8,  6,  1,  8,  6,  0,  9,  5,  2,  8,  5,  1,  9,
-     5,  0, 10,  4,  3,  8,  4,  2,  9,  4,  1, 10,  4,  0, 11,
-     3, 12,  0,  2, 13,  0,  2, 12,  1,  1, 14,  0,  1, 13,  1,
-     1, 12,  2,  0, 15,  0,  0, 14,  1,  0, 13,  2,  0, 12,  3,
-     3,  8,  4,  2,  9,  4,  2,  8,  5,  1, 10,  4,  1,  9,  5,
-     1,  8,  6,  0, 11,  4,  0, 10,  5,  0,  9,  6,  0,  8,  7,
-     3,  4,  8,  2,  5,  8,  2,  4,  9,  1,  6,  8,  1,  5,  9,
-     1,  4, 10,  0,  7,  8,  0,  6,  9,  0,  5, 10,  0,  4, 11,
-     3,  0, 12,  2,  1, 12,  2,  0, 13,  1,  2, 12,  1,  1, 13,
-     1,  0, 14,  0,  3, 12,  0,  2, 13,  0,  1, 14,  0,  0, 15,
-};
-
 __constant__ GXYZOffset c_gxyz_offset[625];
 
 __device__ __forceinline__
@@ -108,13 +85,6 @@ int lex_xyz_address(int l, int i)
     // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
     int offset = (1 << l) >> 1;
     return _c_cartesian_lexical_xyz[offset * 9 + i];
-}
-
-__device__ __forceinline__ unsigned get_smid()
-{
-    unsigned smid;
-    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
-    return smid;
 }
 
 template <int LIJ>
@@ -346,7 +316,7 @@ void dot_dm(double *vk, double *dm, double *gout, int i0, int j0, int k0, int l0
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
-                  int *pool, double *cicj_pool, GXYZOffset *gxyz_offsets,
+                  int *pool, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
     // sq is short for shl_quartet
@@ -356,7 +326,6 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     int gout_stride = blockDim.y;
     int smid = get_smid();
     int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *cicj_cache = cicj_pool + smid * CICJ_CACHE_DEPTH + sq_id;
     __shared__ int ntasks;
     if (sq_id == 0 && gout_id == 0) {
         ntasks = 0;
@@ -410,18 +379,22 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
         idx_l[t_id] = lex_xyz_address(ll, t_id) * stride_l * nsq_per_block;
     }
 
+    __shared__ int ish;
+    __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rj[3];
     __shared__ double aij_cache[2];
-{
     int nbas = envs.nbas;
+    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
+    if (t_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+    }
+    __syncthreads();
     int *bas = envs.bas;
     double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    int ish = bas_ij / nbas;
-    int jsh = bas_ij % nbas;
     double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
     double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -436,7 +409,9 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     double xjxi = rj[0] - ri[0];
     double yjyi = rj[1] - ri[1];
     double zjzi = rj[2] - ri[2];
-    for (int ij = gout_id; ij < iprim*jprim; ij += gout_stride) {
+    int threads = nsq_per_block * gout_stride;
+    double *cicj_cache = (double *)(bas_kl_idx + QUEUE_DEPTH-512);
+    for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
@@ -445,9 +420,8 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        cicj_cache[ij*nsq_per_block] = ci[ip] * cj[jp] * Kab;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-}
 
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
@@ -467,10 +441,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
         int stride_l = bounds.stride_l;
         int g_size = bounds.g_size;
 
-        int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
         int bas_kl = bas_kl_idx[task_id];
-        int ish = bas_ij / nbas;
-        int jsh = bas_ij % nbas;
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
@@ -543,7 +514,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                     Rpq[0*nsq_per_block] = xpq;
                     Rpq[1*nsq_per_block] = ypq;
                     Rpq[2*nsq_per_block] = zpq;
-                    double cicj = cicj_cache[ijp*nsq_per_block];
+                    double cicj = cicj_cache[ijp];
                     gx[nsq_per_block*g_size] = cicj / (aij*akl*sqrt(aij+akl));
                     if (sq_id == 0) {
                         aij_cache[0] = aij;
@@ -934,13 +905,14 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     return buflen;
 }
 
+extern int rys_k_unrolled(RysIntEnvVars *envs, KMatrix *kmat, BoundsInfo *bounds, int *pool);
+
 extern "C" {
 int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                 RysIntEnvVars envs, int *shls_slice, int shm_size,
                 int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
                 float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                int *pool, double *cicj_pool,
-                int *atm, int natm, int *bas, int nbas, double *env)
+                int *pool, int *atm, int natm, int *bas, int nbas, double *env)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -985,7 +957,19 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         kmat.sr_factor = 1;
     }
 
-    if (1) {
+#if 0
+    if (li == 2 && lj == 1 && lk == 1 && ll == 1) {
+        GXYZOffset* p_gxyz_offset = _make_gxyz_offset(bounds);
+        dim3 threads;
+        int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
+        int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
+        int reserved_shm_size = buflen / 4 - cart_idx_size; // in int32 unit
+        rys_2111_kernel<<<npairs_ij, threads, buflen>>>(
+            envs, kmat, bounds, pool, p_gxyz_offset,
+            0, reserved_shm_size);
+    } else
+#endif
+    if (!rys_k_unrolled(&envs, &kmat, &bounds, pool)) {
         GXYZOffset* p_gxyz_offset = _make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -997,7 +981,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         int reserved_shm_size = buflen / 4 - cart_idx_size; // in int32 unit
 
         rys_k_kernel<<<npairs_ij, threads, buflen>>>(
-            envs, kmat, bounds, pool, cicj_pool, p_gxyz_offset,
+            envs, kmat, bounds, pool, p_gxyz_offset,
             gout_pattern, reserved_shm_size);
 
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -1006,7 +990,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-256));
             reserved_shm_size = buflen / 4 - cart_idx_size;
             rys_k_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, kmat, bounds, pool, cicj_pool, p_gxyz_offset+256,
+                envs, kmat, bounds, pool, p_gxyz_offset+256,
                 gout_pattern, reserved_shm_size);
         }
 
@@ -1015,7 +999,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-512));
             reserved_shm_size = buflen / 4 - cart_idx_size;
             rys_k_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, kmat, bounds, pool, cicj_pool, p_gxyz_offset+512,
+                envs, kmat, bounds, pool, p_gxyz_offset+512,
                 gout_pattern, reserved_shm_size);
         }
     }
@@ -1026,7 +1010,6 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         if (err_get_device_id != cudaSuccess) {
             printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
         }
-        printf("CUDA Error in RYS_build_k, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stdout);
         fprintf(stderr, "CUDA Error in RYS_build_k, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }

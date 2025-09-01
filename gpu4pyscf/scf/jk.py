@@ -52,7 +52,6 @@ PTR_BAS_COORD = 7
 LMAX = 4
 TILE = 2
 QUEUE_DEPTH = 262144
-CICJ_CACHE_DEPTH = 36864
 SHM_SIZE = shm_size - 1024
 del shm_size
 GOUT_WIDTH = 42
@@ -514,6 +513,7 @@ class _VHFOpt:
                  for k in range(i+1)
                  for l in range(k+1)]
         schemes = {t: quartets_scheme(mol, uniq_l_ctr[list(t)], with_j, with_k) for t in tasks}
+        tasks = iter(tasks)
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
@@ -556,12 +556,7 @@ class _VHFOpt:
             kern_counts = 0
             kern = libvhf_rys.RYS_build_jk
 
-            while tasks:
-                try:
-                    task = tasks.pop()
-                except IndexError:
-                    break
-
+            for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 tile_ij_mapping = tile_mappings[i,j]
@@ -875,13 +870,12 @@ class _VHFOpt:
             s_ptr = lib.c_null_ptr()
             if mol.omega < 0:
                 s_ptr = ctypes.cast(self.s_estimator.data.ptr, ctypes.c_void_p)
-            pair_mappings = _make_tril_tile_mappings(
-                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=self.tile)
+            pair_mappings = _make_tril_pair_mappings(
+                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=4)
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty((workers, QUEUE_DEPTH), dtype=np.int32)
-            cicj_pool = cp.empty((workers, CICJ_CACHE_DEPTH))
 
             timing_counter = Counter()
             kern_counts = 0
@@ -896,7 +890,7 @@ class _VHFOpt:
                     continue
                 ls = uniq_l_ctr[list(task),0]
                 npairs_kl = pair_kl_mapping.size
-                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
+                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH-512):
                     _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
                     _npairs_kl = pair_kl1 - pair_kl0
                     err = kern(
@@ -915,7 +909,6 @@ class _VHFOpt:
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                         ctypes.c_float(log_cutoff),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(cicj_pool.data.ptr, ctypes.c_void_p),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
@@ -1048,6 +1041,30 @@ def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile):
             idx = cp.argsort(sub_tile_q[mask])[::-1]
             tile_mappings[i,j] = t_ij[mask][idx]
     return tile_mappings
+
+def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
+    nbas = q_cond.shape[0]
+    n_groups = len(l_ctr_bas_loc) - 1
+    pair_mappings = {}
+    for i in range(n_groups):
+        for j in range(i+1):
+            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
+            nish = ish1 - ish0
+            njsh = jsh1 - jsh0
+            ntiles_i = (nish+tile-1) // tile
+            ntiles_j = (njsh+tile-1) // tile
+            pair_ij = (cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32)[:,None] * nbas +
+                       cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32))
+            pair_ij = pair_ij.reshape(ntiles_i,tile,ntiles_j,tile).transpose(0,2,1,3).ravel()
+            ish, jsh = divmod(pair_ij, nbas)
+            if i == j:
+                pair_ij = pair_ij[(ish >= jsh) & (ish < ish1) & (jsh < jsh1)]
+            else:
+                pair_ij = pair_ij[(ish < ish1) & (jsh < jsh1)]
+            pair_ij = pair_ij[q_cond.ravel()[pair_ij] > cutoff]
+            pair_mappings[i,j] = cp.asarray(pair_ij, dtype=np.int32)
+    return pair_mappings
 
 def _make_j_engine_pair_locs(mol):
     ls = mol._bas[:,ANG_OF]

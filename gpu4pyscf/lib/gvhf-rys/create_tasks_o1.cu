@@ -43,7 +43,7 @@ void _fill_k_tasks(int *ntasks, int *bas_kl_idx,
         int bas_kl = pair_kl_mapping[pair_kl];
         int q_kl = q_cond[bas_kl];
         if (q_kl < kl_cutoff) {
-            break;
+            continue;
         }
         if (bas_ij < bas_kl) {
             continue;
@@ -121,7 +121,7 @@ void _fill_sr_k_tasks(int *ntasks, int *bas_kl_idx,
         int bas_kl = pair_kl_mapping[pair_kl];
         int q_kl = q_cond[bas_kl];
         if (q_kl < kl_cutoff) {
-            break;
+            continue;
         }
         if (bas_ij < bas_kl) {
             continue;
