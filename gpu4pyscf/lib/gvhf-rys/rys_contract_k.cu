@@ -260,39 +260,18 @@ void load_dm(double *dm, double *dm_cache, int nao, int nfi, int nfj,
     }
 }
 
-__device__ __forceinline__
-void store_vk(double *vk, double *vk_cache, int nao, int nfi, int nfj, int active)
-{
-    if (active) {
-        int t_id = threadIdx.y;
-        int t_stride = blockDim.y;
-        int nsq_per_block = blockDim.x;
-        for (int m = t_id; m < nfi*nfj; m += t_stride) {
-            int i = m / nfj;
-            int j = m % nfj;
-            atomicAdd(vk+i*nao+j, vk_cache[m*nsq_per_block]);
-        }
-    }
-}
-
 template <int I, int J, int K, int L>
 __device__ __forceinline__
-void dot_dm(double *vk, double *dm, double *gout, int i0, int j0, int k0, int l0,
-            int ldk, int nfi, int nfl, int active)
+void dot_dm(double *vk, double *dm, double *gout, int nao, int i0, int l0,
+            int ioff, int joff, int koff, int loff, int ldk, int nfi, int nfl, int active)
 {
-    int t_id = threadIdx.y;
-    int t_stride = blockDim.y;
     int nsq_per_block = blockDim.x;
     __syncthreads();
-    for (int m = t_id; m < nfi*nfl; m += t_stride) {
-        vk[m*nsq_per_block] = 0;
-    }
-    __syncthreads();
     if (active) {
-        int dl = nfl - l0;
-        int di = nfi - i0;
-        double *dm_local = dm + (j0*ldk+k0)*nsq_per_block;
-        double *vk_local = vk + (i0*nfl+l0)*nsq_per_block;
+        int dl = nfl - loff;
+        int di = nfi - ioff;
+        double *dm_local = dm + (joff*ldk+koff)*nsq_per_block;
+        double *vk_local = vk + (i0+ioff)*nao+(l0+loff);
 #pragma unroll
         for (int l = 0; l < 3; ++l) {
             if (l >= dl) break;
@@ -307,7 +286,7 @@ void dot_dm(double *vk, double *dm, double *gout, int i0, int j0, int k0, int l0
                 int n = i * I + j * J + k * K + l * L;
                 v += gout[n] * dm_local[(j*ldk+k)*nsq_per_block];
             } }
-            atomicAdd(vk_local+(i*nfl+l)*nsq_per_block, v);
+            atomicAdd(vk_local+i*nao+l, v);
         } }
     }
     __syncthreads();
@@ -737,59 +716,42 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
         }
         __syncthreads();
 
-        GXYZOffset goff = gxyz_offsets[gout_id];
-        int ioff = goff.ioff;
-        int joff = goff.joff;
-        int koff = goff.koff;
-        int loff = goff.loff;
-        int *ao_loc = envs.ao_loc;
-        int nao = ao_loc[nbas];
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
-        int nfi = bounds.nfi;
-        int nfj = bounds.nfj;
-        int nfk = bounds.nfk;
-        int nfl = bounds.nfl;
-        int ldi = bounds.ntiles_i * 3;
-        int ldj = bounds.ntiles_j * 3;
-        int ldk = bounds.ntiles_k * 3;
-        int ldl = bounds.ntiles_l * 3;
-        double *vk_cache = shared_memory + sq_id;
-        double *dm_cache = vk_cache + max(nfi, nfj) * max(nfk, nfl) * nsq_per_block;
-        int active = task_id < ntasks;
         for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
+            GXYZOffset goff = gxyz_offsets[gout_id];
+            int ioff = goff.ioff;
+            int joff = goff.joff;
+            int koff = goff.koff;
+            int loff = goff.loff;
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
+            int nfi = bounds.nfi;
+            int nfj = bounds.nfj;
+            int nfk = bounds.nfk;
+            int nfl = bounds.nfl;
+            int ldi = bounds.ntiles_i * 3;
+            int ldj = bounds.ntiles_j * 3;
+            int ldk = bounds.ntiles_k * 3;
+            int ldl = bounds.ntiles_l * 3;
+            double *dm_cache = shared_memory + sq_id;
+            int active = task_id < ntasks;
             double *dm = kmat.dm + i_dm * nao * nao;
             double *vk = kmat.vk + i_dm * nao * nao;
             load_dm(dm+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
-            dot_dm<1, 3, 9, 27>(vk_cache, dm_cache, gout, ioff, joff, koff, loff,
-                                ldk, nfi, nfl, active);
-            store_vk(vk+i0*nao+l0, vk_cache, nao, nfi, nfl, active);
-        }
-        for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-            double *dm = kmat.dm + i_dm * nao * nao;
-            double *vk = kmat.vk + i_dm * nao * nao;
+            dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao, i0, l0,
+                                ioff, joff, koff, loff, ldk, nfi, nfl, active);
             load_dm(dm+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
-            dot_dm<1, 3, 27, 9>(vk_cache, dm_cache, gout, ioff, joff, loff, koff,
-                                ldl, nfi, nfk, active);
-            store_vk(vk+i0*nao+k0, vk_cache, nao, nfi, nfk, active);
-        }
-        for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-            double *dm = kmat.dm + i_dm * nao * nao;
-            double *vk = kmat.vk + i_dm * nao * nao;
+            dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao, i0, k0,
+                                ioff, joff, loff, koff, ldl, nfi, nfk, active);
             load_dm(dm+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
-            dot_dm<3, 1, 9, 27>(vk_cache, dm_cache, gout, joff, ioff, koff, loff,
-                                ldk, nfj, nfl, active);
-            store_vk(vk+j0*nao+l0, vk_cache, nao, nfj, nfl, active);
-        }
-        for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-            double *dm = kmat.dm + i_dm * nao * nao;
-            double *vk = kmat.vk + i_dm * nao * nao;
+            dot_dm<3, 1, 9, 27>(vk, dm_cache, gout, nao, j0, l0,
+                                joff, ioff, koff, loff, ldk, nfj, nfl, active);
             load_dm(dm+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
-            dot_dm<3, 1, 27, 9>(vk_cache, dm_cache, gout, joff, ioff, loff, koff,
-                                ldl, nfj, nfk, active);
-            store_vk(vk+j0*nao+k0, vk_cache, nao, nfj, nfk, active);
+            dot_dm<3, 1, 27, 9>(vk, dm_cache, gout, nao, j0, k0,
+                                joff, ioff, loff, koff, ldl, nfj, nfk, active);
         }
     }
 }
@@ -872,10 +834,6 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
         nsq_per_block = nsq_per_block // 8 * 8
     buflen = nsq_per_block * unit*8 + cart_idx_size*4
 */
-    int nfi = bounds.nfi;
-    int nfj = bounds.nfj;
-    int nfk = bounds.nfk;
-    int nfl = bounds.nfl;
     int ijprim = bounds.iprim * bounds.jprim;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
@@ -888,10 +846,9 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
-    int vk_cache_size = max(nfi, nfj) * max(nfk, nfl);
     int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
     int root_g_cache_size = nroots*2 + g_size*3 + 9;
-    int unit = max(root_g_cache_size, vk_cache_size+dm_cache_size);
+    int unit = max(root_g_cache_size, dm_cache_size);
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
     int THREADS = 256;
