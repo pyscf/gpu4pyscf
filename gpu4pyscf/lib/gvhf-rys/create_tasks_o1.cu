@@ -23,14 +23,13 @@
 #include "vhf1.cuh"
 
 __device__ static
-void _fill_k_tasks(int *ntasks, int *bas_kl_idx,
+void _fill_k_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
                    RysIntEnvVars &envs, BoundsInfo bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -67,7 +66,7 @@ void _fill_k_tasks(int *ntasks, int *bas_kl_idx,
 }
 
 __device__ static
-void _fill_sr_k_tasks(int *ntasks, int *bas_kl_idx,
+void _fill_sr_k_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
                       RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
@@ -75,7 +74,6 @@ void _fill_sr_k_tasks(int *ntasks, int *bas_kl_idx,
     int *bas = envs.bas;
     int nbas = envs.nbas;
     int *pair_kl_mapping = bounds.pair_kl_mapping;
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;

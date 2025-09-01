@@ -331,10 +331,11 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
         ntasks = 0;
     }
     __syncthreads();
+    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, envs, bounds);
+        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, envs, bounds);
+        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -360,7 +361,10 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
     int ntiles_l = bounds.ntiles_l;
-    int *idx_i = ((int*)shared_memory) + reserved_shm_size;
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *cicj_cache = shared_memory + reserved_shm_size - iprim*jprim;
+    int *idx_i = (int*)(shared_memory + reserved_shm_size);
     int *idx_j = idx_i + ntiles_i * 9;
     int *idx_k = idx_j + ntiles_j * 9;
     int *idx_l = idx_k + ntiles_k * 9;
@@ -385,7 +389,6 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     __shared__ double rj[3];
     __shared__ double aij_cache[2];
     int nbas = envs.nbas;
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (t_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
@@ -393,8 +396,6 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     __syncthreads();
     int *bas = envs.bas;
     double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
     double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
     double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -410,7 +411,6 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     double yjyi = rj[1] - ri[1];
     double zjzi = rj[2] - ri[2];
     int threads = nsq_per_block * gout_stride;
-    double *cicj_cache = (double *)(bas_kl_idx + QUEUE_DEPTH-512);
     for (int ij = t_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
@@ -876,6 +876,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int nfj = bounds.nfj;
     int nfk = bounds.nfk;
     int nfl = bounds.nfl;
+    int ijprim = bounds.iprim * bounds.jprim;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
@@ -891,7 +892,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
     int root_g_cache_size = nroots*2 + g_size*3 + 9;
     int unit = max(root_g_cache_size, vk_cache_size+dm_cache_size);
-    int counts = (shm_size - cart_idx_size*4) / (unit*8);
+    int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
     int THREADS = 256;
     int gout_stride = min(n_tiles, gout_stride_max);
@@ -901,7 +902,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     }
     threads.x = nsq_per_block;
     threads.y = gout_stride;
-    int buflen = nsq_per_block * unit*8 + cart_idx_size*4;
+    int buflen = nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
     return buflen;
 }
 
@@ -963,7 +964,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         dim3 threads;
         int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-        int reserved_shm_size = buflen / 4 - cart_idx_size; // in int32 unit
+        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
         rys_2111_kernel<<<npairs_ij, threads, buflen>>>(
             envs, kmat, bounds, pool, p_gxyz_offset,
             0, reserved_shm_size);
@@ -978,7 +979,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         dim3 threads;
         int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-        int reserved_shm_size = buflen / 4 - cart_idx_size; // in int32 unit
+        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
         rys_k_kernel<<<npairs_ij, threads, buflen>>>(
             envs, kmat, bounds, pool, p_gxyz_offset,
@@ -988,7 +989,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
             buflen = threads_scheme_for_k(threads, bounds, shm_size,
                                           min(256, n_tiles-256));
-            reserved_shm_size = buflen / 4 - cart_idx_size;
+        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<npairs_ij, threads, buflen>>>(
                 envs, kmat, bounds, pool, p_gxyz_offset+256,
                 gout_pattern, reserved_shm_size);
@@ -997,7 +998,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         if (n_tiles > 512) { // gggg
             buflen = threads_scheme_for_k(threads, bounds, shm_size,
                                           min(256, n_tiles-512));
-            reserved_shm_size = buflen / 4 - cart_idx_size;
+        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<npairs_ij, threads, buflen>>>(
                 envs, kmat, bounds, pool, p_gxyz_offset+512,
                 gout_pattern, reserved_shm_size);

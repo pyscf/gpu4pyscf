@@ -890,7 +890,7 @@ class _VHFOpt:
                     continue
                 ls = uniq_l_ctr[list(task),0]
                 npairs_kl = pair_kl_mapping.size
-                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH-512):
+                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
                     _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
                     _npairs_kl = pair_kl1 - pair_kl0
                     err = kern(
@@ -1044,6 +1044,7 @@ def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile):
 
 def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
     nbas = q_cond.shape[0]
+    q_cond = q_cond.ravel()
     n_groups = len(l_ctr_bas_loc) - 1
     pair_mappings = {}
     for i in range(n_groups):
@@ -1056,13 +1057,16 @@ def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
             ntiles_j = (njsh+tile-1) // tile
             pair_ij = (cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32)[:,None] * nbas +
                        cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32))
-            pair_ij = pair_ij.reshape(ntiles_i,tile,ntiles_j,tile).transpose(0,2,1,3).ravel()
-            ish, jsh = divmod(pair_ij, nbas)
+            pair_ij = pair_ij.reshape(ntiles_i,tile,ntiles_j,tile).transpose(0,2,1,3)
+            ish = cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32).reshape(ntiles_i,tile)
+            jsh = cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32).reshape(ntiles_j,tile)
+            ish = ish[:,None,:,None]
+            jsh = jsh[None,:,None,:]
             if i == j:
                 pair_ij = pair_ij[(ish >= jsh) & (ish < ish1) & (jsh < jsh1)]
             else:
                 pair_ij = pair_ij[(ish < ish1) & (jsh < jsh1)]
-            pair_ij = pair_ij[q_cond.ravel()[pair_ij] > cutoff]
+            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
             pair_mappings[i,j] = cp.asarray(pair_ij, dtype=np.int32)
     return pair_mappings
 
