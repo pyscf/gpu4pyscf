@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,273 +24,12 @@
 #include "vhf1.cuh"
 #include "rys_roots_for_k.cu"
 #include "create_tasks_o1.cu"
+#include "rys_contract_k.cuh"
 
-#define GOUT_WIDTH0     60
 #define GOUT_WIDTH1     81
-// 16^2*256
-#define CICJ_CACHE_DEPTH        36864
 
-__constant__ int _c_cartesian_lexical_xyz[] = {
-    // s, offset = 0
-    0, 0, 0,
-    0, 0, 0, // padding
-    0, 0, 0, // padding
-    // p, offset = 9
-    1, 0, 0,
-    0, 1, 0,
-    0, 0, 1,
-    // d, offset = 9 * 2
-    2, 0, 0,
-    1, 1, 0,
-    1, 0, 1,
-    0, 2, 0,
-    0, 1, 1,
-    0, 0, 2,
-    // f, offset = 9 * 4
-    3, 0, 0,
-    2, 1, 0,
-    2, 0, 1,
-    1, 2, 0,
-    1, 1, 1,
-    1, 0, 2,
-    0, 3, 0,
-    0, 2, 1,
-    0, 1, 2,
-    0, 0, 3,
-    0, 0, 0, // padding
-    0, 0, 0, // padding
-    // g, offset = 9 * 8
-    4, 0, 0,
-    3, 1, 0,
-    3, 0, 1,
-    2, 2, 0,
-    2, 1, 1,
-    2, 0, 2,
-    1, 3, 0,
-    1, 2, 1,
-    1, 1, 2,
-    1, 0, 3,
-    0, 4, 0,
-    0, 3, 1,
-    0, 2, 2,
-    0, 1, 3,
-    0, 0, 4,
-};
-
-__constant__ GXYZOffset c_gxyz_offset[625];
-
-__device__ __forceinline__
-int lex_xyz_address(int l, int i)
-{
-    // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
-    int offset = (1 << l) >> 1;
-    return _c_cartesian_lexical_xyz[offset * 9 + i];
-}
-
-template <int LIJ>
-__device__ __forceinline__
-void vrr(double *g, double *ri, double *rj, double *Rpq, double aj_aij, double rt_aij,
-         double b10, int g_size)
-{
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    for (int n = gout_id; n < 3; n += gout_stride) {
-        double *_gx = g + n * g_size * nsq_per_block;
-        double Rpa = (rj[n] - ri[n]) * aj_aij;
-        double c0x = Rpa - rt_aij * Rpq[n*nsq_per_block];
-        double s0x, s1x, s2x;
-        s0x = _gx[0];
-        s1x = c0x * s0x;
-        _gx[nsq_per_block] = s1x;
-        for (int i = 1; i < LIJ; ++i) {
-            s2x = c0x * s1x + i * b10 * s0x;
-            _gx[(i+1)*nsq_per_block] = s2x;
-            s0x = s1x;
-            s1x = s2x;
-        }
-    }
-}
-
-template <int LKL>
-__device__ __forceinline__
-void trr(double *g, double *rlrk, double *Rpq, double al_akl, double rt_akl,
-         double b00, double b01, int lij3, int stride_k, int g_size)
-{
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-        __syncthreads();
-        int i = n / 3; //for i in range(lij+1):
-        int _ix = n % 3; // TODO: remove _ix for nroots > 2
-        double *_gx = g + (i + _ix * g_size) * nsq_per_block;
-        double Rqc = rlrk[_ix*nsq_per_block] * al_akl;
-        double cpx = Rqc + rt_akl * Rpq[_ix*nsq_per_block];
-        //for i in range(lij+1):
-        //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
-        double s0x, s1x, s2x;
-        if (n < lij3) {
-            s0x = _gx[0];
-            s1x = cpx * s0x;
-            s1x += i * b00 * _gx[-nsq_per_block];
-            _gx[stride_k*nsq_per_block] = s1x;
-        }
-
-        //for k in range(1, lkl):
-        //    for i in range(lij+1):
-        //        trr(i,k+1) = cp * trr(i,k) + k*b01 * trr(i,k-1) + i*b00 * trr(i-1,k)
-        for (int k = 1; k < LKL; ++k) {
-            __syncthreads();
-            if (n < lij3) {
-                s2x = cpx*s1x + k*b01*s0x;
-                s2x += i * b00 * _gx[(k*stride_k-1)*nsq_per_block];
-                _gx[(k*stride_k+stride_k)*nsq_per_block] = s2x;
-                s0x = s1x;
-                s1x = s2x;
-            }
-        }
-    }
-}
-
-template <int LI, int LJ>
-__device__ __forceinline__
-void hrr_ij(double *g, double *ri, double *rj, int count, int g_size)
-{
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    constexpr int lij = LI + LJ;
-    constexpr int stride_j = LI + 1;
-    constexpr int stride_k = stride_j * (LJ + 1);
-    for (int m = gout_id; m < count; m += gout_stride) {
-        int k = m / 3;
-        int _ix = m % 3;
-        double xjxi = rj[_ix] - ri[_ix];
-        double *_gx = g + (_ix*g_size + k*stride_k) * nsq_per_block;
-#pragma unroll
-        for (int j = 0; j < LJ; ++j) {
-            int ij = (lij-j) + j*stride_j;
-            double s0x, s1x;
-            s1x = _gx[ij*nsq_per_block];
-#pragma unroll
-            for (--ij; ij >= j*stride_j; --ij) {
-                s0x = _gx[ij*nsq_per_block];
-                _gx[(ij+stride_j)*nsq_per_block] = s1x - xjxi * s0x;
-                s1x = s0x;
-            }
-        }
-    }
-}
-template <int LK, int LL>
-__device__ __forceinline__
-void hrr_kl(double *g, double *rlrk, int stride_k)
-{
-    int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
-    constexpr int lkl = LK + LL;
-    for (int n = gout_id; n < stride_k*3; n += gout_stride) {
-        int i = n / 3;
-        int _ix = n % 3;
-        double xlxk = rlrk[_ix*nsq_per_block];
-        double *_gx = g + (_ix*stride_k*(LK+1)*(LL+1) + i) * nsq_per_block;
-#pragma unroll
-        for (int l = 0; l < LL; ++l) {
-            int kl = (lkl+l*LK)*stride_k;
-            double s0x, s1x;
-            s1x = _gx[kl*nsq_per_block];
-#pragma unroll
-            for (int k = lkl-1; k >= l; --k) {
-                int kl = (k+l*LK) * stride_k;
-                s0x = _gx[kl*nsq_per_block];
-                _gx[(kl+stride_k*(LK+1))*nsq_per_block] = s1x - xlxk * s0x;
-                s1x = s0x;
-            }
-        }
-    }
-}
-
-template <int I, int J, int K, int L>
-__device__ __forceinline__
-void inner_dot(double *gout, double *g,
-               int *addr_i, int *addr_j,
-               int *addr_k, int *addr_l)
-{
-#pragma unroll
-    for (int l = 0; l < L; ++l) {
-        int lx_addr = addr_l[l*3+0];
-        int ly_addr = addr_l[l*3+1];
-        int lz_addr = addr_l[l*3+2];
-#pragma unroll
-    for (int k = 0; k < K; ++k) {
-        int kx_addr = addr_k[k*3+0] + lx_addr;
-        int ky_addr = addr_k[k*3+1] + ly_addr;
-        int kz_addr = addr_k[k*3+2] + lz_addr;
-#pragma unroll
-    for (int j = 0; j < J; ++j) {
-        int jx_addr = addr_j[j*3+0] + kx_addr;;
-        int jy_addr = addr_j[j*3+1] + ky_addr;;
-        int jz_addr = addr_j[j*3+2] + kz_addr;;
-#pragma unroll
-    for (int i = 0; i < I; ++i) {
-        int n = i + j * 3 + k * 9 + l * 27;
-        int addrx = addr_i[i*3+0] + jx_addr;
-        int addry = addr_i[i*3+1] + jy_addr;
-        int addrz = addr_i[i*3+2] + jz_addr;
-        gout[n] += g[addrx] * g[addry] * g[addrz];
-    } } } }
-}
-
-__device__ __forceinline__
-void load_dm(double *dm, double *dm_cache, int nao, int nfi, int nfj,
-             int ldi, int ldj, int active)
-{
-    int t_id = threadIdx.y;
-    int t_stride = blockDim.y;
-    int nsq_per_block = blockDim.x;
-    for (int m = t_id; m < ldi*ldj; m += t_stride) {
-        int i = m / ldj;
-        int j = m % ldj;
-        if (i < nfi && j < nfj) {
-            dm_cache[m*nsq_per_block] = dm[i*nao+j];
-        } else {
-            dm_cache[m*nsq_per_block] = 0;
-        }
-    }
-}
-
-template <int I, int J, int K, int L>
-__device__ __forceinline__
-void dot_dm(double *vk, double *dm, double *gout, int nao, int i0, int l0,
-            int ioff, int joff, int koff, int loff, int ldk, int nfi, int nfl, int active)
-{
-    int nsq_per_block = blockDim.x;
-    __syncthreads();
-    if (active) {
-        int dl = nfl - loff;
-        int di = nfi - ioff;
-        double *dm_local = dm + (joff*ldk+koff)*nsq_per_block;
-        double *vk_local = vk + (i0+ioff)*nao+(l0+loff);
-#pragma unroll
-        for (int l = 0; l < 3; ++l) {
-            if (l >= dl) break;
-#pragma unroll
-        for (int i = 0; i < 3; ++i) {
-            if (i >= di) break;
-            double v = 0;
-#pragma unroll
-            for (int k = 0; k < 3; ++k) {
-#pragma unroll
-            for (int j = 0; j < 3; ++j) {
-                int n = i * I + j * J + k * K + l * L;
-                v += gout[n] * dm_local[(j*ldk+k)*nsq_per_block];
-            } }
-            atomicAdd(vk_local+i*nao+l, v);
-        } }
-    }
-    __syncthreads();
-}
+extern __constant__ int _c_cartesian_lexical_xyz[];
+extern __constant__ GXYZOffset c_gxyz_offset[];
 
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
@@ -591,31 +330,31 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                         if (task_id < ntasks) {
                             int lkl3 = (lkl+1)*3;
                             //switch (li*5+lj) {
-                            //case 0 : hrr_ij<0,0>(gx, ri, rj, lkl3, g_size); break;
-                            //case 1 : hrr_ij<0,1>(gx, ri, rj, lkl3, g_size); break;
-                            //case 2 : hrr_ij<0,2>(gx, ri, rj, lkl3, g_size); break;
-                            //case 3 : hrr_ij<0,3>(gx, ri, rj, lkl3, g_size); break;
-                            //case 4 : hrr_ij<0,4>(gx, ri, rj, lkl3, g_size); break;
-                            //case 5 : hrr_ij<1,0>(gx, ri, rj, lkl3, g_size); break;
-                            //case 6 : hrr_ij<1,1>(gx, ri, rj, lkl3, g_size); break;
-                            //case 7 : hrr_ij<1,2>(gx, ri, rj, lkl3, g_size); break;
-                            //case 8 : hrr_ij<1,3>(gx, ri, rj, lkl3, g_size); break;
-                            //case 9 : hrr_ij<1,4>(gx, ri, rj, lkl3, g_size); break;
-                            //case 10: hrr_ij<2,0>(gx, ri, rj, lkl3, g_size); break;
-                            //case 11: hrr_ij<2,1>(gx, ri, rj, lkl3, g_size); break;
-                            //case 12: hrr_ij<2,2>(gx, ri, rj, lkl3, g_size); break;
-                            //case 13: hrr_ij<2,3>(gx, ri, rj, lkl3, g_size); break;
-                            //case 14: hrr_ij<2,4>(gx, ri, rj, lkl3, g_size); break;
-                            //case 15: hrr_ij<3,0>(gx, ri, rj, lkl3, g_size); break;
-                            //case 16: hrr_ij<3,1>(gx, ri, rj, lkl3, g_size); break;
-                            //case 17: hrr_ij<3,2>(gx, ri, rj, lkl3, g_size); break;
-                            //case 18: hrr_ij<3,3>(gx, ri, rj, lkl3, g_size); break;
-                            //case 19: hrr_ij<3,4>(gx, ri, rj, lkl3, g_size); break;
-                            //case 20: hrr_ij<4,0>(gx, ri, rj, lkl3, g_size); break;
-                            //case 21: hrr_ij<4,1>(gx, ri, rj, lkl3, g_size); break;
-                            //case 22: hrr_ij<4,2>(gx, ri, rj, lkl3, g_size); break;
-                            //case 23: hrr_ij<4,3>(gx, ri, rj, lkl3, g_size); break;
-                            //case 24: hrr_ij<4,4>(gx, ri, rj, lkl3, g_size); break;
+                            //case 0 : hrr_ij<0,0>(gx, rjri, lkl3, g_size); break;
+                            //case 1 : hrr_ij<0,1>(gx, rjri, lkl3, g_size); break;
+                            //case 2 : hrr_ij<0,2>(gx, rjri, lkl3, g_size); break;
+                            //case 3 : hrr_ij<0,3>(gx, rjri, lkl3, g_size); break;
+                            //case 4 : hrr_ij<0,4>(gx, rjri, lkl3, g_size); break;
+                            //case 5 : hrr_ij<1,0>(gx, rjri, lkl3, g_size); break;
+                            //case 6 : hrr_ij<1,1>(gx, rjri, lkl3, g_size); break;
+                            //case 7 : hrr_ij<1,2>(gx, rjri, lkl3, g_size); break;
+                            //case 8 : hrr_ij<1,3>(gx, rjri, lkl3, g_size); break;
+                            //case 9 : hrr_ij<1,4>(gx, rjri, lkl3, g_size); break;
+                            //case 10: hrr_ij<2,0>(gx, rjri, lkl3, g_size); break;
+                            //case 11: hrr_ij<2,1>(gx, rjri, lkl3, g_size); break;
+                            //case 12: hrr_ij<2,2>(gx, rjri, lkl3, g_size); break;
+                            //case 13: hrr_ij<2,3>(gx, rjri, lkl3, g_size); break;
+                            //case 14: hrr_ij<2,4>(gx, rjri, lkl3, g_size); break;
+                            //case 15: hrr_ij<3,0>(gx, rjri, lkl3, g_size); break;
+                            //case 16: hrr_ij<3,1>(gx, rjri, lkl3, g_size); break;
+                            //case 17: hrr_ij<3,2>(gx, rjri, lkl3, g_size); break;
+                            //case 18: hrr_ij<3,3>(gx, rjri, lkl3, g_size); break;
+                            //case 19: hrr_ij<3,4>(gx, rjri, lkl3, g_size); break;
+                            //case 20: hrr_ij<4,0>(gx, rjri, lkl3, g_size); break;
+                            //case 21: hrr_ij<4,1>(gx, rjri, lkl3, g_size); break;
+                            //case 22: hrr_ij<4,2>(gx, rjri, lkl3, g_size); break;
+                            //case 23: hrr_ij<4,3>(gx, rjri, lkl3, g_size); break;
+                            //case 24: hrr_ij<4,4>(gx, rjri, lkl3, g_size); break;
                             //default:
                             for (int m = gout_id; m < lkl3; m += gout_stride) {
                                 int k = m / 3;
@@ -638,18 +377,18 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                     if (ll > 0) {
                         __syncthreads();
                         if (task_id < ntasks) {
-                            switch (lk*5+ll) {
-                            case 0 : hrr_kl<0,0>(gx, rlrk, stride_k); break;
-                            case 1 : hrr_kl<0,1>(gx, rlrk, stride_k); break;
-                            case 2 : hrr_kl<0,2>(gx, rlrk, stride_k); break;
+                            //switch (lk*5+ll) {
+                            //case 0 : hrr_kl<0,0>(gx, rlrk, stride_k); break;
+                            //case 1 : hrr_kl<0,1>(gx, rlrk, stride_k); break;
+                            //case 2 : hrr_kl<0,2>(gx, rlrk, stride_k); break;
                             //case 3 : hrr_kl<0,3>(gx, rlrk, stride_k); break;
                             //case 4 : hrr_kl<0,4>(gx, rlrk, stride_k); break;
-                            case 5 : hrr_kl<1,0>(gx, rlrk, stride_k); break;
-                            case 6 : hrr_kl<1,1>(gx, rlrk, stride_k); break;
+                            //case 5 : hrr_kl<1,0>(gx, rlrk, stride_k); break;
+                            //case 6 : hrr_kl<1,1>(gx, rlrk, stride_k); break;
                             //case 7 : hrr_kl<1,2>(gx, rlrk, stride_k); break;
                             //case 8 : hrr_kl<1,3>(gx, rlrk, stride_k); break;
                             //case 9 : hrr_kl<1,4>(gx, rlrk, stride_k); break;
-                            case 10: hrr_kl<2,0>(gx, rlrk, stride_k); break;
+                            //case 10: hrr_kl<2,0>(gx, rlrk, stride_k); break;
                             //case 11: hrr_kl<2,1>(gx, rlrk, stride_k); break;
                             //case 12: hrr_kl<2,2>(gx, rlrk, stride_k); break;
                             //case 13: hrr_kl<2,3>(gx, rlrk, stride_k); break;
@@ -664,7 +403,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                             //case 22: hrr_kl<4,2>(gx, rlrk, stride_k); break;
                             //case 23: hrr_kl<4,3>(gx, rlrk, stride_k); break;
                             //case 24: hrr_kl<4,4>(gx, rlrk, stride_k); break;
-                            default:
+                            //default:
                             for (int n = gout_id; n < stride_k*3; n += gout_stride) {
                                 int i = n / 3;
                                 int _ix = n % 3;
@@ -680,7 +419,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                                     }
                                 }
                             }
-                            }
+                            //}
                         }
                     }
 
@@ -756,7 +495,7 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
     }
 }
 
-static GXYZOffset *_make_gxyz_offset(BoundsInfo &bounds)
+GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
 {
 /*
     nfi = (li + 1) * (li + 2) // 2
@@ -917,7 +656,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
 
 #if 0
     if (li == 2 && lj == 1 && lk == 1 && ll == 1) {
-        GXYZOffset* p_gxyz_offset = _make_gxyz_offset(bounds);
+        GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         dim3 threads;
         int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
@@ -928,7 +667,7 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
     } else
 #endif
     if (!rys_k_unrolled(&envs, &kmat, &bounds, pool)) {
-        GXYZOffset* p_gxyz_offset = _make_gxyz_offset(bounds);
+        GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
                             ((lk == 0) >> 1) |

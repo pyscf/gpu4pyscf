@@ -59,8 +59,9 @@ typedef struct {
     double *vj;
     double *vk;
     double *dm;
-    uint16_t n_dm;
-    uint16_t atom_offset;
+    int n_dm;
+    int atom_offset;
+    double omega;
 } JKMatrix;
 
 typedef struct {
@@ -118,10 +119,6 @@ typedef struct {
     int8_t koff;
     int8_t loff;
 } GXYZOffset;
-
-typedef struct {
-    GXYZOffset goff[256];
-} GXYZOffsets;
 
 typedef struct {
     uint16_t i;

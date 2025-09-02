@@ -234,6 +234,7 @@ class _VHFOpt(jk._VHFOpt):
                         if i == k and j < l: continue
                         tasks.append((i,j,k,l))
         schemes = {t: _md_j_engine_quartets_scheme(t, n_dm=n_dm) for t in tasks}
+        tasks = iter(tasks)
 
         def proc(dm_xyz):
             device_id = cp.cuda.device.get_device_id()
@@ -270,12 +271,7 @@ class _VHFOpt(jk._VHFOpt):
             kern_counts = 0
             kern = libvhf_md.MD_build_j
 
-            while tasks:
-                try:
-                    task = tasks.pop()
-                except IndexError:
-                    break
-
+            for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 pair_ij_mapping, qd_ij_addrs = _pair_mappings[i,j][:2]

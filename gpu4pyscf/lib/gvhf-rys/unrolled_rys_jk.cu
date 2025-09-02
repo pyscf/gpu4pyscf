@@ -1,6 +1,6 @@
 #include <cuda.h>
 #include "vhf1.cuh"
-#include "rys_roots_for_k.cu"
+#include "rys_roots.cu"
 #include "create_tasks_o1.cu"
 
 
@@ -9,7 +9,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -21,10 +21,10 @@ void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -136,7 +136,7 @@ void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -154,9 +154,10 @@ void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 atomicAdd(vk+(i0+0)*nao+(l0+0), val);
@@ -169,6 +170,12 @@ void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val = 0;
                 val += gout0 * dm[(i0+0)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
@@ -179,7 +186,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -191,10 +198,10 @@ void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -310,7 +317,7 @@ void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -342,9 +349,10 @@ void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 atomicAdd(vk+(i0+0)*nao+(l0+0), val);
@@ -373,6 +381,20 @@ void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout1 * dm[(i0+1)*nao+(l0+0)];
                 val += gout2 * dm[(i0+2)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
@@ -383,7 +405,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -395,10 +417,10 @@ void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -526,7 +548,7 @@ void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -575,9 +597,10 @@ void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout3 * dm[(j0+0)*nao+(k0+1)];
@@ -646,13 +669,43 @@ void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout7 * dm[(i0+1)*nao+(l0+0)];
                 val += gout8 * dm[(i0+2)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout7 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout5 * dm[(l0+0)*nao+(k0+1)];
+                val += gout8 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+0)];
+                val += gout4 * dm[(j0+0)*nao+(i0+1)];
+                val += gout5 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+0)];
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -664,10 +717,10 @@ void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -831,7 +884,7 @@ void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -917,9 +970,10 @@ void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout3 * dm[(j0+0)*nao+(k0+1)];
@@ -1076,6 +1130,84 @@ void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout17 * dm[(i0+2)*nao+(l0+1)];
                 val += gout26 * dm[(i0+2)*nao+(l0+2)];
                 atomicAdd(vk+(j0+0)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout12 * dm[(l0+1)*nao+(k0+1)];
+                val += gout15 * dm[(l0+1)*nao+(k0+2)];
+                val += gout18 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+1)];
+                val += gout24 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout7 * dm[(l0+0)*nao+(k0+2)];
+                val += gout10 * dm[(l0+1)*nao+(k0+0)];
+                val += gout13 * dm[(l0+1)*nao+(k0+1)];
+                val += gout16 * dm[(l0+1)*nao+(k0+2)];
+                val += gout19 * dm[(l0+2)*nao+(k0+0)];
+                val += gout22 * dm[(l0+2)*nao+(k0+1)];
+                val += gout25 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout5 * dm[(l0+0)*nao+(k0+1)];
+                val += gout8 * dm[(l0+0)*nao+(k0+2)];
+                val += gout11 * dm[(l0+1)*nao+(k0+0)];
+                val += gout14 * dm[(l0+1)*nao+(k0+1)];
+                val += gout17 * dm[(l0+1)*nao+(k0+2)];
+                val += gout20 * dm[(l0+2)*nao+(k0+0)];
+                val += gout23 * dm[(l0+2)*nao+(k0+1)];
+                val += gout26 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+0)];
+                val += gout4 * dm[(j0+0)*nao+(i0+1)];
+                val += gout5 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+0)];
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+0)];
+                val += gout10 * dm[(j0+0)*nao+(i0+1)];
+                val += gout11 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+0)];
+                val += gout13 * dm[(j0+0)*nao+(i0+1)];
+                val += gout14 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+0)];
+                val += gout16 * dm[(j0+0)*nao+(i0+1)];
+                val += gout17 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+1)];
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout21 * dm[(j0+0)*nao+(i0+0)];
+                val += gout22 * dm[(j0+0)*nao+(i0+1)];
+                val += gout23 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout24 * dm[(j0+0)*nao+(i0+0)];
+                val += gout25 * dm[(j0+0)*nao+(i0+1)];
+                val += gout26 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
             }
         }
     }
@@ -1086,7 +1218,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1098,10 +1230,10 @@ void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -1229,7 +1361,7 @@ void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1277,9 +1409,10 @@ void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout3 * dm[(j0+1)*nao+(k0+0)];
@@ -1340,13 +1473,51 @@ void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout7 * dm[(i0+1)*nao+(l0+0)];
                 val += gout8 * dm[(i0+2)*nao+(l0+0)];
                 atomicAdd(vk+(j0+2)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+1)*nao+(i0+0)];
+                val += gout4 * dm[(j0+1)*nao+(i0+1)];
+                val += gout5 * dm[(j0+1)*nao+(i0+2)];
+                val += gout6 * dm[(j0+2)*nao+(i0+0)];
+                val += gout7 * dm[(j0+2)*nao+(i0+1)];
+                val += gout8 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1358,10 +1529,10 @@ void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -1525,7 +1696,7 @@ void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1611,9 +1782,10 @@ void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout9 * dm[(j0+0)*nao+(k0+1)];
@@ -1770,13 +1942,91 @@ void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout25 * dm[(i0+1)*nao+(l0+0)];
                 val += gout26 * dm[(i0+2)*nao+(l0+0)];
                 atomicAdd(vk+(j0+2)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+1)*nao+(i0+0)];
+                val += gout4 * dm[(j0+1)*nao+(i0+1)];
+                val += gout5 * dm[(j0+1)*nao+(i0+2)];
+                val += gout6 * dm[(j0+2)*nao+(i0+0)];
+                val += gout7 * dm[(j0+2)*nao+(i0+1)];
+                val += gout8 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+0)];
+                val += gout10 * dm[(j0+0)*nao+(i0+1)];
+                val += gout11 * dm[(j0+0)*nao+(i0+2)];
+                val += gout12 * dm[(j0+1)*nao+(i0+0)];
+                val += gout13 * dm[(j0+1)*nao+(i0+1)];
+                val += gout14 * dm[(j0+1)*nao+(i0+2)];
+                val += gout15 * dm[(j0+2)*nao+(i0+0)];
+                val += gout16 * dm[(j0+2)*nao+(i0+1)];
+                val += gout17 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+1)];
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                val += gout21 * dm[(j0+1)*nao+(i0+0)];
+                val += gout22 * dm[(j0+1)*nao+(i0+1)];
+                val += gout23 * dm[(j0+1)*nao+(i0+2)];
+                val += gout24 * dm[(j0+2)*nao+(i0+0)];
+                val += gout25 * dm[(j0+2)*nao+(i0+1)];
+                val += gout26 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1788,10 +2038,10 @@ void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -2063,7 +2313,7 @@ void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2243,9 +2493,10 @@ void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout9 * dm[(j0+0)*nao+(k0+1)];
@@ -2642,6 +2893,204 @@ void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout53 * dm[(i0+2)*nao+(l0+1)];
                 val += gout80 * dm[(i0+2)*nao+(l0+2)];
                 atomicAdd(vk+(j0+2)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                val += gout27 * dm[(l0+1)*nao+(k0+0)];
+                val += gout36 * dm[(l0+1)*nao+(k0+1)];
+                val += gout45 * dm[(l0+1)*nao+(k0+2)];
+                val += gout54 * dm[(l0+2)*nao+(k0+0)];
+                val += gout63 * dm[(l0+2)*nao+(k0+1)];
+                val += gout72 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                val += gout30 * dm[(l0+1)*nao+(k0+0)];
+                val += gout39 * dm[(l0+1)*nao+(k0+1)];
+                val += gout48 * dm[(l0+1)*nao+(k0+2)];
+                val += gout57 * dm[(l0+2)*nao+(k0+0)];
+                val += gout66 * dm[(l0+2)*nao+(k0+1)];
+                val += gout75 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                val += gout33 * dm[(l0+1)*nao+(k0+0)];
+                val += gout42 * dm[(l0+1)*nao+(k0+1)];
+                val += gout51 * dm[(l0+1)*nao+(k0+2)];
+                val += gout60 * dm[(l0+2)*nao+(k0+0)];
+                val += gout69 * dm[(l0+2)*nao+(k0+1)];
+                val += gout78 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                val += gout28 * dm[(l0+1)*nao+(k0+0)];
+                val += gout37 * dm[(l0+1)*nao+(k0+1)];
+                val += gout46 * dm[(l0+1)*nao+(k0+2)];
+                val += gout55 * dm[(l0+2)*nao+(k0+0)];
+                val += gout64 * dm[(l0+2)*nao+(k0+1)];
+                val += gout73 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                val += gout31 * dm[(l0+1)*nao+(k0+0)];
+                val += gout40 * dm[(l0+1)*nao+(k0+1)];
+                val += gout49 * dm[(l0+1)*nao+(k0+2)];
+                val += gout58 * dm[(l0+2)*nao+(k0+0)];
+                val += gout67 * dm[(l0+2)*nao+(k0+1)];
+                val += gout76 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                val += gout34 * dm[(l0+1)*nao+(k0+0)];
+                val += gout43 * dm[(l0+1)*nao+(k0+1)];
+                val += gout52 * dm[(l0+1)*nao+(k0+2)];
+                val += gout61 * dm[(l0+2)*nao+(k0+0)];
+                val += gout70 * dm[(l0+2)*nao+(k0+1)];
+                val += gout79 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                val += gout29 * dm[(l0+1)*nao+(k0+0)];
+                val += gout38 * dm[(l0+1)*nao+(k0+1)];
+                val += gout47 * dm[(l0+1)*nao+(k0+2)];
+                val += gout56 * dm[(l0+2)*nao+(k0+0)];
+                val += gout65 * dm[(l0+2)*nao+(k0+1)];
+                val += gout74 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                val += gout32 * dm[(l0+1)*nao+(k0+0)];
+                val += gout41 * dm[(l0+1)*nao+(k0+1)];
+                val += gout50 * dm[(l0+1)*nao+(k0+2)];
+                val += gout59 * dm[(l0+2)*nao+(k0+0)];
+                val += gout68 * dm[(l0+2)*nao+(k0+1)];
+                val += gout77 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                val += gout35 * dm[(l0+1)*nao+(k0+0)];
+                val += gout44 * dm[(l0+1)*nao+(k0+1)];
+                val += gout53 * dm[(l0+1)*nao+(k0+2)];
+                val += gout62 * dm[(l0+2)*nao+(k0+0)];
+                val += gout71 * dm[(l0+2)*nao+(k0+1)];
+                val += gout80 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+1)*nao+(i0+0)];
+                val += gout4 * dm[(j0+1)*nao+(i0+1)];
+                val += gout5 * dm[(j0+1)*nao+(i0+2)];
+                val += gout6 * dm[(j0+2)*nao+(i0+0)];
+                val += gout7 * dm[(j0+2)*nao+(i0+1)];
+                val += gout8 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+0)];
+                val += gout10 * dm[(j0+0)*nao+(i0+1)];
+                val += gout11 * dm[(j0+0)*nao+(i0+2)];
+                val += gout12 * dm[(j0+1)*nao+(i0+0)];
+                val += gout13 * dm[(j0+1)*nao+(i0+1)];
+                val += gout14 * dm[(j0+1)*nao+(i0+2)];
+                val += gout15 * dm[(j0+2)*nao+(i0+0)];
+                val += gout16 * dm[(j0+2)*nao+(i0+1)];
+                val += gout17 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+1)];
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                val += gout21 * dm[(j0+1)*nao+(i0+0)];
+                val += gout22 * dm[(j0+1)*nao+(i0+1)];
+                val += gout23 * dm[(j0+1)*nao+(i0+2)];
+                val += gout24 * dm[(j0+2)*nao+(i0+0)];
+                val += gout25 * dm[(j0+2)*nao+(i0+1)];
+                val += gout26 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout27 * dm[(j0+0)*nao+(i0+0)];
+                val += gout28 * dm[(j0+0)*nao+(i0+1)];
+                val += gout29 * dm[(j0+0)*nao+(i0+2)];
+                val += gout30 * dm[(j0+1)*nao+(i0+0)];
+                val += gout31 * dm[(j0+1)*nao+(i0+1)];
+                val += gout32 * dm[(j0+1)*nao+(i0+2)];
+                val += gout33 * dm[(j0+2)*nao+(i0+0)];
+                val += gout34 * dm[(j0+2)*nao+(i0+1)];
+                val += gout35 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout36 * dm[(j0+0)*nao+(i0+0)];
+                val += gout37 * dm[(j0+0)*nao+(i0+1)];
+                val += gout38 * dm[(j0+0)*nao+(i0+2)];
+                val += gout39 * dm[(j0+1)*nao+(i0+0)];
+                val += gout40 * dm[(j0+1)*nao+(i0+1)];
+                val += gout41 * dm[(j0+1)*nao+(i0+2)];
+                val += gout42 * dm[(j0+2)*nao+(i0+0)];
+                val += gout43 * dm[(j0+2)*nao+(i0+1)];
+                val += gout44 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout45 * dm[(j0+0)*nao+(i0+0)];
+                val += gout46 * dm[(j0+0)*nao+(i0+1)];
+                val += gout47 * dm[(j0+0)*nao+(i0+2)];
+                val += gout48 * dm[(j0+1)*nao+(i0+0)];
+                val += gout49 * dm[(j0+1)*nao+(i0+1)];
+                val += gout50 * dm[(j0+1)*nao+(i0+2)];
+                val += gout51 * dm[(j0+2)*nao+(i0+0)];
+                val += gout52 * dm[(j0+2)*nao+(i0+1)];
+                val += gout53 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout54 * dm[(j0+0)*nao+(i0+0)];
+                val += gout55 * dm[(j0+0)*nao+(i0+1)];
+                val += gout56 * dm[(j0+0)*nao+(i0+2)];
+                val += gout57 * dm[(j0+1)*nao+(i0+0)];
+                val += gout58 * dm[(j0+1)*nao+(i0+1)];
+                val += gout59 * dm[(j0+1)*nao+(i0+2)];
+                val += gout60 * dm[(j0+2)*nao+(i0+0)];
+                val += gout61 * dm[(j0+2)*nao+(i0+1)];
+                val += gout62 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout63 * dm[(j0+0)*nao+(i0+0)];
+                val += gout64 * dm[(j0+0)*nao+(i0+1)];
+                val += gout65 * dm[(j0+0)*nao+(i0+2)];
+                val += gout66 * dm[(j0+1)*nao+(i0+0)];
+                val += gout67 * dm[(j0+1)*nao+(i0+1)];
+                val += gout68 * dm[(j0+1)*nao+(i0+2)];
+                val += gout69 * dm[(j0+2)*nao+(i0+0)];
+                val += gout70 * dm[(j0+2)*nao+(i0+1)];
+                val += gout71 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout72 * dm[(j0+0)*nao+(i0+0)];
+                val += gout73 * dm[(j0+0)*nao+(i0+1)];
+                val += gout74 * dm[(j0+0)*nao+(i0+2)];
+                val += gout75 * dm[(j0+1)*nao+(i0+0)];
+                val += gout76 * dm[(j0+1)*nao+(i0+1)];
+                val += gout77 * dm[(j0+1)*nao+(i0+2)];
+                val += gout78 * dm[(j0+2)*nao+(i0+0)];
+                val += gout79 * dm[(j0+2)*nao+(i0+1)];
+                val += gout80 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
             }
         }
     }
@@ -2652,7 +3101,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -2664,10 +3113,10 @@ void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -2789,7 +3238,7 @@ void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2828,9 +3277,10 @@ void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 atomicAdd(vk+(i0+0)*nao+(l0+0), val);
@@ -2883,6 +3333,32 @@ void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout4 * dm[(i0+4)*nao+(l0+0)];
                 val += gout5 * dm[(i0+5)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
@@ -2893,7 +3369,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -2905,10 +3381,10 @@ void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -3054,7 +3530,7 @@ void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3119,9 +3595,10 @@ void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout6 * dm[(j0+0)*nao+(k0+1)];
@@ -3250,13 +3727,67 @@ void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout16 * dm[(i0+4)*nao+(l0+0)];
                 val += gout17 * dm[(i0+5)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout6 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                val += gout14 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout15 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout16 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout17 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+0)];
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                val += gout9 * dm[(j0+0)*nao+(i0+3)];
+                val += gout10 * dm[(j0+0)*nao+(i0+4)];
+                val += gout11 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+0)];
+                val += gout13 * dm[(j0+0)*nao+(i0+1)];
+                val += gout14 * dm[(j0+0)*nao+(i0+2)];
+                val += gout15 * dm[(j0+0)*nao+(i0+3)];
+                val += gout16 * dm[(j0+0)*nao+(i0+4)];
+                val += gout17 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -3268,10 +3799,10 @@ void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -3489,7 +4020,7 @@ void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3618,9 +4149,10 @@ void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout6 * dm[(j0+0)*nao+(k0+1)];
@@ -3921,13 +4453,151 @@ void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout35 * dm[(i0+5)*nao+(l0+1)];
                 val += gout53 * dm[(i0+5)*nao+(l0+2)];
                 atomicAdd(vk+(j0+0)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout6 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+0)*nao+(k0+2)];
+                val += gout18 * dm[(l0+1)*nao+(k0+0)];
+                val += gout24 * dm[(l0+1)*nao+(k0+1)];
+                val += gout30 * dm[(l0+1)*nao+(k0+2)];
+                val += gout36 * dm[(l0+2)*nao+(k0+0)];
+                val += gout42 * dm[(l0+2)*nao+(k0+1)];
+                val += gout48 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+0)*nao+(k0+2)];
+                val += gout19 * dm[(l0+1)*nao+(k0+0)];
+                val += gout25 * dm[(l0+1)*nao+(k0+1)];
+                val += gout31 * dm[(l0+1)*nao+(k0+2)];
+                val += gout37 * dm[(l0+2)*nao+(k0+0)];
+                val += gout43 * dm[(l0+2)*nao+(k0+1)];
+                val += gout49 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                val += gout14 * dm[(l0+0)*nao+(k0+2)];
+                val += gout20 * dm[(l0+1)*nao+(k0+0)];
+                val += gout26 * dm[(l0+1)*nao+(k0+1)];
+                val += gout32 * dm[(l0+1)*nao+(k0+2)];
+                val += gout38 * dm[(l0+2)*nao+(k0+0)];
+                val += gout44 * dm[(l0+2)*nao+(k0+1)];
+                val += gout50 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout15 * dm[(l0+0)*nao+(k0+2)];
+                val += gout21 * dm[(l0+1)*nao+(k0+0)];
+                val += gout27 * dm[(l0+1)*nao+(k0+1)];
+                val += gout33 * dm[(l0+1)*nao+(k0+2)];
+                val += gout39 * dm[(l0+2)*nao+(k0+0)];
+                val += gout45 * dm[(l0+2)*nao+(k0+1)];
+                val += gout51 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout16 * dm[(l0+0)*nao+(k0+2)];
+                val += gout22 * dm[(l0+1)*nao+(k0+0)];
+                val += gout28 * dm[(l0+1)*nao+(k0+1)];
+                val += gout34 * dm[(l0+1)*nao+(k0+2)];
+                val += gout40 * dm[(l0+2)*nao+(k0+0)];
+                val += gout46 * dm[(l0+2)*nao+(k0+1)];
+                val += gout52 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout17 * dm[(l0+0)*nao+(k0+2)];
+                val += gout23 * dm[(l0+1)*nao+(k0+0)];
+                val += gout29 * dm[(l0+1)*nao+(k0+1)];
+                val += gout35 * dm[(l0+1)*nao+(k0+2)];
+                val += gout41 * dm[(l0+2)*nao+(k0+0)];
+                val += gout47 * dm[(l0+2)*nao+(k0+1)];
+                val += gout53 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+0)];
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                val += gout9 * dm[(j0+0)*nao+(i0+3)];
+                val += gout10 * dm[(j0+0)*nao+(i0+4)];
+                val += gout11 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+0)];
+                val += gout13 * dm[(j0+0)*nao+(i0+1)];
+                val += gout14 * dm[(j0+0)*nao+(i0+2)];
+                val += gout15 * dm[(j0+0)*nao+(i0+3)];
+                val += gout16 * dm[(j0+0)*nao+(i0+4)];
+                val += gout17 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+1)];
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                val += gout21 * dm[(j0+0)*nao+(i0+3)];
+                val += gout22 * dm[(j0+0)*nao+(i0+4)];
+                val += gout23 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout24 * dm[(j0+0)*nao+(i0+0)];
+                val += gout25 * dm[(j0+0)*nao+(i0+1)];
+                val += gout26 * dm[(j0+0)*nao+(i0+2)];
+                val += gout27 * dm[(j0+0)*nao+(i0+3)];
+                val += gout28 * dm[(j0+0)*nao+(i0+4)];
+                val += gout29 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout30 * dm[(j0+0)*nao+(i0+0)];
+                val += gout31 * dm[(j0+0)*nao+(i0+1)];
+                val += gout32 * dm[(j0+0)*nao+(i0+2)];
+                val += gout33 * dm[(j0+0)*nao+(i0+3)];
+                val += gout34 * dm[(j0+0)*nao+(i0+4)];
+                val += gout35 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout36 * dm[(j0+0)*nao+(i0+0)];
+                val += gout37 * dm[(j0+0)*nao+(i0+1)];
+                val += gout38 * dm[(j0+0)*nao+(i0+2)];
+                val += gout39 * dm[(j0+0)*nao+(i0+3)];
+                val += gout40 * dm[(j0+0)*nao+(i0+4)];
+                val += gout41 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout42 * dm[(j0+0)*nao+(i0+0)];
+                val += gout43 * dm[(j0+0)*nao+(i0+1)];
+                val += gout44 * dm[(j0+0)*nao+(i0+2)];
+                val += gout45 * dm[(j0+0)*nao+(i0+3)];
+                val += gout46 * dm[(j0+0)*nao+(i0+4)];
+                val += gout47 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout48 * dm[(j0+0)*nao+(i0+0)];
+                val += gout49 * dm[(j0+0)*nao+(i0+1)];
+                val += gout50 * dm[(j0+0)*nao+(i0+2)];
+                val += gout51 * dm[(j0+0)*nao+(i0+3)];
+                val += gout52 * dm[(j0+0)*nao+(i0+4)];
+                val += gout53 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -3939,10 +4609,10 @@ void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -4124,7 +4794,7 @@ void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -4217,9 +4887,10 @@ void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout6 * dm[(j0+0)*nao+(k0+1)];
@@ -4462,13 +5133,109 @@ void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout34 * dm[(i0+4)*nao+(l0+0)];
                 val += gout35 * dm[(i0+5)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+5), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout6 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+0)*nao+(k0+2)];
+                val += gout18 * dm[(l0+0)*nao+(k0+3)];
+                val += gout24 * dm[(l0+0)*nao+(k0+4)];
+                val += gout30 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+0)*nao+(k0+2)];
+                val += gout19 * dm[(l0+0)*nao+(k0+3)];
+                val += gout25 * dm[(l0+0)*nao+(k0+4)];
+                val += gout31 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                val += gout14 * dm[(l0+0)*nao+(k0+2)];
+                val += gout20 * dm[(l0+0)*nao+(k0+3)];
+                val += gout26 * dm[(l0+0)*nao+(k0+4)];
+                val += gout32 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout15 * dm[(l0+0)*nao+(k0+2)];
+                val += gout21 * dm[(l0+0)*nao+(k0+3)];
+                val += gout27 * dm[(l0+0)*nao+(k0+4)];
+                val += gout33 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout16 * dm[(l0+0)*nao+(k0+2)];
+                val += gout22 * dm[(l0+0)*nao+(k0+3)];
+                val += gout28 * dm[(l0+0)*nao+(k0+4)];
+                val += gout34 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout17 * dm[(l0+0)*nao+(k0+2)];
+                val += gout23 * dm[(l0+0)*nao+(k0+3)];
+                val += gout29 * dm[(l0+0)*nao+(k0+4)];
+                val += gout35 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+0)];
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                val += gout9 * dm[(j0+0)*nao+(i0+3)];
+                val += gout10 * dm[(j0+0)*nao+(i0+4)];
+                val += gout11 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+0)];
+                val += gout13 * dm[(j0+0)*nao+(i0+1)];
+                val += gout14 * dm[(j0+0)*nao+(i0+2)];
+                val += gout15 * dm[(j0+0)*nao+(i0+3)];
+                val += gout16 * dm[(j0+0)*nao+(i0+4)];
+                val += gout17 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+1)];
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                val += gout21 * dm[(j0+0)*nao+(i0+3)];
+                val += gout22 * dm[(j0+0)*nao+(i0+4)];
+                val += gout23 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout24 * dm[(j0+0)*nao+(i0+0)];
+                val += gout25 * dm[(j0+0)*nao+(i0+1)];
+                val += gout26 * dm[(j0+0)*nao+(i0+2)];
+                val += gout27 * dm[(j0+0)*nao+(i0+3)];
+                val += gout28 * dm[(j0+0)*nao+(i0+4)];
+                val += gout29 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout30 * dm[(j0+0)*nao+(i0+0)];
+                val += gout31 * dm[(j0+0)*nao+(i0+1)];
+                val += gout32 * dm[(j0+0)*nao+(i0+2)];
+                val += gout33 * dm[(j0+0)*nao+(i0+3)];
+                val += gout34 * dm[(j0+0)*nao+(i0+4)];
+                val += gout35 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -4481,10 +5248,10 @@ void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -4655,7 +5422,7 @@ void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -4875,9 +5642,10 @@ void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 switch (gout_id) {
                 case 0:
                 val = 0;
@@ -5536,6 +6304,400 @@ void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 atomicAdd(vk+(j0+0)*nao+(k0+5), val);
                 break;
                 }
+                switch (gout_id) {
+                case 0:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout3 * dm[(l0+0)*nao+(k0+2)];
+                val += gout6 * dm[(l0+0)*nao+(k0+4)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                val += gout15 * dm[(l0+1)*nao+(k0+4)];
+                val += gout18 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                val += gout24 * dm[(l0+2)*nao+(k0+4)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout5 * dm[(l0+0)*nao+(k0+3)];
+                val += gout8 * dm[(l0+0)*nao+(k0+5)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout14 * dm[(l0+1)*nao+(k0+3)];
+                val += gout17 * dm[(l0+1)*nao+(k0+5)];
+                val += gout20 * dm[(l0+2)*nao+(k0+1)];
+                val += gout23 * dm[(l0+2)*nao+(k0+3)];
+                val += gout26 * dm[(l0+2)*nao+(k0+5)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout4 * dm[(l0+0)*nao+(k0+2)];
+                val += gout7 * dm[(l0+0)*nao+(k0+4)];
+                val += gout10 * dm[(l0+1)*nao+(k0+0)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                val += gout16 * dm[(l0+1)*nao+(k0+4)];
+                val += gout19 * dm[(l0+2)*nao+(k0+0)];
+                val += gout22 * dm[(l0+2)*nao+(k0+2)];
+                val += gout25 * dm[(l0+2)*nao+(k0+4)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+0)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+0)];
+                val += gout7 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+0)];
+                val += gout10 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+0)];
+                val += gout13 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout14 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+3)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+0)];
+                val += gout16 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+4)*nao+(l0+1), val);
+                val = 0;
+                val += gout17 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+5)*nao+(l0+1), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout21 * dm[(j0+0)*nao+(i0+0)];
+                val += gout22 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                val = 0;
+                val += gout23 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+3)*nao+(l0+2), val);
+                val = 0;
+                val += gout24 * dm[(j0+0)*nao+(i0+0)];
+                val += gout25 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+4)*nao+(l0+2), val);
+                val = 0;
+                val += gout26 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+5)*nao+(l0+2), val);
+                break;
+                case 1:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout3 * dm[(l0+0)*nao+(k0+2)];
+                val += gout6 * dm[(l0+0)*nao+(k0+4)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                val += gout15 * dm[(l0+1)*nao+(k0+4)];
+                val += gout18 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                val += gout24 * dm[(l0+2)*nao+(k0+4)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout5 * dm[(l0+0)*nao+(k0+3)];
+                val += gout8 * dm[(l0+0)*nao+(k0+5)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout14 * dm[(l0+1)*nao+(k0+3)];
+                val += gout17 * dm[(l0+1)*nao+(k0+5)];
+                val += gout20 * dm[(l0+2)*nao+(k0+1)];
+                val += gout23 * dm[(l0+2)*nao+(k0+3)];
+                val += gout26 * dm[(l0+2)*nao+(k0+5)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout4 * dm[(l0+0)*nao+(k0+2)];
+                val += gout7 * dm[(l0+0)*nao+(k0+4)];
+                val += gout10 * dm[(l0+1)*nao+(k0+0)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                val += gout16 * dm[(l0+1)*nao+(k0+4)];
+                val += gout19 * dm[(l0+2)*nao+(k0+0)];
+                val += gout22 * dm[(l0+2)*nao+(k0+2)];
+                val += gout25 * dm[(l0+2)*nao+(k0+4)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+1)];
+                val += gout1 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+1)];
+                val += gout4 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+1)];
+                val += gout7 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout8 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+1)];
+                val += gout10 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+1)];
+                val += gout13 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout14 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+3)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+1)];
+                val += gout16 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+4)*nao+(l0+1), val);
+                val = 0;
+                val += gout17 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+5)*nao+(l0+1), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+1)];
+                val += gout19 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout21 * dm[(j0+0)*nao+(i0+1)];
+                val += gout22 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                val = 0;
+                val += gout23 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+3)*nao+(l0+2), val);
+                val = 0;
+                val += gout24 * dm[(j0+0)*nao+(i0+1)];
+                val += gout25 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+4)*nao+(l0+2), val);
+                val = 0;
+                val += gout26 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+5)*nao+(l0+2), val);
+                break;
+                case 2:
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+1)];
+                val += gout4 * dm[(l0+0)*nao+(k0+3)];
+                val += gout7 * dm[(l0+0)*nao+(k0+5)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout13 * dm[(l0+1)*nao+(k0+3)];
+                val += gout16 * dm[(l0+1)*nao+(k0+5)];
+                val += gout19 * dm[(l0+2)*nao+(k0+1)];
+                val += gout22 * dm[(l0+2)*nao+(k0+3)];
+                val += gout25 * dm[(l0+2)*nao+(k0+5)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout3 * dm[(l0+0)*nao+(k0+2)];
+                val += gout6 * dm[(l0+0)*nao+(k0+4)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                val += gout15 * dm[(l0+1)*nao+(k0+4)];
+                val += gout18 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                val += gout24 * dm[(l0+2)*nao+(k0+4)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout5 * dm[(l0+0)*nao+(k0+3)];
+                val += gout8 * dm[(l0+0)*nao+(k0+5)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout14 * dm[(l0+1)*nao+(k0+3)];
+                val += gout17 * dm[(l0+1)*nao+(k0+5)];
+                val += gout20 * dm[(l0+2)*nao+(k0+1)];
+                val += gout23 * dm[(l0+2)*nao+(k0+3)];
+                val += gout26 * dm[(l0+2)*nao+(k0+5)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout1 * dm[(j0+0)*nao+(i0+0)];
+                val += gout2 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+0)];
+                val += gout5 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+0)];
+                val += gout8 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+0)];
+                val += gout11 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+0)];
+                val += gout14 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+3)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+4)*nao+(l0+1), val);
+                val = 0;
+                val += gout16 * dm[(j0+0)*nao+(i0+0)];
+                val += gout17 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+5)*nao+(l0+1), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout19 * dm[(j0+0)*nao+(i0+0)];
+                val += gout20 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout21 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                val = 0;
+                val += gout22 * dm[(j0+0)*nao+(i0+0)];
+                val += gout23 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+3)*nao+(l0+2), val);
+                val = 0;
+                val += gout24 * dm[(j0+0)*nao+(i0+2)];
+                atomicAdd(vj+(k0+4)*nao+(l0+2), val);
+                val = 0;
+                val += gout25 * dm[(j0+0)*nao+(i0+0)];
+                val += gout26 * dm[(j0+0)*nao+(i0+4)];
+                atomicAdd(vj+(k0+5)*nao+(l0+2), val);
+                break;
+                case 3:
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+1)];
+                val += gout4 * dm[(l0+0)*nao+(k0+3)];
+                val += gout7 * dm[(l0+0)*nao+(k0+5)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout13 * dm[(l0+1)*nao+(k0+3)];
+                val += gout16 * dm[(l0+1)*nao+(k0+5)];
+                val += gout19 * dm[(l0+2)*nao+(k0+1)];
+                val += gout22 * dm[(l0+2)*nao+(k0+3)];
+                val += gout25 * dm[(l0+2)*nao+(k0+5)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout3 * dm[(l0+0)*nao+(k0+2)];
+                val += gout6 * dm[(l0+0)*nao+(k0+4)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                val += gout15 * dm[(l0+1)*nao+(k0+4)];
+                val += gout18 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                val += gout24 * dm[(l0+2)*nao+(k0+4)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout5 * dm[(l0+0)*nao+(k0+3)];
+                val += gout8 * dm[(l0+0)*nao+(k0+5)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout14 * dm[(l0+1)*nao+(k0+3)];
+                val += gout17 * dm[(l0+1)*nao+(k0+5)];
+                val += gout20 * dm[(l0+2)*nao+(k0+1)];
+                val += gout23 * dm[(l0+2)*nao+(k0+3)];
+                val += gout26 * dm[(l0+2)*nao+(k0+5)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+1)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+1)];
+                val += gout11 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+1)];
+                val += gout14 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+3)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+4)*nao+(l0+1), val);
+                val = 0;
+                val += gout16 * dm[(j0+0)*nao+(i0+1)];
+                val += gout17 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+5)*nao+(l0+1), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout19 * dm[(j0+0)*nao+(i0+1)];
+                val += gout20 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout21 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                val = 0;
+                val += gout22 * dm[(j0+0)*nao+(i0+1)];
+                val += gout23 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+3)*nao+(l0+2), val);
+                val = 0;
+                val += gout24 * dm[(j0+0)*nao+(i0+3)];
+                atomicAdd(vj+(k0+4)*nao+(l0+2), val);
+                val = 0;
+                val += gout25 * dm[(j0+0)*nao+(i0+1)];
+                val += gout26 * dm[(j0+0)*nao+(i0+5)];
+                atomicAdd(vj+(k0+5)*nao+(l0+2), val);
+                break;
+                }
             }
         }
     }
@@ -5546,7 +6708,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -5558,10 +6720,10 @@ void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -5707,7 +6869,7 @@ void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -5770,9 +6932,10 @@ void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout6 * dm[(j0+1)*nao+(k0+0)];
@@ -5881,13 +7044,87 @@ void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout16 * dm[(i0+4)*nao+(l0+0)];
                 val += gout17 * dm[(i0+5)*nao+(l0+0)];
                 atomicAdd(vk+(j0+2)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout15 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout16 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout17 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+1)*nao+(i0+0)];
+                val += gout7 * dm[(j0+1)*nao+(i0+1)];
+                val += gout8 * dm[(j0+1)*nao+(i0+2)];
+                val += gout9 * dm[(j0+1)*nao+(i0+3)];
+                val += gout10 * dm[(j0+1)*nao+(i0+4)];
+                val += gout11 * dm[(j0+1)*nao+(i0+5)];
+                val += gout12 * dm[(j0+2)*nao+(i0+0)];
+                val += gout13 * dm[(j0+2)*nao+(i0+1)];
+                val += gout14 * dm[(j0+2)*nao+(i0+2)];
+                val += gout15 * dm[(j0+2)*nao+(i0+3)];
+                val += gout16 * dm[(j0+2)*nao+(i0+4)];
+                val += gout17 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -5899,10 +7136,10 @@ void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -6120,7 +7357,7 @@ void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -6245,9 +7482,10 @@ void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout18 * dm[(j0+0)*nao+(k0+1)];
@@ -6536,13 +7774,163 @@ void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout52 * dm[(i0+4)*nao+(l0+0)];
                 val += gout53 * dm[(i0+5)*nao+(l0+0)];
                 atomicAdd(vk+(j0+2)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout18 * dm[(l0+0)*nao+(k0+1)];
+                val += gout36 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout24 * dm[(l0+0)*nao+(k0+1)];
+                val += gout42 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+0)];
+                val += gout30 * dm[(l0+0)*nao+(k0+1)];
+                val += gout48 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout19 * dm[(l0+0)*nao+(k0+1)];
+                val += gout37 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout25 * dm[(l0+0)*nao+(k0+1)];
+                val += gout43 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+0)];
+                val += gout31 * dm[(l0+0)*nao+(k0+1)];
+                val += gout49 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout20 * dm[(l0+0)*nao+(k0+1)];
+                val += gout38 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout26 * dm[(l0+0)*nao+(k0+1)];
+                val += gout44 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+0)];
+                val += gout32 * dm[(l0+0)*nao+(k0+1)];
+                val += gout50 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout21 * dm[(l0+0)*nao+(k0+1)];
+                val += gout39 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                val += gout27 * dm[(l0+0)*nao+(k0+1)];
+                val += gout45 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout15 * dm[(l0+0)*nao+(k0+0)];
+                val += gout33 * dm[(l0+0)*nao+(k0+1)];
+                val += gout51 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout22 * dm[(l0+0)*nao+(k0+1)];
+                val += gout40 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+0)];
+                val += gout28 * dm[(l0+0)*nao+(k0+1)];
+                val += gout46 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout16 * dm[(l0+0)*nao+(k0+0)];
+                val += gout34 * dm[(l0+0)*nao+(k0+1)];
+                val += gout52 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout23 * dm[(l0+0)*nao+(k0+1)];
+                val += gout41 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+0)];
+                val += gout29 * dm[(l0+0)*nao+(k0+1)];
+                val += gout47 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout17 * dm[(l0+0)*nao+(k0+0)];
+                val += gout35 * dm[(l0+0)*nao+(k0+1)];
+                val += gout53 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+1)*nao+(i0+0)];
+                val += gout7 * dm[(j0+1)*nao+(i0+1)];
+                val += gout8 * dm[(j0+1)*nao+(i0+2)];
+                val += gout9 * dm[(j0+1)*nao+(i0+3)];
+                val += gout10 * dm[(j0+1)*nao+(i0+4)];
+                val += gout11 * dm[(j0+1)*nao+(i0+5)];
+                val += gout12 * dm[(j0+2)*nao+(i0+0)];
+                val += gout13 * dm[(j0+2)*nao+(i0+1)];
+                val += gout14 * dm[(j0+2)*nao+(i0+2)];
+                val += gout15 * dm[(j0+2)*nao+(i0+3)];
+                val += gout16 * dm[(j0+2)*nao+(i0+4)];
+                val += gout17 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+1)];
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                val += gout21 * dm[(j0+0)*nao+(i0+3)];
+                val += gout22 * dm[(j0+0)*nao+(i0+4)];
+                val += gout23 * dm[(j0+0)*nao+(i0+5)];
+                val += gout24 * dm[(j0+1)*nao+(i0+0)];
+                val += gout25 * dm[(j0+1)*nao+(i0+1)];
+                val += gout26 * dm[(j0+1)*nao+(i0+2)];
+                val += gout27 * dm[(j0+1)*nao+(i0+3)];
+                val += gout28 * dm[(j0+1)*nao+(i0+4)];
+                val += gout29 * dm[(j0+1)*nao+(i0+5)];
+                val += gout30 * dm[(j0+2)*nao+(i0+0)];
+                val += gout31 * dm[(j0+2)*nao+(i0+1)];
+                val += gout32 * dm[(j0+2)*nao+(i0+2)];
+                val += gout33 * dm[(j0+2)*nao+(i0+3)];
+                val += gout34 * dm[(j0+2)*nao+(i0+4)];
+                val += gout35 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout36 * dm[(j0+0)*nao+(i0+0)];
+                val += gout37 * dm[(j0+0)*nao+(i0+1)];
+                val += gout38 * dm[(j0+0)*nao+(i0+2)];
+                val += gout39 * dm[(j0+0)*nao+(i0+3)];
+                val += gout40 * dm[(j0+0)*nao+(i0+4)];
+                val += gout41 * dm[(j0+0)*nao+(i0+5)];
+                val += gout42 * dm[(j0+1)*nao+(i0+0)];
+                val += gout43 * dm[(j0+1)*nao+(i0+1)];
+                val += gout44 * dm[(j0+1)*nao+(i0+2)];
+                val += gout45 * dm[(j0+1)*nao+(i0+3)];
+                val += gout46 * dm[(j0+1)*nao+(i0+4)];
+                val += gout47 * dm[(j0+1)*nao+(i0+5)];
+                val += gout48 * dm[(j0+2)*nao+(i0+0)];
+                val += gout49 * dm[(j0+2)*nao+(i0+1)];
+                val += gout50 * dm[(j0+2)*nao+(i0+2)];
+                val += gout51 * dm[(j0+2)*nao+(i0+3)];
+                val += gout52 * dm[(j0+2)*nao+(i0+4)];
+                val += gout53 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -6555,10 +7943,10 @@ void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -6723,7 +8111,7 @@ void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 8);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -7038,9 +8426,10 @@ void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 switch (gout_id) {
                 case 0:
                 val = 0;
@@ -8283,13 +9672,643 @@ void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 atomicAdd(vk+(j0+2)*nao+(k0+2), val);
                 break;
                 }
+                switch (gout_id) {
+                case 0:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout20 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+1)*nao+(i0+2)];
+                val += gout2 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+1)*nao+(i0+0)];
+                val += gout4 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+4)];
+                val += gout6 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+2)];
+                val += gout8 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+0)];
+                val += gout10 * dm[(j0+1)*nao+(i0+2)];
+                val += gout11 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+1)*nao+(i0+0)];
+                val += gout13 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout14 * dm[(j0+0)*nao+(i0+4)];
+                val += gout15 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout16 * dm[(j0+0)*nao+(i0+2)];
+                val += gout17 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+1)*nao+(i0+2)];
+                val += gout20 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 1:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout20 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+1)];
+                val += gout1 * dm[(j0+1)*nao+(i0+3)];
+                val += gout2 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+1)*nao+(i0+1)];
+                val += gout4 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+3)];
+                val += gout8 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+1)];
+                val += gout10 * dm[(j0+1)*nao+(i0+3)];
+                val += gout11 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+1)*nao+(i0+1)];
+                val += gout13 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout14 * dm[(j0+0)*nao+(i0+5)];
+                val += gout15 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout16 * dm[(j0+0)*nao+(i0+3)];
+                val += gout17 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+1)];
+                val += gout19 * dm[(j0+1)*nao+(i0+3)];
+                val += gout20 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 2:
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout11 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+2)];
+                val += gout1 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+0)];
+                val += gout3 * dm[(j0+1)*nao+(i0+2)];
+                val += gout4 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+1)*nao+(i0+0)];
+                val += gout6 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+4)];
+                val += gout8 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+2)];
+                val += gout10 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+0)];
+                val += gout12 * dm[(j0+1)*nao+(i0+2)];
+                val += gout13 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout14 * dm[(j0+1)*nao+(i0+0)];
+                val += gout15 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout16 * dm[(j0+0)*nao+(i0+4)];
+                val += gout17 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+2)];
+                val += gout19 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 3:
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout11 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+3)];
+                val += gout1 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+1)];
+                val += gout3 * dm[(j0+1)*nao+(i0+3)];
+                val += gout4 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+1)*nao+(i0+1)];
+                val += gout6 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+5)];
+                val += gout8 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+3)];
+                val += gout10 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+1)];
+                val += gout12 * dm[(j0+1)*nao+(i0+3)];
+                val += gout13 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout14 * dm[(j0+1)*nao+(i0+1)];
+                val += gout15 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout16 * dm[(j0+0)*nao+(i0+5)];
+                val += gout17 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+3)];
+                val += gout19 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 4:
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+2)];
+                val += gout13 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout11 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+4)];
+                val += gout1 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+0)];
+                val += gout5 * dm[(j0+1)*nao+(i0+2)];
+                val += gout6 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+1)*nao+(i0+0)];
+                val += gout8 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+4)];
+                val += gout10 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+2)];
+                val += gout12 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+0)];
+                val += gout14 * dm[(j0+1)*nao+(i0+2)];
+                val += gout15 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout16 * dm[(j0+1)*nao+(i0+0)];
+                val += gout17 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+4)];
+                val += gout19 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 5:
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+2)];
+                val += gout13 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout11 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+5)];
+                val += gout1 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+3)];
+                val += gout3 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+1)];
+                val += gout5 * dm[(j0+1)*nao+(i0+3)];
+                val += gout6 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+1)*nao+(i0+1)];
+                val += gout8 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+5)];
+                val += gout10 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+3)];
+                val += gout12 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+1)];
+                val += gout14 * dm[(j0+1)*nao+(i0+3)];
+                val += gout15 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout16 * dm[(j0+1)*nao+(i0+1)];
+                val += gout17 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+5)];
+                val += gout19 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 6:
+                val = 0;
+                val += gout6 * dm[(l0+1)*nao+(k0+0)];
+                val += gout15 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+2)];
+                val += gout13 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout11 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+1)*nao+(i0+0)];
+                val += gout1 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+4)];
+                val += gout3 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+2)];
+                val += gout5 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+0)];
+                val += gout7 * dm[(j0+1)*nao+(i0+2)];
+                val += gout8 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+1)*nao+(i0+0)];
+                val += gout10 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+4)];
+                val += gout12 * dm[(j0+2)*nao+(i0+0)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+2)];
+                val += gout14 * dm[(j0+1)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+0)];
+                val += gout16 * dm[(j0+1)*nao+(i0+2)];
+                val += gout17 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+1)*nao+(i0+0)];
+                val += gout19 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 7:
+                val = 0;
+                val += gout6 * dm[(l0+1)*nao+(k0+0)];
+                val += gout15 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+1)*nao+(k0+1)];
+                val += gout18 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+2)];
+                val += gout13 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout16 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout19 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout11 * dm[(l0+1)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout14 * dm[(l0+2)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+1)*nao+(i0+1)];
+                val += gout1 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+5)];
+                val += gout3 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+3)];
+                val += gout5 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout6 * dm[(j0+0)*nao+(i0+1)];
+                val += gout7 * dm[(j0+1)*nao+(i0+3)];
+                val += gout8 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout9 * dm[(j0+1)*nao+(i0+1)];
+                val += gout10 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout11 * dm[(j0+0)*nao+(i0+5)];
+                val += gout12 * dm[(j0+2)*nao+(i0+1)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+3)];
+                val += gout14 * dm[(j0+1)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+1)];
+                val += gout16 * dm[(j0+1)*nao+(i0+3)];
+                val += gout17 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+1)*nao+(i0+1)];
+                val += gout19 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                }
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -8302,10 +10321,10 @@ void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -8476,7 +10495,7 @@ void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -8693,9 +10712,10 @@ void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 switch (gout_id) {
                 case 0:
                 val = 0;
@@ -9474,13 +11494,359 @@ void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 atomicAdd(vk+(j0+2)*nao+(k0+5), val);
                 break;
                 }
+                switch (gout_id) {
+                case 0:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+2)];
+                val += gout18 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+1)];
+                val += gout15 * dm[(l0+0)*nao+(k0+3)];
+                val += gout24 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+2)];
+                val += gout21 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+1)];
+                val += gout14 * dm[(l0+0)*nao+(k0+3)];
+                val += gout23 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+2)];
+                val += gout20 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                val += gout17 * dm[(l0+0)*nao+(k0+3)];
+                val += gout26 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+2)];
+                val += gout19 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                val += gout16 * dm[(l0+0)*nao+(k0+3)];
+                val += gout25 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+2)];
+                val += gout22 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+4)];
+                val += gout2 * dm[(j0+1)*nao+(i0+2)];
+                val += gout3 * dm[(j0+2)*nao+(i0+0)];
+                val += gout4 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+2)];
+                val += gout6 * dm[(j0+1)*nao+(i0+0)];
+                val += gout7 * dm[(j0+1)*nao+(i0+4)];
+                val += gout8 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+0)];
+                val += gout10 * dm[(j0+0)*nao+(i0+4)];
+                val += gout11 * dm[(j0+1)*nao+(i0+2)];
+                val += gout12 * dm[(j0+2)*nao+(i0+0)];
+                val += gout13 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout14 * dm[(j0+0)*nao+(i0+2)];
+                val += gout15 * dm[(j0+1)*nao+(i0+0)];
+                val += gout16 * dm[(j0+1)*nao+(i0+4)];
+                val += gout17 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+4)];
+                val += gout20 * dm[(j0+1)*nao+(i0+2)];
+                val += gout21 * dm[(j0+2)*nao+(i0+0)];
+                val += gout22 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout23 * dm[(j0+0)*nao+(i0+2)];
+                val += gout24 * dm[(j0+1)*nao+(i0+0)];
+                val += gout25 * dm[(j0+1)*nao+(i0+4)];
+                val += gout26 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                break;
+                case 1:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+2)];
+                val += gout18 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+1)];
+                val += gout15 * dm[(l0+0)*nao+(k0+3)];
+                val += gout24 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+2)];
+                val += gout21 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+1)];
+                val += gout14 * dm[(l0+0)*nao+(k0+3)];
+                val += gout23 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+2)];
+                val += gout20 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                val += gout17 * dm[(l0+0)*nao+(k0+3)];
+                val += gout26 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+2)];
+                val += gout19 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                val += gout16 * dm[(l0+0)*nao+(k0+3)];
+                val += gout25 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+2)];
+                val += gout22 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+1)];
+                val += gout1 * dm[(j0+0)*nao+(i0+5)];
+                val += gout2 * dm[(j0+1)*nao+(i0+3)];
+                val += gout3 * dm[(j0+2)*nao+(i0+1)];
+                val += gout4 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+3)];
+                val += gout6 * dm[(j0+1)*nao+(i0+1)];
+                val += gout7 * dm[(j0+1)*nao+(i0+5)];
+                val += gout8 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+1)];
+                val += gout10 * dm[(j0+0)*nao+(i0+5)];
+                val += gout11 * dm[(j0+1)*nao+(i0+3)];
+                val += gout12 * dm[(j0+2)*nao+(i0+1)];
+                val += gout13 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout14 * dm[(j0+0)*nao+(i0+3)];
+                val += gout15 * dm[(j0+1)*nao+(i0+1)];
+                val += gout16 * dm[(j0+1)*nao+(i0+5)];
+                val += gout17 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+1)];
+                val += gout19 * dm[(j0+0)*nao+(i0+5)];
+                val += gout20 * dm[(j0+1)*nao+(i0+3)];
+                val += gout21 * dm[(j0+2)*nao+(i0+1)];
+                val += gout22 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout23 * dm[(j0+0)*nao+(i0+3)];
+                val += gout24 * dm[(j0+1)*nao+(i0+1)];
+                val += gout25 * dm[(j0+1)*nao+(i0+5)];
+                val += gout26 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                break;
+                case 2:
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+0)*nao+(k0+3)];
+                val += gout22 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+2)];
+                val += gout19 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                val += gout16 * dm[(l0+0)*nao+(k0+3)];
+                val += gout25 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+2)];
+                val += gout18 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+1)];
+                val += gout15 * dm[(l0+0)*nao+(k0+3)];
+                val += gout24 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+2)];
+                val += gout21 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+1)];
+                val += gout14 * dm[(l0+0)*nao+(k0+3)];
+                val += gout23 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+2)];
+                val += gout20 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                val += gout17 * dm[(l0+0)*nao+(k0+3)];
+                val += gout26 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+2)];
+                val += gout1 * dm[(j0+1)*nao+(i0+0)];
+                val += gout2 * dm[(j0+1)*nao+(i0+4)];
+                val += gout3 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+0)];
+                val += gout5 * dm[(j0+0)*nao+(i0+4)];
+                val += gout6 * dm[(j0+1)*nao+(i0+2)];
+                val += gout7 * dm[(j0+2)*nao+(i0+0)];
+                val += gout8 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+2)];
+                val += gout10 * dm[(j0+1)*nao+(i0+0)];
+                val += gout11 * dm[(j0+1)*nao+(i0+4)];
+                val += gout12 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+0)];
+                val += gout14 * dm[(j0+0)*nao+(i0+4)];
+                val += gout15 * dm[(j0+1)*nao+(i0+2)];
+                val += gout16 * dm[(j0+2)*nao+(i0+0)];
+                val += gout17 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+2)];
+                val += gout19 * dm[(j0+1)*nao+(i0+0)];
+                val += gout20 * dm[(j0+1)*nao+(i0+4)];
+                val += gout21 * dm[(j0+2)*nao+(i0+2)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout22 * dm[(j0+0)*nao+(i0+0)];
+                val += gout23 * dm[(j0+0)*nao+(i0+4)];
+                val += gout24 * dm[(j0+1)*nao+(i0+2)];
+                val += gout25 * dm[(j0+2)*nao+(i0+0)];
+                val += gout26 * dm[(j0+2)*nao+(i0+4)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                break;
+                case 3:
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout13 * dm[(l0+0)*nao+(k0+3)];
+                val += gout22 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+2)];
+                val += gout19 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                val += gout16 * dm[(l0+0)*nao+(k0+3)];
+                val += gout25 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+2)];
+                val += gout18 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+1)];
+                val += gout15 * dm[(l0+0)*nao+(k0+3)];
+                val += gout24 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+2)];
+                val += gout21 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+1)];
+                val += gout14 * dm[(l0+0)*nao+(k0+3)];
+                val += gout23 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+2)];
+                val += gout20 * dm[(l0+0)*nao+(k0+4)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                val += gout17 * dm[(l0+0)*nao+(k0+3)];
+                val += gout26 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+3)];
+                val += gout1 * dm[(j0+1)*nao+(i0+1)];
+                val += gout2 * dm[(j0+1)*nao+(i0+5)];
+                val += gout3 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout4 * dm[(j0+0)*nao+(i0+1)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+1)*nao+(i0+3)];
+                val += gout7 * dm[(j0+2)*nao+(i0+1)];
+                val += gout8 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+3)];
+                val += gout10 * dm[(j0+1)*nao+(i0+1)];
+                val += gout11 * dm[(j0+1)*nao+(i0+5)];
+                val += gout12 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+1)];
+                val += gout14 * dm[(j0+0)*nao+(i0+5)];
+                val += gout15 * dm[(j0+1)*nao+(i0+3)];
+                val += gout16 * dm[(j0+2)*nao+(i0+1)];
+                val += gout17 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+3)];
+                val += gout19 * dm[(j0+1)*nao+(i0+1)];
+                val += gout20 * dm[(j0+1)*nao+(i0+5)];
+                val += gout21 * dm[(j0+2)*nao+(i0+3)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout22 * dm[(j0+0)*nao+(i0+1)];
+                val += gout23 * dm[(j0+0)*nao+(i0+5)];
+                val += gout24 * dm[(j0+1)*nao+(i0+3)];
+                val += gout25 * dm[(j0+2)*nao+(i0+1)];
+                val += gout26 * dm[(j0+2)*nao+(i0+5)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
+                break;
+                }
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -9492,10 +11858,10 @@ void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -9677,7 +12043,7 @@ void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -9773,9 +12139,10 @@ void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout6 * dm[(j0+1)*nao+(k0+0)];
@@ -9968,13 +12335,159 @@ void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout34 * dm[(i0+4)*nao+(l0+0)];
                 val += gout35 * dm[(i0+5)*nao+(l0+0)];
                 atomicAdd(vk+(j0+5)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout18 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+3), val);
+                val = 0;
+                val += gout24 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+4), val);
+                val = 0;
+                val += gout30 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+5), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout19 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+3), val);
+                val = 0;
+                val += gout25 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+4), val);
+                val = 0;
+                val += gout31 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+5), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout20 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+3), val);
+                val = 0;
+                val += gout26 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+4), val);
+                val = 0;
+                val += gout32 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+5), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout15 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout21 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+3), val);
+                val = 0;
+                val += gout27 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+4), val);
+                val = 0;
+                val += gout33 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+5), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout16 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout22 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+3), val);
+                val = 0;
+                val += gout28 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+4), val);
+                val = 0;
+                val += gout34 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+5), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout17 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout23 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+3), val);
+                val = 0;
+                val += gout29 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+4), val);
+                val = 0;
+                val += gout35 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+5), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+1)*nao+(i0+0)];
+                val += gout7 * dm[(j0+1)*nao+(i0+1)];
+                val += gout8 * dm[(j0+1)*nao+(i0+2)];
+                val += gout9 * dm[(j0+1)*nao+(i0+3)];
+                val += gout10 * dm[(j0+1)*nao+(i0+4)];
+                val += gout11 * dm[(j0+1)*nao+(i0+5)];
+                val += gout12 * dm[(j0+2)*nao+(i0+0)];
+                val += gout13 * dm[(j0+2)*nao+(i0+1)];
+                val += gout14 * dm[(j0+2)*nao+(i0+2)];
+                val += gout15 * dm[(j0+2)*nao+(i0+3)];
+                val += gout16 * dm[(j0+2)*nao+(i0+4)];
+                val += gout17 * dm[(j0+2)*nao+(i0+5)];
+                val += gout18 * dm[(j0+3)*nao+(i0+0)];
+                val += gout19 * dm[(j0+3)*nao+(i0+1)];
+                val += gout20 * dm[(j0+3)*nao+(i0+2)];
+                val += gout21 * dm[(j0+3)*nao+(i0+3)];
+                val += gout22 * dm[(j0+3)*nao+(i0+4)];
+                val += gout23 * dm[(j0+3)*nao+(i0+5)];
+                val += gout24 * dm[(j0+4)*nao+(i0+0)];
+                val += gout25 * dm[(j0+4)*nao+(i0+1)];
+                val += gout26 * dm[(j0+4)*nao+(i0+2)];
+                val += gout27 * dm[(j0+4)*nao+(i0+3)];
+                val += gout28 * dm[(j0+4)*nao+(i0+4)];
+                val += gout29 * dm[(j0+4)*nao+(i0+5)];
+                val += gout30 * dm[(j0+5)*nao+(i0+0)];
+                val += gout31 * dm[(j0+5)*nao+(i0+1)];
+                val += gout32 * dm[(j0+5)*nao+(i0+2)];
+                val += gout33 * dm[(j0+5)*nao+(i0+3)];
+                val += gout34 * dm[(j0+5)*nao+(i0+4)];
+                val += gout35 * dm[(j0+5)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -9987,10 +12500,10 @@ void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -10161,7 +12674,7 @@ void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -10389,9 +12902,10 @@ void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 switch (gout_id) {
                 case 0:
                 val = 0;
@@ -11122,6 +13636,328 @@ void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 atomicAdd(vk+(j0+5)*nao+(k0+2), val);
                 break;
                 }
+                switch (gout_id) {
+                case 0:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+4), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+3), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+5), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+4), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+4)];
+                val += gout2 * dm[(j0+1)*nao+(i0+2)];
+                val += gout3 * dm[(j0+2)*nao+(i0+0)];
+                val += gout4 * dm[(j0+2)*nao+(i0+4)];
+                val += gout5 * dm[(j0+3)*nao+(i0+2)];
+                val += gout6 * dm[(j0+4)*nao+(i0+0)];
+                val += gout7 * dm[(j0+4)*nao+(i0+4)];
+                val += gout8 * dm[(j0+5)*nao+(i0+2)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+0)];
+                val += gout10 * dm[(j0+0)*nao+(i0+4)];
+                val += gout11 * dm[(j0+1)*nao+(i0+2)];
+                val += gout12 * dm[(j0+2)*nao+(i0+0)];
+                val += gout13 * dm[(j0+2)*nao+(i0+4)];
+                val += gout14 * dm[(j0+3)*nao+(i0+2)];
+                val += gout15 * dm[(j0+4)*nao+(i0+0)];
+                val += gout16 * dm[(j0+4)*nao+(i0+4)];
+                val += gout17 * dm[(j0+5)*nao+(i0+2)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+0)];
+                val += gout19 * dm[(j0+0)*nao+(i0+4)];
+                val += gout20 * dm[(j0+1)*nao+(i0+2)];
+                val += gout21 * dm[(j0+2)*nao+(i0+0)];
+                val += gout22 * dm[(j0+2)*nao+(i0+4)];
+                val += gout23 * dm[(j0+3)*nao+(i0+2)];
+                val += gout24 * dm[(j0+4)*nao+(i0+0)];
+                val += gout25 * dm[(j0+4)*nao+(i0+4)];
+                val += gout26 * dm[(j0+5)*nao+(i0+2)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                case 1:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+4), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+3), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+5), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+4), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+1)];
+                val += gout1 * dm[(j0+0)*nao+(i0+5)];
+                val += gout2 * dm[(j0+1)*nao+(i0+3)];
+                val += gout3 * dm[(j0+2)*nao+(i0+1)];
+                val += gout4 * dm[(j0+2)*nao+(i0+5)];
+                val += gout5 * dm[(j0+3)*nao+(i0+3)];
+                val += gout6 * dm[(j0+4)*nao+(i0+1)];
+                val += gout7 * dm[(j0+4)*nao+(i0+5)];
+                val += gout8 * dm[(j0+5)*nao+(i0+3)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+1)];
+                val += gout10 * dm[(j0+0)*nao+(i0+5)];
+                val += gout11 * dm[(j0+1)*nao+(i0+3)];
+                val += gout12 * dm[(j0+2)*nao+(i0+1)];
+                val += gout13 * dm[(j0+2)*nao+(i0+5)];
+                val += gout14 * dm[(j0+3)*nao+(i0+3)];
+                val += gout15 * dm[(j0+4)*nao+(i0+1)];
+                val += gout16 * dm[(j0+4)*nao+(i0+5)];
+                val += gout17 * dm[(j0+5)*nao+(i0+3)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+1)];
+                val += gout19 * dm[(j0+0)*nao+(i0+5)];
+                val += gout20 * dm[(j0+1)*nao+(i0+3)];
+                val += gout21 * dm[(j0+2)*nao+(i0+1)];
+                val += gout22 * dm[(j0+2)*nao+(i0+5)];
+                val += gout23 * dm[(j0+3)*nao+(i0+3)];
+                val += gout24 * dm[(j0+4)*nao+(i0+1)];
+                val += gout25 * dm[(j0+4)*nao+(i0+5)];
+                val += gout26 * dm[(j0+5)*nao+(i0+3)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                case 2:
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+3), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+5), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+4), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+3), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+5), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+2)];
+                val += gout1 * dm[(j0+1)*nao+(i0+0)];
+                val += gout2 * dm[(j0+1)*nao+(i0+4)];
+                val += gout3 * dm[(j0+2)*nao+(i0+2)];
+                val += gout4 * dm[(j0+3)*nao+(i0+0)];
+                val += gout5 * dm[(j0+3)*nao+(i0+4)];
+                val += gout6 * dm[(j0+4)*nao+(i0+2)];
+                val += gout7 * dm[(j0+5)*nao+(i0+0)];
+                val += gout8 * dm[(j0+5)*nao+(i0+4)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+2)];
+                val += gout10 * dm[(j0+1)*nao+(i0+0)];
+                val += gout11 * dm[(j0+1)*nao+(i0+4)];
+                val += gout12 * dm[(j0+2)*nao+(i0+2)];
+                val += gout13 * dm[(j0+3)*nao+(i0+0)];
+                val += gout14 * dm[(j0+3)*nao+(i0+4)];
+                val += gout15 * dm[(j0+4)*nao+(i0+2)];
+                val += gout16 * dm[(j0+5)*nao+(i0+0)];
+                val += gout17 * dm[(j0+5)*nao+(i0+4)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+2)];
+                val += gout19 * dm[(j0+1)*nao+(i0+0)];
+                val += gout20 * dm[(j0+1)*nao+(i0+4)];
+                val += gout21 * dm[(j0+2)*nao+(i0+2)];
+                val += gout22 * dm[(j0+3)*nao+(i0+0)];
+                val += gout23 * dm[(j0+3)*nao+(i0+4)];
+                val += gout24 * dm[(j0+4)*nao+(i0+2)];
+                val += gout25 * dm[(j0+5)*nao+(i0+0)];
+                val += gout26 * dm[(j0+5)*nao+(i0+4)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                case 3:
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+3), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+5), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+4), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+3), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+5), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+3)];
+                val += gout1 * dm[(j0+1)*nao+(i0+1)];
+                val += gout2 * dm[(j0+1)*nao+(i0+5)];
+                val += gout3 * dm[(j0+2)*nao+(i0+3)];
+                val += gout4 * dm[(j0+3)*nao+(i0+1)];
+                val += gout5 * dm[(j0+3)*nao+(i0+5)];
+                val += gout6 * dm[(j0+4)*nao+(i0+3)];
+                val += gout7 * dm[(j0+5)*nao+(i0+1)];
+                val += gout8 * dm[(j0+5)*nao+(i0+5)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout9 * dm[(j0+0)*nao+(i0+3)];
+                val += gout10 * dm[(j0+1)*nao+(i0+1)];
+                val += gout11 * dm[(j0+1)*nao+(i0+5)];
+                val += gout12 * dm[(j0+2)*nao+(i0+3)];
+                val += gout13 * dm[(j0+3)*nao+(i0+1)];
+                val += gout14 * dm[(j0+3)*nao+(i0+5)];
+                val += gout15 * dm[(j0+4)*nao+(i0+3)];
+                val += gout16 * dm[(j0+5)*nao+(i0+1)];
+                val += gout17 * dm[(j0+5)*nao+(i0+5)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+3)];
+                val += gout19 * dm[(j0+1)*nao+(i0+1)];
+                val += gout20 * dm[(j0+1)*nao+(i0+5)];
+                val += gout21 * dm[(j0+2)*nao+(i0+3)];
+                val += gout22 * dm[(j0+3)*nao+(i0+1)];
+                val += gout23 * dm[(j0+3)*nao+(i0+5)];
+                val += gout24 * dm[(j0+4)*nao+(i0+3)];
+                val += gout25 * dm[(j0+5)*nao+(i0+1)];
+                val += gout26 * dm[(j0+5)*nao+(i0+5)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                }
             }
         }
     }
@@ -11132,7 +13968,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -11144,10 +13980,10 @@ void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -11277,7 +14113,7 @@ void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -11323,9 +14159,10 @@ void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 atomicAdd(vk+(i0+0)*nao+(l0+0), val);
@@ -11410,13 +14247,55 @@ void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout8 * dm[(i0+8)*nao+(l0+0)];
                 val += gout9 * dm[(i0+9)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+0)*nao+(i0+6)];
+                val += gout7 * dm[(j0+0)*nao+(i0+7)];
+                val += gout8 * dm[(j0+0)*nao+(i0+8)];
+                val += gout9 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -11428,10 +14307,10 @@ void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -11601,7 +14480,7 @@ void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -11684,9 +14563,10 @@ void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout10 * dm[(j0+0)*nao+(k0+1)];
@@ -11895,13 +14775,99 @@ void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout28 * dm[(i0+8)*nao+(l0+0)];
                 val += gout29 * dm[(i0+9)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout27 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout18 * dm[(l0+0)*nao+(k0+1)];
+                val += gout28 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                val += gout19 * dm[(l0+0)*nao+(k0+1)];
+                val += gout29 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+0)*nao+(i0+6)];
+                val += gout7 * dm[(j0+0)*nao+(i0+7)];
+                val += gout8 * dm[(j0+0)*nao+(i0+8)];
+                val += gout9 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+0)];
+                val += gout11 * dm[(j0+0)*nao+(i0+1)];
+                val += gout12 * dm[(j0+0)*nao+(i0+2)];
+                val += gout13 * dm[(j0+0)*nao+(i0+3)];
+                val += gout14 * dm[(j0+0)*nao+(i0+4)];
+                val += gout15 * dm[(j0+0)*nao+(i0+5)];
+                val += gout16 * dm[(j0+0)*nao+(i0+6)];
+                val += gout17 * dm[(j0+0)*nao+(i0+7)];
+                val += gout18 * dm[(j0+0)*nao+(i0+8)];
+                val += gout19 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+0)];
+                val += gout21 * dm[(j0+0)*nao+(i0+1)];
+                val += gout22 * dm[(j0+0)*nao+(i0+2)];
+                val += gout23 * dm[(j0+0)*nao+(i0+3)];
+                val += gout24 * dm[(j0+0)*nao+(i0+4)];
+                val += gout25 * dm[(j0+0)*nao+(i0+5)];
+                val += gout26 * dm[(j0+0)*nao+(i0+6)];
+                val += gout27 * dm[(j0+0)*nao+(i0+7)];
+                val += gout28 * dm[(j0+0)*nao+(i0+8)];
+                val += gout29 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -11914,10 +14880,10 @@ void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -12084,7 +15050,7 @@ void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -12280,9 +15246,10 @@ void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 switch (gout_id) {
                 case 0:
                 val = 0;
@@ -12941,13 +15908,315 @@ void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 atomicAdd(vk+(j0+0)*nao+(k0+2), val);
                 break;
                 }
+                switch (gout_id) {
+                case 0:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                val += gout20 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                val += gout18 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout16 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout14 * dm[(l0+1)*nao+(k0+2)];
+                val += gout19 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout7 * dm[(l0+0)*nao+(k0+2)];
+                val += gout12 * dm[(l0+1)*nao+(k0+1)];
+                val += gout17 * dm[(l0+2)*nao+(k0+0)];
+                val += gout22 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+4)];
+                val += gout2 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+2)];
+                val += gout4 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+0)];
+                val += gout6 * dm[(j0+0)*nao+(i0+4)];
+                val += gout7 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                val += gout9 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+0)];
+                val += gout11 * dm[(j0+0)*nao+(i0+4)];
+                val += gout12 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+2)];
+                val += gout14 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+0)];
+                val += gout16 * dm[(j0+0)*nao+(i0+4)];
+                val += gout17 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+2)];
+                val += gout19 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+0)];
+                val += gout21 * dm[(j0+0)*nao+(i0+4)];
+                val += gout22 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 1:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                val += gout20 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                val += gout18 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout16 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout14 * dm[(l0+1)*nao+(k0+2)];
+                val += gout19 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout7 * dm[(l0+0)*nao+(k0+2)];
+                val += gout12 * dm[(l0+1)*nao+(k0+1)];
+                val += gout17 * dm[(l0+2)*nao+(k0+0)];
+                val += gout22 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+1)];
+                val += gout1 * dm[(j0+0)*nao+(i0+5)];
+                val += gout2 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+1)];
+                val += gout6 * dm[(j0+0)*nao+(i0+5)];
+                val += gout7 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout8 * dm[(j0+0)*nao+(i0+3)];
+                val += gout9 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+1)];
+                val += gout11 * dm[(j0+0)*nao+(i0+5)];
+                val += gout12 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout13 * dm[(j0+0)*nao+(i0+3)];
+                val += gout14 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+1)];
+                val += gout16 * dm[(j0+0)*nao+(i0+5)];
+                val += gout17 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout18 * dm[(j0+0)*nao+(i0+3)];
+                val += gout19 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+1)];
+                val += gout21 * dm[(j0+0)*nao+(i0+5)];
+                val += gout22 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 2:
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                val += gout20 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                val += gout18 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout16 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout14 * dm[(l0+1)*nao+(k0+2)];
+                val += gout19 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+2)];
+                val += gout1 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+0)];
+                val += gout3 * dm[(j0+0)*nao+(i0+4)];
+                val += gout4 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+2)];
+                val += gout6 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+0)];
+                val += gout8 * dm[(j0+0)*nao+(i0+4)];
+                val += gout9 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+2)];
+                val += gout11 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+0)];
+                val += gout13 * dm[(j0+0)*nao+(i0+4)];
+                val += gout14 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+2)];
+                val += gout16 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout17 * dm[(j0+0)*nao+(i0+0)];
+                val += gout18 * dm[(j0+0)*nao+(i0+4)];
+                val += gout19 * dm[(j0+0)*nao+(i0+8)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+2)];
+                val += gout21 * dm[(j0+0)*nao+(i0+6)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                case 3:
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+1)];
+                val += gout7 * dm[(l0+1)*nao+(k0+0)];
+                val += gout12 * dm[(l0+1)*nao+(k0+2)];
+                val += gout17 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout5 * dm[(l0+0)*nao+(k0+2)];
+                val += gout10 * dm[(l0+1)*nao+(k0+1)];
+                val += gout15 * dm[(l0+2)*nao+(k0+0)];
+                val += gout20 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+1)];
+                val += gout8 * dm[(l0+1)*nao+(k0+0)];
+                val += gout13 * dm[(l0+1)*nao+(k0+2)];
+                val += gout18 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout6 * dm[(l0+0)*nao+(k0+2)];
+                val += gout11 * dm[(l0+1)*nao+(k0+1)];
+                val += gout16 * dm[(l0+2)*nao+(k0+0)];
+                val += gout21 * dm[(l0+2)*nao+(k0+2)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+1)];
+                val += gout9 * dm[(l0+1)*nao+(k0+0)];
+                val += gout14 * dm[(l0+1)*nao+(k0+2)];
+                val += gout19 * dm[(l0+2)*nao+(k0+1)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+3)];
+                val += gout1 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout2 * dm[(j0+0)*nao+(i0+1)];
+                val += gout3 * dm[(j0+0)*nao+(i0+5)];
+                val += gout4 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout5 * dm[(j0+0)*nao+(i0+3)];
+                val += gout6 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+5)];
+                val += gout9 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+1), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+3)];
+                val += gout11 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+1)*nao+(l0+1), val);
+                val = 0;
+                val += gout12 * dm[(j0+0)*nao+(i0+1)];
+                val += gout13 * dm[(j0+0)*nao+(i0+5)];
+                val += gout14 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+2)*nao+(l0+1), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+3)];
+                val += gout16 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+0)*nao+(l0+2), val);
+                val = 0;
+                val += gout17 * dm[(j0+0)*nao+(i0+1)];
+                val += gout18 * dm[(j0+0)*nao+(i0+5)];
+                val += gout19 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+1)*nao+(l0+2), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+3)];
+                val += gout21 * dm[(j0+0)*nao+(i0+7)];
+                atomicAdd(vj+(k0+2)*nao+(l0+2), val);
+                break;
+                }
             }
         }
     }
 }
 
 __global__ static
-void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -12959,10 +16228,10 @@ void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -13192,7 +16461,7 @@ void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -13318,9 +16587,10 @@ void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout10 * dm[(j0+0)*nao+(k0+1)];
@@ -13715,13 +16985,165 @@ void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout58 * dm[(i0+8)*nao+(l0+0)];
                 val += gout59 * dm[(i0+9)*nao+(l0+0)];
                 atomicAdd(vk+(j0+0)*nao+(k0+5), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                val += gout30 * dm[(l0+0)*nao+(k0+3)];
+                val += gout40 * dm[(l0+0)*nao+(k0+4)];
+                val += gout50 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                val += gout31 * dm[(l0+0)*nao+(k0+3)];
+                val += gout41 * dm[(l0+0)*nao+(k0+4)];
+                val += gout51 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                val += gout32 * dm[(l0+0)*nao+(k0+3)];
+                val += gout42 * dm[(l0+0)*nao+(k0+4)];
+                val += gout52 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                val += gout23 * dm[(l0+0)*nao+(k0+2)];
+                val += gout33 * dm[(l0+0)*nao+(k0+3)];
+                val += gout43 * dm[(l0+0)*nao+(k0+4)];
+                val += gout53 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                val += gout24 * dm[(l0+0)*nao+(k0+2)];
+                val += gout34 * dm[(l0+0)*nao+(k0+3)];
+                val += gout44 * dm[(l0+0)*nao+(k0+4)];
+                val += gout54 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+1)];
+                val += gout25 * dm[(l0+0)*nao+(k0+2)];
+                val += gout35 * dm[(l0+0)*nao+(k0+3)];
+                val += gout45 * dm[(l0+0)*nao+(k0+4)];
+                val += gout55 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+1)];
+                val += gout26 * dm[(l0+0)*nao+(k0+2)];
+                val += gout36 * dm[(l0+0)*nao+(k0+3)];
+                val += gout46 * dm[(l0+0)*nao+(k0+4)];
+                val += gout56 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+1)];
+                val += gout27 * dm[(l0+0)*nao+(k0+2)];
+                val += gout37 * dm[(l0+0)*nao+(k0+3)];
+                val += gout47 * dm[(l0+0)*nao+(k0+4)];
+                val += gout57 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                val += gout18 * dm[(l0+0)*nao+(k0+1)];
+                val += gout28 * dm[(l0+0)*nao+(k0+2)];
+                val += gout38 * dm[(l0+0)*nao+(k0+3)];
+                val += gout48 * dm[(l0+0)*nao+(k0+4)];
+                val += gout58 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                val += gout19 * dm[(l0+0)*nao+(k0+1)];
+                val += gout29 * dm[(l0+0)*nao+(k0+2)];
+                val += gout39 * dm[(l0+0)*nao+(k0+3)];
+                val += gout49 * dm[(l0+0)*nao+(k0+4)];
+                val += gout59 * dm[(l0+0)*nao+(k0+5)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+0)*nao+(i0+6)];
+                val += gout7 * dm[(j0+0)*nao+(i0+7)];
+                val += gout8 * dm[(j0+0)*nao+(i0+8)];
+                val += gout9 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout10 * dm[(j0+0)*nao+(i0+0)];
+                val += gout11 * dm[(j0+0)*nao+(i0+1)];
+                val += gout12 * dm[(j0+0)*nao+(i0+2)];
+                val += gout13 * dm[(j0+0)*nao+(i0+3)];
+                val += gout14 * dm[(j0+0)*nao+(i0+4)];
+                val += gout15 * dm[(j0+0)*nao+(i0+5)];
+                val += gout16 * dm[(j0+0)*nao+(i0+6)];
+                val += gout17 * dm[(j0+0)*nao+(i0+7)];
+                val += gout18 * dm[(j0+0)*nao+(i0+8)];
+                val += gout19 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout20 * dm[(j0+0)*nao+(i0+0)];
+                val += gout21 * dm[(j0+0)*nao+(i0+1)];
+                val += gout22 * dm[(j0+0)*nao+(i0+2)];
+                val += gout23 * dm[(j0+0)*nao+(i0+3)];
+                val += gout24 * dm[(j0+0)*nao+(i0+4)];
+                val += gout25 * dm[(j0+0)*nao+(i0+5)];
+                val += gout26 * dm[(j0+0)*nao+(i0+6)];
+                val += gout27 * dm[(j0+0)*nao+(i0+7)];
+                val += gout28 * dm[(j0+0)*nao+(i0+8)];
+                val += gout29 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                val = 0;
+                val += gout30 * dm[(j0+0)*nao+(i0+0)];
+                val += gout31 * dm[(j0+0)*nao+(i0+1)];
+                val += gout32 * dm[(j0+0)*nao+(i0+2)];
+                val += gout33 * dm[(j0+0)*nao+(i0+3)];
+                val += gout34 * dm[(j0+0)*nao+(i0+4)];
+                val += gout35 * dm[(j0+0)*nao+(i0+5)];
+                val += gout36 * dm[(j0+0)*nao+(i0+6)];
+                val += gout37 * dm[(j0+0)*nao+(i0+7)];
+                val += gout38 * dm[(j0+0)*nao+(i0+8)];
+                val += gout39 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+3)*nao+(l0+0), val);
+                val = 0;
+                val += gout40 * dm[(j0+0)*nao+(i0+0)];
+                val += gout41 * dm[(j0+0)*nao+(i0+1)];
+                val += gout42 * dm[(j0+0)*nao+(i0+2)];
+                val += gout43 * dm[(j0+0)*nao+(i0+3)];
+                val += gout44 * dm[(j0+0)*nao+(i0+4)];
+                val += gout45 * dm[(j0+0)*nao+(i0+5)];
+                val += gout46 * dm[(j0+0)*nao+(i0+6)];
+                val += gout47 * dm[(j0+0)*nao+(i0+7)];
+                val += gout48 * dm[(j0+0)*nao+(i0+8)];
+                val += gout49 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+4)*nao+(l0+0), val);
+                val = 0;
+                val += gout50 * dm[(j0+0)*nao+(i0+0)];
+                val += gout51 * dm[(j0+0)*nao+(i0+1)];
+                val += gout52 * dm[(j0+0)*nao+(i0+2)];
+                val += gout53 * dm[(j0+0)*nao+(i0+3)];
+                val += gout54 * dm[(j0+0)*nao+(i0+4)];
+                val += gout55 * dm[(j0+0)*nao+(i0+5)];
+                val += gout56 * dm[(j0+0)*nao+(i0+6)];
+                val += gout57 * dm[(j0+0)*nao+(i0+7)];
+                val += gout58 * dm[(j0+0)*nao+(i0+8)];
+                val += gout59 * dm[(j0+0)*nao+(i0+9)];
+                atomicAdd(vj+(k0+5)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -13733,10 +17155,10 @@ void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -13906,7 +17328,7 @@ void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -13987,9 +17409,10 @@ void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout10 * dm[(j0+1)*nao+(k0+0)];
@@ -14162,13 +17585,135 @@ void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout28 * dm[(i0+8)*nao+(l0+0)];
                 val += gout29 * dm[(i0+9)*nao+(l0+0)];
                 atomicAdd(vk+(j0+2)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout20 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout21 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout22 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout23 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout24 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout15 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout25 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout16 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+1), val);
+                val = 0;
+                val += gout26 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+2), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout17 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+1), val);
+                val = 0;
+                val += gout27 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+2), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout18 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+1), val);
+                val = 0;
+                val += gout28 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+2), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout19 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+1), val);
+                val = 0;
+                val += gout29 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+0)*nao+(i0+6)];
+                val += gout7 * dm[(j0+0)*nao+(i0+7)];
+                val += gout8 * dm[(j0+0)*nao+(i0+8)];
+                val += gout9 * dm[(j0+0)*nao+(i0+9)];
+                val += gout10 * dm[(j0+1)*nao+(i0+0)];
+                val += gout11 * dm[(j0+1)*nao+(i0+1)];
+                val += gout12 * dm[(j0+1)*nao+(i0+2)];
+                val += gout13 * dm[(j0+1)*nao+(i0+3)];
+                val += gout14 * dm[(j0+1)*nao+(i0+4)];
+                val += gout15 * dm[(j0+1)*nao+(i0+5)];
+                val += gout16 * dm[(j0+1)*nao+(i0+6)];
+                val += gout17 * dm[(j0+1)*nao+(i0+7)];
+                val += gout18 * dm[(j0+1)*nao+(i0+8)];
+                val += gout19 * dm[(j0+1)*nao+(i0+9)];
+                val += gout20 * dm[(j0+2)*nao+(i0+0)];
+                val += gout21 * dm[(j0+2)*nao+(i0+1)];
+                val += gout22 * dm[(j0+2)*nao+(i0+2)];
+                val += gout23 * dm[(j0+2)*nao+(i0+3)];
+                val += gout24 * dm[(j0+2)*nao+(i0+4)];
+                val += gout25 * dm[(j0+2)*nao+(i0+5)];
+                val += gout26 * dm[(j0+2)*nao+(i0+6)];
+                val += gout27 * dm[(j0+2)*nao+(i0+7)];
+                val += gout28 * dm[(j0+2)*nao+(i0+8)];
+                val += gout29 * dm[(j0+2)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
 }
 
 __global__ static
-void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -14181,10 +17726,10 @@ void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -14351,7 +17896,7 @@ void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, 4);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -14543,9 +18088,10 @@ void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 switch (gout_id) {
                 case 0:
                 val = 0;
@@ -15172,13 +18718,347 @@ void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 atomicAdd(vk+(j0+2)*nao+(k0+2), val);
                 break;
                 }
+                switch (gout_id) {
+                case 0:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+6)*nao+(j0+1), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+6)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+8)*nao+(j0+1), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+8)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+4)];
+                val += gout2 * dm[(j0+0)*nao+(i0+8)];
+                val += gout3 * dm[(j0+1)*nao+(i0+2)];
+                val += gout4 * dm[(j0+1)*nao+(i0+6)];
+                val += gout5 * dm[(j0+2)*nao+(i0+0)];
+                val += gout6 * dm[(j0+2)*nao+(i0+4)];
+                val += gout7 * dm[(j0+2)*nao+(i0+8)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout8 * dm[(j0+0)*nao+(i0+2)];
+                val += gout9 * dm[(j0+0)*nao+(i0+6)];
+                val += gout10 * dm[(j0+1)*nao+(i0+0)];
+                val += gout11 * dm[(j0+1)*nao+(i0+4)];
+                val += gout12 * dm[(j0+1)*nao+(i0+8)];
+                val += gout13 * dm[(j0+2)*nao+(i0+2)];
+                val += gout14 * dm[(j0+2)*nao+(i0+6)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+0)];
+                val += gout16 * dm[(j0+0)*nao+(i0+4)];
+                val += gout17 * dm[(j0+0)*nao+(i0+8)];
+                val += gout18 * dm[(j0+1)*nao+(i0+2)];
+                val += gout19 * dm[(j0+1)*nao+(i0+6)];
+                val += gout20 * dm[(j0+2)*nao+(i0+0)];
+                val += gout21 * dm[(j0+2)*nao+(i0+4)];
+                val += gout22 * dm[(j0+2)*nao+(i0+8)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                case 1:
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+7)*nao+(j0+1), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+7)*nao+(j0+2), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+9)*nao+(j0+1), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                val += gout22 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+9)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+1)];
+                val += gout1 * dm[(j0+0)*nao+(i0+5)];
+                val += gout2 * dm[(j0+0)*nao+(i0+9)];
+                val += gout3 * dm[(j0+1)*nao+(i0+3)];
+                val += gout4 * dm[(j0+1)*nao+(i0+7)];
+                val += gout5 * dm[(j0+2)*nao+(i0+1)];
+                val += gout6 * dm[(j0+2)*nao+(i0+5)];
+                val += gout7 * dm[(j0+2)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout8 * dm[(j0+0)*nao+(i0+3)];
+                val += gout9 * dm[(j0+0)*nao+(i0+7)];
+                val += gout10 * dm[(j0+1)*nao+(i0+1)];
+                val += gout11 * dm[(j0+1)*nao+(i0+5)];
+                val += gout12 * dm[(j0+1)*nao+(i0+9)];
+                val += gout13 * dm[(j0+2)*nao+(i0+3)];
+                val += gout14 * dm[(j0+2)*nao+(i0+7)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+1)];
+                val += gout16 * dm[(j0+0)*nao+(i0+5)];
+                val += gout17 * dm[(j0+0)*nao+(i0+9)];
+                val += gout18 * dm[(j0+1)*nao+(i0+3)];
+                val += gout19 * dm[(j0+1)*nao+(i0+7)];
+                val += gout20 * dm[(j0+2)*nao+(i0+1)];
+                val += gout21 * dm[(j0+2)*nao+(i0+5)];
+                val += gout22 * dm[(j0+2)*nao+(i0+9)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                case 2:
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+6)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+6)*nao+(j0+2), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+8)*nao+(j0+1), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+8)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+2)];
+                val += gout1 * dm[(j0+0)*nao+(i0+6)];
+                val += gout2 * dm[(j0+1)*nao+(i0+0)];
+                val += gout3 * dm[(j0+1)*nao+(i0+4)];
+                val += gout4 * dm[(j0+1)*nao+(i0+8)];
+                val += gout5 * dm[(j0+2)*nao+(i0+2)];
+                val += gout6 * dm[(j0+2)*nao+(i0+6)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+0)];
+                val += gout8 * dm[(j0+0)*nao+(i0+4)];
+                val += gout9 * dm[(j0+0)*nao+(i0+8)];
+                val += gout10 * dm[(j0+1)*nao+(i0+2)];
+                val += gout11 * dm[(j0+1)*nao+(i0+6)];
+                val += gout12 * dm[(j0+2)*nao+(i0+0)];
+                val += gout13 * dm[(j0+2)*nao+(i0+4)];
+                val += gout14 * dm[(j0+2)*nao+(i0+8)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+2)];
+                val += gout16 * dm[(j0+0)*nao+(i0+6)];
+                val += gout17 * dm[(j0+1)*nao+(i0+0)];
+                val += gout18 * dm[(j0+1)*nao+(i0+4)];
+                val += gout19 * dm[(j0+1)*nao+(i0+8)];
+                val += gout20 * dm[(j0+2)*nao+(i0+2)];
+                val += gout21 * dm[(j0+2)*nao+(i0+6)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                case 3:
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                val += gout17 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                val += gout15 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                val += gout20 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                val += gout18 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                val += gout16 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+7)*nao+(j0+1), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                val += gout21 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+7)*nao+(j0+2), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                val += gout19 * dm[(l0+0)*nao+(k0+2)];
+                atomicAdd(vj+(i0+9)*nao+(j0+1), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+1)];
+                atomicAdd(vj+(i0+9)*nao+(j0+2), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+3)];
+                val += gout1 * dm[(j0+0)*nao+(i0+7)];
+                val += gout2 * dm[(j0+1)*nao+(i0+1)];
+                val += gout3 * dm[(j0+1)*nao+(i0+5)];
+                val += gout4 * dm[(j0+1)*nao+(i0+9)];
+                val += gout5 * dm[(j0+2)*nao+(i0+3)];
+                val += gout6 * dm[(j0+2)*nao+(i0+7)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
+                val = 0;
+                val += gout7 * dm[(j0+0)*nao+(i0+1)];
+                val += gout8 * dm[(j0+0)*nao+(i0+5)];
+                val += gout9 * dm[(j0+0)*nao+(i0+9)];
+                val += gout10 * dm[(j0+1)*nao+(i0+3)];
+                val += gout11 * dm[(j0+1)*nao+(i0+7)];
+                val += gout12 * dm[(j0+2)*nao+(i0+1)];
+                val += gout13 * dm[(j0+2)*nao+(i0+5)];
+                val += gout14 * dm[(j0+2)*nao+(i0+9)];
+                atomicAdd(vj+(k0+1)*nao+(l0+0), val);
+                val = 0;
+                val += gout15 * dm[(j0+0)*nao+(i0+3)];
+                val += gout16 * dm[(j0+0)*nao+(i0+7)];
+                val += gout17 * dm[(j0+1)*nao+(i0+1)];
+                val += gout18 * dm[(j0+1)*nao+(i0+5)];
+                val += gout19 * dm[(j0+1)*nao+(i0+9)];
+                val += gout20 * dm[(j0+2)*nao+(i0+3)];
+                val += gout21 * dm[(j0+2)*nao+(i0+7)];
+                atomicAdd(vj+(k0+2)*nao+(l0+0), val);
+                break;
+                }
             }
         }
     }
 }
 
 __global__ static
-void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void _rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -15190,10 +19070,10 @@ void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (jk.omega >= 0) {
+        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -15423,7 +19303,7 @@ void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -15552,9 +19432,10 @@ void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             double val;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao;
-                double *vk = kmat.vk + i_dm * nao * nao;
+            for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+                double *dm = jk.dm + i_dm * nao * nao;
+                double *vk = jk.vk + i_dm * nao * nao;
+                double *vj = jk.vj + i_dm * nao * nao;
                 val = 0;
                 val += gout0 * dm[(j0+0)*nao+(k0+0)];
                 val += gout10 * dm[(j0+1)*nao+(k0+0)];
@@ -15859,12 +19740,254 @@ void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 val += gout58 * dm[(i0+8)*nao+(l0+0)];
                 val += gout59 * dm[(i0+9)*nao+(l0+0)];
                 atomicAdd(vk+(j0+5)*nao+(k0+0), val);
+                val = 0;
+                val += gout0 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+0), val);
+                val = 0;
+                val += gout10 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+1), val);
+                val = 0;
+                val += gout20 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+2), val);
+                val = 0;
+                val += gout30 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+3), val);
+                val = 0;
+                val += gout40 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+4), val);
+                val = 0;
+                val += gout50 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+0)*nao+(j0+5), val);
+                val = 0;
+                val += gout1 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+0), val);
+                val = 0;
+                val += gout11 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+1), val);
+                val = 0;
+                val += gout21 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+2), val);
+                val = 0;
+                val += gout31 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+3), val);
+                val = 0;
+                val += gout41 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+4), val);
+                val = 0;
+                val += gout51 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+1)*nao+(j0+5), val);
+                val = 0;
+                val += gout2 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+0), val);
+                val = 0;
+                val += gout12 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+1), val);
+                val = 0;
+                val += gout22 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+2), val);
+                val = 0;
+                val += gout32 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+3), val);
+                val = 0;
+                val += gout42 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+4), val);
+                val = 0;
+                val += gout52 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+2)*nao+(j0+5), val);
+                val = 0;
+                val += gout3 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+0), val);
+                val = 0;
+                val += gout13 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+1), val);
+                val = 0;
+                val += gout23 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+2), val);
+                val = 0;
+                val += gout33 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+3), val);
+                val = 0;
+                val += gout43 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+4), val);
+                val = 0;
+                val += gout53 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+3)*nao+(j0+5), val);
+                val = 0;
+                val += gout4 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+0), val);
+                val = 0;
+                val += gout14 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+1), val);
+                val = 0;
+                val += gout24 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+2), val);
+                val = 0;
+                val += gout34 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+3), val);
+                val = 0;
+                val += gout44 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+4), val);
+                val = 0;
+                val += gout54 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+4)*nao+(j0+5), val);
+                val = 0;
+                val += gout5 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+0), val);
+                val = 0;
+                val += gout15 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+1), val);
+                val = 0;
+                val += gout25 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+2), val);
+                val = 0;
+                val += gout35 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+3), val);
+                val = 0;
+                val += gout45 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+4), val);
+                val = 0;
+                val += gout55 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+5)*nao+(j0+5), val);
+                val = 0;
+                val += gout6 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+0), val);
+                val = 0;
+                val += gout16 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+1), val);
+                val = 0;
+                val += gout26 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+2), val);
+                val = 0;
+                val += gout36 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+3), val);
+                val = 0;
+                val += gout46 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+4), val);
+                val = 0;
+                val += gout56 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+6)*nao+(j0+5), val);
+                val = 0;
+                val += gout7 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+0), val);
+                val = 0;
+                val += gout17 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+1), val);
+                val = 0;
+                val += gout27 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+2), val);
+                val = 0;
+                val += gout37 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+3), val);
+                val = 0;
+                val += gout47 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+4), val);
+                val = 0;
+                val += gout57 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+7)*nao+(j0+5), val);
+                val = 0;
+                val += gout8 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+0), val);
+                val = 0;
+                val += gout18 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+1), val);
+                val = 0;
+                val += gout28 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+2), val);
+                val = 0;
+                val += gout38 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+3), val);
+                val = 0;
+                val += gout48 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+4), val);
+                val = 0;
+                val += gout58 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+8)*nao+(j0+5), val);
+                val = 0;
+                val += gout9 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+0), val);
+                val = 0;
+                val += gout19 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+1), val);
+                val = 0;
+                val += gout29 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+2), val);
+                val = 0;
+                val += gout39 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+3), val);
+                val = 0;
+                val += gout49 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+4), val);
+                val = 0;
+                val += gout59 * dm[(l0+0)*nao+(k0+0)];
+                atomicAdd(vj+(i0+9)*nao+(j0+5), val);
+                val = 0;
+                val += gout0 * dm[(j0+0)*nao+(i0+0)];
+                val += gout1 * dm[(j0+0)*nao+(i0+1)];
+                val += gout2 * dm[(j0+0)*nao+(i0+2)];
+                val += gout3 * dm[(j0+0)*nao+(i0+3)];
+                val += gout4 * dm[(j0+0)*nao+(i0+4)];
+                val += gout5 * dm[(j0+0)*nao+(i0+5)];
+                val += gout6 * dm[(j0+0)*nao+(i0+6)];
+                val += gout7 * dm[(j0+0)*nao+(i0+7)];
+                val += gout8 * dm[(j0+0)*nao+(i0+8)];
+                val += gout9 * dm[(j0+0)*nao+(i0+9)];
+                val += gout10 * dm[(j0+1)*nao+(i0+0)];
+                val += gout11 * dm[(j0+1)*nao+(i0+1)];
+                val += gout12 * dm[(j0+1)*nao+(i0+2)];
+                val += gout13 * dm[(j0+1)*nao+(i0+3)];
+                val += gout14 * dm[(j0+1)*nao+(i0+4)];
+                val += gout15 * dm[(j0+1)*nao+(i0+5)];
+                val += gout16 * dm[(j0+1)*nao+(i0+6)];
+                val += gout17 * dm[(j0+1)*nao+(i0+7)];
+                val += gout18 * dm[(j0+1)*nao+(i0+8)];
+                val += gout19 * dm[(j0+1)*nao+(i0+9)];
+                val += gout20 * dm[(j0+2)*nao+(i0+0)];
+                val += gout21 * dm[(j0+2)*nao+(i0+1)];
+                val += gout22 * dm[(j0+2)*nao+(i0+2)];
+                val += gout23 * dm[(j0+2)*nao+(i0+3)];
+                val += gout24 * dm[(j0+2)*nao+(i0+4)];
+                val += gout25 * dm[(j0+2)*nao+(i0+5)];
+                val += gout26 * dm[(j0+2)*nao+(i0+6)];
+                val += gout27 * dm[(j0+2)*nao+(i0+7)];
+                val += gout28 * dm[(j0+2)*nao+(i0+8)];
+                val += gout29 * dm[(j0+2)*nao+(i0+9)];
+                val += gout30 * dm[(j0+3)*nao+(i0+0)];
+                val += gout31 * dm[(j0+3)*nao+(i0+1)];
+                val += gout32 * dm[(j0+3)*nao+(i0+2)];
+                val += gout33 * dm[(j0+3)*nao+(i0+3)];
+                val += gout34 * dm[(j0+3)*nao+(i0+4)];
+                val += gout35 * dm[(j0+3)*nao+(i0+5)];
+                val += gout36 * dm[(j0+3)*nao+(i0+6)];
+                val += gout37 * dm[(j0+3)*nao+(i0+7)];
+                val += gout38 * dm[(j0+3)*nao+(i0+8)];
+                val += gout39 * dm[(j0+3)*nao+(i0+9)];
+                val += gout40 * dm[(j0+4)*nao+(i0+0)];
+                val += gout41 * dm[(j0+4)*nao+(i0+1)];
+                val += gout42 * dm[(j0+4)*nao+(i0+2)];
+                val += gout43 * dm[(j0+4)*nao+(i0+3)];
+                val += gout44 * dm[(j0+4)*nao+(i0+4)];
+                val += gout45 * dm[(j0+4)*nao+(i0+5)];
+                val += gout46 * dm[(j0+4)*nao+(i0+6)];
+                val += gout47 * dm[(j0+4)*nao+(i0+7)];
+                val += gout48 * dm[(j0+4)*nao+(i0+8)];
+                val += gout49 * dm[(j0+4)*nao+(i0+9)];
+                val += gout50 * dm[(j0+5)*nao+(i0+0)];
+                val += gout51 * dm[(j0+5)*nao+(i0+1)];
+                val += gout52 * dm[(j0+5)*nao+(i0+2)];
+                val += gout53 * dm[(j0+5)*nao+(i0+3)];
+                val += gout54 * dm[(j0+5)*nao+(i0+4)];
+                val += gout55 * dm[(j0+5)*nao+(i0+5)];
+                val += gout56 * dm[(j0+5)*nao+(i0+6)];
+                val += gout57 * dm[(j0+5)*nao+(i0+7)];
+                val += gout58 * dm[(j0+5)*nao+(i0+8)];
+                val += gout59 * dm[(j0+5)*nao+(i0+9)];
+                atomicAdd(vj+(k0+0)*nao+(l0+0), val);
             }
         }
     }
 }
 
-int rys_k_unrolled(RysIntEnvVars *envs, KMatrix *kmat, BoundsInfo *bounds, int *pool)
+int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *pool)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -15922,61 +20045,61 @@ int rys_k_unrolled(RysIntEnvVars *envs, KMatrix *kmat, BoundsInfo *bounds, int *
     int npairs_ij = bounds->npairs_ij;
     switch (ijkl) {
     case 0:
-        rys_k_0000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_0000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 125:
-        rys_k_1000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_1000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 130:
-        rys_k_1010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_1010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 131:
-        rys_k_1011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_1011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 150:
-        rys_k_1100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_1100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 155:
-        rys_k_1110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_1110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 156:
-        rys_k_1111<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_1111<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 250:
-        rys_k_2000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_2000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 255:
-        rys_k_2010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_2010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 256:
-        rys_k_2011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_2011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 260:
-        rys_k_2020<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_2020<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 261:
         buflen += 4032;
-        rys_k_2021<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        rys_jk_2021<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 275:
-        rys_k_2100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_2100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 280:
-        rys_k_2110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_2110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 281:
         buflen += 2592;
-        rys_k_2111<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        rys_jk_2111<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 285:
         buflen += 4032;
-        rys_k_2120<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        rys_jk_2120<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 300:
-        rys_k_2200<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_2200<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 305:
         buflen += 4032;
-        rys_k_2210<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        rys_jk_2210<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 375:
-        rys_k_3000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_3000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 380:
-        rys_k_3010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_3010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 381:
         buflen += 3648;
-        rys_k_3011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        rys_jk_3011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 385:
-        rys_k_3020<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_3020<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 400:
-        rys_k_3100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_3100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 405:
         buflen += 3648;
-        rys_k_3110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        rys_jk_3110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     case 425:
-        rys_k_3200<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds, pool); break;
+        _rys_jk_3200<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
     default: return 0;
     }
     return 1;

@@ -235,11 +235,6 @@ class RHF(hf.RHF):
         hcore = hf.get_hcore(mol)
         return pack_tril(hcore).get()
 
-    def get_jk(self, mol, dm, hermi=1, with_j=True, with_k=True, omega=None):
-        vj = self.get_j(mol, dm, hermi, omega)
-        vk = self.get_k(mol, dm, hermi, omega)
-        return vj, vk
-
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
         '''Constructus the lower-triangular part of the Veff matrix.'''
         log = logger.new_logger(mol, self.verbose)
