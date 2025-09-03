@@ -36,7 +36,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt, init_constant,
+    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt,
     _make_tril_pair_mappings, _nearest_power2)
 
 __all__ = [
@@ -113,6 +113,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
             s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
 
         ejk = cp.zeros((mol.natm, 3))
+
         dm_cond = cp.log(condense('absmax', _dms, ao_loc) + 1e-300).astype(np.float32)
         q_cond = cp.asarray(vhfopt.q_cond)
         log_max_dm = float(dm_cond.max())
@@ -145,8 +146,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     rys_envs, (ctypes.c_int*2)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij),
-                    ctypes.c_int(_npairs_kl),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),

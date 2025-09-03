@@ -508,7 +508,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     }
 }
 
-extern int rys_ejk_ip1_unrolled_o0(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
+extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         int *pool, double *dd_pool);
 
 extern "C" {
@@ -566,7 +566,7 @@ int RYS_per_atom_jk_ip1_o0(double *ejk, double j_factor, double k_factor,
         jk.sr_factor = 1;
     }
 
-    if (!rys_ejk_ip1_unrolled_o0(&envs, &jk, &bounds, pool, dd_pool)) {
+    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;

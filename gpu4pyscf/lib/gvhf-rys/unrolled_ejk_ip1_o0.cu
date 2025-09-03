@@ -26504,7 +26504,7 @@ void rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     }
 }
 
-int rys_ejk_ip1_unrolled_o0(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
+int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         int *pool, double *dd_pool)
 {
     int li = bounds->li;
