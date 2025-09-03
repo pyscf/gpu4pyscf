@@ -33,10 +33,11 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt, init_constant,
-    _make_tril_tile_mappings, _nearest_power2)
+    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt,
+    _make_tril_pair_mappings, _nearest_power2)
 
 __all__ = [
     'SCF_GradScanner',
@@ -58,83 +59,7 @@ libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
 #     dd_cache_size = nf * min(THREADS, _nearest_power2(SHM_SIZE//(g_size*3*8)))
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 
-def _ejk_ip1_task(mol, dms, vhfopt, task_list, j_factor=1.0, k_factor=1.0,
-                 device_id=0, verbose=0):
-    n_dm = dms.shape[0]
-    assert n_dm <= 2
-    nao = vhfopt.sorted_mol.nao
-    uniq_l_ctr = vhfopt.uniq_l_ctr
-    uniq_l = uniq_l_ctr[:,0]
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
-    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    kern = libvhf_rys.RYS_per_atom_jk_ip1
-
-    timing_counter = Counter()
-    kern_counts = 0
-    with cp.cuda.Device(device_id), _streams[device_id]:
-        log = logger.new_logger(mol, verbose)
-        cput0 = log.init_timer()
-        init_constant(mol)
-
-        dms = cp.asarray(dms)
-
-        tile_q_ptr = ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p)
-        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
-        s_ptr = lib.c_null_ptr()
-        if mol.omega < 0:
-            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
-
-        ejk = cp.zeros((mol.natm, 3))
-
-        ao_loc = mol.ao_loc
-        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-        log_max_dm = float(dm_cond.max())
-        log_cutoff = math.log(vhfopt.direct_scf_tol)
-        tile_mappings = _make_tril_tile_mappings(
-            l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, vhfopt.tile)
-        workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-        dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
-        info = cp.empty(2, dtype=np.uint32)
-        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
-
-        for i, j, k, l in task_list:
-            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
-                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
-            tile_ij_mapping = tile_mappings[i,j]
-            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                        l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-            tile_kl_mapping = tile_mappings[k,l]
-            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-            err = kern(
-                ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                ctypes.c_double(j_factor), ctypes.c_double(k_factor),
-                ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n_dm), ctypes.c_int(nao),
-                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                ctypes.c_int(tile_ij_mapping.size),
-                ctypes.c_int(tile_kl_mapping.size),
-                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                tile_q_ptr, q_ptr, s_ptr,
-                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff),
-                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(workers),
-                mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-            if err != 0:
-                raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
-            if log.verbose >= logger.DEBUG1:
-                msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
-                t1, t1p = log.timer_debug1(msg, *t1), t1
-                timing_counter[llll] += t1[1] - t1p[1]
-                kern_counts += 1
-    return ejk, kern_counts, timing_counter
+libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
 
 def _jk_energy_per_atom(mol, dm, vhfopt=None,
                         j_factor=1., k_factor=1., verbose=None):
@@ -144,11 +69,8 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
-        # Small group size for load balance
-        group_size = None
-        if num_devices > 1: 
-            group_size = jk.GROUP_SIZE
-        vhfopt = _VHFOpt(mol).build(group_size=group_size)
+        vhfopt = _VHFOpt(mol, tile=1).build()
+    assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
     nao_orig = vhfopt.mol.nao
@@ -158,40 +80,99 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
 
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
-    dms = cp.asarray(dms, order='C')
+    n_dm, nao = dms.shape[:2]
+    assert n_dm <= 2
 
+    ao_loc = mol.ao_loc
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
+    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     assert uniq_l.max() <= LMAX
 
     n_groups = len(uniq_l_ctr)
-    tasks = []
-    for i in range(n_groups):
-        for j in range(i+1):
-            for k in range(i+1):
-                for l in range(k+1):
-                    tasks.append((i,j,k,l))
-    tasks = np.array(tasks)
-    task_list = []
-    for device_id in range(num_devices):
-        task_list.append(tasks[device_id::num_devices])
+    tasks = ((i, j, k, l)
+             for i in range(n_groups)
+             for j in range(i+1)
+             for k in range(i+1)
+             for l in range(k+1))
 
-    cp.cuda.get_current_stream().synchronize()
-    futures = []
-    with ThreadPoolExecutor(max_workers=num_devices) as executor:
-        for device_id in range(num_devices):
-            future = executor.submit(
-                _ejk_ip1_task,
-                mol, dms, vhfopt, task_list[device_id],
-                j_factor=j_factor, k_factor=k_factor, verbose=log.verbose,
-                device_id=device_id)
-            futures.append(future)
+    def proc():
+        device_id = cp.cuda.device.get_device_id()
+        log = logger.new_logger(mol, verbose)
+        cput0 = log.init_timer()
+
+        timing_counter = Counter()
+        kern_counts = 0
+        kern = libvhf_rys.RYS_per_atom_jk_ip1
+
+        _dms = cp.asarray(dms, order='C')
+        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
+        s_ptr = lib.c_null_ptr()
+        if mol.omega < 0:
+            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
+
+        ejk = cp.zeros((mol.natm, 3))
+
+        dm_cond = cp.log(condense('absmax', _dms, ao_loc) + 1e-300).astype(np.float32)
+        q_cond = cp.asarray(vhfopt.q_cond)
+        log_max_dm = float(dm_cond.max())
+        log_cutoff = math.log(vhfopt.direct_scf_tol)
+        pair_mappings = _make_tril_pair_mappings(
+            l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+        rys_envs = vhfopt.rys_envs
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, QUEUE_DEPTH), dtype=np.int32)
+        dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
+        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
+
+        for i, j, k, l in tasks:
+            shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
+            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+            pair_ij_mapping = pair_mappings[i,j]
+            pair_kl_mapping = pair_mappings[k,l]
+            npairs_ij = pair_ij_mapping.size
+            npairs_kl = pair_kl_mapping.size
+            if npairs_ij == 0 or npairs_kl == 0:
+                continue
+            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
+                _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
+                _npairs_kl = pair_kl1 - pair_kl0
+                err = kern(
+                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                    ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                    ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    rys_envs, (ctypes.c_int*2)(*scheme),
+                    (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                    s_ptr,
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                    mol._atm.ctypes, ctypes.c_int(mol.natm),
+                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                if err != 0:
+                    raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
+            if log.verbose >= logger.DEBUG1:
+                ntasks = npairs_ij * npairs_kl
+                msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
+                t1, t1p = log.timer_debug1(msg, *t1), t1
+                timing_counter[llll] += t1[1] - t1p[1]
+                kern_counts += 1
+        return ejk, kern_counts, timing_counter
+
+    results = multi_gpu.run(proc, non_blocking=True)
 
     kern_counts = 0
     timing_collection = Counter()
     ejk_dist = []
-    for future in futures:
-        ejk, counts, counter = future.result()
+    for ejk, counts, counter in results:
         kern_counts += counts
         timing_collection += counter
         ejk_dist.append(ejk)

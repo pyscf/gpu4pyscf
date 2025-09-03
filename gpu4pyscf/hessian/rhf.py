@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,9 +35,11 @@ from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt, 
-    init_constant, _make_tril_tile_mappings, _nearest_power2)
+    LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
+    init_constant, _make_tril_tile_mappings, _make_tril_pair_mappings,
+    _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import jk
 
@@ -48,6 +50,8 @@ libvhf_rys.RYS_build_jk_ip1.restype = ctypes.c_int
 GB = 1024*1024*1024
 ALIGNED = 4
 DD_CACHE_MAX = rhf_grad.DD_CACHE_MAX
+
+libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
 
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1mo=None,
@@ -408,32 +412,55 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         vj = vk = vhf = None
     return h1mo
 
-def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
-                       device_id=0, with_j=True, with_k=True, verbose=0):
-    # TODO: compute JK in MO
-    assert isinstance(verbose, int)
-    nao = vhfopt.sorted_mol.nao
+def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
+    r'''
+    For each atom, compute
+    J = ((\nabla_X i) j| kl) (D_lk + D_ji)
+    K = ((\nabla_X i) j| kl) (D_jk + D_li)
+    '''
+    assert mol.omega >= 0
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
+    vhfopt = _VHFOpt(mol, tile=1).build()
+
+    mol = vhfopt.sorted_mol
+    nao_orig = vhfopt.mol.nao
+
+    dm = cp.asarray(dm, order='C')
+    dms = dm.reshape(-1,nao_orig,nao_orig)
+    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
+    dms = vhfopt.apply_coeff_C_mat_CT(dms)
+    n_dm, nao = dms.shape[:2]
+    assert n_dm == 1
+
     natm = mol.natm
-    nbas = mol.nbas
-    n_dm = dms.shape[0]
     if atoms_slice is None:
         atoms_slice = 0, natm
     atom0, atom1 = atoms_slice
 
+    ao_loc = mol.ao_loc
     uniq_l_ctr = vhfopt.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     l_ctr_bas_loc = vhfopt.l_ctr_offsets
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-    kern = libvhf_rys.RYS_build_jk_ip1
+    assert uniq_l.max() <= LMAX
 
-    timing_counter = Counter()
-    kern_counts = 0
-    with cp.cuda.Device(device_id), _streams[device_id]:
+    n_groups = len(uniq_l_ctr)
+    tasks = ((i, j, k, l)
+             for i in range(n_groups)
+             for j in range(n_groups)
+             for k in range(n_groups)
+             for l in range(k+1))
+
+    def proc():
+        device_id = cp.cuda.device.get_device_id()
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        init_constant(mol)
+        timing_counter = Counter()
+        kern_counts = 0
+        kern = libvhf_rys.RYS_build_jk_ip1
 
-        dms = cp.asarray(dms)
+        _dms = cp.asarray(dms)
 
         vj = vk = None
         vj_ptr = vk_ptr = lib.c_null_ptr()
@@ -445,136 +472,68 @@ def _build_jk_ip1_task(mol, dms, vhfopt, task_list, atoms_slice,
             vj = cp.zeros(((atom1-atom0)*3, nao, nao))
             vj_ptr = ctypes.cast(vj.data.ptr, ctypes.c_void_p)
 
-        ao_loc = mol.ao_loc
-        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+        dm_cond = cp.log(condense('absmax', _dms, ao_loc) + 1e-300).astype(np.float32)
+        q_cond = cp.asarray(vhfopt.q_cond)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
-        tril_tile_mappings = _make_tril_tile_mappings(
-            l_ctr_bas_loc, vhfopt.tile_q_cond, log_cutoff-log_max_dm, vhfopt.tile)
+        cutoff = log_cutoff - log_max_dm
+        pair_kl_mappings = _make_tril_pair_mappings(
+            l_ctr_bas_loc, q_cond, cutoff, tile=6)
+        pair_ij_mappings = _make_pair_mappings_for_atoms_slice(
+            mol, l_ctr_bas_loc, q_cond, cutoff, atoms_slice, tile=6)
+
+        rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
-        QUEUE_DEPTH = 65536
-        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-        info = cp.empty(2, dtype=np.uint32)
+        pool = cp.empty((workers, QUEUE_DEPTH), dtype=np.int32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
-        for i, j, k, l in task_list:
-            ij_shls = (l_ctr_bas_loc[i], l_ctr_bas_loc[i+1],
-                       l_ctr_bas_loc[j], l_ctr_bas_loc[j+1])
-            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
-            ij_shls = (ish0, ish1, jsh0, jsh1)
-
-            sub_tile_q = vhfopt.tile_q_cond[ish0:ish1,jsh0:jsh1]
-            mask = sub_tile_q > log_cutoff - log_max_dm
-            mask[mol._bas[ish0:ish1,ATOM_OF] <  atom0] = False
-            mask[mol._bas[ish0:ish1,ATOM_OF] >= atom1] = False
-            t_ij = (cp.arange(ish0, ish1, dtype=np.int32)[:,None] * nbas +
-                    cp.arange(jsh0, jsh1, dtype=np.int32))
-            idx = cp.argsort(sub_tile_q[mask])[::-1]
-            tile_ij_mapping = t_ij[mask][idx]
+        for i, j, k, l in tasks:
+            shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
             llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            kl_shls = (l_ctr_bas_loc[k], l_ctr_bas_loc[k+1],
-                        l_ctr_bas_loc[l], l_ctr_bas_loc[l+1])
-            tile_kl_mapping = tril_tile_mappings[k,l]
+            pair_ij_mapping = pair_ij_mappings[i,j]
+            pair_kl_mapping = pair_kl_mappings[k,l]
+            npairs_ij = pair_ij_mapping.size
+            npairs_kl = pair_kl_mapping.size
+            if npairs_ij == 0 or npairs_kl == 0:
+                continue
+
             scheme = _ip1_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-            err = kern(
-                vj_ptr, vk_ptr, ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
-                vhfopt.rys_envs, (ctypes.c_int*2)(*scheme),
-                (ctypes.c_int*8)(*ij_shls, *kl_shls),
-                ctypes.c_int(tile_ij_mapping.size),
-                ctypes.c_int(tile_kl_mapping.size),
-                ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                ctypes.cast(vhfopt.tile_q_cond.data.ptr, ctypes.c_void_p),
-                ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p),
-                lib.c_null_ptr(),
-                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                ctypes.c_float(log_cutoff),
-                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(workers),
-                mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-            if err != 0:
-                raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+            for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
+                _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
+                _npairs_kl = pair_kl1 - pair_kl0
+                err = kern(
+                    vj_ptr, vk_ptr, ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
+                    rys_envs, (ctypes.c_int*2)(*scheme),
+                    (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                    lib.c_null_ptr(),
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    mol._atm.ctypes, ctypes.c_int(mol.natm),
+                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                if err != 0:
+                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                cp.cuda.get_current_stream().synchronize()
             if log.verbose >= logger.DEBUG1:
-                msg = f'processing {llll}, tasks = {info[1].get()} on Device {device_id}'
+                ntasks = npairs_ij * npairs_kl
+                msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
                 t1, t1p = log.timer_debug1(msg, *t1), t1
                 timing_counter[llll] += t1[1] - t1p[1]
                 kern_counts += 1
-    return vj, vk, kern_counts, timing_counter
+        return vj, vk, kern_counts, timing_counter
 
-def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=None):
-    r'''
-    For each atom, compute
-    J = ((\nabla_X i) j| kl) (D_lk + D_ji)
-    K = ((\nabla_X i) j| kl) (D_jk + D_li)
-    '''
-    assert mol.omega >= 0
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    vhfopt = _VHFOpt(mol)
-    # tile must set to 1. This tile size is assumed in the GPU kernel code
-    vhfopt.tile = 1
-    # Small group size for load balance
-    group_size = None
-    if num_devices > 1: 
-        group_size = GROUP_SIZE
-    vhfopt.build(group_size=group_size)
-
-    mol = vhfopt.sorted_mol
-    nao_orig = vhfopt.mol.nao
-
-    dm = cp.asarray(dm, order='C')
-    dms = dm.reshape(-1,nao_orig,nao_orig)
-    n_dm = dms.shape[0]
-    #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
-    dms = vhfopt.apply_coeff_C_mat_CT(dms)
-    dms = cp.asarray(dms, order='C')
-    assert n_dm == 1
-
-    natm = mol.natm
-    if atoms_slice is None:
-        atoms_slice = 0, natm
-    atom0, atom1 = atoms_slice
-
-    uniq_l_ctr = vhfopt.uniq_l_ctr
-    uniq_l = uniq_l_ctr[:,0]
-    assert uniq_l.max() <= LMAX
-
-    nbas = mol.nbas
-    assert vhfopt.tile_q_cond.shape == (nbas, nbas)
-
-    n_groups = len(uniq_l_ctr)
-    tasks = []
-    for i in range(n_groups):
-        for j in range(n_groups):
-            for k in range(n_groups):
-                for l in range(k+1):
-                    tasks.append((i,j,k,l))
-    tasks = np.array(tasks)
-    task_list = []
-    for device_id in range(num_devices):
-        task_list.append(tasks[device_id::num_devices])
-
-    cp.cuda.get_current_stream().synchronize()
-    futures = []
-    with ThreadPoolExecutor(max_workers=num_devices) as executor:
-        for device_id in range(num_devices):
-            future = executor.submit(
-                _build_jk_ip1_task,
-                mol, dms, vhfopt, task_list[device_id], atoms_slice,
-                with_j=with_j, with_k=with_k, verbose=log.verbose,
-                device_id=device_id)
-            futures.append(future)
+    results = multi_gpu.run(proc, non_blocking=True)
 
     kern_counts = 0
     timing_collection = Counter()
     vj_dist = []
     vk_dist = []
-    for future in futures:
-        vj, vk, counts, counter = future.result()
+    for vj, vk, counts, counter in results:
         kern_counts += counts
         timing_collection += counter
         vj_dist.append(vj)
@@ -613,15 +572,46 @@ def _ip1_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ij_prims = nps[0] * nps[1]
     nroots = (order + 1) // 2 + 1
 
-    unit = nroots*2 + g_size*3 + 6
-    counts = (shm_size - ij_prims*6 * 8) // (unit*8)
+    unit = nroots*2 + g_size*3 + 9
+    counts = (shm_size - ij_prims * 8) // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
-    gout_width = 18
+    gout_width = 27
     while gout_stride < 16 and gout_size / (gout_stride*gout_width) > 1:
         n //= 2
         gout_stride *= 2
     return n, gout_stride
+
+def _make_pair_mappings_for_atoms_slice(mol, l_ctr_bas_loc, q_cond, cutoff,
+                                        atoms_slice, tile=4):
+    nbas = q_cond.shape[0]
+    atom0, atom1 = atoms_slice
+    mask = q_cond > cutoff
+    mask[(mol._bas[:,ATOM_OF] <  atom0) |
+         (mol._bas[:,ATOM_OF] >= atom1)] = False
+    mask = mask.ravel()
+    n_groups = len(l_ctr_bas_loc) - 1
+    pair_mappings = {}
+    tile = 6
+    for i in range(n_groups):
+        for j in range(n_groups):
+            ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+            jsh0, jsh1 = l_ctr_bas_loc[j], l_ctr_bas_loc[j+1]
+            nish = ish1 - ish0
+            njsh = jsh1 - jsh0
+            ntiles_i = (nish+tile-1) // tile
+            ntiles_j = (njsh+tile-1) // tile
+            pair_ij = (cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32)[:,None] * nbas +
+                       cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32))
+            pair_ij = pair_ij.reshape(ntiles_i,tile,ntiles_j,tile).transpose(0,2,1,3)
+            ish = cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32).reshape(ntiles_i,tile)
+            jsh = cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32).reshape(ntiles_j,tile)
+            ish = ish[:,None,:,None]
+            jsh = jsh[None,:,None,:]
+            pair_ij = pair_ij[(ish < ish1) & (jsh < jsh1)]
+            pair_ij = pair_ij[mask[pair_ij]]
+            pair_mappings[i,j] = cp.asarray(pair_ij, dtype=np.int32)
+    return pair_mappings
 
 def get_hcore(mol):
     '''Part of the second derivatives of core Hamiltonian'''

@@ -8,8 +8,6 @@ add_library(gvhf_rys SHARED
   rys_contract_k.cu unrolled_rys_k.cu
   rys_contract_jk.cu unrolled_rys_jk.cu
   rys_contract_jk_ip1.cu unrolled_rys_ip1.cu unrolled_ejk_ip1.cu
-  rys_contract_jk_ip1_o0.cu unrolled_ejk_ip1_o0.cu
-  rys_contract_jk_ip1_o1.cu unrolled_rys_jk_ip1.cu
   rys_contract_jk_ip2.cu unrolled_ejk_ip2_type12.cu unrolled_ejk_ip2_type3.cu
 )
 
