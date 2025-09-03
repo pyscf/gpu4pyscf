@@ -33,7 +33,7 @@ extern __constant__ GXYZOffset c_gxyz_offset[];
 
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
-void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
+void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   int *pool, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
@@ -163,9 +163,13 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -242,7 +246,8 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega,
+                                kmat.lr_factor, kmat.sr_factor);
                 int lij = li + lj;
                 int lkl = lk + ll;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -302,7 +307,9 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                             if (n < lij3) {
                                 s0x = _gx[0];
                                 s1x = cpx * s0x;
-                                s1x += i * b00 * _gx[-nsq_per_block];
+                                if (i > 0) {
+                                    s1x += i * b00 * _gx[-nsq_per_block];
+                                }
                                 _gx[stride_k*nsq_per_block] = s1x;
                             }
 
@@ -313,7 +320,9 @@ void rys_k_kernel(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds,
                                 __syncthreads();
                                 if (n < lij3) {
                                     s2x = cpx*s1x + k*b01*s0x;
-                                    s2x += i * b00 * _gx[(k*stride_k-1)*nsq_per_block];
+                                    if (i > 0) {
+                                        s2x += i * b00 * _gx[(k*stride_k-1)*nsq_per_block];
+                                    }
                                     _gx[(k*stride_k+stride_k)*nsq_per_block] = s2x;
                                     s0x = s1x;
                                     s1x = s2x;
@@ -602,7 +611,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     return buflen;
 }
 
-extern int rys_k_unrolled(RysIntEnvVars *envs, KMatrix *kmat, BoundsInfo *bounds, int *pool);
+extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds, int *pool);
 
 extern "C" {
 int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
@@ -648,24 +657,15 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
         q_cond, s_estimator, dm_cond, cutoff,
         ntiles_i, ntiles_j, ntiles_k, ntiles_l};
 
-    KMatrix kmat = {vk, dm, 1, 0, omega, n_dm};
-    if (omega < 0) {
+    JKMatrix kmat = {NULL, vk, dm, n_dm, 0, omega};
+    if (omega >= 0) {
+        kmat.lr_factor = 1;
+        kmat.sr_factor = 0;
+    } else {
         kmat.lr_factor = 0;
         kmat.sr_factor = 1;
     }
 
-#if 0
-    if (li == 2 && lj == 1 && lk == 1 && ll == 1) {
-        GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
-        dim3 threads;
-        int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
-        int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-        rys_2111_kernel<<<npairs_ij, threads, buflen>>>(
-            envs, kmat, bounds, pool, p_gxyz_offset,
-            0, reserved_shm_size);
-    } else
-#endif
     if (!rys_k_unrolled(&envs, &kmat, &bounds, pool)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |

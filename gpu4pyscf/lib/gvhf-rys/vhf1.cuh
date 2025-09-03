@@ -62,16 +62,9 @@ typedef struct {
     int n_dm;
     int atom_offset;
     double omega;
-} JKMatrix;
-
-typedef struct {
-    double *vk;
-    double *dm;
     double lr_factor; // Long-range part of HF exchange
     double sr_factor; // Song-range part of HF exchange
-    double omega;
-    int n_dm;
-} KMatrix;
+} JKMatrix;
 
 typedef struct {
     double *ejk;
@@ -79,6 +72,9 @@ typedef struct {
     double j_factor;
     double k_factor;
     int n_dm;
+    double omega;
+    double lr_factor;
+    double sr_factor;
 } JKEnergy;
 
 typedef struct {
@@ -146,6 +142,12 @@ __device__ __forceinline__ unsigned get_smid()
     asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
     return smid;
 }
+
+// to ensure that each SM only executes one block
+#define adjust_threads(kernel, threads) { \
+    cudaFuncAttributes attr; \
+    cudaFuncGetAttributes(&attr, kernel); \
+    if (attr.numRegs <= 128) threads *= 2; }
 
 #ifdef __CUDACC__
 extern __constant__ int c_g_pair_idx[];

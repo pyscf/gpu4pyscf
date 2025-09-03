@@ -48,8 +48,8 @@ static int _fill_ejk_tasks(ShellQuartet *shl_quartet_idx,
     int jsh0 = tile_j * TILE;
     int ish1 = ish0 + TILE;
     int jsh1 = jsh0 + TILE;
-    int do_j = jk.j_factor != NULL;
-    int do_k = jk.k_factor != NULL;
+    int do_j = jk.j_factor != 0;
+    int do_k = jk.k_factor != 0;
 
     int count = 0;
     float tile_q_ij = tile_q_cond[tile_ij];
@@ -197,8 +197,8 @@ static int _fill_sr_ejk_tasks(ShellQuartet *shl_quartet_idx,
     int jsh0 = tile_j * TILE;
     int ish1 = ish0 + TILE;
     int jsh1 = jsh0 + TILE;
-    int do_j = jk.j_factor != NULL;
-    int do_k = jk.k_factor != NULL;
+    int do_j = jk.j_factor != 0;
+    int do_k = jk.k_factor != 0;
 
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;

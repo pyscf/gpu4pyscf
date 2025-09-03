@@ -68,7 +68,8 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     cput0 = log.init_timer()
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol).build()
+        vhfopt = _VHFOpt(mol, tile=1).build()
+        print(vhfopt.tile)
     assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
@@ -104,7 +105,7 @@ def get_k(mol, dm, hermi=0, vhfopt=None, verbose=None):
     cput0 = log.init_timer()
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol).build()
+        vhfopt = _VHFOpt(mol, tile=1).build()
     assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
@@ -129,9 +130,7 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol)
-        vhfopt.tile = TILE
-        vhfopt.build()
+        vhfopt = _VHFOpt(mol).build()
     assert vhfopt.tile == TILE
 
     nao_orig = vhfopt.mol.nao
@@ -155,13 +154,13 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     return vj
 
 class _VHFOpt:
-    def __init__(self, mol, cutoff=1e-13):
+    def __init__(self, mol, cutoff=1e-13, tile=TILE):
         self.mol = mol
         self.direct_scf_tol = cutoff
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
         self.h_shls = None
-        self.tile = 1
+        self.tile = tile
 
         # Hold cache on GPU devices
         self._rys_envs = {}
@@ -493,7 +492,6 @@ class _VHFOpt:
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
-            stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms) # transfer to current device
@@ -510,7 +508,8 @@ class _VHFOpt:
             if mol.omega < 0:
                 s_ptr = ctypes.cast(self.s_estimator.data.ptr, ctypes.c_void_p)
             pair_mappings = _make_tril_pair_mappings(
-                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=4)
+                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+            rys_envs = self.rys_envs
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
@@ -525,10 +524,10 @@ class _VHFOpt:
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 pair_ij_mapping = pair_mappings[i,j]
                 pair_kl_mapping = pair_mappings[k,l]
-                if len(pair_ij_mapping) == 0 or len(pair_kl_mapping) == 0:
-                    continue
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
+                if npairs_ij == 0 or npairs_kl == 0:
+                    continue
                 for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
                     _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
                     _npairs_kl = pair_kl1 - pair_kl0
@@ -537,8 +536,7 @@ class _VHFOpt:
                         ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        self.rys_envs,
-                        (ctypes.c_int*8)(*shls_slice),
+                        rys_envs, (ctypes.c_int*8)(*shls_slice),
                         ctypes.c_int(SHM_SIZE),
                         ctypes.c_int(npairs_ij),
                         ctypes.c_int(_npairs_kl),
@@ -656,7 +654,6 @@ class _VHFOpt:
 
         def proc(dm_xyz, dm_cond):
             device_id = cp.cuda.device.get_device_id()
-            stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dm_xyz = asarray(dm_xyz) # transfer to current device
@@ -802,7 +799,6 @@ class _VHFOpt:
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
-            stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms) # transfer to current device
@@ -818,7 +814,8 @@ class _VHFOpt:
             if mol.omega < 0:
                 s_ptr = ctypes.cast(self.s_estimator.data.ptr, ctypes.c_void_p)
             pair_mappings = _make_tril_pair_mappings(
-                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=4)
+                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+            rys_envs = self.rys_envs
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
@@ -833,10 +830,10 @@ class _VHFOpt:
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 pair_ij_mapping = pair_mappings[i,j]
                 pair_kl_mapping = pair_mappings[k,l]
-                if len(pair_ij_mapping) == 0 or len(pair_kl_mapping) == 0:
-                    continue
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
+                if npairs_ij == 0 or npairs_kl == 0:
+                    continue
                 for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
                     _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
                     _npairs_kl = pair_kl1 - pair_kl0
@@ -844,8 +841,7 @@ class _VHFOpt:
                         ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        self.rys_envs,
-                        (ctypes.c_int*8)(*shls_slice),
+                        rys_envs, (ctypes.c_int*8)(*shls_slice),
                         ctypes.c_int(SHM_SIZE),
                         ctypes.c_int(npairs_ij),
                         ctypes.c_int(_npairs_kl),

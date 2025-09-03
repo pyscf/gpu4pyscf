@@ -20,11 +20,17 @@
 extern __constant__ int _c_cartesian_lexical_xyz[];
 
 __device__ __forceinline__
+int lex_xyz_offset(int l) {
+    // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
+    int offset = (1 << l) >> 1;
+    return offset * 9;
+}
+
+__device__ __forceinline__
 int lex_xyz_address(int l, int i)
 {
     // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
-    int offset = (1 << l) >> 1;
-    return _c_cartesian_lexical_xyz[offset * 9 + i];
+    return _c_cartesian_lexical_xyz[lex_xyz_offset(l) + i];
 }
 
 template <int LIJ>

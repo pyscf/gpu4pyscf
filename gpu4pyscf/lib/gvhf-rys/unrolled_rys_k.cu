@@ -1,4 +1,5 @@
 #include <cuda.h>
+#include <cuda_runtime.h>
 #include "vhf1.cuh"
 #include "rys_roots_for_k.cu"
 #include "create_tasks_o1.cu"
@@ -9,7 +10,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -81,9 +82,13 @@ void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -136,7 +141,7 @@ void rys_k_0000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -179,7 +184,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -251,9 +256,13 @@ void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -310,7 +319,7 @@ void rys_k_1000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -383,7 +392,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -455,9 +464,13 @@ void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -526,7 +539,7 @@ void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -652,7 +665,7 @@ void rys_k_1010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -724,9 +737,13 @@ void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -831,7 +848,7 @@ void rys_k_1011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1086,7 +1103,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1158,9 +1175,13 @@ void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -1229,7 +1250,7 @@ void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1346,7 +1367,7 @@ void rys_k_1100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1418,9 +1439,13 @@ void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -1525,7 +1550,7 @@ void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -1776,7 +1801,7 @@ void rys_k_1110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_1111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1848,9 +1873,13 @@ void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -2063,7 +2092,7 @@ void rys_k_1111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2652,7 +2681,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -2724,9 +2753,13 @@ void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -2789,7 +2822,7 @@ void rys_k_2000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -2893,7 +2926,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -2965,9 +2998,13 @@ void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -3054,7 +3091,7 @@ void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3256,7 +3293,7 @@ void rys_k_2010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -3328,9 +3365,13 @@ void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -3489,7 +3530,7 @@ void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -3927,7 +3968,7 @@ void rys_k_2011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -3999,9 +4040,13 @@ void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -4124,7 +4169,7 @@ void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -4468,7 +4513,7 @@ void rys_k_2020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -4552,9 +4597,13 @@ void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -4655,7 +4704,7 @@ void rys_k_2021(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -5546,7 +5595,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -5618,9 +5667,13 @@ void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -5707,7 +5760,7 @@ void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -5887,7 +5940,7 @@ void rys_k_2100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -5959,9 +6012,13 @@ void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -6120,7 +6177,7 @@ void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -6542,7 +6599,7 @@ void rys_k_2110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -6626,9 +6683,13 @@ void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -6723,7 +6784,7 @@ void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -8289,7 +8350,7 @@ void rys_k_2111(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -8373,9 +8434,13 @@ void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -8476,7 +8541,7 @@ void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -9480,7 +9545,7 @@ void rys_k_2120(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -9552,9 +9617,13 @@ void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -9677,7 +9746,7 @@ void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -9974,7 +10043,7 @@ void rys_k_2200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -10058,9 +10127,13 @@ void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -10161,7 +10234,7 @@ void rys_k_2210(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -11132,7 +11205,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_3000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -11204,9 +11277,13 @@ void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -11277,7 +11354,7 @@ void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -11416,7 +11493,7 @@ void rys_k_3000(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_3010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -11488,9 +11565,13 @@ void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -11601,7 +11682,7 @@ void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -11901,7 +11982,7 @@ void rys_k_3010(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -11985,9 +12066,13 @@ void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -12084,7 +12169,7 @@ void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -12947,7 +13032,7 @@ void rys_k_3011(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -13019,9 +13104,13 @@ void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -13192,7 +13281,7 @@ void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -13721,7 +13810,7 @@ void rys_k_3020(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_3100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -13793,9 +13882,13 @@ void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -13906,7 +13999,7 @@ void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -14168,7 +14261,7 @@ void rys_k_3100(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -14252,9 +14345,13 @@ void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -14351,7 +14448,7 @@ void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double s0, s1, s2;
@@ -15178,7 +15275,7 @@ void rys_k_3110(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
 }
 
 __global__ static
-void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
+void rys_k_3200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -15250,9 +15347,13 @@ void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -15423,7 +15524,7 @@ void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 int nroots = bounds.nroots;
-                rys_roots_for_k(nroots, theta, rr, rw, kmat);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
                 if (task_id >= ntasks) {
                     continue;
                 }
@@ -15864,7 +15965,7 @@ void rys_k_3200(RysIntEnvVars envs, KMatrix kmat, BoundsInfo bounds, int *pool)
     }
 }
 
-int rys_k_unrolled(RysIntEnvVars *envs, KMatrix *kmat, BoundsInfo *bounds, int *pool)
+int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds, int *pool)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -15912,6 +16013,17 @@ int rys_k_unrolled(RysIntEnvVars *envs, KMatrix *kmat, BoundsInfo *bounds, int *
     case 255: nsq_per_block *= 2; break;
     case 275: nsq_per_block *= 2; break;
     case 375: nsq_per_block *= 2; break;
+    }
+#else
+    switch (ijkl) {
+    case 0: adjust_threads(rys_k_0000, nsq_per_block); break;
+    case 125: adjust_threads(rys_k_1000, nsq_per_block); break;
+    case 130: adjust_threads(rys_k_1010, nsq_per_block); break;
+    case 150: adjust_threads(rys_k_1100, nsq_per_block); break;
+    case 250: adjust_threads(rys_k_2000, nsq_per_block); break;
+    case 255: adjust_threads(rys_k_2010, nsq_per_block); break;
+    case 275: adjust_threads(rys_k_2100, nsq_per_block); break;
+    case 375: adjust_threads(rys_k_3000, nsq_per_block); break;
     }
 #endif
 

@@ -18,11 +18,8 @@
 
 __device__ __forceinline__
 void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
-                     KMatrix &kmat)
+                     double omega, double lr_factor, double sr_factor)
 {
-    double omega = kmat.omega;
-    double lr_factor = kmat.lr_factor;
-    double sr_factor = kmat.sr_factor;
     int block_size = blockDim.x;
     int rt_id = threadIdx.y;
     int stride = blockDim.y;

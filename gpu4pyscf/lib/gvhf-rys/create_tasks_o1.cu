@@ -94,12 +94,12 @@ void _fill_jk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         float d_cutoff = kl_cutoff - q_kl;
-        if ((d_ij                  > d_cutoff ||
-             dm_cond[bas_kl]       > d_cutoff ||
-             dm_cond[ish*nbas+ksh] > d_cutoff ||
-             dm_cond[jsh*nbas+ksh] > d_cutoff ||
-             dm_cond[ish*nbas+lsh] > d_cutoff ||
-             dm_cond[jsh*nbas+lsh] > d_cutoff)) {
+        if (d_ij                  > d_cutoff ||
+            dm_cond[bas_kl]       > d_cutoff ||
+            dm_cond[ish*nbas+ksh] > d_cutoff ||
+            dm_cond[jsh*nbas+ksh] > d_cutoff ||
+            dm_cond[ish*nbas+lsh] > d_cutoff ||
+            dm_cond[jsh*nbas+lsh] > d_cutoff) {
             int off = atomicAdd(ntasks, 1);
             bas_kl_idx[off] = bas_kl;
         }
@@ -288,12 +288,12 @@ void _fill_sr_jk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         float d_cutoff = kl_cutoff - q_kl;
-        if ((d_ij                  > d_cutoff ||
-             dm_cond[bas_kl]       > d_cutoff ||
-             dm_cond[ish*nbas+ksh] > d_cutoff ||
-             dm_cond[jsh*nbas+ksh] > d_cutoff ||
-             dm_cond[ish*nbas+lsh] > d_cutoff ||
-             dm_cond[jsh*nbas+lsh] > d_cutoff)) {
+        if (d_ij                  > d_cutoff ||
+            dm_cond[bas_kl]       > d_cutoff ||
+            dm_cond[ish*nbas+ksh] > d_cutoff ||
+            dm_cond[jsh*nbas+ksh] > d_cutoff ||
+            dm_cond[ish*nbas+lsh] > d_cutoff ||
+            dm_cond[jsh*nbas+lsh] > d_cutoff) {
             double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
             double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
@@ -327,12 +327,12 @@ void _fill_sr_jk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             if (d_cutoff > 0) {
                 continue;
             }
-            if ((d_ij                  > d_cutoff ||
-                 dm_cond[bas_kl]       > d_cutoff ||
-                 dm_cond[ish*nbas+ksh] > d_cutoff ||
-                 dm_cond[jsh*nbas+ksh] > d_cutoff ||
-                 dm_cond[ish*nbas+lsh] > d_cutoff ||
-                 dm_cond[jsh*nbas+lsh] > d_cutoff)) {
+            if (d_ij                  > d_cutoff ||
+                dm_cond[bas_kl]       > d_cutoff ||
+                dm_cond[ish*nbas+ksh] > d_cutoff ||
+                dm_cond[jsh*nbas+ksh] > d_cutoff ||
+                dm_cond[ish*nbas+lsh] > d_cutoff ||
+                dm_cond[jsh*nbas+lsh] > d_cutoff) {
                 int off = atomicAdd(ntasks, 1);
                 bas_kl_idx[off] = bas_kl;
             }

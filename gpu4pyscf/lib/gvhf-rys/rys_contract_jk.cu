@@ -161,9 +161,13 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        if (ish == jsh) fac_sym *= .5;
-        if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (task_id < ntasks) {
+            if (ish == jsh) fac_sym *= .5;
+            if (ksh == lsh) fac_sym *= .5;
+            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+        } else {
+            fac_sym = 0;
+        }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -301,7 +305,9 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                             if (n < lij3) {
                                 s0x = _gx[0];
                                 s1x = cpx * s0x;
-                                s1x += i * b00 * _gx[-nsq_per_block];
+                                if (i > 0) {
+                                    s1x += i * b00 * _gx[-nsq_per_block];
+                                }
                                 _gx[stride_k*nsq_per_block] = s1x;
                             }
 
@@ -312,7 +318,9 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                 __syncthreads();
                                 if (n < lij3) {
                                     s2x = cpx*s1x + k*b01*s0x;
-                                    s2x += i * b00 * _gx[(k*stride_k-1)*nsq_per_block];
+                                    if (i > 0) {
+                                        s2x += i * b00 * _gx[(k*stride_k-1)*nsq_per_block];
+                                    }
                                     _gx[(k*stride_k+stride_k)*nsq_per_block] = s2x;
                                     s0x = s1x;
                                     s1x = s2x;

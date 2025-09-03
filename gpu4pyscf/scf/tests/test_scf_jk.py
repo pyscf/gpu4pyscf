@@ -14,6 +14,7 @@
 
 import unittest
 import numpy as np
+import numpy as cp
 import pyscf
 from pyscf import lib, gto
 from gpu4pyscf.scf import jk
