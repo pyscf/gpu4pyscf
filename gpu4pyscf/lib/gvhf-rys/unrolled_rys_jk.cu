@@ -22,9 +22,9 @@ void _rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -83,7 +83,7 @@ void _rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -199,9 +199,9 @@ void _rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -260,7 +260,7 @@ void _rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -418,9 +418,9 @@ void _rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -479,7 +479,7 @@ void _rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -718,9 +718,9 @@ void _rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -779,7 +779,7 @@ void _rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -1231,9 +1231,9 @@ void _rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -1292,7 +1292,7 @@ void _rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -1530,9 +1530,9 @@ void _rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -1591,7 +1591,7 @@ void _rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -2039,9 +2039,9 @@ void _rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -2100,7 +2100,7 @@ void _rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -3114,9 +3114,9 @@ void _rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -3175,7 +3175,7 @@ void _rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -3382,9 +3382,9 @@ void _rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -3443,7 +3443,7 @@ void _rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -3800,9 +3800,9 @@ void _rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -3861,7 +3861,7 @@ void _rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -4610,9 +4610,9 @@ void _rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -4671,7 +4671,7 @@ void _rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -5249,9 +5249,9 @@ void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -5321,7 +5321,7 @@ void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -6721,9 +6721,9 @@ void _rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -6782,7 +6782,7 @@ void _rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -7137,9 +7137,9 @@ void _rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -7198,7 +7198,7 @@ void _rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -7944,9 +7944,9 @@ void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -8016,7 +8016,7 @@ void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -10322,9 +10322,9 @@ void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -10394,7 +10394,7 @@ void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -11859,9 +11859,9 @@ void _rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -11920,7 +11920,7 @@ void _rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -12501,9 +12501,9 @@ void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -12573,7 +12573,7 @@ void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -13981,9 +13981,9 @@ void _rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -14042,7 +14042,7 @@ void _rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -14308,9 +14308,9 @@ void _rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -14369,7 +14369,7 @@ void _rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -14881,9 +14881,9 @@ void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -14953,7 +14953,7 @@ void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -16229,9 +16229,9 @@ void _rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -16290,7 +16290,7 @@ void _rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -17156,9 +17156,9 @@ void _rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -17217,7 +17217,7 @@ void _rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -17727,9 +17727,9 @@ void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -17799,7 +17799,7 @@ void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -19071,9 +19071,9 @@ void _rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -19132,7 +19132,7 @@ void _rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         double fac_sym = PI_FAC;
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
-        if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
+        if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -20035,6 +20035,17 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *
     case 255: nsq_per_block *= 2; break;
     case 275: nsq_per_block *= 2; break;
     case 375: nsq_per_block *= 2; break;
+    }
+#else
+    switch (ijkl) {
+    case 0: adjust_threads(_rys_jk_0000, nsq_per_block); break;
+    case 125: adjust_threads(_rys_jk_1000, nsq_per_block); break;
+    case 130: adjust_threads(_rys_jk_1010, nsq_per_block); break;
+    case 150: adjust_threads(_rys_jk_1100, nsq_per_block); break;
+    case 250: adjust_threads(_rys_jk_2000, nsq_per_block); break;
+    case 255: adjust_threads(_rys_jk_2010, nsq_per_block); break;
+    case 275: adjust_threads(_rys_jk_2100, nsq_per_block); break;
+    case 375: adjust_threads(_rys_jk_3000, nsq_per_block); break;
     }
 #endif
 

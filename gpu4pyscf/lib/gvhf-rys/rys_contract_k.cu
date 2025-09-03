@@ -51,9 +51,9 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;

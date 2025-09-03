@@ -23,9 +23,9 @@ void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -197,9 +197,9 @@ void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -405,9 +405,9 @@ void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -678,9 +678,9 @@ void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -1116,9 +1116,9 @@ void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -1380,9 +1380,9 @@ void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -1814,9 +1814,9 @@ void rys_k_1111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -2694,9 +2694,9 @@ void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -2939,9 +2939,9 @@ void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -3306,9 +3306,9 @@ void rys_k_2011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -3981,9 +3981,9 @@ void rys_k_2020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -4527,9 +4527,9 @@ void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -5608,9 +5608,9 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -5953,9 +5953,9 @@ void rys_k_2110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -6613,9 +6613,9 @@ void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -8364,9 +8364,9 @@ void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -9558,9 +9558,9 @@ void rys_k_2200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -10057,9 +10057,9 @@ void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -11218,9 +11218,9 @@ void rys_k_3000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -11506,9 +11506,9 @@ void rys_k_3010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -11996,9 +11996,9 @@ void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -13045,9 +13045,9 @@ void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -13823,9 +13823,9 @@ void rys_k_3100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -14275,9 +14275,9 @@ void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -15288,9 +15288,9 @@ void rys_k_3200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (kmat.lr_factor != 0) {
-        _fill_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_k_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;

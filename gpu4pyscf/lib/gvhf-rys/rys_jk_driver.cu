@@ -28,20 +28,10 @@
 __constant__ int c_g_pair_idx[3675];
 __constant__ int c_g_pair_offsets[LMAX1*LMAX1];
 
-extern __global__ void rys_jk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                                         ShellQuartet *pool, uint32_t *batch_head);
-extern __global__ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                                          ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                           ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
 extern __global__ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                                           ShellQuartet *pool, double *dd_pool, uint32_t *batch_head);
-extern int os_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head,
-                    int *scheme, int workers, double omega);
-extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, double *dd_pool,
-                    uint32_t *batch_head, int *scheme, int workers);
 extern int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                     ShellQuartet *pool, double *dd_pool,
                     uint32_t *batch_head, int *scheme, int workers);

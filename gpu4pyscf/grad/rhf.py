@@ -107,7 +107,6 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
         kern = libvhf_rys.RYS_per_atom_jk_ip1
 
         _dms = cp.asarray(dms, order='C')
-        q_ptr = ctypes.cast(vhfopt.q_cond.data.ptr, ctypes.c_void_p)
         s_ptr = lib.c_null_ptr()
         if mol.omega < 0:
             s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)

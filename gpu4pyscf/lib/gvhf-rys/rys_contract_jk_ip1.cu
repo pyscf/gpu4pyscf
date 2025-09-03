@@ -23,7 +23,7 @@
 #include "vhf1.cuh"
 #include "rys_roots_for_k.cu"
 #include "rys_contract_k.cuh"
-#include "create_tasks_ip1.cu"
+#include "create_tasks_o1.cu"
 
 #define GWIDTH_IP1 27
 
@@ -46,9 +46,9 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
-        _fill_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_jk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
