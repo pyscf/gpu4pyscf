@@ -721,7 +721,7 @@ class _VHFOpt:
                     ntasks = npairs_ij * npairs_kl
                     llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
+                    t1, t1p = log.timer_debug1(msg, *t1), t1
                     if llll not in timing_collection:
                         timing_collection[llll] = 0
                     timing_collection[llll] += t1[1] - t1p[1]

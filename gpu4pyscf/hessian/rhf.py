@@ -218,7 +218,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
         natm = mol.natm
         ejk = cp.zeros((natm, natm, 3, 3))
 
-        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+        dm_cond = cp.log(condense('absmax', _dms, ao_loc) + 1e-300).astype(np.float32)
         q_cond = cp.asarray(vhfopt.q_cond)
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(vhfopt.direct_scf_tol)
@@ -247,7 +247,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
                 err1 = kern1(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                     ctypes.c_double(j_factor), ctypes.c_double(k_factor),
-                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     rys_envs, (ctypes.c_int*2)(*scheme1),
                     (ctypes.c_int*8)(*shls_slice),
@@ -266,7 +266,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
                 err2 = kern2(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                     ctypes.c_double(j_factor), ctypes.c_double(k_factor),
-                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     rys_envs, (ctypes.c_int*2)(*scheme3),
                     (ctypes.c_int*8)(*shls_slice),
