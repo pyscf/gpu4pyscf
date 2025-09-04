@@ -27,13 +27,14 @@ from gpu4pyscf.dft import numint, xc_deriv
 from gpu4pyscf.dft import radi
 from gpu4pyscf.dft import gen_grid
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device, take_last2d)
+    contract, get_avail_mem, add_sparse, tag_array, sandwich_dot,
+    reduce_to_device, take_last2d, ndarray)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
 
 from pyscf import __config__
-MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 4096)            # 128*128
+MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 4096)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 
 libgdft = numint.libgdft
@@ -232,8 +233,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     mo_coeff_mask = mo_coeff[idx,:]
                     rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, buf=aow_buf, out=rho)
 
-                    vxc_buf = cupy.ndarray((blk_size,), memptr=aow_buf.data)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf={'sigma1':vxc_buf})[1]
+                    vxc_buf = aow_buf
+                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=vxc_buf)[1]
 
                     wv = cupy.multiply(weight, vxc, out=vxc)
                     wv[0] *= .5
@@ -262,8 +263,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
                     mo_coeff_mask = mo_coeff[idx,:]
                     rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False, buf=aow_buf, out=rho)
-                    vxc_buf = cupy.ndarray((blk_size,), memptr=aow_buf.data)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf={'sigma1':vxc_buf})[1]
+                    vxc_buf = aow_buf
+                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=vxc_buf)[1]
 
                     wv = cupy.multiply(weight, vxc, out=vxc)
                     wv[0] *= .5
@@ -371,45 +372,43 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     log.timer_debug1('grad nlc vxc', *t0)
     return None, -exc1
 
-def _make_dR_dao_w(ao, wv, buf=None):
-    #:buf = numpy.einsum('nip,p->nip', ao[1:4], wv[0])
+def _make_dR_dao_w(ao, wv, out=None):
+    #:aow = numpy.einsum('nip,p->nip', ao[1:4], wv[0])
     if not ao.flags.c_contiguous or ao.dtype != numpy.float64:
-        if buf is None:
-            buf = cupy.empty_like(ao[:3])
+        aow = ndarray(ao[:3].shape, dtype=ao.dtype, buffer=out)
         tmp = cupy.empty_like(ao[0])
-        buf[0] = numint._scale_ao(ao[1], wv[0], out=buf[0])  # dX nabla_x
-        buf[1] = numint._scale_ao(ao[2], wv[0], out=buf[1])  # dX nabla_y
-        buf[2] = numint._scale_ao(ao[3], wv[0], out=buf[2])  # dX nabla_z
+        numint._scale_ao(ao[1], wv[0], out=aow[0])  # dX nabla_x
+        numint._scale_ao(ao[2], wv[0], out=aow[1])  # dX nabla_y
+        numint._scale_ao(ao[3], wv[0], out=aow[2])  # dX nabla_z
         # XX, XY, XZ = 4, 5, 6
         # YX, YY, YZ = 5, 7, 8
         # ZX, ZY, ZZ = 6, 8, 9
-        buf[0] += numint._scale_ao(ao[4], wv[1], out=tmp)  # dX nabla_x
-        buf[0] += numint._scale_ao(ao[5], wv[2], out=tmp)  # dX nabla_y
-        buf[0] += numint._scale_ao(ao[6], wv[3], out=tmp)  # dX nabla_z
-        buf[1] += numint._scale_ao(ao[5], wv[1], out=tmp)  # dY nabla_x
-        buf[1] += numint._scale_ao(ao[7], wv[2], out=tmp)  # dY nabla_y
-        buf[1] += numint._scale_ao(ao[8], wv[3], out=tmp)  # dY nabla_z
-        buf[2] += numint._scale_ao(ao[6], wv[1], out=tmp)  # dZ nabla_x
-        buf[2] += numint._scale_ao(ao[8], wv[2], out=tmp)  # dZ nabla_y
-        buf[2] += numint._scale_ao(ao[9], wv[3], out=tmp)  # dZ nabla_z
-        return buf
+        aow[0] += numint._scale_ao(ao[4], wv[1], out=tmp)  # dX nabla_x
+        aow[0] += numint._scale_ao(ao[5], wv[2], out=tmp)  # dX nabla_y
+        aow[0] += numint._scale_ao(ao[6], wv[3], out=tmp)  # dX nabla_z
+        aow[1] += numint._scale_ao(ao[5], wv[1], out=tmp)  # dY nabla_x
+        aow[1] += numint._scale_ao(ao[7], wv[2], out=tmp)  # dY nabla_y
+        aow[1] += numint._scale_ao(ao[8], wv[3], out=tmp)  # dY nabla_z
+        aow[2] += numint._scale_ao(ao[6], wv[1], out=tmp)  # dZ nabla_x
+        aow[2] += numint._scale_ao(ao[8], wv[2], out=tmp)  # dZ nabla_y
+        aow[2] += numint._scale_ao(ao[9], wv[3], out=tmp)  # dZ nabla_z
+        return aow
 
     assert ao.flags.c_contiguous
     assert wv.flags.c_contiguous
 
     _, nao, ngrids = ao.shape
-    if buf is None:
-        buf = cupy.empty([3,nao,ngrids])
+    aow = ndarray([3,nao,ngrids], buffer=out)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFT_make_dR_dao_w(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(buf.data.ptr, ctypes.c_void_p),
+        ctypes.cast(aow.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao.data.ptr, ctypes.c_void_p),
         ctypes.cast(wv.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids), ctypes.c_int(nao))
     if err != 0:
         raise RuntimeError('CUDA Error')
-    return buf
+    return aow
 
 def _d1_dot_(ao1, ao2, alpha=1.0, beta=0.0, transpose=False, out=None):
     if out is None:
@@ -434,7 +433,7 @@ def _gga_grad_sum_(ao, wv, accumulate=False, buf=None, out=None):
         vmat = _d1_dot_(ao[1:4], aow.T, out=out)
     else:
         vmat = _d1_dot_(ao[1:4], aow.T, beta=1.0, out=out)
-    aow = _make_dR_dao_w(ao, wv[:4], buf=buf)
+    aow = _make_dR_dao_w(ao, wv[:4], out=buf)
     vmat = _d1_dot_(aow, ao[0].T, beta=1, out=out)
     return vmat
 
