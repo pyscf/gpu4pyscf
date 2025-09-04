@@ -63,10 +63,10 @@
 #define BAS_SLOTS       8
 
 typedef struct {
-    uint16_t cell0_natm; // in bvk-cell
-    uint16_t cell0_nbas; // in bvk-cell
-    uint16_t bvk_ncells; // number of images in the BvK cell
-    uint16_t nimgs; // number of images in lattice sum
+    int cell0_natm; // in bvk-cell
+    int cell0_nbas; // in bvk-cell
+    int bvk_ncells; // number of images in the BvK cell
+    int nimgs; // number of images in lattice sum
     int *atm;
     int *bas;
     double *env;

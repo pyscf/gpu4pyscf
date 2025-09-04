@@ -470,10 +470,10 @@ def most_diffused_pgto(cell):
 
 class PBCIntEnvVars(ctypes.Structure):
     _fields_ = [
-        ('cell0_natm', ctypes.c_uint16),
-        ('cell0_nbas', ctypes.c_uint16),
-        ('bvk_ncells', ctypes.c_uint16),
-        ('nimgs', ctypes.c_uint16),
+        ('cell0_natm', ctypes.c_int),
+        ('cell0_nbas', ctypes.c_int),
+        ('bvk_ncells', ctypes.c_int),
+        ('nimgs', ctypes.c_int),
         ('atm', ctypes.c_void_p),
         ('bas', ctypes.c_void_p),
         ('env', ctypes.c_void_p),
