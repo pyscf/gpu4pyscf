@@ -268,9 +268,10 @@ class FSSH:
             hop_index = self.check_hop(r, p_ij)
             # 6. adjust nuclear velocity
             if hop_index != -1 and hop_index != self.cur_state:
-                dVt = energy_list[(i+2)%3][hop_index] - energy_list[(i+1)%3][self.cur_state]
-                dVp = energy_list[(i+1)%3][hop_index] - energy_list[(i+1)%3][self.cur_state]
-                d_vec = (dVt - dVp) / self.dt
+                self.tdgrad.state = hop_index
+                dVh = self.tdgrad.kernel()
+                dVc = -force
+                d_vec = dVh - dVc
                 hop_allowed, velocity = self.rescale_velocity(hop_index, energy, velocity, d_vec)
                 if hop_allowed:
                     self.cur_state = hop_index
