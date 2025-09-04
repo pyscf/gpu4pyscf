@@ -613,7 +613,5 @@ class NAC(tdrhf.NAC):
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
-    as_scanner = NotImplemented
-
 
 
