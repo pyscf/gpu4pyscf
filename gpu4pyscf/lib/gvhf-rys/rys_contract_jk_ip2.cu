@@ -1414,13 +1414,13 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
     }
 }
 
-extern int rys_ejk_ip2_type12_unrolled_o0(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
+extern int rys_ejk_ip2_type12_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         int *pool, double *dd_pool);
-extern int rys_ejk_ip2_type3_unrolled_o0(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
+extern int rys_ejk_ip2_type3_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
                         int *pool, double *dd_pool);
 
 extern "C" {
-int RYS_per_atom_jk_ip2_type12_o0(double *ejk, double j_factor, double k_factor,
+int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
@@ -1474,7 +1474,7 @@ int RYS_per_atom_jk_ip2_type12_o0(double *ejk, double j_factor, double k_factor,
         jk.sr_factor = 1;
     }
 
-    if (!rys_ejk_ip2_type12_unrolled_o0(&envs, &jk, &bounds, pool, dd_pool)) {
+    if (!rys_ejk_ip2_type12_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
@@ -1499,7 +1499,7 @@ int RYS_per_atom_jk_ip2_type12_o0(double *ejk, double j_factor, double k_factor,
     return 0;
 }
 
-int RYS_per_atom_jk_ip2_type3_o0(double *ejk, double j_factor, double k_factor,
+int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
@@ -1553,7 +1553,7 @@ int RYS_per_atom_jk_ip2_type3_o0(double *ejk, double j_factor, double k_factor,
         jk.sr_factor = 1;
     }
 
-    if (!rys_ejk_ip2_type3_unrolled_o0(&envs, &jk, &bounds, pool, dd_pool)) {
+    if (!rys_ejk_ip2_type3_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;

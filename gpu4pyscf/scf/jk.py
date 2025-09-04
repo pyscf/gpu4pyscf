@@ -665,19 +665,17 @@ class _VHFOpt:
                 _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
                 pair_loc_on_gpu.data.ptr,
             )
-            tile_q_cond = self.tile_q_cond
             q_cond = self.q_cond
 
             err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_int(SHM_SIZE))
             if err != 0:
                 raise RuntimeError('CUDA kernel initialization')
 
-            tile_mappings = _make_tril_tile_mappings(
-                l_ctr_bas_loc, tile_q_cond, log_cutoff-log_max_dm, self.tile)
+            pair_mappings = _make_tril_pair_mappings(
+                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
-            info = cp.empty(2, dtype=np.uint32)
 
             timing_collection = {}
             kern_counts = 0
@@ -690,36 +688,39 @@ class _VHFOpt:
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                tile_ij_mapping = tile_mappings[i,j]
-                tile_kl_mapping = tile_mappings[k,l]
-                if len(tile_ij_mapping) == 0 or len(tile_kl_mapping) == 0:
+                pair_ij_mapping = pair_mappings[i,j]
+                pair_kl_mapping = pair_mappings[k,l]
+                npairs_ij = pair_ij_mapping.size
+                npairs_kl = pair_kl_mapping.size
+                if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 scheme = schemes[task]
-                err = kern(
-                    ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    rys_envs, (ctypes.c_int*3)(*scheme),
-                    (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(tile_ij_mapping.size),
-                    ctypes.c_int(tile_kl_mapping.size),
-                    ctypes.cast(tile_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(tile_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(tile_q_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                    lib.c_null_ptr(),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(info.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(workers),
-                    mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                if err != 0:
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
+                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
+                    _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
+                    _npairs_kl = pair_kl1 - pair_kl0
+                    err = kern(
+                        ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(n_dm), ctypes.c_int(nao),
+                        rys_envs, (ctypes.c_int*3)(*scheme),
+                        (ctypes.c_int*8)(*shls_slice),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                        lib.c_null_ptr(),
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        mol._atm.ctypes, ctypes.c_int(mol.natm),
+                        mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                    if err != 0:
+                        llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                        raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
+                    ntasks = npairs_ij * npairs_kl
                     llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                    msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
                     t1, t1p = log.timer_debug1(f'processing {llll}, tasks = {info[1]}', *t1), t1
                     if llll not in timing_collection:
                         timing_collection[llll] = 0
@@ -1059,12 +1060,12 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)//6
     nroots = order // 2 + 1
 
-    unit = nroots*2 + g_size*3 + ij_prims + 9
+    unit = nroots*2 + g_size*3 + 6
     dm_cache_size = nf3_ij + nf3_kl*2 + (lij+1)*(lkl+1)*(nmax+2)
     gout_size = nf3_ij * nf3_kl
     if dm_cache_size < gout_size:
         unit += dm_cache_size
-        shm_size -= nf3_ij * TILE*TILE * 8
+        shm_size -= nf3_ij * 8
         with_gout = False
     else:
         unit += gout_size
@@ -1072,7 +1073,7 @@ def _j_engine_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
 
     if mol.omega < 0:
         unit += nroots*2
-    counts = shm_size // (unit*8)
+    counts = (shm_size-ij_prims*8) // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n
     return n, gout_stride, with_gout

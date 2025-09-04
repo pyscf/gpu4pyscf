@@ -150,9 +150,6 @@ __device__ __forceinline__ unsigned get_smid()
     if (attr.numRegs <= 128) threads *= 2; }
 
 #ifdef __CUDACC__
-extern __constant__ int c_g_pair_idx[];
-extern __constant__ int c_g_pair_offsets[];
-//extern __constant__ double c_env[];
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
 #endif

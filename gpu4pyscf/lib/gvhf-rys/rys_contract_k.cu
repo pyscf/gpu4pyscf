@@ -117,9 +117,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -127,6 +124,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         rjri[t_id] = env[rj_ptr+t_id] - ri[t_id];
     }
     __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
