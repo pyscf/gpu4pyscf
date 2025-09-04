@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "gvhf-rys/vhf1.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 

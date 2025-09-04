@@ -20,7 +20,7 @@
 #include <string.h>
 #include <cuda_runtime.h>
 
-#include "vhf1.cuh"
+#include "vhf.cuh"
 #include "rys_roots_for_k.cu"
 #include "rys_contract_k.cuh"
 #include "create_tasks.cu"

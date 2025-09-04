@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 
-#include "gvhf-rys/vhf1.cuh"
+#include "gvhf-rys/vhf.cuh"
 //#include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
 

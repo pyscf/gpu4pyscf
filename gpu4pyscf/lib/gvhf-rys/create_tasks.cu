@@ -20,7 +20,7 @@
 #include <string.h>
 #include <cuda_runtime.h>
 
-#include "vhf1.cuh"
+#include "vhf.cuh"
 
 __device__ static
 void _fill_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,

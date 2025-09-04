@@ -1,5 +1,5 @@
 #include <cuda.h>
-#include "vhf1.cuh"
+#include "vhf.cuh"
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
 

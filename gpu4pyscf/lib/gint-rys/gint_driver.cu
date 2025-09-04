@@ -20,7 +20,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include "gvhf-rys/vhf1.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
 
 __constant__ int c_g_pair_idx[3675]; // corresponding to LMAX=4

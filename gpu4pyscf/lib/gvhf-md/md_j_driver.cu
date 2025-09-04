@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cuda_runtime.h>
-#include "gvhf-rys/vhf1.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/md_j.cuh"
 
 extern __global__ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
