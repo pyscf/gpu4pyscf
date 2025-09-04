@@ -573,19 +573,19 @@ int build_ft_aopair(double *out, int compressing, PBCIntEnvVars *envs,
                     int *bas_ij, double *grids, int *img_offsets, int *img_idx,
                     int *atm, int natm, int *bas, int nbas, double *env)
 {
-    uint16_t ish0 = shls_slice[0];
-    uint16_t jsh0 = shls_slice[2];
-    uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
-    uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    uint8_t iprim = bas[NPRIM_OF + ish0*BAS_SLOTS];
-    uint8_t jprim = bas[NPRIM_OF + jsh0*BAS_SLOTS];
-    uint8_t nfi = (li+1)*(li+2)/2;
-    uint8_t nfj = (lj+1)*(lj+2)/2;
-    uint8_t nfij = nfi * nfj;
-    uint8_t stride_i = 1;
-    uint8_t stride_j = li + 1;
+    int ish0 = shls_slice[0];
+    int jsh0 = shls_slice[2];
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    int iprim = bas[NPRIM_OF + ish0*BAS_SLOTS];
+    int jprim = bas[NPRIM_OF + jsh0*BAS_SLOTS];
+    int nfi = (li+1)*(li+2)/2;
+    int nfj = (lj+1)*(lj+2)/2;
+    int nfij = nfi * nfj;
+    int stride_i = 1;
+    int stride_j = li + 1;
     // up to g functions
-    uint8_t g_size = stride_j * (uint16_t)(lj + 1);
+    int g_size = stride_j * (lj + 1);
     AFTBoundsInfo bounds = {li, lj, nfij, g_size,
         stride_i, stride_j, iprim, jprim,
         npairs_ij, ngrids, bas_ij, grids, img_offsets, img_idx};

@@ -1,15 +1,15 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
 #include <cuda_runtime.h>
-
 #include "gvhf-rys/vhf1.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
 
 
-__device__ static
-void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_000(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -137,8 +137,8 @@ void int3c2e_bdiv_000(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_100(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -281,8 +281,8 @@ void int3c2e_bdiv_100(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_110(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -453,8 +453,8 @@ void int3c2e_bdiv_110(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_200(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -610,8 +610,8 @@ void int3c2e_bdiv_200(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_210(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -815,8 +815,8 @@ void int3c2e_bdiv_210(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_220(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -1089,8 +1089,8 @@ void int3c2e_bdiv_220(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_001(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -1233,8 +1233,8 @@ void int3c2e_bdiv_001(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_101(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -1406,8 +1406,8 @@ void int3c2e_bdiv_101(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_111(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -1652,8 +1652,8 @@ void int3c2e_bdiv_111(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_201(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -1859,8 +1859,8 @@ void int3c2e_bdiv_201(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_211(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -2198,8 +2198,8 @@ void int3c2e_bdiv_211(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__
-void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_221(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
@@ -2207,8 +2207,6 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
     int ksh1 = bounds.ksh_offsets[ksh_block_id+1];
-    int nksh = ksh1 - ksh0;
-    int nshl_pair = shl_pair1 - shl_pair0;
     int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
     int nbas = envs.nbas;
     int ish0 = bas_ij0 / nbas;
@@ -2218,14 +2216,23 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int *bas = envs.bas;
-    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    int kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
-    int nroots = 3;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
+    __shared__ int nroots;
+    __shared__ int iprim, jprim, kprim;
+    __shared__ int nshl_pair, nksh;
+    if (st_id == 0) {
+        iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+        jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+        kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
+        nksh = ksh1 - ksh0;
+        nshl_pair = shl_pair1 - shl_pair0;
+        nroots = 3;
+        if (omega < 0) {
+            nroots *= 2;
+        }
+    }
+    __syncthreads();
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 128;
@@ -2254,15 +2261,8 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
         int bas_ij = bounds.bas_ij_idx[shl_pair_in_block + shl_pair0];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
             double xjxi = rj[0] - ri[0];
             double yjyi = rj[1] - ri[1];
@@ -2300,8 +2300,17 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
         double gout24 = 0;
         double gout25 = 0;
         double gout26 = 0;
+int ijprim = iprim * jprim;
+int ijkprim = ijprim * kprim;
         double s0, s1, s2;
         for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
+            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+            double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+            double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp % kprim;
             int ip = ijp / jprim;
@@ -2695,8 +2704,8 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_002(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -2852,8 +2861,8 @@ void int3c2e_bdiv_002(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_102(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -3059,8 +3068,8 @@ void int3c2e_bdiv_102(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_112(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -3402,8 +3411,8 @@ void int3c2e_bdiv_112(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__ static
-void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_202(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     // For better load balance, consume blocks in the reversed order
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -3673,8 +3682,8 @@ void int3c2e_bdiv_202(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__
-void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+void int3c2e_bdiv_212(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
@@ -3682,8 +3691,6 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
     int ksh1 = bounds.ksh_offsets[ksh_block_id+1];
-    int nksh = ksh1 - ksh0;
-    int nshl_pair = shl_pair1 - shl_pair0;
     int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
     int nbas = envs.nbas;
     int ish0 = bas_ij0 / nbas;
@@ -3693,14 +3700,23 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int *bas = envs.bas;
-    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    int kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
-    int ijprim = iprim * jprim;
-    int ijkprim = ijprim * kprim;
-    int nroots = 3;
     double *env = envs.env;
     double omega = env[PTR_RANGE_OMEGA];
+    __shared__ int nroots;
+    __shared__ int iprim, jprim, kprim;
+    __shared__ int nshl_pair, nksh;
+    if (st_id == 0) {
+        iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+        jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+        kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
+        nksh = ksh1 - ksh0;
+        nshl_pair = shl_pair1 - shl_pair0;
+        nroots = 3;
+        if (omega < 0) {
+            nroots *= 2;
+        }
+    }
+    __syncthreads();
     extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 128;
@@ -3729,15 +3745,8 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
         int bas_ij = bounds.bas_ij_idx[shl_pair_in_block + shl_pair0];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
             double xjxi = rj[0] - ri[0];
             double yjyi = rj[1] - ri[1];
@@ -3775,8 +3784,17 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
         double gout24 = 0;
         double gout25 = 0;
         double gout26 = 0;
+int ijprim = iprim * jprim;
+int ijkprim = ijprim * kprim;
         double s0, s1, s2;
         for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
+            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+            double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+            double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+            double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+            double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp % kprim;
             int ip = ijp / jprim;
@@ -4159,8 +4177,8 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
     }
 }
 
-__device__
-int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
+__device__ inline
+int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
 {
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;

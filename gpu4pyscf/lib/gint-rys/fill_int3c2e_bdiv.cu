@@ -20,12 +20,13 @@
 #include <cuda_runtime.h>
 
 #include "gvhf-rys/vhf1.cuh"
-#include "gvhf-rys/rys_roots.cu"
+//#include "gvhf-rys/rys_roots.cu"
 #include "int3c2e.cuh"
 
 #define GOUT_WIDTH      54
 
-__device__ int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds);
+//__device__ int int3c2e_bdiv_unrolled(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds);
+#include "unrolled_int3c2e_bdiv.cu"
 
 __global__
 void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds)
@@ -48,9 +49,10 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
 
     int *bas = envs.bas;
     __shared__ int li, lj, lk, nroots;
-    __shared__ int nfi, nfj, nfk;
+    __shared__ int nfi, nfj, nfk, nfij;
     __shared__ int iprim, jprim, kprim;
     __shared__ int nshl_pair, nksh;
+    __shared__ int stride_j, stride_k, g_size;
     if (thread_id == 0) {
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
@@ -64,10 +66,13 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
         kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
         nksh = ksh1 - ksh0;
         nshl_pair = shl_pair1 - shl_pair0;
+        stride_j = li + 1;
+        stride_k = stride_j * (lj + 1);
+        nfij = nfi * nfj;
+        g_size = stride_k * (lk + 1);
     }
     __syncthreads();
     int lij = li + lj;
-    int nfij = nfi * nfj;
     int *idx_ij = c_g_pair_idx + c_g_pair_offsets[li*LMAX1+lj];
     int *idy_ij = idx_ij + nfij;
     int *idz_ij = idx_ij + nfij * 2;
@@ -75,11 +80,8 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     int *idx_k = c_g_cart_idx + lk_offset;
     int *idy_k = idx_k + nfk;
     int *idz_k = idx_k + nfk * 2;
-    int stride_j = li + 1;
-    int stride_k = stride_j * (lj + 1);
-    int g_size = stride_k * (lk + 1);
 
-    register int nst_per_block = blockDim.x;
+    int nst_per_block = blockDim.x;
     if (lij + lk > 2) {
         nst_per_block = bounds.nst_lookup[(lk*LMAX1+lj)*LMAX1+li];
     }
@@ -188,6 +190,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                     }
                     double rt = rw[ irys*2   *nst_per_block];
                     double rt_aa = rt / (aij + ak);
+                    int lij = li + lj;
 
                     if (lij > 0) {
                         __syncthreads();
@@ -195,7 +198,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                         double b10 = .5/aij * (1 - rt_aij);
                         // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                         for (int n = gout_id; n < 3; n += gout_stride) {
-                            double *_gx = gx + n * gx_len;
+                            double *_gx = gx + n * g_size * nst_per_block;
                             double xjxi = rjri[n*nst_per_block];
                             double xpa = xjxi * aj_aij;
                             //double c0x = Rpa[ir] - rt_aij * Rpq[n*nst_per_block];

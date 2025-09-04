@@ -50,7 +50,7 @@ libpbc.aopair_fill_triu.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
-GOUT_WIDTH = 45
+GOUT_WIDTH = 54
 THREADS = 256
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):

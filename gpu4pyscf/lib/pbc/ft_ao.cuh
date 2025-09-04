@@ -23,14 +23,14 @@
 #define NG_PER_BLOCK    32
 
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t nfij;
-    uint8_t g_size;
-    uint8_t stride_i;
-    uint8_t stride_j;
-    uint8_t iprim;
-    uint8_t jprim;
+    int li;
+    int lj;
+    int nfij;
+    int g_size;
+    int stride_i;
+    int stride_j;
+    int iprim;
+    int jprim;
     int npairs_ij;
     int ngrids;
     int *bas_ij_idx;
