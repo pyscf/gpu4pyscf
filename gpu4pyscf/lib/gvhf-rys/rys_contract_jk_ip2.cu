@@ -23,7 +23,7 @@
 #include "vhf1.cuh"
 #include "rys_roots_for_k.cu"
 #include "rys_contract_k.cuh"
-#include "create_tasks_o1.cu"
+#include "create_tasks.cu"
 
 // type 1: (d^2i j | k l)
 // type 2: (di dj | k l)

@@ -23,7 +23,7 @@
 #include "vhf1.cuh"
 #include "rys_roots.cu"
 #include "rys_contract_k.cuh"
-#include "create_tasks_o1.cu"
+#include "create_tasks.cu"
 
 #define GOUT_WIDTH1     81
 

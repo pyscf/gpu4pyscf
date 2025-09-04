@@ -23,7 +23,7 @@
 #include "gint/cuda_alloc.cuh"
 #include "vhf1.cuh"
 #include "rys_roots_for_k.cu"
-#include "create_tasks_o1.cu"
+#include "create_tasks.cu"
 #include "rys_contract_k.cuh"
 
 #define GOUT_WIDTH1     81

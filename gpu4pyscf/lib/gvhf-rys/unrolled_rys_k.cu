@@ -2,7 +2,7 @@
 #include <cuda_runtime.h>
 #include "vhf1.cuh"
 #include "rys_roots_for_k.cu"
-#include "create_tasks_o1.cu"
+#include "create_tasks.cu"
 
 
 #if CUDA_VERSION >= 12040

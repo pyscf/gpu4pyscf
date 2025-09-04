@@ -1,7 +1,7 @@
 #include <cuda.h>
 #include "vhf1.cuh"
 #include "rys_roots.cu"
-#include "create_tasks_o1.cu"
+#include "create_tasks.cu"
 
 
 __global__ static

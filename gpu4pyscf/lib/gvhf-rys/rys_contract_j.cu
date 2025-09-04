@@ -22,7 +22,7 @@
 
 #include "vhf1.cuh"
 #include "rys_roots.cu"
-#include "create_tasks_o1.cu"
+#include "create_tasks.cu"
 
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
