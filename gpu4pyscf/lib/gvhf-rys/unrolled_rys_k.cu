@@ -35,24 +35,21 @@ void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -60,6 +57,10 @@ void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -89,8 +90,6 @@ void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -209,24 +208,21 @@ void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -234,6 +230,10 @@ void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -263,8 +263,6 @@ void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -417,24 +415,21 @@ void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -442,6 +437,10 @@ void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -471,8 +470,6 @@ void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -690,24 +687,21 @@ void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -715,6 +709,10 @@ void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -744,8 +742,6 @@ void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1128,24 +1124,21 @@ void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1153,6 +1146,10 @@ void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -1182,8 +1179,6 @@ void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1392,24 +1387,21 @@ void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1417,6 +1409,10 @@ void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -1446,8 +1442,6 @@ void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1826,24 +1820,21 @@ void rys_k_1111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1851,6 +1842,10 @@ void rys_k_1111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -1880,8 +1875,6 @@ void rys_k_1111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -2706,24 +2699,21 @@ void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -2731,6 +2721,10 @@ void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -2760,8 +2754,6 @@ void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -2951,24 +2943,21 @@ void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -2976,6 +2965,10 @@ void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -3005,8 +2998,6 @@ void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -3318,24 +3309,21 @@ void rys_k_2011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -3343,6 +3331,10 @@ void rys_k_2011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -3372,8 +3364,6 @@ void rys_k_2011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -3993,24 +3983,21 @@ void rys_k_2020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -4018,6 +4005,10 @@ void rys_k_2020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -4047,8 +4038,6 @@ void rys_k_2020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -4548,25 +4537,22 @@ void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 
     int thread_id = 64 * gout_id + sq_id;
     int threads = 256;
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (thread_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -4574,6 +4560,10 @@ void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -4606,12 +4596,6 @@ void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
@@ -4623,39 +4607,70 @@ void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
             rlrk[128] = zlzk;
             fac_ijkl[0] = fac_sym;
         }
+        double gout0;
+        double gout1;
+        double gout2;
+        double gout3;
+        double gout4;
+        double gout5;
+        double gout6;
+        double gout7;
+        double gout8;
+        double gout9;
+        double gout10;
+        double gout11;
+        double gout12;
+        double gout13;
+        double gout14;
+        double gout15;
+        double gout16;
+        double gout17;
+        double gout18;
+        double gout19;
+        double gout20;
+        double gout21;
+        double gout22;
+        double gout23;
+        double gout24;
+        double gout25;
+        double gout26;
         
-        double gout0 = 0;
-        double gout1 = 0;
-        double gout2 = 0;
-        double gout3 = 0;
-        double gout4 = 0;
-        double gout5 = 0;
-        double gout6 = 0;
-        double gout7 = 0;
-        double gout8 = 0;
-        double gout9 = 0;
-        double gout10 = 0;
-        double gout11 = 0;
-        double gout12 = 0;
-        double gout13 = 0;
-        double gout14 = 0;
-        double gout15 = 0;
-        double gout16 = 0;
-        double gout17 = 0;
-        double gout18 = 0;
-        double gout19 = 0;
-        double gout20 = 0;
-        double gout21 = 0;
-        double gout22 = 0;
-        double gout23 = 0;
-        double gout24 = 0;
-        double gout25 = 0;
-        double gout26 = 0;
+        gout0 = 0;
+        gout1 = 0;
+        gout2 = 0;
+        gout3 = 0;
+        gout4 = 0;
+        gout5 = 0;
+        gout6 = 0;
+        gout7 = 0;
+        gout8 = 0;
+        gout9 = 0;
+        gout10 = 0;
+        gout11 = 0;
+        gout12 = 0;
+        gout13 = 0;
+        gout14 = 0;
+        gout15 = 0;
+        gout16 = 0;
+        gout17 = 0;
+        gout18 = 0;
+        gout19 = 0;
+        gout20 = 0;
+        gout21 = 0;
+        gout22 = 0;
+        gout23 = 0;
+        gout24 = 0;
+        gout25 = 0;
+        gout26 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             __syncthreads();
             if (gout_id == 0) {
                 int kp = klp / lprim;
                 int lp = klp % lprim;
+                double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+                double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+                double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+                double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
                 double ak = expk[kp];
                 double al = expl[lp];
                 double akl = ak + al;
@@ -4684,6 +4699,7 @@ void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
+                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                 double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
@@ -5620,24 +5636,21 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -5645,6 +5658,10 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -5674,8 +5691,6 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -5965,24 +5980,21 @@ void rys_k_2110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -5990,6 +6002,10 @@ void rys_k_2110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -6019,8 +6035,6 @@ void rys_k_2110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -6634,25 +6648,22 @@ void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 
     int thread_id = 32 * gout_id + sq_id;
     int threads = 256;
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (thread_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -6660,6 +6671,10 @@ void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -6692,12 +6707,6 @@ void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
@@ -6709,33 +6718,58 @@ void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
             rlrk[64] = zlzk;
             fac_ijkl[0] = fac_sym;
         }
+        double gout0;
+        double gout1;
+        double gout2;
+        double gout3;
+        double gout4;
+        double gout5;
+        double gout6;
+        double gout7;
+        double gout8;
+        double gout9;
+        double gout10;
+        double gout11;
+        double gout12;
+        double gout13;
+        double gout14;
+        double gout15;
+        double gout16;
+        double gout17;
+        double gout18;
+        double gout19;
+        double gout20;
         
-        double gout0 = 0;
-        double gout1 = 0;
-        double gout2 = 0;
-        double gout3 = 0;
-        double gout4 = 0;
-        double gout5 = 0;
-        double gout6 = 0;
-        double gout7 = 0;
-        double gout8 = 0;
-        double gout9 = 0;
-        double gout10 = 0;
-        double gout11 = 0;
-        double gout12 = 0;
-        double gout13 = 0;
-        double gout14 = 0;
-        double gout15 = 0;
-        double gout16 = 0;
-        double gout17 = 0;
-        double gout18 = 0;
-        double gout19 = 0;
-        double gout20 = 0;
+        gout0 = 0;
+        gout1 = 0;
+        gout2 = 0;
+        gout3 = 0;
+        gout4 = 0;
+        gout5 = 0;
+        gout6 = 0;
+        gout7 = 0;
+        gout8 = 0;
+        gout9 = 0;
+        gout10 = 0;
+        gout11 = 0;
+        gout12 = 0;
+        gout13 = 0;
+        gout14 = 0;
+        gout15 = 0;
+        gout16 = 0;
+        gout17 = 0;
+        gout18 = 0;
+        gout19 = 0;
+        gout20 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             __syncthreads();
             if (gout_id == 0) {
                 int kp = klp / lprim;
                 int lp = klp % lprim;
+                double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+                double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+                double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+                double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
                 double ak = expk[kp];
                 double al = expl[lp];
                 double akl = ak + al;
@@ -6764,6 +6798,7 @@ void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
+                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                 double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
@@ -8385,25 +8420,22 @@ void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 
     int thread_id = 64 * gout_id + sq_id;
     int threads = 256;
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (thread_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -8411,6 +8443,10 @@ void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -8443,12 +8479,6 @@ void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
@@ -8460,39 +8490,70 @@ void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
             rlrk[128] = zlzk;
             fac_ijkl[0] = fac_sym;
         }
+        double gout0;
+        double gout1;
+        double gout2;
+        double gout3;
+        double gout4;
+        double gout5;
+        double gout6;
+        double gout7;
+        double gout8;
+        double gout9;
+        double gout10;
+        double gout11;
+        double gout12;
+        double gout13;
+        double gout14;
+        double gout15;
+        double gout16;
+        double gout17;
+        double gout18;
+        double gout19;
+        double gout20;
+        double gout21;
+        double gout22;
+        double gout23;
+        double gout24;
+        double gout25;
+        double gout26;
         
-        double gout0 = 0;
-        double gout1 = 0;
-        double gout2 = 0;
-        double gout3 = 0;
-        double gout4 = 0;
-        double gout5 = 0;
-        double gout6 = 0;
-        double gout7 = 0;
-        double gout8 = 0;
-        double gout9 = 0;
-        double gout10 = 0;
-        double gout11 = 0;
-        double gout12 = 0;
-        double gout13 = 0;
-        double gout14 = 0;
-        double gout15 = 0;
-        double gout16 = 0;
-        double gout17 = 0;
-        double gout18 = 0;
-        double gout19 = 0;
-        double gout20 = 0;
-        double gout21 = 0;
-        double gout22 = 0;
-        double gout23 = 0;
-        double gout24 = 0;
-        double gout25 = 0;
-        double gout26 = 0;
+        gout0 = 0;
+        gout1 = 0;
+        gout2 = 0;
+        gout3 = 0;
+        gout4 = 0;
+        gout5 = 0;
+        gout6 = 0;
+        gout7 = 0;
+        gout8 = 0;
+        gout9 = 0;
+        gout10 = 0;
+        gout11 = 0;
+        gout12 = 0;
+        gout13 = 0;
+        gout14 = 0;
+        gout15 = 0;
+        gout16 = 0;
+        gout17 = 0;
+        gout18 = 0;
+        gout19 = 0;
+        gout20 = 0;
+        gout21 = 0;
+        gout22 = 0;
+        gout23 = 0;
+        gout24 = 0;
+        gout25 = 0;
+        gout26 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             __syncthreads();
             if (gout_id == 0) {
                 int kp = klp / lprim;
                 int lp = klp % lprim;
+                double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+                double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+                double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+                double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
                 double ak = expk[kp];
                 double al = expl[lp];
                 double akl = ak + al;
@@ -8521,6 +8582,7 @@ void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
+                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                 double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
@@ -9570,24 +9632,21 @@ void rys_k_2200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -9595,6 +9654,10 @@ void rys_k_2200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -9624,8 +9687,6 @@ void rys_k_2200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -10078,25 +10139,22 @@ void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 
     int thread_id = 64 * gout_id + sq_id;
     int threads = 256;
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (thread_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -10104,6 +10162,10 @@ void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -10136,12 +10198,6 @@ void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
@@ -10153,39 +10209,70 @@ void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
             rlrk[128] = zlzk;
             fac_ijkl[0] = fac_sym;
         }
+        double gout0;
+        double gout1;
+        double gout2;
+        double gout3;
+        double gout4;
+        double gout5;
+        double gout6;
+        double gout7;
+        double gout8;
+        double gout9;
+        double gout10;
+        double gout11;
+        double gout12;
+        double gout13;
+        double gout14;
+        double gout15;
+        double gout16;
+        double gout17;
+        double gout18;
+        double gout19;
+        double gout20;
+        double gout21;
+        double gout22;
+        double gout23;
+        double gout24;
+        double gout25;
+        double gout26;
         
-        double gout0 = 0;
-        double gout1 = 0;
-        double gout2 = 0;
-        double gout3 = 0;
-        double gout4 = 0;
-        double gout5 = 0;
-        double gout6 = 0;
-        double gout7 = 0;
-        double gout8 = 0;
-        double gout9 = 0;
-        double gout10 = 0;
-        double gout11 = 0;
-        double gout12 = 0;
-        double gout13 = 0;
-        double gout14 = 0;
-        double gout15 = 0;
-        double gout16 = 0;
-        double gout17 = 0;
-        double gout18 = 0;
-        double gout19 = 0;
-        double gout20 = 0;
-        double gout21 = 0;
-        double gout22 = 0;
-        double gout23 = 0;
-        double gout24 = 0;
-        double gout25 = 0;
-        double gout26 = 0;
+        gout0 = 0;
+        gout1 = 0;
+        gout2 = 0;
+        gout3 = 0;
+        gout4 = 0;
+        gout5 = 0;
+        gout6 = 0;
+        gout7 = 0;
+        gout8 = 0;
+        gout9 = 0;
+        gout10 = 0;
+        gout11 = 0;
+        gout12 = 0;
+        gout13 = 0;
+        gout14 = 0;
+        gout15 = 0;
+        gout16 = 0;
+        gout17 = 0;
+        gout18 = 0;
+        gout19 = 0;
+        gout20 = 0;
+        gout21 = 0;
+        gout22 = 0;
+        gout23 = 0;
+        gout24 = 0;
+        gout25 = 0;
+        gout26 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             __syncthreads();
             if (gout_id == 0) {
                 int kp = klp / lprim;
                 int lp = klp % lprim;
+                double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+                double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+                double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+                double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
                 double ak = expk[kp];
                 double al = expl[lp];
                 double akl = ak + al;
@@ -10214,6 +10301,7 @@ void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
+                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                 double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
@@ -11230,24 +11318,21 @@ void rys_k_3000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -11255,6 +11340,10 @@ void rys_k_3000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -11284,8 +11373,6 @@ void rys_k_3000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -11518,24 +11605,21 @@ void rys_k_3010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -11543,6 +11627,10 @@ void rys_k_3010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -11572,8 +11660,6 @@ void rys_k_3010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -12017,25 +12103,22 @@ void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 
     int thread_id = 64 * gout_id + sq_id;
     int threads = 256;
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (thread_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -12043,6 +12126,10 @@ void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -12075,12 +12162,6 @@ void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
@@ -12092,35 +12173,62 @@ void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
             rlrk[128] = zlzk;
             fac_ijkl[0] = fac_sym;
         }
+        double gout0;
+        double gout1;
+        double gout2;
+        double gout3;
+        double gout4;
+        double gout5;
+        double gout6;
+        double gout7;
+        double gout8;
+        double gout9;
+        double gout10;
+        double gout11;
+        double gout12;
+        double gout13;
+        double gout14;
+        double gout15;
+        double gout16;
+        double gout17;
+        double gout18;
+        double gout19;
+        double gout20;
+        double gout21;
+        double gout22;
         
-        double gout0 = 0;
-        double gout1 = 0;
-        double gout2 = 0;
-        double gout3 = 0;
-        double gout4 = 0;
-        double gout5 = 0;
-        double gout6 = 0;
-        double gout7 = 0;
-        double gout8 = 0;
-        double gout9 = 0;
-        double gout10 = 0;
-        double gout11 = 0;
-        double gout12 = 0;
-        double gout13 = 0;
-        double gout14 = 0;
-        double gout15 = 0;
-        double gout16 = 0;
-        double gout17 = 0;
-        double gout18 = 0;
-        double gout19 = 0;
-        double gout20 = 0;
-        double gout21 = 0;
-        double gout22 = 0;
+        gout0 = 0;
+        gout1 = 0;
+        gout2 = 0;
+        gout3 = 0;
+        gout4 = 0;
+        gout5 = 0;
+        gout6 = 0;
+        gout7 = 0;
+        gout8 = 0;
+        gout9 = 0;
+        gout10 = 0;
+        gout11 = 0;
+        gout12 = 0;
+        gout13 = 0;
+        gout14 = 0;
+        gout15 = 0;
+        gout16 = 0;
+        gout17 = 0;
+        gout18 = 0;
+        gout19 = 0;
+        gout20 = 0;
+        gout21 = 0;
+        gout22 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             __syncthreads();
             if (gout_id == 0) {
                 int kp = klp / lprim;
                 int lp = klp % lprim;
+                double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+                double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+                double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+                double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
                 double ak = expk[kp];
                 double al = expl[lp];
                 double akl = ak + al;
@@ -12149,6 +12257,7 @@ void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
+                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                 double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
@@ -13057,24 +13166,21 @@ void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -13082,6 +13188,10 @@ void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -13111,8 +13221,6 @@ void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -13835,24 +13943,21 @@ void rys_k_3100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -13860,6 +13965,10 @@ void rys_k_3100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -13889,8 +13998,6 @@ void rys_k_3100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -14296,25 +14403,22 @@ void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
 
     int thread_id = 64 * gout_id + sq_id;
     int threads = 256;
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (thread_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -14322,6 +14426,10 @@ void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -14354,12 +14462,6 @@ void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         }
         int iprim = bounds.iprim;
         int jprim = bounds.jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
@@ -14371,35 +14473,62 @@ void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
             rlrk[128] = zlzk;
             fac_ijkl[0] = fac_sym;
         }
+        double gout0;
+        double gout1;
+        double gout2;
+        double gout3;
+        double gout4;
+        double gout5;
+        double gout6;
+        double gout7;
+        double gout8;
+        double gout9;
+        double gout10;
+        double gout11;
+        double gout12;
+        double gout13;
+        double gout14;
+        double gout15;
+        double gout16;
+        double gout17;
+        double gout18;
+        double gout19;
+        double gout20;
+        double gout21;
+        double gout22;
         
-        double gout0 = 0;
-        double gout1 = 0;
-        double gout2 = 0;
-        double gout3 = 0;
-        double gout4 = 0;
-        double gout5 = 0;
-        double gout6 = 0;
-        double gout7 = 0;
-        double gout8 = 0;
-        double gout9 = 0;
-        double gout10 = 0;
-        double gout11 = 0;
-        double gout12 = 0;
-        double gout13 = 0;
-        double gout14 = 0;
-        double gout15 = 0;
-        double gout16 = 0;
-        double gout17 = 0;
-        double gout18 = 0;
-        double gout19 = 0;
-        double gout20 = 0;
-        double gout21 = 0;
-        double gout22 = 0;
+        gout0 = 0;
+        gout1 = 0;
+        gout2 = 0;
+        gout3 = 0;
+        gout4 = 0;
+        gout5 = 0;
+        gout6 = 0;
+        gout7 = 0;
+        gout8 = 0;
+        gout9 = 0;
+        gout10 = 0;
+        gout11 = 0;
+        gout12 = 0;
+        gout13 = 0;
+        gout14 = 0;
+        gout15 = 0;
+        gout16 = 0;
+        gout17 = 0;
+        gout18 = 0;
+        gout19 = 0;
+        gout20 = 0;
+        gout21 = 0;
+        gout22 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             __syncthreads();
             if (gout_id == 0) {
                 int kp = klp / lprim;
                 int lp = klp % lprim;
+                double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+                double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
+                double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+                double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
                 double ak = expk[kp];
                 double al = expl[lp];
                 double akl = ak + al;
@@ -14428,6 +14557,7 @@ void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
                 double xij = ri[0] + (rjri[0]) * aj_aij;
                 double yij = ri[1] + (rjri[1]) * aj_aij;
                 double zij = ri[2] + (rjri[2]) * aj_aij;
+                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                 double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
                 double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
                 double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
@@ -15300,24 +15430,21 @@ void rys_k_3200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * bounds.nroots*2;
 
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     __shared__ int ish;
     __shared__ int jsh;
     __shared__ double ri[3];
     __shared__ double rjri[3];
-    int nbas = envs.nbas;
+    __shared__ double *expi;
+    __shared__ double *expj;
     if (sq_id == 0) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
-    __syncthreads();
-    int *bas = envs.bas;
-    double *env = envs.env;
-    int iprim = bounds.iprim;
-    int jprim = bounds.jprim;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -15325,6 +15452,10 @@ void rys_k_3200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
     }
     __syncthreads();
+    int iprim = bounds.iprim;
+    int jprim = bounds.jprim;
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
     double xjxi = rjri[0];
     double yjyi = rjri[1];
     double zjzi = rjri[2];
@@ -15354,8 +15485,6 @@ void rys_k_3200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool)
         } else {
             fac_sym = 0;
         }
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
