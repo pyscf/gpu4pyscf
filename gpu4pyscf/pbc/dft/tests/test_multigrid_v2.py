@@ -91,7 +91,6 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
-    @unittest.skip('kpts not supported')
     def test_get_nuc_kpts_nonorth(self):
         ref = MultiGridNumInt_cpu(cell_nonorth).get_nuc(kpts)
         out = multigrid.MultiGridNumInt(cell_nonorth).get_nuc(kpts).get()
@@ -151,15 +150,15 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
-    @unittest.skip('kpts not supported')
     def test_get_vxc_lda_kpts(self):
         nao = cell_orth.nao
         np.random.seed(2)
         xc = 'lda,'
         nkpts = len(kpts)
-        dm = np.random.random((nkpts,nao,nao)) - .5
-        dm = dm + dm.transpose(0,2,1)
-        dm = np.array([dm+1e-3, dm])
+        dm = np.empty((2,nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((2,nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((2,nkpts,nao,nao)) - .5
+        dm = np.einsum('ukpr,ukqr->ukpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
         if hasattr(multigrid_cpu, 'nr_uks'):
@@ -219,15 +218,15 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
-    @unittest.skip('kpts not supported')
     def test_get_vxc_gga_kpts(self):
         nao = cell_orth.nao
-        np.random.seed(2)
+        np.random.seed(20)
         xc = 'pbe,'
         nkpts = len(kpts)
-        dm = np.random.random((nkpts,nao,nao)) - .5
-        dm = dm + dm.transpose(0,2,1)
-        dm = np.array([dm+1e-3, dm])
+        dm = np.empty((2,nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((2,nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((2,nkpts,nao,nao)) - .5
+        dm = np.einsum('ukpr,ukqr->ukpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
         mf = pcell.KRKS(xc=xc)
@@ -240,15 +239,18 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
-    @unittest.skip('kpts not supported')
     def test_get_vxc_gga_kpts_nonorth(self):
         nao = cell_nonorth.nao
         np.random.seed(2)
         xc = 'pbe,'
-        dm = np.random.random((nao,nao)) - .5
-        dm = dm.dot(dm.T)
+        nkpts = len(kpts)
+        dm = np.empty((nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((nkpts,nao,nao)) - .5
+        dm = np.einsum('kpr,kqr->kpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
         pcell = cell_nonorth.copy()
         pcell.precision = 1e-10
+
         if hasattr(multigrid_cpu, 'nr_rks'):
             n0, exc0, ref = multigrid_cpu.nr_rks(
                 MultiGridNumInt_cpu(pcell), xc, dm, with_j=True, kpts=kpts)
@@ -288,6 +290,36 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-7
         assert abs(ref-vxc.get()).max() < 1e-7
 
+    def test_get_vxc_mgga_kpts(self):
+        nao = cell_orth.nao
+        np.random.seed(3)
+        xc = 'r2scan'
+        nkpts = len(kpts)
+        dm = np.empty((nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((nkpts,nao,nao)) - .5
+        dm = np.einsum('kpr,kqr->kpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
+        pcell = cell_orth.copy()
+        pcell.precision = 1e-11
+        mf = pcell.KRKS(xc=xc)
+
+        n0, exc0, ref = mf._numint.nr_rks(pcell, mf.grids, xc, dm, kpts=kpts)
+        # vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        # ref += vj
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=False, kpts=kpts)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
+        dm = np.array([dm, dm])
+        n0, exc0, ref = mf._numint.nr_uks(pcell, mf.grids, xc, dm, kpts=kpts)
+        vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        ref += vj[0] + vj[1]
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True, kpts=kpts)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
     def test_get_vxc_mgga_nonorth(self):
         nao = cell_nonorth.nao
         np.random.seed(2)
@@ -302,6 +334,26 @@ class KnownValues(unittest.TestCase):
         vj = mf.with_df.get_jk(dm, with_k=False)[0]
         ref += vj
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_nonorth).nr_rks(cell_nonorth, None, xc, dm, with_j=True)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
+    def test_get_vxc_mgga_kpts_nonorth(self):
+        nao = cell_nonorth.nao
+        np.random.seed(4)
+        xc = 'r2scan'
+        nkpts = len(kpts)
+        dm = np.empty((nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((nkpts,nao,nao)) - .5
+        dm = np.einsum('kpr,kqr->kpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
+        pcell = cell_nonorth.copy()
+        mf = pcell.KRKS(xc=xc)
+
+        n0, exc0, ref = mf._numint.nr_rks(pcell, mf.grids, xc, dm, kpts=kpts)
+        vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        ref += vj
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_nonorth).nr_rks(cell_nonorth, None, xc, dm, with_j=True, kpts=kpts)
         assert abs(n0-n1).max() < 1e-8
         assert abs(exc0-exc1).max() < 1e-7
         assert abs(ref-vxc.get()).max() < 1e-7

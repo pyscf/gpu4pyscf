@@ -79,8 +79,8 @@ def image_pair_to_difference(
 ):
     translation_vectors = np.asarray(
         np.linalg.solve(lattice_vectors_cpu.T, vectors_to_neighboring_images_cpu.T).T,
-        dtype=np.int32,
     )
+    translation_vectors = np.asarray(np.round(translation_vectors), dtype = np.int32)
     image_difference_full = (
         # k_j - k_i corresponding to <i|j>
         translation_vectors[None,:,:] - translation_vectors[:,None,:]
@@ -331,9 +331,9 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
 
         fft_grid = list(
             map(
-                lambda n_mesh_points: cp.fft.fftfreq(
+                lambda n_mesh_points: cp.round(cp.fft.fftfreq(
                     n_mesh_points, 1.0 / n_mesh_points
-                ).astype(cp.int32),
+                )).astype(cp.int32),
                 mesh,
             )
         )
