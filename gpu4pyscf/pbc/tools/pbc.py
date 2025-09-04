@@ -111,6 +111,26 @@ def _get_Gv(cell, mesh):
           rz[:,None] * b[2])
     return Gv.reshape(-1, 3)
 
+def _Gv_wrap_around(cell, Gv, k, mesh):
+    '''wrap around the high frequency k+G vectors into their lower frequency
+    counterparts. Important if you want the gamma point and k-point answers to
+    agree.
+    '''
+    b = cell.reciprocal_vectors()
+    box_edge = asarray(np.einsum('i,ij->ij', mesh, b))
+    kG = asarray(k) + asarray(Gv)
+    reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
+    if cell.dimension >= 1:
+        kG[reduced_coords[:,0]> .5] -= box_edge[0]
+        kG[reduced_coords[:,0]<-.5] += box_edge[0]
+    if cell.dimension >= 2:
+        kG[reduced_coords[:,1]> .5] -= box_edge[1]
+        kG[reduced_coords[:,1]<-.5] += box_edge[1]
+    if cell.dimension == 3:
+        kG[reduced_coords[:,2]> .5] -= box_edge[2]
+        kG[reduced_coords[:,2]<-.5] += box_edge[2]
+    return kG
+
 def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
               wrap_around=True, omega=None, **kwargs):
     '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
@@ -188,38 +208,12 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         return coulG
 
     if abs(k).sum() > 1e-9:
-        kG = asarray(k) + Gv
+        if wrap_around:
+            kG = _Gv_wrap_around(cell, Gv, k, mesh)
+        else:
+            kG = asarray(k) + Gv
     else:
         kG = Gv
-
-    equal2boundary = None
-    if wrap_around and abs(k).sum() > 1e-9:
-        equal2boundary = cp.zeros(Gv.shape[0], dtype=bool)
-        # Here we 'wrap around' the high frequency k+G vectors into their lower
-        # frequency counterparts.  Important if you want the gamma point and k-point
-        # answers to agree
-        b = cell.reciprocal_vectors()
-        box_edge = np.einsum('i,ij->ij', np.asarray(mesh)//2+0.5, b)
-        assert all(np.rint(np.linalg.solve(box_edge.T, k))==0)
-        box_edge = asarray(box_edge)
-        reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
-        on_edge_p1 = abs(reduced_coords - 1) < 1e-9
-        on_edge_m1 = abs(reduced_coords + 1) < 1e-9
-        if cell.dimension >= 1:
-            equal2boundary |= on_edge_p1[:,0]
-            equal2boundary |= on_edge_m1[:,0]
-            kG[reduced_coords[:,0]> 1] -= 2 * box_edge[0]
-            kG[reduced_coords[:,0]<-1] += 2 * box_edge[0]
-        if cell.dimension >= 2:
-            equal2boundary |= on_edge_p1[:,1]
-            equal2boundary |= on_edge_m1[:,1]
-            kG[reduced_coords[:,1]> 1] -= 2 * box_edge[1]
-            kG[reduced_coords[:,1]<-1] += 2 * box_edge[1]
-        if cell.dimension == 3:
-            equal2boundary |= on_edge_p1[:,2]
-            equal2boundary |= on_edge_m1[:,2]
-            kG[reduced_coords[:,2]> 1] -= 2 * box_edge[2]
-            kG[reduced_coords[:,2]<-1] += 2 * box_edge[2]
 
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0
@@ -250,9 +244,6 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
 
     else:
         raise NotImplementedError(f'dimension={cell.dimension}')
-
-    if equal2boundary is not None:
-        coulG[equal2boundary] = 0
 
     # Scale the coulG kernel for attenuated Coulomb integrals.
     # * kwarg omega is used by RangeSeparatedJKBuilder which requires ewald probe charge

@@ -161,7 +161,7 @@ class FTOpt:
         self.bvk_kmesh = bvk_kmesh
         self.kpts = kpts
 
-        self.aft_envs = None
+        self._aft_envs = None
         self.bvk_cell = None
 
     def build(self, verbose=None):
@@ -188,20 +188,35 @@ class FTOpt:
         _bas = cp.array(bvkcell._bas)
         _env = cp.array(_scale_sp_ctr_coeff(bvkcell))
         ao_loc = cp.array(bvkcell.ao_loc)
-        aft_envs = PBCIntEnvVars(
-            cell.natm, cell.nbas, bvk_ncells, nimgs, _atm.data.ptr,
-            _bas.data.ptr, _env.data.ptr, ao_loc.data.ptr, Ls.data.ptr
-        )
-        # Keep a reference to these arrays, prevent releasing them upon returning the closure
-        aft_envs._env_ref_holder = (_atm, _bas, _env, ao_loc, Ls)
-        self.aft_envs = aft_envs
-
+        self._aft_envs = PBCIntEnvVars.new(
+            cell.natm, cell.nbas, bvk_ncells, nimgs, _atm, _bas, _env, ao_loc, Ls)
         init_constant(cell)
         return self
 
+    @property
+    def aft_envs(self):
+        _aft_envs = self._aft_envs
+        if _aft_envs is None or cp.cuda.device.get_device_id() == _aft_envs._device:
+            return self._aft_envs
+        return _aft_envs.copy()
+
+    def estimate_cutoff_with_penalty(self):
+        cell = self.sorted_cell
+        rcut = cell.rcut
+        vol = cell.vol
+        cell_exp, _, cell_l = most_diffused_pgto(cell)
+        lsum = cell_l * 2 + 1
+        rad = vol**(-1./3) * rcut + 1
+        surface = 4*np.pi * rad**2
+        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*cell_exp*2) + surface
+        cutoff = cell.precision / lattice_sum_factor
+        logger.debug1(cell, 'ft_ao min_exp=%g cutoff=%g', cell_exp, cutoff)
+        return cutoff
+
     def make_img_idx_cache(self, permutation_symmetry, verbose=None):
+        '''Cache significant orbital-pairs and their lattice sum images'''
         log = logger.new_logger(self.cell, verbose)
-        if self.aft_envs is None:
+        if self._aft_envs is None:
             self.build(verbose)
 
         cell = self.sorted_cell
@@ -216,17 +231,8 @@ class FTOpt:
             bvk_ncells = 1
         else:
             bvk_ncells = np.prod(bvk_kmesh)
-
-        rcut = cell.rcut
-        vol = cell.vol
-        cell_exp, _, cell_l = most_diffused_pgto(cell)
-        lsum = cell_l * 2 + 1
-        rad = vol**(-1./3) * rcut + 1
-        surface = 4*np.pi * rad**2
-        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*cell_exp*2) + surface
-        cutoff = cell.precision / lattice_sum_factor
+        cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
-        log.debug1('ft_ao min_exp=%g cutoff=%g', cell_exp, cutoff)
 
         exps, cs = extract_pgto_params(cell, 'diffused')
         exps = cp.asarray(exps, dtype=np.float32)
@@ -309,7 +315,7 @@ class FTOpt:
         '''
         log = logger.new_logger(self.cell, verbose)
         cput0 = log.init_timer()
-        if self.aft_envs is None:
+        if self._aft_envs is None:
             self.build(verbose)
 
         cell = self.sorted_cell
@@ -458,7 +464,7 @@ class FTOpt:
 def most_diffused_pgto(cell):
     exps, cs = extract_pgto_params(cell, 'diffused')
     ls = cell._bas[:,ANG_OF]
-    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
+    r2 = np.log(cs**2 / cell.precision * 10**ls + 1e-200) / exps
     idx = r2.argmax()
     return exps[idx], cs[idx], ls[idx]
 
@@ -474,6 +480,26 @@ class PBCIntEnvVars(ctypes.Structure):
         ('ao_loc', ctypes.c_void_p),
         ('img_coords', ctypes.c_void_p),
     ]
+
+    @classmethod
+    def new(cls, natm, nbas, ncells, nimgs, atm, bas, env, ao_loc, Ls):
+        obj = PBCIntEnvVars(natm, nbas, ncells, nimgs, atm.data.ptr, bas.data.ptr,
+                            env.data.ptr, ao_loc.data.ptr, Ls.data.ptr)
+        # Keep a reference to these arrays, prevent releasing them upon returning
+        obj._env_ref_holder = (atm, bas, env, ao_loc, Ls)
+        obj._device = cp.cuda.device.get_device_id()
+        return obj
+
+    def copy(self):
+        atm, bas, env, ao_loc, Ls = self._env_ref_holder
+        atm = cp.asarray(atm)
+        bas = cp.asarray(bas)
+        env = cp.asarray(env)
+        ao_loc = cp.asarray(ao_loc)
+        Ls = cp.asarray(Ls)
+        return PBCIntEnvVars.new(
+            self.cell0_natm, self.cell0_nbas, self.bvk_ncells, self.nimgs,
+            atm, bas, env, ao_loc, Ls)
 
 def init_constant(cell):
     err = libpbc.init_constant(ctypes.c_int(SHM_SIZE))

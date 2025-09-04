@@ -63,7 +63,7 @@ class KnownValues(unittest.TestCase):
         mol1.basis = '631g'
         cls.mol1 = mol1.build()
 
-        cls.mf_uhf = mf_uhf = mol.UHF().to_gpu().run()
+        cls.mf_uhf = mf_uhf = mol.UHF().run().to_gpu()
         cls.td_hf = mf_uhf.TDHF().run(conv_tol=1e-6)
 
         mf_lda = mol.UKS().set(xc='lda', conv_tol=1e-12).to_gpu()

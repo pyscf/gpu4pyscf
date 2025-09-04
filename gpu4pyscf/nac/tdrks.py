@@ -400,8 +400,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp((z1ao + z1ao.T))
-    fock_matrix = mf.get_fock()
-    fock_mo = reduce(cp.dot, (mo_coeff.T, fock_matrix, mo_coeff))
+    fock_mo = cp.diag(mo_energy)
     TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
     TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
     TFvo = cp.dot(TIJvv, fock_mo[nocc:,:nocc])
@@ -613,8 +612,6 @@ class NAC(tdrhf.NAC):
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
-
-    as_scanner = NotImplemented
 
 
 

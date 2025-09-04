@@ -181,13 +181,9 @@ class _GTOvalOpt:
         sorted_ao_loc = (original_cell_ao_loc[rev_bas_mapping] +
                          np.arange(bvk_ncells, dtype=np.int32)[:,None] * cell0_nao)
         ao_loc_gpu = cp.array(sorted_ao_loc.ravel(), dtype=np.int32)
-        gto_envs = PBCIntEnvVars(
+        self.gto_envs = PBCIntEnvVars.new(
             sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
-            ao_loc_gpu.data.ptr, Ls.data.ptr,
-        )
-        gto_envs._env_ref_holder = (_atm, _bas, _env, ao_loc_gpu, Ls)
-        self.gto_envs = gto_envs
+            _atm, _bas, _env, ao_loc_gpu, Ls)
 
 def _estimate_rcut(cell, deriv=0):
     '''Analogous to pyscf.pbc.gto.eval_gto._estimate_rcut, improved value

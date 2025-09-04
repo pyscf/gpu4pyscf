@@ -87,7 +87,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -101,14 +101,15 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
+            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
 
     def test_get_vxc_gga(self):
         a = np.eye(3) * 5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]],
+                     precision=1e-9, a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -118,8 +119,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
-            cell1.precision = 1e-10
-            cell2.precision = 1e-10
+            cell1.precision = 1e-12
+            cell2.precision = 1e-12
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -129,7 +130,8 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]],
+                     precision=1e-9, a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -139,8 +141,8 @@ class KnownValues(unittest.TestCase):
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
-            cell1.precision = 1e-10
-            cell2.precision = 1e-10
+            cell1.precision = 1e-12
+            cell2.precision = 1e-12
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
@@ -150,7 +152,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -170,40 +172,41 @@ class KnownValues(unittest.TestCase):
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             de = np.einsum('ij,ji', dm, (vj1-vj2))
             de += exc1 - exc2
-            assert abs(dat[i,j] - de/2e-5) < 1e-9
+            assert abs(dat[i,j] - de/2e-5) < 1e-8
 
     def test_get_nuc(self):
         a = np.eye(3) * 5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
         xc = 'lda,'
         mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
         dat = rks_stress.get_vxc(mf_grad, cell, dm, with_nuc=True)
+        kpt = np.zeros(3)
         ni = NumInt()
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
-            vne1 = FFTDF(cell1).get_nuc()
+            vne1 = FFTDF(cell1).get_nuc(kpt)
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
-            vne2 = FFTDF(cell2).get_nuc()
+            vne2 = FFTDF(cell2).get_nuc(kpt)
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             de = np.einsum('ij,ji', dm, (vne1-vne2))
             de += exc1 - exc2
-            assert abs(dat[i,j] - de/2e-5) < 1e-9
+            assert abs(dat[i,j] - de/2e-5) < 1e-8
 
     def test_get_pp(self):
         a = np.eye(3) * 5
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
-        cell = gto.M(atom='C 1 1 1; C 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]],
-                     pseudo='gth-pade', a=a, unit='Bohr')
+        cell = gto.M(atom='Si 1 1 1; C 2 1.5 2.4',
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]],
+                     precision=1e-9, pseudo='gth-pade', a=a, unit='Bohr')
         nao = cell.nao
         dm = np.random.rand(nao, nao) - .5
         dm = dm.dot(dm.T)
@@ -211,13 +214,14 @@ class KnownValues(unittest.TestCase):
         mf_grad = rks.Gradients(cell.RKS(xc=xc).to_gpu())
         dat = rks_stress.get_vxc(mf_grad, cell, dm, with_nuc=True)
         ni = NumInt()
+        kpt = np.zeros(3)
         for (i, j) in [(0, 0), (0, 1), (0, 2), (2, 1), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-5)
             cell1.precision = 1e-10
             cell2.precision = 1e-10
-            vne1 = FFTDF(cell1).get_pp()
+            vne1 = FFTDF(cell1).get_pp(kpt)
             exc1 = ni.nr_rks(cell1, UniformGrids(cell1), xc, dm)[1]
-            vne2 = FFTDF(cell2).get_pp()
+            vne2 = FFTDF(cell2).get_pp(kpt)
             exc2 = ni.nr_rks(cell2, UniformGrids(cell2), xc, dm)[1]
             de = np.einsum('ij,ji', dm, (vne1-vne2))
             de += exc1 - exc2

@@ -26,7 +26,20 @@ class ROKS(rks.KohnShamDFT, ROHF):
         ROHF.__init__(self, mol)
         rks.KohnShamDFT.__init__(self, xc)
 
-    get_veff = uks.get_veff
+    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+        if dm is None:
+            dm = self.make_rdm1()
+        elif getattr(dm, 'mo_coeff', None) is not None:
+            mo_coeff = cp.repeat(dm.mo_coeff[None], 2, axis=0)
+            mo_occ = cp.asarray([dm.mo_occ>0, dm.mo_occ==2],
+                                dtype=np.double)
+            if dm.ndim == 2:  # RHF DM
+                dm = cp.repeat(dm[None]*.5, 2, axis=0)
+            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        elif dm.ndim == 2:  # RHF DM
+            dm = cp.repeat(dm[None]*.5, 2, axis=0)
+        return uks.UKS.get_veff(self, mol, dm, dm_last, vhf_last, hermi)
+
     energy_elec = uks.UKS.energy_elec
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented

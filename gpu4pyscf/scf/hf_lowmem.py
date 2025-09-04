@@ -145,6 +145,34 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     else:
         log.warn("SCF failed to converge")
 
+    if scf_conv and abs(mf.level_shift) > 0:
+        # An extra diagonalization, to remove level shift
+        s1e = asarray(mf.get_ovlp(mol))
+        fock = mf.get_fock(h1e, s1e, vhf)
+
+        cp.get_default_memory_pool().free_all_blocks()
+        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        fock = s1e = None
+        mo_occ = mf.get_occ(mo_energy, mo_coeff)
+        dm, dm_last = mf.make_wfn(mo_coeff, mo_occ), dm
+        vhf = mf.get_veff(mol, dm, dm_last, vhf)
+        cp.get_default_memory_pool().free_all_blocks()
+
+        fock = mf.get_fock(h1e, None, vhf)
+        norm_gorb = cp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
+        fock = None
+        e_tot, last_hf_e = mf.energy_tot(dm, h1e, vhf), e_tot
+
+        conv_tol = conv_tol * 10
+        conv_tol_grad = conv_tol_grad * 3
+        if abs(e_tot-last_hf_e) < conv_tol or norm_gorb < conv_tol_grad:
+            scf_conv = True
+        else:
+            log.warn("Level-shifted SCF extra cycle failed to converge")
+            scf_conv = False
+        log.info('Extra cycle= %d E= %.15g  delta_E= %4.3g',
+                 cycle+1, e_tot, e_tot-last_hf_e)
+
     mf.converged = scf_conv
     mf.e_tot = e_tot
     mf.mo_energy = mo_energy

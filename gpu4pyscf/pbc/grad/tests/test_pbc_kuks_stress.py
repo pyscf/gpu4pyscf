@@ -43,7 +43,7 @@ class KnownValues(unittest.TestCase):
                      basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 1]
         nao = cell.nao
-        dm = np.random.rand(2,len(kmesh), nao, nao) - (.5+.2j)
+        dm = np.random.rand(2,np.prod(kmesh), nao, nao) - (.5+.1j)
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'lda,'
         mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu())
@@ -62,10 +62,10 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 1]
         nao = cell.nao
-        dm = np.random.rand(2,len(kmesh), nao, nao) - (.5+.2j)
+        dm = np.random.rand(2,np.prod(kmesh), nao, nao) - (.5+.1j)
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'pbe,'
         mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu())
@@ -77,7 +77,7 @@ class KnownValues(unittest.TestCase):
             cell2.precision = 1e-10
             exc1 = ni.nr_uks(cell1, UniformGrids(cell1), xc, dm, kpts=cell1.make_kpts(kmesh))[1]
             exc2 = ni.nr_uks(cell2, UniformGrids(cell2), xc, dm, kpts=cell2.make_kpts(kmesh))[1]
-            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-9
+            assert abs(dat[i,j] - (exc1 - exc2)/2e-5) < 1e-8
 
     def test_get_vxc_mgga(self):
         a = np.eye(3) * 5
@@ -87,7 +87,7 @@ class KnownValues(unittest.TestCase):
                      basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
         kmesh = [3, 1, 1]
         nao = cell.nao
-        dm = np.random.rand(2,len(kmesh), nao, nao) - (.5+.2j)
+        dm = np.random.rand(2,np.prod(kmesh), nao, nao) - (.5+.1j)
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'm06,'
         mf_grad = kuks.Gradients(cell.KUKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu())
@@ -106,10 +106,11 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                     basis=[[0, [.5, 1]], [1, [.8, 1]]], a=a, unit='Bohr')
-        kmesh = [3, 1, 1]
+                     basis=[[0, [.5, 1]], [1, [.8, 1]], [2, [.6, 1]]], a=a, unit='Bohr')
+        kmesh = [3, 1, 3]
         nao = cell.nao
-        dm = np.random.rand(2,len(kmesh), nao, nao) - (.5+.2j)
+        dm = np.random.rand(2,np.prod(kmesh), nao, nao) - (.5+.1j)
+        dm *= .5
         dm = np.einsum('skpi,skqi->skpq', dm, dm.conj())
         xc = 'lda,'
         kpts = cell.make_kpts(kmesh)

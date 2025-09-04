@@ -81,6 +81,8 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
         dm_kpts = sandwich_dot(dm_kpts.reshape(-1,nao,nao), c2s.T)
         nao = c2s.shape[0]
         dm_kpts = dm_kpts.reshape(2,nkpts,nao,nao)
+        cell = cell.copy()
+        cell.cart = True
     assert nkpts == len(kpts)
 
     grids_idx = grids.argsort(tile=8)

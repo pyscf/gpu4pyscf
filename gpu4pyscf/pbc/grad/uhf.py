@@ -21,12 +21,12 @@ import pyscf.pbc.grad.uhf as cpu_uhf
 from pyscf.pbc.grad.rhf import _contract_vhf_dm
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo import pp_int
-from pyscf.pbc.dft.multigrid.pp import vpploc_part1_nuc_grad
 import gpu4pyscf.grad.uhf as mol_uhf
 import gpu4pyscf.pbc.grad.rhf as rhf
 from gpu4pyscf.lib.cupy_helper import return_cupy_array
 from gpu4pyscf.pbc.dft import multigrid_v2
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.grad.pp import vpploc_part1_nuc_grad
 
 __all__ = ['Gradients']
 
