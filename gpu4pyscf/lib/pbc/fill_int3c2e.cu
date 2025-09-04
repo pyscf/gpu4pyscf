@@ -40,9 +40,9 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
     int nksp_per_block = nksh_per_block * nsp_per_block;
     int ksp_id = nksh_per_block * sp_id + ksh_id;
     int thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
-    int warp_id = thread_id / WARP_SIZE;
+    int warp_id = thread_id / warpSize;
     int nimgs = envs.nimgs;
-    int sp0_this_block = sp_block_id * nsp_per_block * SPTAKS_PER_BLOCK;
+    int sp0_this_block = sp_block_id * nsp_per_block * SPTASKS_PER_BLOCK;
     int ksh0_this_block = ksh_block_id * nksh_per_block;
     int nksh = min(bounds.nksh - ksh0_this_block, nksh_per_block);
     int ksh0 = ksh0_this_block + bounds.ksh0;
@@ -69,7 +69,7 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
-    int *sp_img_offsets = bounds.img_offsets;
+    uint32_t *sp_img_offsets = bounds.img_offsets;
 
     int gx_len = g_size * nksp_per_block;
     extern __shared__ double rw_buffer[];
@@ -83,21 +83,22 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
     __shared__ int img_counts_in_warp[WARPS];
     double gout[GOUT_WIDTH];
 
-    int ntasks = nksh * nsp_per_block * SPTAKS_PER_BLOCK;
+    int ntasks = nksh * nsp_per_block * SPTASKS_PER_BLOCK;
     for (int ijk_idx = ksp_id; ijk_idx < ntasks; ijk_idx += nksp_per_block) {
         int ksh = ijk_idx % nksh + ksh0;
         int pair_ij_idx = ijk_idx / nksh + sp0_this_block;
-        int img1 = 0;
+        uint32_t img1;
         int pair_ij = pair_ij_idx;
         if (pair_ij_idx >= bounds.n_prim_pairs) {
             pair_ij = sp0_this_block;
+            img1 = sp_img_offsets[pair_ij];
         } else {
             img1 = sp_img_offsets[pair_ij_idx+1];
         }
         int bas_ij = bounds.bas_ij_idx[pair_ij];
-        int img0 = sp_img_offsets[pair_ij];
+        uint32_t img0 = sp_img_offsets[pair_ij];
         __syncthreads();
-        int thread_id_in_warp = thread_id % WARP_SIZE;
+        int thread_id_in_warp = thread_id % warpSize;
         if (thread_id_in_warp == 0) {
             img_counts_in_warp[warp_id] = img1 - img0;
         }

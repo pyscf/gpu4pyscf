@@ -16,10 +16,12 @@ import tempfile
 import numpy as np
 import cupy as cp
 import pyscf
+from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.df.rsdf_builder import _RSGDFBuilder
 from pyscf.pbc.df.df import _load3c
 from gpu4pyscf.pbc.df.rsdf_builder import build_cderi
 from gpu4pyscf.pbc.df import rsdf_builder
+import pytest
 
 def test_gamma_point():
     cell = pyscf.M(
@@ -183,8 +185,9 @@ def test_gamma_point_compressed():
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
         ''',
-        basis={'C1': [[2, [1.1, 1.]],
-                      [3, [2., 1.]]],
+        basis={'C1': ('ccpvdz',
+                      [[2, [1.1, 1.]],
+                      [3, [2., 1.]]]),
                'C2': 'ccpvdz'},
         a=np.diag([2.5, 1.9, 2.2])*3)
 
@@ -211,14 +214,324 @@ C    D
     omega = 0.3
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(cell, auxcell, omega=omega)
     nao = cell.nao
-    i, j, diag = idx
+    ij, diag = idx
+    i, j = divmod(ij, nao)
     naux = auxcell.nao
     out = cp.zeros((naux,nao,nao))
-    out[:,j,i] = dat
-    out[:,i,j] = dat
+    out[:,j,i] = dat[0]
+    out[:,i,j] = dat[0]
 
     ref = build_cderi(cell, auxcell, omega=omega)[0]
-    assert abs(ref[0,0] - out).max() < 1e-14
+    assert abs(ref[0,0] - out).max() < 1e-12
+
+def test_sr_gamma_point_compressed():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[2, [1.1, 1.]],
+                      [3, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    omega = 0.3
+    cell.omega = auxcell.omega = -omega
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(
+        cell, auxcell, omega=omega, with_long_range=False)
+    nao = cell.nao
+    ij, diag = idx
+    i, j = divmod(ij, nao)
+    naux = auxcell.nao
+    out = cp.zeros((naux,nao,nao))
+    out[:,j,i] = dat[0]
+    out[:,i,j] = dat[0]
+
+    ref = build_cderi(cell, auxcell, omega=omega)[0]
+    assert abs(ref[0,0] - out).max() < 1e-12
+
+def test_kpts_compressed():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[2, [1.1, 1.]],
+                      [3, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision=1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    nao = cell.nao
+    omega = 0.3
+    kmesh = [3,1,4]
+    kpts = cell.make_kpts(kmesh)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts, omega=omega)
+    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    for kp in sorted(dat):
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        ki_idx, kj_idx = np.where(kk_conserv == kp)
+        for ki, kj in zip(ki_idx, kj_idx):
+            if (ki, kj) in ref:
+                _ref = ref[ki, kj]
+            else:
+                _ref = ref[kj, ki].conj().transpose(0,2,1)
+            print(ki, kj)
+            assert abs(_ref - out[ki]).max() < 1e-11
+
+def test_kpts_compressed1():
+    from pyscf.pbc.df import df as df_cpu
+    cell = pyscf.M(
+        atom = 'He 1. .5 .5;C .1 1.3 2.1',
+        basis = {'He': [(0, (1., 1)), (1, (.4, 1))],
+                 'C' :[[0, [1., 1]]],},
+        a = np.eye(3) * 2.5,
+    )
+    auxcell = df_cpu.make_auxcell(cell)
+
+    nao = cell.nao
+    kmesh = [1,3,1]
+    kpts = cell.make_kpts(kmesh)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts)
+    ref = build_cderi(cell, auxcell, kpts)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    for kp in sorted(dat):
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        ki_idx, kj_idx = np.where(kk_conserv == kp)
+        for ki, kj in zip(ki_idx, kj_idx):
+            if (ki, kj) in ref:
+                _ref = ref[ki, kj]
+            else:
+                _ref = ref[kj, ki].conj().transpose(0,2,1)
+            print(ki, kj)
+            assert abs(_ref - out[ki]).max() < 1e-10
+
+@pytest.mark.skip('Must include gamma point')
+def test_kpts_compressed2():
+    from pyscf.pbc.df import df as df_cpu
+    cell = pyscf.M(
+        atom = 'He 1. .5 .5;C .1 1.3 2.1',
+        basis = {'He': [(0, (1., 1)), (1, (.4, 1))],
+                 'C' :[[0, [1., 1]]],},
+        a = np.eye(3) * 2.5,
+    )
+    auxcell = df_cpu.make_auxcell(cell)
+
+    nao = cell.nao
+    kmesh = [2,3,1]
+    kpts = cell.make_kpts(kmesh, with_gamma_point=False)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts)
+    ref = build_cderi(cell, auxcell, kpts)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    for kp in sorted(dat):
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        ki_idx, kj_idx = np.where(kk_conserv == kp)
+        for ki, kj in zip(ki_idx, kj_idx):
+            if (ki, kj) in ref:
+                _ref = ref[ki, kj]
+            else:
+                _ref = ref[kj, ki].conj().transpose(0,2,1)
+            print(ki, kj)
+            assert abs(_ref - out[ki]).max() < 1e-10
+
+def test_sr_kpts_compressed():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[2, [1.1, 1.]],
+                      [3, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision=1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    nao = cell.nao
+    omega = 0.3
+    cell.omega = auxcell.omega = -omega
+    kmesh = [3,1,1]
+    kpts = cell.make_kpts(kmesh)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(
+        cell, auxcell, kpts, omega=omega, with_long_range=False)
+    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    for kp in sorted(dat):
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        ki_idx, kj_idx = np.where(kk_conserv == kp)
+        for ki, kj in zip(ki_idx, kj_idx):
+            if (ki, kj) in ref:
+                _ref = ref[ki, kj]
+            else:
+                _ref = ref[kj, ki].conj().transpose(0,2,1)
+            print(ki, kj)
+            assert abs(_ref - out[ki]).max() < 1e-11
+
+def test_j_only_compressed():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[2, [1.1, 1.]],
+                      [3, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision=1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    nao = cell.nao
+    omega = 0.3
+    kmesh = [3,1,4]
+    kpts = cell.make_kpts(kmesh)
+    nkpts = len(kpts)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_j_only(cell, auxcell, kpts, omega=omega)
+    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+
+    out = rsdf_builder.unpack_cderi(dat[0], idx, 0, kk_conserv, expLk, nao)
+    for ki in range(nkpts):
+        _ref = ref[ki, ki]
+        assert abs(_ref - out[ki]).max() < 1e-11
+
+def test_sr_j_only_compressed():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[2, [1.1, 1.]],
+                      [3, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision=1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+     12.9917624900           1.0000000000
+C    S
+      2.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    nao = cell.nao
+    omega = 0.3
+    cell.omega = auxcell.omega = -omega
+    kmesh = [3,1,1]
+    kpts = cell.make_kpts(kmesh)
+    nkpts = len(kpts)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_j_only(
+        cell, auxcell, kpts, omega=omega, with_long_range=False)
+    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+
+    out = rsdf_builder.unpack_cderi(dat[0], idx, 0, kk_conserv, expLk, nao)
+    for ki in range(nkpts):
+        _ref = ref[ki, ki]
+        assert abs(_ref - out[ki]).max() < 1e-11
 
 def _get_2c2e_slow(auxcell, uniq_kpts, omega, with_long_range=True):
     from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega

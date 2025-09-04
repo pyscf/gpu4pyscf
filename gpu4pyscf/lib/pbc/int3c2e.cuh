@@ -25,7 +25,7 @@
 #define IMG_MASK_SLOTS  1024
 #define L_AUX_MAX       6
 #define L_AUX1          7
-#define SPTAKS_PER_BLOCK        32
+#define SPTASKS_PER_BLOCK       32
 #define IMG_BLOCK       16384
 #define PI_FAC          34.98683665524972497
 
@@ -47,7 +47,7 @@ typedef struct {
     int n_ctr_pairs;
     int *bas_ij_idx;
     int *pair_mapping;
-    int *img_offsets; // offset img_idx for each shell-pair
+    uint32_t *img_offsets; // offset img_idx for each shell-pair
     int *img_idx; // indices of img_coords in each shell-pair
 } PBCInt3c2eBounds;
 

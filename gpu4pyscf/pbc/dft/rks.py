@@ -220,8 +220,8 @@ Compact basis functions are found in the system. It is recommended to use Becke 
         return self
 
     def reset(self, cell=None):
-        if cell is None:
-            return self
+        if cell is not None:
+            self.cell = cell
         pbchf.SCF.reset(self, cell)
         self.grids.reset(cell)
         self.nlcgrids.reset(cell)

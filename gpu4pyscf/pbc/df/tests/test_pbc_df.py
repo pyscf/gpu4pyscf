@@ -86,10 +86,15 @@ class KnownValues(unittest.TestCase):
         assert abs(vj.get() - jref).max() < 1e-8
         assert abs(vk.get() - kref).max() < 1e-8
 
-        dm = dm + np.random.random((nao,nao)) * 1j
-        dm = dm + dm.conj().T
-        jref, kref = mydf0.get_jk(dm, hermi=1, exxdiv='ewald')
-        vj, vk = mydf.get_jk(dm, hermi=1, exxdiv='ewald')
+        dm1 = dm + np.random.random((nao,nao)) * 1j
+        dm1 = dm1 + dm1.conj().T
+        jref1, kref1 = mydf0.get_jk(dm1, hermi=1, exxdiv='ewald')
+        vj, vk = mydf.get_jk(dm1, hermi=1, exxdiv='ewald')
+        assert abs(vj.get() - jref1).max() < 1e-8
+        assert abs(vk.get() - kref1).max() < 1e-8
+
+        mydf.is_gamma_point = True
+        vj, vk = mydf.get_jk(dm, hermi=0, exxdiv='ewald')
         assert abs(vj.get() - jref).max() < 1e-8
         assert abs(vk.get() - kref).max() < 1e-8
 
@@ -103,8 +108,8 @@ class KnownValues(unittest.TestCase):
         dm = dm + dm.T
         vj, vk = mydf.get_jk(dm, hermi=1, exxdiv='ewald')
         jref, kref = mydf0.get_jk(dm, hermi=1, exxdiv='ewald')
-        assert abs(vj - jref).max() < 1e-8
-        assert abs(vk - kref).max() < 1e-8
+        assert abs(vj.get() - jref).max() < 1e-8
+        assert abs(vk.get() - kref).max() < 1e-8
 
     def test_jk1(self):
         kpts = cell.make_kpts([1,6,1])
@@ -243,6 +248,28 @@ class KnownValues(unittest.TestCase):
 
         kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
+        assert abs(vk.get() - kref).max() < 1e-8
+
+    @unittest.skip('pbc-gdf does not support different k-mesh in get_jk and build')
+    def test_get_k4(self):
+        kpts = cell.make_kpts([6,1,1])
+        mydf  = GDF(cell, kpts=kpts).build()
+
+        kpts = cell.make_kpts([3,1,1])
+        nkpts = len(kpts)
+        mydf0 = df_cpu.GDF(cell, kpts=kpts).build()
+
+        nao = cell.nao
+        np.random.seed(12)
+        nocc = 2
+        mo = (np.random.random((nkpts,nao,nocc)) +
+              np.random.random((nkpts,nao,nocc))*1j)
+        mo_occ = np.ones((nkpts,nocc))
+        dm = np.einsum('kpi,kqi->kpq', mo, mo.conj())
+        dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
+
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-8
 
 if __name__ == '__main__':

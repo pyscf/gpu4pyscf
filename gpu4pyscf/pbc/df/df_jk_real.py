@@ -39,22 +39,25 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         assert mydf.is_gamma_point
         mydf.build()
         t0 = log.timer_debug1('Init get_jk', *t0)
-    assert hermi == 1
     assert dm.dtype == np.float64
     assert with_j or with_k
 
     out_shape = dm.shape
-    out_cupy = isinstance(dm, cp.ndarray)
     nao = out_shape[-1]
     assert nao == mydf.nao
     dms = cp.asarray(dm).reshape(-1,nao,nao)
     nset = len(dms)
+    naux = mydf.get_naoaux()
 
     vj = vk = None
     if with_j:
-        rows, cols, diag = mydf._cderi_idx
+        ao_pair_mapping, diag = mydf._cderi_idx
+        rows, cols = divmod(ao_pair_mapping, nao)
         dm_sparse = dms[:,rows,cols]
-        dm_sparse *= 2
+        if hermi == 1:
+            dm_sparse *= 2
+        else:
+            dm_sparse += dms[:,cols,rows]
         dm_sparse[:,diag] *= .5
 
     if getattr(dm, 'mo_coeff', None) is not None:
@@ -62,35 +65,46 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         mo_occ = dm.mo_occ.reshape(nset,nmo)
         mo_coeff = dm.mo_coeff.reshape(nset,nao,nmo)
         occ_coeff = []
-        for c, occ in zip(mo_coeff, mo_occ):
-            mask = occ > 0
-            occ_coeff.append(c[:,mask] * occ[mask]**0.5)
+        nocc = 0
+        if with_k:
+            for c, occ in zip(mo_coeff, mo_occ):
+                mask = occ > 0
+                occ_coeff.append(c[:,mask] * occ[mask]**0.5)
+            nocc = max(x.shape[1] for x in occ_coeff)
+
+        blksize = mydf.get_blksize(extra=nao*nocc)
+        aux_iter = lib.prange(0, naux, blksize)
 
         def proc():
             vj_packed = vk = None
             if with_j:
                 _dm_sparse = cp.asarray(dm_sparse)
                 vj_packed = cp.zeros_like(dm_sparse)
-            nocc = 0
             if with_k:
                 _occ_coeff = [cp.asarray(x) for x in occ_coeff]
                 vk = cp.zeros_like(dms)
-                nocc = max(x.shape[1] for x in occ_coeff)
-            blksize = mydf.get_blksize(extra=nao*nocc)
-            for cderi, cderi_sparse in mydf.loop(blksize=blksize, unpack=with_k):
+            for cderi, cderi_sparse, sign in mydf.loop_gamma_point(
+                    blksize, unpack=with_k, aux_iter=aux_iter):
                 if with_j:
                     rhoj = _dm_sparse.dot(cderi_sparse)
-                    vj_packed += rhoj.dot(cderi_sparse.T)
-                cderi_sparse = rhoj = None
+                    if sign > 0:
+                        vj_packed += rhoj.dot(cderi_sparse.T)
+                    else:
+                        vj_packed -= rhoj.dot(cderi_sparse.T)
                 if with_k:
                     for i in range(nset):
                         rhok = contract('Lji,jk->Lki', cderi, _occ_coeff[i])
                         rhok = rhok.reshape([-1,nao])
-                        vk[i] += cp.dot(rhok.T, rhok)
+                        if sign > 0:
+                            vk[i] += cp.dot(rhok.T, rhok)
+                        else:
+                            vk[i] -= cp.dot(rhok.T, rhok)
                         rhok = None
-                cderi = None
             return vj_packed, vk
     else:
+        blksize = mydf.get_blksize(extra=nao*nao)
+        aux_iter = lib.prange(0, naux, blksize)
+
         def proc():
             vj_packed = vk = None
             if with_j:
@@ -99,17 +113,19 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
             if with_k:
                 _dms = cp.asarray(dms)
                 vk = cp.zeros_like(dms)
-            blksize = mydf.get_blksize(extra=nao*nao)
-            for cderi, cderi_sparse in mydf.loop(blksize=blksize, unpack=with_k):
+            for cderi, cderi_sparse, sign in mydf.loop_gamma_point(
+                    blksize, unpack=with_k, aux_iter=aux_iter):
                 if with_j:
                     rhoj = _dm_sparse.dot(cderi_sparse)
-                    vj_packed += rhoj.dot(cderi_sparse.T)
+                    if sign > 0:
+                        vj_packed += rhoj.dot(cderi_sparse.T)
+                    else:
+                        vj_packed -= rhoj.dot(cderi_sparse.T)
                 cderi_sparse = rhoj = None
                 if with_k:
                     for k in range(nset):
-                        rhok = contract('Lij,jk->Lki', cderi, _dms[k])
-                        rhok = rhok.reshape([-1,nao])
-                        vk[k] += cp.dot(rhok.T, cderi.reshape([-1,nao]))
+                        rhok = contract('Lij,jk->Lki', cderi, _dms[k], alpha=sign)
+                        contract('Lki,Lkj->ij', rhok, cderi, beta=1, out=vk[k])
                         rhok = None
                 cderi = None
             return vj_packed, vk
@@ -123,7 +139,6 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         vj = cp.zeros_like(dms)
         vj[:,cols,rows] = vj[:,rows,cols] = vj_packed
         vj = vj.reshape(out_shape)
-        if not out_cupy: vj = vj.get()
 
     if with_k:
         vk = [k for j, k in results]
@@ -131,7 +146,6 @@ def get_jk(mydf, dm, hermi=1, with_j=True, with_k=True, exxdiv=None):
         if exxdiv == 'ewald':
             _ewald_exxdiv_for_G0(mydf.cell, np.zeros(3), dms, vk)
         vk = vk.reshape(out_shape)
-        if not out_cupy: vk = vk.get()
 
     t1 = log.timer_debug1('vj and vk', *t1)
     return vj, vk
