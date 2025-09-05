@@ -27,8 +27,8 @@
 #define GOUT_WIDTH      45
 #define PAGE_SIZE       30
 #define REMOTE_THRESHOLD 50
-#define PAGES_PER_BLOCK  262144
-// approximately, 2048 images in each ijk shell triplet for 256 threads
+#define PAGES_PER_BLOCK  524288
+// approximately, 4000 images in each ijk shell triplet for 256 threads
 #define KTASKS_PER_BLOCK 16
 
 typedef struct {
@@ -53,7 +53,7 @@ int _filter_images(ImgIdxPage *page_pool, PBCIntEnvVars &envs, PBCInt3c2eBounds 
 {
     int thread_xy = threadIdx.x + blockDim.x * threadIdx.y;
     int threads_xy = blockDim.x * blockDim.y;
-    int thread_id = thread_xy + threads_xy * blockIdx.z;
+    int thread_id = thread_xy + threads_xy * threadIdx.z;
     __shared__ int num_pages;
     if (thread_id) {
         num_pages = 0;
