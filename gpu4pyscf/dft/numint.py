@@ -1340,7 +1340,6 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
 
         fxc_w_buf = cupy.empty(nspin*ncomp*nspin*ncomp*MIN_BLK_SIZE)
         vtmp_buf = cupy.empty(nao*nao)
-        wv_buf =  cupy.empty(2*ncomp*MIN_BLK_SIZE)
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
         for ao, mask, weights, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,

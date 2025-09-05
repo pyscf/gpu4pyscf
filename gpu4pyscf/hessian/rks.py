@@ -32,7 +32,7 @@ from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices, min_grid_blksize
 from gpu4pyscf.hessian import jk
-from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
+from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD, _contract_rho1_fxc
 import ctypes
 from pyscf import __config__
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 4096)
