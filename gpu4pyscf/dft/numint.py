@@ -1681,7 +1681,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
             spin = 0
     xcfuns = ni._init_xcfuns(xc_code, spin)
     inp = {}
-    if spin:
+    if spin == 0:
         assert rho.dtype == np.float64
         ngrids = rho.shape[-1]
         if xctype == 'LDA':
