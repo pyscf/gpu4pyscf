@@ -20,6 +20,7 @@ import ctypes
 import math
 import numpy as np
 import cupy as cp
+import scipy.optimize
 from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
 from pyscf.gto import (ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF,
@@ -1159,3 +1160,19 @@ def estimate_rcut(cell, auxcell, omega):
 
 def _estimate_shl_pairs_per_block(li, lj, nshl_pair):
     return _nearest_power2(THREADS*25 // ((li+2)*(lj+2)), return_leq=False)
+
+def minimal_enclosing_sphere(cell):
+    '''Find a sphere that covers all basis functions'''
+    exps, cs = extract_pgto_params(cell, 'diffused')
+    ls = cell._bas[:,ANG_OF]
+    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
+    r2 = [r2[sh0:sh1].max() for sh0, sh1 in cell.aoslice_by_atom()[:,:2]]
+    radii = np.array(r2)**.5
+    atm_coords = cell.atom_coords()
+    def cost(center):
+        return (np.linalg.norm(atm_coords - center, axis=1) + radii).max()
+    c0 = np.mean(atm_coords, axis=0)
+    res = scipy.optimize.minimize(cost, c0, method='Powell')
+    center = res.x
+    radius = cost(center)
+    return center, radius
