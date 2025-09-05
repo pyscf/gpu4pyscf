@@ -443,20 +443,18 @@ def _gga_grad_sum_(ao, wv, accumulate=False, buf=None, out=None):
 def _tau_grad_dot_(ao, wv, buf=None, out=None):
     '''The tau part of MGGA functional'''
     if buf is None:
-        buf = cupy.zeros((ao.shape[1], ao.shape[2]))
-    if out is None:
-        out = cupy.zeros((3, ao.shape[1], ao.shape[1]))
+        buf = cupy.zeros_like(ao[1])
 
     idx1 = [4, 5, 6]
     idx2 = [5, 7, 8]
     idx3 = [6, 8, 9]
     aow = numint._scale_ao(ao[1], wv, out=buf)
-    vmat = _d1_dot_(ao[idx1], aow.T, beta=1, out=out)
+    out = _d1_dot_(ao[idx1], aow.T, beta=1, out=out)
     aow = numint._scale_ao(ao[2], wv, out=buf)
-    vmat = _d1_dot_(ao[idx2], aow.T, beta=1, out=out)
+    _d1_dot_(ao[idx2], aow.T, beta=1, out=out)
     aow = numint._scale_ao(ao[3], wv, out=buf)
-    vmat = _d1_dot_(ao[idx3], aow.T, beta=1, out=out)
-    return vmat
+    _d1_dot_(ao[idx3], aow.T, beta=1, out=out)
+    return out
 
 def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           max_memory=2000, verbose=None):

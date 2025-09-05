@@ -2278,9 +2278,9 @@ def _tau_dot(bra, ket, wv, buf=None, out=None):
     '''1/2 <nabla i| v | nabla j>'''
     # einsum('g,xig,xjg->ij', .5*wv, bra[1:4], ket[1:4])
     wv = cupy.asarray(.5 * wv)
-    contract('ig,jg->ij', bra[1], _scale_ao(ket[1], wv, out=buf), out=out)
-    contract('ig,jg->ij', bra[2], _scale_ao(ket[2], wv, out=buf), beta=1., out=out)
-    contract('ig,jg->ij', bra[3], _scale_ao(ket[3], wv, out=buf), beta=1., out=out)
+    out = contract('ig,jg->ij', bra[1], _scale_ao(ket[1], wv, out=buf), out=out)
+    out = contract('ig,jg->ij', bra[2], _scale_ao(ket[2], wv, out=buf), beta=1., out=out)
+    out = contract('ig,jg->ij', bra[3], _scale_ao(ket[3], wv, out=buf), beta=1., out=out)
     return out
 
 class _GDFTOpt:
