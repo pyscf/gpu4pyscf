@@ -19,11 +19,12 @@ import cupyx.scipy.linalg as cpx_linalg
 from pyscf import gto, lib
 from gpu4pyscf import scf
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
-from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem, cholesky
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, _krylov_tools
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.df import int3c2e_bdiv
 
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
@@ -229,13 +230,15 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(aosym=True, group_size=group_size, group_size_aux=group_size_aux,verbose=mol.verbose)
-
+    C_p_orig = C_p.copy()
+    C_q_orig = C_q.copy()
     C_p = C_p[intopt._ao_idx,:]
     C_q = C_q[intopt._ao_idx,:]
 
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
 
+    upper_inv_eri2c_orig = lower_inv_eri2c.T.copy()
     upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
     # equivalent to 
     # upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx].T.copy()
@@ -315,7 +318,21 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     if calc == 'J':
         Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+       
+        Puv = get_int3c2e(mol, auxmol)
+        # tmp = int3c2e.get_int3c2e(mol, auxmol).transpose(2,0,1)
+        # # tmp = cp.einsum('uvP->Puv',tmp)
+        # print('Puv check', cp.linalg.norm(Puv-tmp))
+
+        # Piaref = get_PuvCupCvq_to_Ppq(tmp, C_p,C_q)
+        Piaref = get_PuvCupCvq_to_Ppq(Puv, C_p, C_q)
+
+
+        print('Pia check', cp.linalg.norm(cp.asarray(Pia)-cp.asarray(Piaref)))
+        ref = contract('PQ,Qia->Pia', upper_inv_eri2c, Piaref)
+        print('Tia check', cp.linalg.norm(cp.asarray(Tia)-cp.asarray(ref)))
         return Tia
+        # return ref
 
     if calc == 'K':
         Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
@@ -328,8 +345,247 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         return Tia, Tij, Tab
    
+def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
+                                calc='JK', aosym=True, omega=None, alpha=None, beta=None,
+                                group_size=BLKSIZE, group_size_aux=AUXBLKSIZE):
+    """
+    (3c2e_{Puv}, C_{up}, C_{vq} -> Ppq)。
 
-def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
+    Parameters:
+        mol: pyscf.gto.Mole
+        auxmol: pyscf.gto.Mole
+        C_p: cupy.ndarray (nao, p)
+        C_q: cupy.ndarray  (nao, q)
+
+    Returns:
+        Tpq: cupy.ndarray (naux, nao, nao)
+    """
+
+    intopt = VHFOpt(mol, auxmol, 'int2e')
+    intopt.build(aosym=aosym, group_size=group_size, group_size_aux=group_size_aux)
+
+    nao = mol.nao
+    naux = auxmol.nao
+
+    siz_p = C_p.shape[1]
+    siz_q = C_q.shape[1]
+
+    if 'J' in calc:
+        Ppq = cp.empty((naux, siz_p, siz_q), dtype=cp.float32)
+
+    if 'K' in calc:
+        Ppp = cp.empty((naux, siz_p, siz_p), dtype=cp.float32)
+        Pqq = cp.empty((naux, siz_q, siz_q), dtype=cp.float32)
+
+    for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
+        k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
+
+        int3c_slice = cp.empty((k1 - k0, nao, nao), dtype=cp.float32, order='C')
+
+        for cp_ij_id, _ in enumerate(intopt.log_qs):
+            cpi = intopt.cp_idx[cp_ij_id]
+            cpj = intopt.cp_jdx[cp_ij_id]
+            li = intopt.angular[cpi]
+            lj = intopt.angular[cpj]
+
+            int3c_slice_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=0)
+
+            if not mol.cart:
+                int3c_slice_blk = cart2sph(int3c_slice_blk, axis=1, ang=lj)
+                int3c_slice_blk = cart2sph(int3c_slice_blk, axis=2, ang=li)
+
+
+            if omega and omega != 0:
+                int3c_slice_blk_omega = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=omega)
+
+                if not mol.cart:
+                    int3c_slice_blk_omega = cart2sph(int3c_slice_blk_omega, axis=1, ang=lj)
+                    int3c_slice_blk_omega = cart2sph(int3c_slice_blk_omega, axis=2, ang=li)
+                int3c_slice_blk = alpha * int3c_slice_blk +  beta * int3c_slice_blk_omega
+
+            int3c_slice_blk = cp.asarray(int3c_slice_blk, dtype=cp.float32, order='C')
+            i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
+            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+
+            assert int3c_slice[:,j0:j1, i0:i1].shape == int3c_slice_blk.shape
+            int3c_slice[:,j0:j1, i0:i1] = int3c_slice_blk
+
+        if aosym:
+            row, col = cp.tril_indices(nao)
+            int3c_slice[:, row, col] = int3c_slice[:, col, row]
+
+
+        unsorted_ao_index = cp.argsort(intopt._ao_idx)
+        int3c_slice = int3c_slice[:, unsorted_ao_index, :]
+        int3c_slice = int3c_slice[:, :, unsorted_ao_index]
+
+        if 'J' in calc:
+            Ppq[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_q)
+
+        if 'K' in calc:
+
+            Ppp[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p)
+            Pqq[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q)
+
+
+    unsorted_aux_ao_index = cp.argsort(intopt._aux_ao_idx)
+
+
+    DEBUG = True
+    if DEBUG:
+        eri_3c2e = int3c2e.get_int3c2e(mol, auxmol, omega=0).transpose(2,0,1)
+        print('omega', omega)
+        if omega and omega != 0:
+            eri_3c2e_erf = get_int3c2e(mol, auxmol, omega=omega)
+            eri_3c2e = alpha * eri_3c2e + beta * eri_3c2e_erf
+        tmp = cp.einsum('Puv,up->Ppv', eri_3c2e, C_p)
+        Ppq = cp.einsum('Ppv,vq->Ppq', tmp, C_q)
+
+
+    if calc == 'J':
+        Tpq = get_Ppq_to_Tpq(Ppq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
+        return Tpq
+
+    if calc == 'K':
+        Tpp = get_Ppq_to_Tpq(Ppp[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
+        Tqq = get_Ppq_to_Tpq(Pqq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
+        return Tpp, Tqq
+
+    if calc == 'JK':
+        Tpq = get_Ppq_to_Tpq(Ppq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
+        Tpp = get_Ppq_to_Tpq(Ppp[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
+        Tqq = get_Ppq_to_Tpq(Pqq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
+        return Tpq, Tpp, Tqq
+
+
+def get_Tpq_bdiv_raw(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+           calc='JK', omega=None, alpha=None, beta=None,
+           log=None, in_ram=True, single=True):
+    nao = mol.nao
+    naux = auxmol.nao
+
+    # siz_p = C_p.shape[1]
+    # siz_q = C_q.shape[1]
+
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    ao_idx = cp.asarray(int3c2e_opt.ao_idx)
+    print('ao_idx.shape', ao_idx.shape)
+
+    nao, nao_orig = int3c2e_opt.coeff.shape
+    print('nao, nao_orig', nao, nao_orig) # 220 208
+
+    aux_coeff = cp.array(int3c2e_opt.aux_coeff) # aux_coeff is contraction coeff of GTO, not the MO coeff
+    naux = aux_coeff.shape[0]
+    print('aux_coeff.shape', aux_coeff.shape)
+
+    out = cp.zeros((nao*nao, naux))
+    print('out.shape', out.shape)
+    
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    # eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
+    eri3c = eri3c.dot(aux_coeff)
+
+    print('eri3c.shape', eri3c.shape)
+    print('eri3c.flags', eri3c.flags)
+
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
+    rows, cols = divmod(ao_pair_mapping, nao)
+    out[rows*nao+cols] = eri3c
+    out[cols*nao+rows] = eri3c
+    out = out.reshape(nao, nao, naux)
+
+    coeff = cp.asarray(int3c2e_opt.coeff)
+    print('coeff.shape', coeff.shape)
+    # out = contract('pqr,rk->pqk', out, aux_coeff)
+    out = contract('pqk,qj->pjk', out, coeff)
+    out = contract('pjk,pi->ijk', out, coeff)
+    from pyscf.df import incore
+    ref = incore.aux_e2(mol, auxmol)
+    assert abs(out.get()-ref).max() < 1e-10
+
+
+def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+           calc='JK', omega=None, alpha=None, beta=None,
+           log=None, in_ram=True, single=True):
+    # nao = mol.nao
+    n_occ = C_p.shape[1]
+
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    ao_idx = cp.asarray(int3c2e_opt.ao_idx)
+    print('ao_idx.shape', ao_idx.shape)
+
+    # C_p = C_p[ao_idx,:]
+    # C_q = C_q[ao_idx,:]
+    # C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    # C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+
+    nao, nao_orig = int3c2e_opt.coeff.shape
+    print('nao, nao_orig', nao, nao_orig) # 220 208
+
+    aux_coeff = cp.array(int3c2e_opt.aux_coeff) # aux_coeff is contraction coeff of GTO, not the MO coeff
+    naux = aux_coeff.shape[0]
+    print('aux_coeff.shape', aux_coeff.shape)
+
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    print('eri3c.shape', eri3c.shape)
+    # eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
+    print('orbital_pair_cart2sph eri3c.shape', eri3c.shape)
+    # eri3c = eri3c.dot(aux_coeff)  # (uv|P)
+    print('mol.cart', mol.cart)
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
+
+    # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    rows, cols = divmod(ao_pair_mapping, nao)
+    # rows, cols = divmod(ao_pair_mapping, nao_orig)
+
+    out = cp.zeros((nao*nao, naux))
+    # out = cp.zeros((nao_orig*nao_orig, naux))
+
+    out[ao_pair_mapping] = eri3c
+    out[rows*nao+cols] = out[cols*nao+rows] = eri3c
+    # out[cols*nao_orig+rows] = eri3c
+    
+    out = out.reshape(nao, nao, naux)
+
+    # out = out.reshape(nao_orig, nao_orig, naux)
+
+    coeff = cp.asarray(int3c2e_opt.coeff)
+    # print('coeff.shape', coeff.shape) # (220, 208)
+    # C_p = coeff.dot(C_p)
+    # C_q = coeff.dot(C_q)
+    out = contract('pqr,rk->pqk', out, aux_coeff)
+    # out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
+
+    out = contract('pqk,qj->pjk', out, coeff)
+    out = contract('pjk,pi->ijk', out, coeff)
+
+    ref = get_int3c2e(mol, auxmol)
+    print('out - ref', cp.linalg.norm(cp.einsum('uvP->Puv', out)-ref)) 
+
+    # out = cp.einsum('Puv->uvP', ref)
+    # out = get_int3c2e(mol, auxmol)
+    out = int3c2e.get_int3c2e(mol, auxmol)
+
+    # tmp = contract('Puv,up->Ppv', out, C_p)
+    # out = contract('Ppv,vq->Ppq', tmp, C_q)
+    out = contract('uvP,up->pvP', out, C_p)
+    out = contract('pvP,vq->Ppq', out, C_q)
+
+    # j2c = cp.asarray(int3c2e_opt.auxmol.intor('int2c2e'), order='C')
+    # print('int3c2e_opt.auxmol_int2c2e - auxmol_int2c2e', cp.linalg.norm(j2c-cp.asarray(auxmol.intor('int2c2e')))) # 0.0
+    
+    # cd_low = cp.linalg.cholesky(j2c)
+    
+    # cd_low = cpx_linalg.solve_triangular(cd_low, aux_coeff.T, lower=True, overwrite_b=True)
+    # cd_low = cpx_linalg.solve_triangular(cd_low, cp.eye(cd_low.shape[0]), lower=True, overwrite_b=True)
+
+    # print('cd_low - lower_inv_eri2c', cp.linalg.norm(cd_low - lower_inv_eri2c.T)) # 1e-7
+    Tpq = contract('PQ,Qpq->Qpq', lower_inv_eri2c.T, out)
+
+    return Tpq
+
+
+def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None, dtype=cp.float64):
 
     eri2c = auxmol.intor('int2c2e')
 
@@ -343,9 +599,14 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
     eri2c = cp.asarray(eri2c, dtype=cp.float64, order='C')
 
     try:
-        ''' eri2c=L L.T
-            LX = I
-            lower_inv_eri2c = X = L^-1
+        ''' we want lower_inv_eri2c = X
+                X X.T = eri2c^-1
+                (X X.T)^-1 = eri2c
+                (X.T)^-1 X^-1 = eri2c = L L.T
+                (X.T)^-1 = L
+        need to solve  L_inv = L^-1
+                X = L_inv.T
+           
         '''
         L = cp.linalg.cholesky(eri2c)
         L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
@@ -357,7 +618,7 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None):
         '''
         lower_inv_eri2c = math_helper.matrix_power(eri2c,-0.5,epsilon=LINEAR_EPSILON)
 
-    lower_inv_eri2c = cp.asarray(lower_inv_eri2c, dtype=cp.float32, order='C')
+    lower_inv_eri2c = cp.asarray(lower_inv_eri2c, dtype=dtype, order='C')
     return lower_inv_eri2c
 
 
@@ -1062,7 +1323,7 @@ class RisBase(lib.StreamObject):
         byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
         log.info(f'T_ia_J will take {byte_T_ia_J / (1024 ** 2):.0f} MB memory') 
 
-        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
+        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0, dtype=self.dtype)
 
         if self.a_x != 0:
             
@@ -1077,7 +1338,7 @@ class RisBase(lib.StreamObject):
             if self._JK_share_aux:
                 self.lower_inv_eri2c_K = self.lower_inv_eri2c_J
             else:
-                self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
+                self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta, dtype=self.dtype)
              
         self.log = log
 
@@ -1086,12 +1347,27 @@ class RisBase(lib.StreamObject):
         log = self.log
         log.info('==================== RIJ ====================')
         cpu0 = log.init_timer()
-        
+
+        T_ia_J_old = compute_Tpq_on_gpu_general(mol=self.mol, auxmol=self.auxmol_J, C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, lower_inv_eri2c=self.lower_inv_eri2c_J,
+                                calc='J', omega=0)
+
+        T_ia_J_bdiv = get_Tpq_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
+                            C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
+                            in_ram=self._in_ram, single=self.single, log=log)
+
         T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
                         group_size = self.group_size, group_size_aux =self.group_size_aux,
                         in_ram=self._in_ram, single=self.single, log=log)
-        
+
+
+ 
+
+        print('check norm T_ia_J_bdiv', cp.linalg.norm(T_ia_J_bdiv - cp.asarray(T_ia_J)))
+        print('check norm T_ia_J_old', cp.linalg.norm(T_ia_J_old - cp.asarray(T_ia_J)))
+
+        # assert cp.abs(T_ia_J_bdiv - T_ia_J).max() < 1e-10
+
         log.timer('build T_ia_J', *cpu0)
         log.info(get_memory_info('after T_ia_J'))
         return T_ia_J
@@ -1396,10 +1672,7 @@ class TDDFT(RisBase):
 
         log.info(get_memory_info('before T_ia_J'))
 
-        T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
-                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
-                        group_size = self.group_size, group_size_aux =self.group_size_aux,
-                        in_ram=self._in_ram, single=self.single, log=log)
+        T_ia_J = self.get_T_J()
         
         log.timer('T_ia_J', *cpu0)
 
