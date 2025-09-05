@@ -75,10 +75,10 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
                                          verbose=ks_grad.verbose)
     else:
         exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm,
-                           max_memory=max_memory, verbose=ks_grad.verbose)    
+                           max_memory=max_memory, verbose=ks_grad.verbose)
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
-    aoslices = mol.aoslice_by_atom()    
+    aoslices = mol.aoslice_by_atom()
     exc1_per_atom = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
     exc1_per_atom = cupy.asarray(exc1_per_atom)
 
@@ -182,17 +182,17 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         exc1_ao = cupy.zeros((nset,3,nao))
 
         if xctype == 'LDA':
-            ncomp = 1          
+            ncomp = 1
         elif xctype == 'GGA':
             ncomp = 4
         else:
             ncomp = 5
-        rho_buf = cupy.empty(ncomp*MIN_BLK_SIZE)      
+        rho_buf = cupy.empty(ncomp*MIN_BLK_SIZE)
         vtmp_buf = cupy.empty((3*nao*nao))
         res_buf = cupy.empty(3*nao)
         dm_mask_buf = cupy.empty(nao*nao)
         if xctype == 'LDA':
-            ao_deriv = 1 
+            ao_deriv = 1
             aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao,1*nocc))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
@@ -200,24 +200,24 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 nao_sub = len(idx)
                 for idm in range(nset):
                     rho = cupy.ndarray((ncomp, blk_size), memptr=rho_buf.data)
-                    vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
+                    vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)
                     res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
 
                     mo_coeff_mask = mo_coeff[idx,:]
                     rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype, buf=aow_buf, out=rho)
 
                     vxc_buf = cupy.ndarray((blk_size,), memptr=aow_buf.data)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0] 
+                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0]
                     wv = cupy.multiply(weight, vxc, out=vxc)
                     aow  = cupy.ndarray((nao_sub, blk_size), memptr=aow_buf.data)
-                    aow = numint._scale_ao(ao_mask[0], wv, out=aow)         
-                    vtmp = _d1_dot_(ao_mask[1:4], aow.T, out=vtmp)             
+                    aow = numint._scale_ao(ao_mask[0], wv, out=aow)
+                    vtmp = _d1_dot_(ao_mask[1:4], aow.T, out=vtmp)
                     dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
                     dm_mask = take_last2d(dms[idm], idx, out=dm_mask)
                     res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
                     exc1_ao[idm][:,idx] += res
         elif xctype == 'GGA':
-            
+
             ao_deriv = 2
             aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
@@ -227,7 +227,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
                 for idm in range(nset):
                     rho = cupy.ndarray((ncomp, blk_size), memptr=rho_buf.data)
-                    vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
+                    vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)
                     res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
 
                     mo_coeff_mask = mo_coeff[idx,:]
@@ -255,10 +255,10 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
                 nao_sub = len(idx)
-            
+
                 for idm in range(nset):
                     rho = cupy.ndarray((ncomp, blk_size), memptr=rho_buf.data)
-                    vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
+                    vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)
                     res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
 
                     mo_coeff_mask = mo_coeff[idx,:]
@@ -271,14 +271,14 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     wv[4] *= .5  # for the factor 1/2 in tau
                     aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
                     vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow, out=vtmp)
-                    vtmp = _tau_grad_dot_(ao_mask, wv[4], buf=aow[0], out=vtmp) 
+                    vtmp = _tau_grad_dot_(ao_mask, wv[4], buf=aow[0], out=vtmp)
                     dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
                     dm_mask = take_last2d(dms[idm], idx, out=dm_mask)
                     res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
                     exc1_ao[idm][:,idx] += res
 
         log.timer_debug1('gradient of vxc', *t0)
-            
+
     return exc1_ao
 
 def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
@@ -295,7 +295,7 @@ def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao = mol.nao
     dms = cupy.asarray(dms).reshape(-1,nao,nao)
     nset = dms.shape[0]
-    dms = opt.sort_orbitals(dms, axis=[1,2])    
+    dms = opt.sort_orbitals(dms, axis=[1,2])
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
     futures = []
@@ -307,7 +307,7 @@ def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 verbose=log.verbose, device_id=device_id)
             futures.append(future)
-    exc1_dist = [future.result() for future in futures] 
+    exc1_dist = [future.result() for future in futures]
     exc1 = reduce_to_device(exc1_dist)
     exc1 = opt.unsort_orbitals(exc1, axis=[2])
     if nset == 1:
@@ -427,7 +427,7 @@ def _gga_grad_sum_(ao, wv, accumulate=False, buf=None, out=None):
     if buf is None:
         buf = cupy.empty((3, ao.shape[1], ao.shape[2]), dtype=ao.dtype)
     if out is None:
-        out = cupy.empty((3, ao.shape[1], ao.shape[1]), dtype=ao.dtype)  
+        out = cupy.empty((3, ao.shape[1], ao.shape[1]), dtype=ao.dtype)
     aow = numint._scale_ao(ao[:4], wv[:4], out=buf[0])
     if not accumulate:
         vmat = _d1_dot_(ao[1:4], aow.T, out=out)
@@ -445,7 +445,7 @@ def _tau_grad_dot_(ao, wv, buf=None, out=None):
     if buf is None:
         buf = cupy.zeros((ao.shape[1], ao.shape[2]))
     if out is None:
-        out = cupy.zeros((3, ao.shape[1], ao.shape[1]))  
+        out = cupy.zeros((3, ao.shape[1], ao.shape[1]))
 
     idx1 = [4, 5, 6]
     idx2 = [5, 7, 8]

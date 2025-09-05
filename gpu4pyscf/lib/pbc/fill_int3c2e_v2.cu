@@ -27,8 +27,8 @@
 #define GOUT_WIDTH      45
 #define PAGE_SIZE       30
 #define REMOTE_THRESHOLD 50
-#define PAGES_PER_BLOCK  262144
-// approximately, 2048 images in each ijk shell triplet for 256 threads
+#define PAGES_PER_BLOCK  524288
+// approximately, 4000 images in each ijk shell triplet for 256 threads
 #define KTASKS_PER_BLOCK 16
 
 typedef struct {
