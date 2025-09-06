@@ -1418,7 +1418,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 wv[0] *= .5
                 wv[4] *= .5  # for the factor 1/2 in tau
                 v_ip = rks_grad._gga_grad_sum_(ao1, wv,  accumulate=True, buf=aow, out=v_ip)
-                v_ip = rks_grad._tau_grad_dot_(ao1, wv[4], buf=aow[0], out=v_ip)
+                v_ip = rks_grad._tau_grad_dot_(ao1, wv[4], accumulate=True, buf=aow[0], out=v_ip)
                 mo = contract('xig,ip->xpg', ao1, mocc, out=mo)
                 ao_dm0 = contract('ik,pil->pkl', dm0, ao1[:4], out=ao_dm0)
                 for ia in range(natm):
