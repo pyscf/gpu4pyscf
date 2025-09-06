@@ -172,43 +172,6 @@ BLKSIZE = 256
 AUXBLKSIZE = 256
 
 
-def get_int3c2e(mol, auxmol, aosym=True, omega=None):
-    '''
-    Generate full int3c2e tensor on GPU
-    for debug purpose
-    '''
-    nao = mol.nao
-    naux = auxmol.nao
-    intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(diag_block_with_triu=True, aosym=aosym, group_size=BLKSIZE, group_size_aux=BLKSIZE)
-    int3c = cp.empty([naux, nao, nao], order='C')
-    for cp_ij_id, _ in enumerate(intopt.log_qs):
-        cpi = intopt.cp_idx[cp_ij_id]
-        cpj = intopt.cp_jdx[cp_ij_id]
-        li = intopt.angular[cpi]
-        lj = intopt.angular[cpj]
-        i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-        j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
-
-        int3c_slice = cp.empty([naux, j1-j0, i1-i0], order='C')
-        for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-            k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
-            get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, out=int3c_slice[k0:k1], omega=omega)
-
-        if not mol.cart:
-            int3c_slice = cart2sph(int3c_slice, axis=1, ang=lj)
-            int3c_slice = cart2sph(int3c_slice, axis=2, ang=li)
-
-        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-        int3c[:, j0:j1, i0:i1] = int3c_slice
-    if aosym:
-        row, col = np.tril_indices(nao)
-        int3c[:, row, col] = int3c[:, col, row]
-    int3c = intopt.unsort_orbitals(int3c, aux_axis=[0], axis=[1,2])
-    return int3c
-
-
 def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
            calc='JK', aosym=True, omega=None, alpha=None, beta=None,
            group_size=BLKSIZE, group_size_aux=AUXBLKSIZE, log=None, 
@@ -230,18 +193,25 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(aosym=True, group_size=group_size, group_size_aux=group_size_aux,verbose=mol.verbose)
-    C_p_orig = C_p.copy()
-    C_q_orig = C_q.copy()
+
+    print('intopt._ao_idx', intopt._ao_idx.shape)
+
+    C_p_unsorted = C_p.copy()
+    C_q_unsorted = C_q.copy()
+
     C_p = C_p[intopt._ao_idx,:]
     C_q = C_q[intopt._ao_idx,:]
 
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
 
-    upper_inv_eri2c_orig = lower_inv_eri2c.T.copy()
+    print('intopt._aux_ao_idx', intopt._aux_ao_idx.shape)
+
+    upper_inv_eri2c_unsorted = lower_inv_eri2c.T
+
+
     upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
-    # equivalent to 
-    # upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx].T.copy()
+    # upper_inv_eri2c = lower_inv_eri2c.T
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
@@ -249,16 +219,15 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     int3c_dtype = cp.float32 if single else cp.float64
 
     if 'J' in calc:
-        Pia = xp.empty((naux, siz_p, siz_q), dtype=P_dtype)
+        Pia = xp.zeros((naux, siz_p, siz_q), dtype=P_dtype)
 
     if 'K' in calc:
-        Pij = xp.empty((naux, siz_p, siz_p), dtype=P_dtype)
-        Pab = xp.empty((naux, siz_q, siz_q), dtype=P_dtype)
+        Pij = xp.zeros((naux, siz_p, siz_p), dtype=P_dtype)
+        Pab = xp.zeros((naux, siz_q, siz_q), dtype=P_dtype)
 
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
         k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
-
-        int3c_slice = cp.empty((k1 - k0, nao, nao), dtype=int3c_dtype, order='C')
+        int3c_slice = cp.zeros((k1 - k0, nao, nao), dtype=int3c_dtype, order='C')
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
             cpj = intopt.cp_jdx[cp_ij_id]
@@ -299,6 +268,13 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             Pij[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p, in_ram=in_ram)
             Pab[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q, in_ram=in_ram)
 
+    # if 'J' in calc:
+    #     Pia = intopt.unsort_orbitals(Pia,aux_axis=[0])
+    # if 'K' in calc:
+    #     Pij = intopt.unsort_orbitals(Pij,aux_axis=[0])
+    #     Pab = intopt.unsort_orbitals(Pab,aux_axis=[0])
+
+
     if in_ram:
         def einsum2dot(_,a,b):
             P, Q = a.shape
@@ -319,18 +295,13 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     if calc == 'J':
         Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
        
-        Puv = get_int3c2e(mol, auxmol)
-        # tmp = int3c2e.get_int3c2e(mol, auxmol).transpose(2,0,1)
-        # # tmp = cp.einsum('uvP->Puv',tmp)
-        # print('Puv check', cp.linalg.norm(Puv-tmp))
 
-        # Piaref = get_PuvCupCvq_to_Ppq(tmp, C_p,C_q)
-        Piaref = get_PuvCupCvq_to_Ppq(Puv, C_p, C_q)
-
-
-        print('Pia check', cp.linalg.norm(cp.asarray(Pia)-cp.asarray(Piaref)))
-        ref = contract('PQ,Qia->Pia', upper_inv_eri2c, Piaref)
-        print('Tia check', cp.linalg.norm(cp.asarray(Tia)-cp.asarray(ref)))
+        # standard Tia_ref = \sum_{Puv} (P|Q) (Q|uv) C_ui Cva
+        eri_3c2e_ref = int3c2e.get_int3c2e(mol, auxmol, omega=0).transpose(2,0,1)
+        Pia_ref = get_PuvCupCvq_to_Ppq(eri_3c2e_ref, C_p_unsorted, C_q_unsorted)
+        Tia_ref = tmp_einsum('PQ, Qia->Pia', upper_inv_eri2c_unsorted, Pia_ref)
+        print('Tia - Tia_ref', cp.linalg.norm(cp.asarray(Tia)-cp.asarray(Tia_ref)))
+        assert cp.abs(cp.asarray(Tia)-cp.asarray(Tia_ref)).max() < 1e-7
         return Tia
         # return ref
 
@@ -345,6 +316,8 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         return Tia, Tij, Tab
    
+
+
 def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
                                 calc='JK', aosym=True, omega=None, alpha=None, beta=None,
                                 group_size=BLKSIZE, group_size_aux=AUXBLKSIZE):
@@ -371,16 +344,18 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
     siz_q = C_q.shape[1]
 
     if 'J' in calc:
-        Ppq = cp.empty((naux, siz_p, siz_q), dtype=cp.float32)
+        Pia = cp.zeros((naux, siz_p, siz_q), dtype=cp.float32)
 
     if 'K' in calc:
-        Ppp = cp.empty((naux, siz_p, siz_p), dtype=cp.float32)
-        Pqq = cp.empty((naux, siz_q, siz_q), dtype=cp.float32)
+        Pij = cp.zeros((naux, siz_p, siz_p), dtype=cp.float32)
+        Pab = cp.zeros((naux, siz_q, siz_q), dtype=cp.float32)
 
+    unsorted_ao_index = cp.argsort(intopt._ao_idx)
+    unsorted_aux_ao_index = cp.argsort(intopt._aux_ao_idx)
     for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
         k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
 
-        int3c_slice = cp.empty((k1 - k0, nao, nao), dtype=cp.float32, order='C')
+        int3c_slice = cp.zeros((k1 - k0, nao, nao), dtype=cp.float32, order='C')
 
         for cp_ij_id, _ in enumerate(intopt.log_qs):
             cpi = intopt.cp_idx[cp_ij_id]
@@ -415,47 +390,54 @@ def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
             int3c_slice[:, row, col] = int3c_slice[:, col, row]
 
 
-        unsorted_ao_index = cp.argsort(intopt._ao_idx)
+        
         int3c_slice = int3c_slice[:, unsorted_ao_index, :]
         int3c_slice = int3c_slice[:, :, unsorted_ao_index]
 
+
         if 'J' in calc:
-            Ppq[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_q)
+            Pia[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_q)
 
         if 'K' in calc:
 
-            Ppp[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p)
-            Pqq[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q)
+            Pij[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p)
+            Pab[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q)
 
+    
+    if 'J' in calc:
+        Pia = Pia[unsorted_aux_ao_index,:,:]
+    if 'K' in calc:
+        Pij = Pij[unsorted_aux_ao_index,:,:]
+        Pab = Pab[unsorted_aux_ao_index,:,:]
 
-    unsorted_aux_ao_index = cp.argsort(intopt._aux_ao_idx)
+    # DEBUG = False
+    # if DEBUG:
+ 
+    #     eri_3c2e = int3c2e.get_int3c2e(mol, auxmol, omega=0).transpose(2,0,1)
 
+    #     if omega and omega != 0:
+    #         eri_3c2e_erf = int3c2e.get_int3c2e(mol, auxmol, omega=omega).transpose(2,0,1)
+    #         eri_3c2e = alpha * eri_3c2e + beta * eri_3c2e_erf
 
-    DEBUG = True
-    if DEBUG:
-        eri_3c2e = int3c2e.get_int3c2e(mol, auxmol, omega=0).transpose(2,0,1)
-        print('omega', omega)
-        if omega and omega != 0:
-            eri_3c2e_erf = get_int3c2e(mol, auxmol, omega=omega)
-            eri_3c2e = alpha * eri_3c2e + beta * eri_3c2e_erf
-        tmp = cp.einsum('Puv,up->Ppv', eri_3c2e, C_p)
-        Ppq = cp.einsum('Ppv,vq->Ppq', tmp, C_q)
-
+    #     Pia = get_PuvCupCvq_to_Ppq(eri_3c2e, C_p, C_q)
+    #     if calc == 'J':
+    #         Tia_ref = cp.einsum('PQ, Qpq', lower_inv_eri2c.T, Pia)
+            
 
     if calc == 'J':
-        Tpq = get_Ppq_to_Tpq(Ppq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-        return Tpq
+        Tia = get_Ppq_to_Tpq(Pia, lower_inv_eri2c)
+        return Tia
 
     if calc == 'K':
-        Tpp = get_Ppq_to_Tpq(Ppp[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-        Tqq = get_Ppq_to_Tpq(Pqq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-        return Tpp, Tqq
+        Tij = get_Ppq_to_Tpq(Pij, lower_inv_eri2c)
+        Tab = get_Ppq_to_Tpq(Pab, lower_inv_eri2c)
+        return Tij, Tab
 
     if calc == 'JK':
-        Tpq = get_Ppq_to_Tpq(Ppq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-        Tpp = get_Ppq_to_Tpq(Ppp[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-        Tqq = get_Ppq_to_Tpq(Pqq[unsorted_aux_ao_index,:,:], lower_inv_eri2c)
-        return Tpq, Tpp, Tqq
+        Tia = get_Ppq_to_Tpq(Pia, lower_inv_eri2c)
+        Tij = get_Ppq_to_Tpq(Pij, lower_inv_eri2c)
+        Tab = get_Ppq_to_Tpq(Pab, lower_inv_eri2c)
+        return Tia, Tij, Tab
 
 
 def get_Tpq_bdiv_raw(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
@@ -559,16 +541,19 @@ def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     out = contract('pqk,qj->pjk', out, coeff)
     out = contract('pjk,pi->ijk', out, coeff)
 
-    ref = get_int3c2e(mol, auxmol)
-    print('out - ref', cp.linalg.norm(cp.einsum('uvP->Puv', out)-ref)) 
+    int3c2eref = int3c2e.get_int3c2e(mol, auxmol)
+    print('int3c2eref.shape',  int3c2eref.shape)
+    int3c2eref = cp.einsum('uvP->Puv',int3c2eref)
+    int3c2e_bdiv_out = cp.einsum('uvP->Puv',out)
+    print('int3c2e_bdiv - int3c2eref', cp.linalg.norm(int3c2e_bdiv_out-int3c2eref)) # bingo!
 
     # out = cp.einsum('Puv->uvP', ref)
     # out = get_int3c2e(mol, auxmol)
-    out = int3c2e.get_int3c2e(mol, auxmol)
-
+    # out = int3c2e.get_int3c2e(mol, auxmol)
+    out = int3c2e_bdiv_out
     # tmp = contract('Puv,up->Ppv', out, C_p)
     # out = contract('Ppv,vq->Ppq', tmp, C_q)
-    out = contract('uvP,up->pvP', out, C_p)
+    out = contract('Puv,up->pvP', out, C_p)
     out = contract('pvP,vq->Ppq', out, C_q)
 
     # j2c = cp.asarray(int3c2e_opt.auxmol.intor('int2c2e'), order='C')
@@ -580,7 +565,7 @@ def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     # cd_low = cpx_linalg.solve_triangular(cd_low, cp.eye(cd_low.shape[0]), lower=True, overwrite_b=True)
 
     # print('cd_low - lower_inv_eri2c', cp.linalg.norm(cd_low - lower_inv_eri2c.T)) # 1e-7
-    Tpq = contract('PQ,Qpq->Qpq', lower_inv_eri2c.T, out)
+    Tpq = contract('PQ,Qpq->Ppq', lower_inv_eri2c.T, out)
 
     return Tpq
 
@@ -1365,8 +1350,9 @@ class RisBase(lib.StreamObject):
         log.info('==================== RIJ ====================')
         cpu0 = log.init_timer()
 
-        T_ia_J_old = compute_Tpq_on_gpu_general(mol=self.mol, auxmol=self.auxmol_J, C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, lower_inv_eri2c=self.lower_inv_eri2c_J,
-                                calc='J', omega=0)
+        T_ia_J_old = compute_Tpq_on_gpu_general(mol=self.mol, auxmol=self.auxmol_J, C_p=self.C_occ_notrunc, 
+                                                C_q=self.C_vir_notrunc, lower_inv_eri2c=self.lower_inv_eri2c_J,
+                                                calc='J', omega=0)
 
         T_ia_J_bdiv = get_Tpq_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
                             C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
@@ -1378,16 +1364,21 @@ class RisBase(lib.StreamObject):
                         in_ram=self._in_ram, single=self.single, log=log)
 
 
+        def compareAB(A,B):
+            A = cp.asarray(A)
+            B = cp.asarray(B)
+            return float(cp.linalg.norm(A-B)), float(cp.abs(A-B).max())
  
 
-        print('check norm T_ia_J_bdiv', cp.linalg.norm(T_ia_J_bdiv - cp.asarray(T_ia_J)))
-        print('check norm T_ia_J_old', cp.linalg.norm(T_ia_J_old - cp.asarray(T_ia_J)))
-
+        print('T_ia_J_bdiv - T_ia_J', compareAB(T_ia_J_bdiv,T_ia_J))
+        print('T_ia_J_old - T_ia_J', compareAB(T_ia_J_old, T_ia_J))
+        print('T_ia_J_bdiv - T_ia_J_old', compareAB(T_ia_J_bdiv, T_ia_J_old))
+  
         # assert cp.abs(T_ia_J_bdiv - T_ia_J).max() < 1e-10
 
         log.timer('build T_ia_J', *cpu0)
         log.info(get_memory_info('after T_ia_J'))
-        return T_ia_J
+        return T_ia_J_bdiv
     
     def get_2T_K(self):
         log = self.log
