@@ -16,7 +16,7 @@
 
 #include <cuda_runtime.h>
 #include <stdio.h>
-#define THREADS        8
+#define THREADS        16
 
 __global__
 static void _block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
@@ -28,10 +28,13 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
     }
     int m0 = rows[r+1] - rows[r];
     int n0 = cols[r+1] - cols[r];
+    int diag_offset = offsets[r];
+    int row_offset = rows[r];
+    int col_offset = cols[r];
     
-    for (int i = threadIdx.x; i < m0; i += THREADS){
-        for (int j = threadIdx.y; j < n0; j += THREADS){
-            out[(i+rows[r])*n + (j+cols[r])] = diags[offsets[r] + i*n0 + j];
+    for (int i = threadIdx.y; i < m0; i += THREADS){
+        for (int j = threadIdx.x; j < n0; j += THREADS){
+            out[(i+row_offset)*n + (j+col_offset)] = diags[diag_offset + i*n0 + j];
         }
     }
 }
@@ -44,6 +47,7 @@ int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, in
     _block_diag<<<blocks, threads, 0, stream>>>(out, m, n, diags, ndiags, offsets, rows, cols);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in block_diag: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
