@@ -834,7 +834,7 @@ def empty_mapped(shape, dtype=float, order='C'):
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
     return out
 
-def ndarray(shape, dtype, buffer=None):
+def ndarray(shape, dtype=np.float64, buffer=None):
     '''
     Construct CuPy ndarray object using the NumPy ndarray API
     '''

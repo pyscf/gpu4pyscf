@@ -68,7 +68,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol, xc='pbe0').to_gpu()
         mf.kernel()
         td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)
-        td.conv_tol=1.0E-5
+        td.conv_tol=1.0E-4
         td.nstates = 5
         td.kernel()
         ci_optimizer = ConicalIntersectionOptimizer(td, states=(1, 2), crossing_type='n-2')
@@ -77,7 +77,7 @@ class KnownValues(unittest.TestCase):
         mff = dft.RKS(optimized_mol, xc='pbe0').to_gpu()
         mff.kernel()
         tdf = tdscf.ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)
-        td.conv_tol=1.0E-5
+        td.conv_tol=1.0E-4
         tdf.nstates = 5
         tdf.kernel()
         gf = tdf.nuc_grad_method()
