@@ -271,14 +271,13 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     wv[4] *= .5  # for the factor 1/2 in tau
                     aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
                     vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow, out=vtmp)
-                    vtmp = _tau_grad_dot_(ao_mask, wv[4], buf=aow[0], out=vtmp)
+                    vtmp = _tau_grad_dot_(ao_mask, wv[4], accumulate=True, buf=aow[0], out=vtmp)
                     dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
                     dm_mask = take_last2d(dms[idm], idx, out=dm_mask)
                     res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
                     exc1_ao[idm][:,idx] += res
 
         log.timer_debug1('gradient of vxc', *t0)
-
     return exc1_ao
 
 def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
@@ -426,33 +425,33 @@ def _gga_grad_sum_(ao, wv, accumulate=False, buf=None, out=None):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
     if buf is None:
         buf = cupy.empty((3, ao.shape[1], ao.shape[2]), dtype=ao.dtype)
-    if out is None:
-        out = cupy.empty((3, ao.shape[1], ao.shape[1]), dtype=ao.dtype)
     aow = numint._scale_ao(ao[:4], wv[:4], out=buf[0])
     if not accumulate:
         vmat = _d1_dot_(ao[1:4], aow.T, out=out)
     else:
+        assert out is not None
         vmat = _d1_dot_(ao[1:4], aow.T, beta=1.0, out=out)
     aow = _make_dR_dao_w(ao, wv[:4], out=buf)
-    vmat = _d1_dot_(aow, ao[0].T, beta=1, out=out)
+    vmat = _d1_dot_(aow, ao[0].T, beta=1, out=vmat)
     return vmat
 
 # XX, XY, XZ = 4, 5, 6
 # YX, YY, YZ = 5, 7, 8
 # ZX, ZY, ZZ = 6, 8, 9
-def _tau_grad_dot_(ao, wv, buf=None, out=None):
+def _tau_grad_dot_(ao, wv, accumulate=False, buf=None, out=None):
     '''The tau part of MGGA functional'''
-    if buf is None:
-        buf = cupy.zeros_like(ao[1])
-
     idx1 = [4, 5, 6]
     idx2 = [5, 7, 8]
     idx3 = [6, 8, 9]
     aow = numint._scale_ao(ao[1], wv, out=buf)
-    out = _d1_dot_(ao[idx1], aow.T, out=out)
-    aow = numint._scale_ao(ao[2], wv, out=buf)
+    if accumulate:
+        assert out is not None
+        out = _d1_dot_(ao[idx1], aow.T, beta=1, out=out)
+    else:
+        out = _d1_dot_(ao[idx1], aow.T, out=out)
+    aow = numint._scale_ao(ao[2], wv, out=aow)
     _d1_dot_(ao[idx2], aow.T, beta=1, out=out)
-    aow = numint._scale_ao(ao[3], wv, out=buf)
+    aow = numint._scale_ao(ao[3], wv, out=aow)
     _d1_dot_(ao[idx3], aow.T, beta=1, out=out)
     return out
 
@@ -537,7 +536,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv[4] *= .5  # for the factor 1/2 in tau
 
                 vtmp  = _gga_grad_sum_(ao, wv)
-                vtmp += _tau_grad_dot_(ao, wv[4])
+                _tau_grad_dot_(ao, wv[4], accumulate=True, out=vtmp)
                 vmat += vtmp
                 excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
                 excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2

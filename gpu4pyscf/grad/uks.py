@@ -253,14 +253,14 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 wv[:,4] *= .5  # for the factor 1/2 in tau
                 aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
                 vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[0],  buf=aow, out=vtmp)
-                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[0,4], buf=aow[0], out=vtmp)
+                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[0,4], accumulate=True, buf=aow[0], out=vtmp)
                 #add_sparse(vmat[0], vtmp, idx)
                 dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
                 dm_mask = take_last2d(dms[0], idx, out=dm_mask)
                 res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
                 exc1[:, idx] += res
                 vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1],  buf=aow, out=vtmp)
-                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[1,4], buf=aow[0], out=vtmp)
+                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[1,4], accumulate=True, buf=aow[0], out=vtmp)
                 #add_sparse(vmat[1], vtmp, idx)
                 dm_mask = take_last2d(dms[1], idx, out=dm_mask)
                 res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
@@ -389,14 +389,14 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv[:,4] *= .5
 
                 vtmp = rks_grad._gga_grad_sum_(ao, wv[0])
-                vtmp += rks_grad._tau_grad_dot_(ao, wv[0,4])
+                rks_grad._tau_grad_dot_(ao, wv[0,4], accumulate=True, out=vtmp)
                 vmat[0] += vtmp
                 rho = rho_a[0] + rho_b[0]
                 excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
                 excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[0]) * 2
 
                 vtmp = rks_grad._gga_grad_sum_(ao, wv[1])
-                vtmp += rks_grad._tau_grad_dot_(ao, wv[1,4])
+                rks_grad._tau_grad_dot_(ao, wv[1,4], accumulate=True, out=vtmp)
                 vmat[1] += vtmp
                 excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
                 rho = vxc = None
