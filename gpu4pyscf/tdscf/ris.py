@@ -209,9 +209,14 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     upper_inv_eri2c_unsorted = lower_inv_eri2c.T
 
+    eri2c = cp.asarray(auxmol.intor('int2c2e'))
+    eri2c = eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx]
+    L = cp.linalg.cholesky(eri2c)
+    L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
+    lower_inv_eri2c = L_inv.T
 
-    upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
-    # upper_inv_eri2c = lower_inv_eri2c.T
+    # upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
+    upper_inv_eri2c = lower_inv_eri2c.T
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
