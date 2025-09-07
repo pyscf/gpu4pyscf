@@ -930,14 +930,14 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                     assert hermi == 1
                     cpos_alpha = cupy.ndarray((nao_sub, nocc_alpha) , memptr=mo_buf.data)
                     cpos_alpha = cupy.take(mo_coeff_alpha, idx, axis=0, out=cpos_alpha)
-                    rho_tot[0, i, :, p0:p1] = _eval_rho2(ao_mask, cpos_alpha, xctype, with_lapl, buf=buf, rho=rho_tot[0, i, :, p0:p1])
+                    _eval_rho2(ao_mask, cpos_alpha, xctype, with_lapl, buf=buf, rho=rho_tot[0, i, :, p0:p1])
                     cpos_beta = cupy.ndarray((nao_sub, nocc_beta) , memptr=mo_buf.data)
                     cpos_beta = cupy.take(mo_coeff_beta, idx, axis=0, out=cpos_beta)
-                    rho_tot[1, i, :, p0:p1] = _eval_rho2(ao_mask, cpos_beta, xctype, with_lapl, buf=buf, rho=rho_tot[1, i, :, p0:p1])
+                    _eval_rho2(ao_mask, cpos_beta, xctype, with_lapl, buf=buf, rho=rho_tot[1, i, :, p0:p1])
         t0 = log.timer_debug1(f'eval rho on Device {device_id}', *t0)
         dm_mask_buf = mo_buf = mo_coeff = None
         weights = cupy.asarray(grids.weights[grid_start:grid_end])
-        nelec = cupy.einsum('sng,g->sn', rho_tot[:,:,0], weights).get()
+        nelec = rho_tot[:,:,0].dot(weights).get() # 'sng,g->sn'
         exc = cupy.empty((nset, ngrids_local, 1))
         if xctype == 'LDA':
             vxc = cupy.zeros((nset, 2, 1,  ngrids_local))
@@ -984,17 +984,17 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 elif xctype == 'MGGA':
                     va = _tau_dot(ao_mask, ao_mask, wv[i,0,4, p0:p1], out=vtmp)
                     aow_alpha = _scale_ao(ao_mask[:4], wv[i,0,:4,p0:p1], out=buf)
-                    va = contract('ig,jg->ij', ao_mask[0],aow_alpha, beta=1, out=vtmp)
+                    va = contract('ig,jg->ij', ao_mask[0],aow_alpha, beta=1, out=va)
                     add_sparse(vmata[i], va, idx)
                     vb = _tau_dot(ao_mask, ao_mask, wv[i,1,4, p0:p1], out=vtmp)
                     aow_beta = _scale_ao(ao_mask[:4], wv[i,1,:4,p0:p1], out=buf)
-                    vb = contract('ig,jg->ij', ao_mask[0],aow_beta, beta=1, out=vtmp)
+                    vb = contract('ig,jg->ij', ao_mask[0],aow_beta, beta=1, out=vb)
                     add_sparse(vmatb[i], vb, idx)
                 elif xctype == 'HF':
                     pass
                 else:
                     raise NotImplementedError(f'numint.nr_uks for functional {xc_code}')
-    t0 = log.timer_debug1(f'eval integration on {device_id}', *t0)
+        t0 = log.timer_debug1(f'eval integration on {device_id}', *t0)
     return nelec, excsum, (vmata, vmatb)
 
 
