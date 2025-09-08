@@ -27,9 +27,6 @@
 
 #define GOUT_WIDTH1     81
 
-extern __constant__ int _c_cartesian_lexical_xyz[];
-extern __constant__ GXYZOffset c_gxyz_offset[];
-
 __global__ static
 void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                    int *pool, GXYZOffset *gxyz_offsets,

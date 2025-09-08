@@ -152,4 +152,7 @@ __device__ __forceinline__ unsigned get_smid()
 
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
+
+extern __constant__ int _c_cartesian_lexical_xyz[];
+extern __constant__ GXYZOffset c_gxyz_offset[];
 #endif

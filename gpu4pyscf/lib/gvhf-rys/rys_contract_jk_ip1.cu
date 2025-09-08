@@ -27,8 +27,6 @@
 
 #define GWIDTH_IP1 27
 
-extern __constant__ int _c_cartesian_lexical_xyz[];
-
 __global__ static
 void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                        int *pool, int reserved_shm_size, int nfij, int nfkl)

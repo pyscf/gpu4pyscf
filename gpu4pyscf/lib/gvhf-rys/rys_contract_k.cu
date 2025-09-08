@@ -28,9 +28,6 @@
 
 #define GOUT_WIDTH1     81
 
-extern __constant__ int _c_cartesian_lexical_xyz[];
-extern __constant__ GXYZOffset c_gxyz_offset[];
-
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,

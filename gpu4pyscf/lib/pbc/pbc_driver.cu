@@ -632,32 +632,32 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
                  int *bas_ij_idx, int *pair_mapping, int *img_idx, uint32_t *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
-    uint16_t ish0 = shls_slice[0];
-    uint16_t jsh0 = shls_slice[2];
-    uint16_t ksh0 = shls_slice[4] + nbas;
-    uint16_t ksh1 = shls_slice[5] + nbas;
-    uint16_t nksh = ksh1 - ksh0;
-    uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
-    uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    uint8_t lk = bas[ANG_OF + ksh0*BAS_SLOTS];
-    uint8_t kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
-    uint8_t nfi = (li+1)*(li+2)/2;
-    uint8_t nfj = (lj+1)*(lj+2)/2;
-    uint8_t nfk = (lk+1)*(lk+2)/2;
-    uint8_t nfij = nfi * nfj;
-    uint8_t order = li + lj + lk;
-    uint8_t nroots = order / 2 + 1;
+    int ish0 = shls_slice[0];
+    int jsh0 = shls_slice[2];
+    int ksh0 = shls_slice[4] + nbas;
+    int ksh1 = shls_slice[5] + nbas;
+    int nksh = ksh1 - ksh0;
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    int lk = bas[ANG_OF + ksh0*BAS_SLOTS];
+    int kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
+    int nfi = (li+1)*(li+2)/2;
+    int nfj = (lj+1)*(lj+2)/2;
+    int nfk = (lk+1)*(lk+2)/2;
+    int nfij = nfi * nfj;
+    int order = li + lj + lk;
+    int nroots = order / 2 + 1;
     double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
-    uint8_t stride_j = li + 1;
-    uint8_t stride_k = stride_j * (lj + 1);
+    int stride_j = li + 1;
+    int stride_k = stride_j * (lj + 1);
     // up to (gg|i)
-    uint8_t g_size = stride_k * (lk + 1);
+    int g_size = stride_k * (lk + 1);
     PBCInt3c2eBounds bounds = {
-        (uint8_t)li, (uint8_t)lj, lk, nroots, nfij, nfk, kprim,
-        stride_j, stride_k, g_size, (uint16_t)naux, (uint16_t)nksh, (uint16_t)ksh0,
+        li, lj, lk, nroots, nfij, nfk, kprim,
+        stride_j, stride_k, g_size, naux, nksh, ksh0,
         n_prim_pairs, n_ctr_pairs,
         bas_ij_idx, pair_mapping, img_offsets, img_idx
     };
