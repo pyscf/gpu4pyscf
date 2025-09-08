@@ -903,7 +903,6 @@ def evaluate_xc_gradient_wrapper(
         c_driver = libgpbc.evaluate_xc_gradient_driver
 
     assert gradient.dtype == xc_weights.dtype
-    assert gradient.dtype == dm_slice.dtype
 
     if gradient.dtype == cp.float32:
         use_float_precision = ctypes.c_int(1)
@@ -918,7 +917,7 @@ def evaluate_xc_gradient_wrapper(
         density_matrix_with_translation = dm_slice
     else:
         density_matrix_with_translation = cp.einsum(
-            "kt, ikpq -> itpq", phase_diff_among_images, dm_slice
+            "kt, ikpq->itpq", phase_diff_among_images.conj(), dm_slice
         )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
@@ -928,6 +927,8 @@ def evaluate_xc_gradient_wrapper(
     density_matrix_with_translation_real_part = cp.asarray(
         density_matrix_with_translation.real, order="C"
     )
+
+    assert gradient.dtype == density_matrix_with_translation_real_part.dtype
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
@@ -1172,6 +1173,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
+    dms = None
     assert nset == 1
 
     mesh = ni.mesh
@@ -1277,6 +1279,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
+    dms = None
     assert nset == 2
 
     mesh = ni.mesh
@@ -1369,6 +1372,7 @@ def get_veff_ip1(
     kpts=None,
     kpts_band=None,
     with_j=True,
+    with_pseudo=True,
     verbose=None,
 ):
     if kpts is None:
@@ -1379,6 +1383,7 @@ def get_veff_ip1(
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
+    dms = None
     kpts_band = _format_kpts_band(kpts_band, kpts)
 
     xc_type = ni._xc_type(xc_code)
@@ -1435,7 +1440,8 @@ def get_veff_ip1(
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
-    if cell._pseudo:
+    if with_pseudo:
+        assert cell._pseudo is not None
         xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG_part1(cell, mesh)
 
     veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
