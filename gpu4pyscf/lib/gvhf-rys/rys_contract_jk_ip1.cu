@@ -457,7 +457,7 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 
 __global__ static
 void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                        int *pool, double *dd_pool)
+                        int *pool, double *dd_pool, int reserved_shm_size)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -497,7 +497,6 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int stride_k = bounds.stride_k;
     int stride_l = bounds.stride_l;
     int g_size = bounds.g_size;
-    int nroots = bounds.nroots;
     int nfi = bounds.nfi;
     int nfj = bounds.nfj;
     int nfk = bounds.nfk;
@@ -516,7 +515,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+6) + sq_id;
-    double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+6);
+    double *cicj_cache = shared_memory + reserved_shm_size;
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
@@ -1074,11 +1073,12 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
         dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + ij_prims;
-        buflen = MAX(buflen, 12*gout_stride*quartets_per_block);
+        int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
+        int reserved_shm_size = MAX(buflen, 12*gout_stride*quartets_per_block);
+        buflen = reserved_shm_size + ij_prims;
 
         rys_ejk_ip1_kernel<<<npairs_ij, threads, buflen*sizeof(double)>>>(
-                envs, jk, bounds, pool, dd_pool);
+                envs, jk, bounds, pool, dd_pool, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -206,7 +206,7 @@ class KnownValues(unittest.TestCase):
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
         mf = scf.RHF(mol1)
-        vj = mf.get_j(mol1, dm, hermi=0).get()
+        vj = mf.get_j(mol1, dm, hermi=0)
         self.assertAlmostEqual(lib.fp(vj), 89.57263277687994, 7)
 
         mf1 = mf.to_cpu()
