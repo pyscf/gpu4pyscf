@@ -161,14 +161,22 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('ukpr,ukqr->ukpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
-        if hasattr(multigrid_cpu, 'nr_uks'):
-            n0, exc0, ref = multigrid_cpu.nr_uks(
-                MultiGridNumInt_cpu(pcell), xc, dm, with_j=True, kpts=kpts)
-        else:
-            n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_uks(
-                pcell, None, xc, dm, kpts=kpts)
-        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(
-            cell_orth, None, xc, dm, with_j=True, kpts=kpts)
+
+        mf = pcell.KUKS(xc=xc)
+        n0, exc0, ref = mf._numint.nr_uks(pcell, mf.grids, xc, dm, kpts=kpts)
+        vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        ref += vj[0] + vj[1]
+
+        ### Henry 20250909: The CPU multigrid reference result for UKS is wrong both in value and in format in pyscf==2.8.0.
+        # if hasattr(multigrid_cpu, 'nr_uks'):
+        #     n0, exc0, ref = multigrid_cpu.nr_uks(
+        #         MultiGridNumInt_cpu(pcell), xc, dm, with_j=True, kpts=kpts)
+        # else:
+        #     n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_uks(
+        #         pcell, None, xc, dm, kpts=kpts)
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True, kpts=kpts)
+        print(f"n0 = {n0}, n1 = {n1}")
+        print(f"exc0 = {exc0}, exc1 = {exc1}")
         assert abs(n0-n1).max() < 1e-8
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
