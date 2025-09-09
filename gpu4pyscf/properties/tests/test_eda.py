@@ -20,7 +20,7 @@ import pyscf
 from gpu4pyscf.properties.eda import eval_ALMO_EDA_2_energies
 
 def setUpModule():
-    global system_svp, system_tzvpp, system_charged
+    global system_svp, system_tzvpp, system_charged, system_two_Li, system_three_Li
 
     if True:
         basis = 'def2-svp'
@@ -143,17 +143,52 @@ def setUpModule():
 
         system_charged = [frag_1_mol, frag_2_mol]
 
+    if True:
+        basis = 'cc-pvdz'
+
+        frag_1_mol = pyscf.M(
+        atom = """
+            Li 0 0 0
+        """,
+        # unit = "B",
+        basis = basis,
+        charge = 1,
+        spin = 0,
+        output = '/dev/null',
+        )
+
+        frag_2_mol = pyscf.M(
+        atom = """
+            Li 2.5 0.1 0
+        """,
+        # unit = "B",
+        basis = basis,
+        charge = 1,
+        spin = 0,
+        output = '/dev/null',
+        )
+
+        frag_3_mol = pyscf.M(
+        atom = """
+            Li 8.0 -0.1 0
+        """,
+        # unit = "B",
+        basis = basis,
+        charge = 1,
+        spin = 0,
+        output = '/dev/null',
+        )
+
+        system_two_Li = [frag_1_mol, frag_2_mol]
+        system_three_Li = [frag_1_mol, frag_2_mol, frag_3_mol]
+
 def tearDownModule():
-    global system_svp, system_tzvpp, system_charged
-    for mol in system_svp:
-        mol.stdout.close()
-    del system_svp
-    for mol in system_tzvpp:
-        mol.stdout.close()
-    del system_tzvpp
-    for mol in system_charged:
-        mol.stdout.close()
-    del system_charged
+    global system_svp, system_tzvpp, system_charged, system_two_Li, system_three_Li
+    to_clean = [system_svp, system_tzvpp, system_charged, system_two_Li, system_three_Li]
+    for system in to_clean:
+        for mol in system:
+            mol.stdout.close()
+    del to_clean
 
 class KnownValues(unittest.TestCase):
     def test_almo_eda_2_hf_svp(self):
@@ -695,6 +730,112 @@ class KnownValues(unittest.TestCase):
         assert len(reference_dft_gradients) == len(test_dft_gradients)
         for reference_dft_gradient, test_dft_gradient in zip(reference_dft_gradients, test_dft_gradients):
             assert np.max(np.abs(test_dft_gradient - reference_dft_gradient)) < 1e-6
+
+    def test_almo_eda_2_two_Li_edgecase(self):
+        ### Q-Chem input
+        # $molecule
+        # 2 1
+        # --
+        # 1 1
+        #             Li 0 0 0
+        # --
+        # 1 1
+        #             Li 2.5 0.1 0
+        # $end
+
+        # $rem
+        # JOBTYPE                     eda
+        # EDA2                        1
+        # METHOD                      PBE
+        # BASIS                       cc-pvdz
+        # XC_GRID                     000099000590
+        # NL_GRID                     000050000194
+        # MAX_SCF_CYCLES              100
+        # SCF_CONVERGENCE             10
+        # THRESH                      14
+        # MEM_STATIC                  8000
+        # MEM_TOTAL                   80000
+        # SYMMETRY                    FALSE
+        # SYM_IGNORE                  TRUE
+        # $end
+        reference_eda_result = {
+            "total"                   :  553.9834,
+            "frozen"                  :  555.2922,
+            "electrostatic"           :  555.3023,
+            "classical electrostatic" :  555.3150,
+            "dispersion"              :   -0.0273,
+            "pauli"                   :    0.0171,
+            "polarization"            :   -0.3832,
+            "charge transfer"         :   -0.9256,
+            "unit"                    : "kJ/mol",
+        }
+        reference_dft_result = {
+            "energy" : [ -7.2555003103, -7.2555003103, -14.3000020085 ],
+        }
+
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_two_Li, xc = "PBE")
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            elif type(reference_value) is float:
+                # The Hartree to kJ/mol conversion factor of Q-Chem (2625.531) is derived from Q-Chem total energy term.
+                # It is important since several terms are big in value.
+                # Henry has no idea why they adopt such a conversion factor.
+                reference_value *= 2625.500 / 2625.531
+                assert abs(test_value - reference_value) < 1e-3, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 2e-7
+
+    def test_almo_eda_2_three_Li_edgecase(self):
+        reference_eda_result = {
+            "total"                   :  980.0584,
+            "frozen"                  :  981.3959,
+            "electrostatic"           :  981.4061,
+            "classical electrostatic" :  981.4190,
+            "dispersion"              :   -0.0275,
+            "pauli"                   :    0.0173,
+            "polarization"            :   -0.3721,
+            "charge transfer"         :   -0.9654,
+            "unit"                    : "kJ/mol",
+        }
+        reference_dft_result = {
+            "energy" : [ -7.2555003103, -7.2555003103, -7.2555003103, -21.3932208818 ],
+        }
+
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_three_Li, xc = "PBE")
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            elif type(reference_value) is float:
+                # The Hartree to kJ/mol conversion factor of Q-Chem (2625.531) is derived from Q-Chem total energy term.
+                # It is important since several terms are big in value.
+                # Henry has no idea why they adopt such a conversion factor.
+                reference_value *= 2625.500 / 2625.531
+                assert abs(test_value - reference_value) < 1e-3, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 2e-7
 
 if __name__ == "__main__":
     print("Full Tests for ALMO EDA 2 energies")
