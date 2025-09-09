@@ -702,7 +702,6 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
 def gen_vind(hessobj, mo_coeff, mo_occ):
     mol = hessobj.mol
-    mf = hessobj.base
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     nao, nmo = mo_coeff.shape

@@ -26,12 +26,11 @@ from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
 from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc, get_dD_dS, get_dF_dA, get_dSii, grad_switch_h
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
-from gpu4pyscf.hessian.jk import _ao2mo
 from gpu4pyscf.gto.int3c1e_ip import int1e_grids_ip1, int1e_grids_ip2
 from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ipip1, int1e_grids_ipvip1, int1e_grids_ipip2, int1e_grids_ip1ip2
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
-from gpu4pyscf.hessian.rhf import HessianBase
+from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
 from pyscf import lib as pyscf_lib
 from gpu4pyscf.lib.cupy_helper import contract
 

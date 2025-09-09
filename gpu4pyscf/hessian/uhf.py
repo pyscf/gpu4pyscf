@@ -375,7 +375,6 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
 def gen_vind(hessobj, mo_coeff, mo_occ):
     mol = hessobj.mol
-    mf = hessobj.base
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     nao, nmoa = mo_coeff[0].shape
@@ -432,8 +431,6 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
         mob = jopt.apply_coeff_C_mat(mo_coeff[1])
         mocca = moa[:,mo_occ[0]>0.5]
         moccb = mob[:,mo_occ[1]>0.5]
-        nmoa = moa.shape[1]
-        nocca = mocca.shape[1]
         vja = _ao2mo(vjab, mocca, moa).reshape(n_dm_2,-1)
         vjb = _ao2mo(vjab, moccb, mob).reshape(n_dm_2,-1)
         vj = cp.hstack((vja, vjb))
@@ -448,8 +445,6 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
         mob = kopt.apply_coeff_C_mat(mo_coeff[1])
         mocca = moa[:,mo_occ[0]>0.5]
         moccb = mob[:,mo_occ[1]>0.5]
-        nmoa = moa.shape[1]
-        nocca = mocca.shape[1]
         vka, vkb = vk[:n_dm_2], vk[n_dm_2:]
         vka = _ao2mo(vka, mocca, moa).reshape(n_dm_2,-1)
         vkb = _ao2mo(vkb, moccb, mob).reshape(n_dm_2,-1)
