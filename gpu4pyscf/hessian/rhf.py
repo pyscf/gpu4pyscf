@@ -225,7 +225,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
             l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+        pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
@@ -449,7 +449,7 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
 
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, QUEUE_DEPTH), dtype=np.int32)
+        pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
         for i, j, k, l in tasks:

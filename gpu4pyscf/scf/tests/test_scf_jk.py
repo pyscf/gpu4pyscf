@@ -225,3 +225,13 @@ def test_k_hermi1():
     vk = jk.get_k(mol, dm, hermi=1).get()
     assert abs(vk - ref).max() < 1e-9
     assert abs(lib.fp(vk) - 5580.092102968194) < 1e-9
+
+    np.random.seed(9)
+    nao = mol.nao
+    dm = np.random.rand(2, nao, nao) - .5
+    dm = cp.einsum('nij,nkj->nik', dm, dm)
+
+    ref = jk.get_jk(mol, dm, hermi=1)[1].get()
+    vk = jk.get_k(mol, dm, hermi=1).get()
+    assert abs(vk - ref).max() < 1e-9
+    assert abs(lib.fp(vk) - 327.9485135045478) < 1e-9

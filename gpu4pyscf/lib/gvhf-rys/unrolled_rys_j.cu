@@ -5,23 +5,31 @@
 
 
 __global__ static
-void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -149,26 +157,39 @@ void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -311,26 +332,39 @@ void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -498,26 +532,39 @@ void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -734,26 +781,39 @@ void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -918,26 +978,39 @@ void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -1154,26 +1227,39 @@ void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -1465,26 +1551,39 @@ void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         atomicAdd(vj+kl_pair0+8, vj_kl_110);
         atomicAdd(vj+kl_pair0+9, vj_kl_200);
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -1849,26 +1948,39 @@ void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         atomicAdd(vj+kl_pair0+18, vj_kl_210);
         atomicAdd(vj+kl_pair0+19, vj_kl_300);
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -2344,26 +2456,39 @@ void rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         atomicAdd(vj+kl_pair0+33, vj_kl_310);
         atomicAdd(vj+kl_pair0+34, vj_kl_400);
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -2552,26 +2677,39 @@ void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -2843,26 +2981,39 @@ void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -3220,26 +3371,39 @@ void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         atomicAdd(vj+kl_pair0+8, vj_kl_110);
         atomicAdd(vj+kl_pair0+9, vj_kl_200);
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -3689,26 +3853,39 @@ void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         atomicAdd(vj+kl_pair0+18, vj_kl_210);
         atomicAdd(vj+kl_pair0+19, vj_kl_300);
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -3945,26 +4122,39 @@ void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
             dm += nao_pairs;
         }
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -4318,26 +4508,39 @@ void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         atomicAdd(vj+kl_pair0+2, vj_kl_010);
         atomicAdd(vj+kl_pair0+3, vj_kl_100);
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
-void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
+void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.omega >= 0) {
         _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int iprim = bounds.iprim;
@@ -4791,6 +4994,11 @@ void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool)
         atomicAdd(vj+kl_pair0+8, vj_kl_110);
         atomicAdd(vj+kl_pair0+9, vj_kl_200);
     }
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *pool)
@@ -4825,28 +5033,33 @@ int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *p
     case 38: adjust_threads(rys_j_4_2, nsq_per_block); break;
     }
 
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = pool + workers * QUEUE_DEPTH;
+    cudaMemset(head, 0, sizeof(int));
+
     dim3 threads(nsq_per_block, gout_stride);
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int buflen = nroots*2 * nsq_per_block + iprim*jprim + nf3_ij;
-    int npairs_ij = bounds->npairs_ij;
     switch (ijkl) {
-    case 0: rys_j_0_0<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 9: rys_j_1_0<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 10: rys_j_1_1<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 11: rys_j_1_2<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 18: rys_j_2_0<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 19: rys_j_2_1<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 20: rys_j_2_2<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 21: rys_j_2_3<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 22: rys_j_2_4<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 27: rys_j_3_0<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 28: rys_j_3_1<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 29: rys_j_3_2<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 30: rys_j_3_3<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 36: rys_j_4_0<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 37: rys_j_4_1<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
-    case 38: rys_j_4_2<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool); break;
+    case 0: rys_j_0_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 9: rys_j_1_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 10: rys_j_1_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 11: rys_j_1_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 18: rys_j_2_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 19: rys_j_2_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 20: rys_j_2_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 21: rys_j_2_3<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 22: rys_j_2_4<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 27: rys_j_3_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 28: rys_j_3_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 29: rys_j_3_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 30: rys_j_3_3<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 36: rys_j_4_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 37: rys_j_4_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 38: rys_j_4_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     default: return 0;
     }
     return 1;

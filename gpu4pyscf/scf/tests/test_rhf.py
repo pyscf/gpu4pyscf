@@ -173,7 +173,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(vj - refj).max(), 0, 8)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 8)
 
-    @unittest.skip('hermi=0')
     def test_get_jk1_hermi0(self):
         np.random.seed(1)
         nao = mol1.nao
@@ -202,7 +201,6 @@ class KnownValues(unittest.TestCase):
         refj = mf1.get_j(mol1, dm, hermi=1)
         self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
-    @unittest.skip('hermi=0')
     def test_get_j1_hermi0(self):
         np.random.seed(1)
         nao = mol1.nao
@@ -229,13 +227,12 @@ class KnownValues(unittest.TestCase):
         refk = mf1.get_k(mol1, dm, hermi=1)
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
-    @unittest.skip('hermi=0')
     def test_get_k1_hermi0(self):
         np.random.seed(1)
         nao = mol1.nao
         dm = np.random.random((2,nao,nao))
         mf = scf.RHF(mol1)
-        vk = mf.get_k(mol1, dm, hermi=0).get()
+        vk = mf.get_k(mol1, dm, hermi=0)
         self.assertAlmostEqual(lib.fp(vk),-26.36969769724246, 7)
 
         mf1 = mf.to_cpu()

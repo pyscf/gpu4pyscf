@@ -738,6 +738,8 @@ class SCF(pyscf_lib.StreamObject):
                 vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
                     mol, self.direct_scf_tol, tile=1).build()
             vk = jk.get_k(mol, dm, hermi, vhfopt)
+        if not isinstance(dm, cupy.ndarray):
+            vk = vk.get()
         return vk
 
 class KohnShamDFT:

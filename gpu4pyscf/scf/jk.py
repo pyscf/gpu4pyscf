@@ -69,7 +69,6 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
 
     if vhfopt is None:
         vhfopt = _VHFOpt(mol, tile=1).build()
-        print(vhfopt.tile)
     assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
@@ -513,7 +512,8 @@ class _VHFOpt:
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty((workers, QUEUE_DEPTH), dtype=np.int32)
+            # An additional integer to count for the proccessed pair_ijs 
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
 
             timing_counter = Counter()
             kern_counts = 0
@@ -819,7 +819,7 @@ class _VHFOpt:
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty((workers, QUEUE_DEPTH), dtype=np.int32)
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
 
             timing_counter = Counter()
             kern_counts = 0

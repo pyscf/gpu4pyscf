@@ -7,27 +7,37 @@
 
 __global__ static
 void rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -41,8 +51,6 @@ void rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -278,31 +286,46 @@ void rys_ejk_ip1_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -316,8 +339,6 @@ void rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -642,31 +663,46 @@ void rys_ejk_ip1_1000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -680,8 +716,6 @@ void rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -1259,31 +1293,46 @@ void rys_ejk_ip1_1010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -1297,8 +1346,6 @@ void rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -2632,31 +2679,46 @@ void rys_ejk_ip1_1011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -2670,8 +2732,6 @@ void rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -3257,31 +3317,46 @@ void rys_ejk_ip1_1100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -3295,8 +3370,6 @@ void rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -4636,32 +4709,47 @@ void rys_ejk_ip1_1110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + smid * 2592 + sq_id;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 2592 + sq_id;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -4678,8 +4766,6 @@ void rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * 114 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (114+nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -6633,31 +6719,46 @@ void rys_ejk_ip1_1111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -6671,8 +6772,6 @@ void rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -7123,31 +7222,46 @@ void rys_ejk_ip1_2000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -7161,8 +7275,6 @@ void rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -8112,32 +8224,47 @@ void rys_ejk_ip1_2010(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + smid * 1728 + sq_id;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 1728 + sq_id;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -8154,8 +8281,6 @@ void rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * 78 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (78+nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -9542,31 +9667,46 @@ void rys_ejk_ip1_2011(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -9580,8 +9720,6 @@ void rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -11272,32 +11410,47 @@ void rys_ejk_ip1_2020(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + smid * 3456 + sq_id;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -11314,8 +11467,6 @@ void rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * 102 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (102+nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -13759,31 +13910,46 @@ void rys_ejk_ip1_2021(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -13797,8 +13963,6 @@ void rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -14756,32 +14920,47 @@ void rys_ejk_ip1_2100(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + smid * 1728 + sq_id;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 1728 + sq_id;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -14798,8 +14977,6 @@ void rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * 78 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (78+nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -16178,32 +16355,47 @@ void rys_ejk_ip1_2110(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + smid * 5184 + sq_id;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 5184 + sq_id;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -16220,8 +16412,6 @@ void rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * 150 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (150+nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -19760,32 +19950,47 @@ void rys_ejk_ip1_2111(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + smid * 3456 + sq_id;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -19802,8 +20007,6 @@ void rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * 102 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (102+nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -22244,31 +22447,46 @@ void rys_ejk_ip1_2120(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 256;
     constexpr int gout_stride = 1;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -22282,8 +22500,6 @@ void rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     extern __shared__ double shared_memory[];
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -24000,32 +24216,47 @@ void rys_ejk_ip1_2200(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
 void rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                     int *pool, double *dd_pool)
+                     int *pool, double *dd_pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
     constexpr int nsq_per_block = 32;
     constexpr int gout_stride = 8;
-    int smid = get_smid();
-    int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
-    double *dd_cache = dd_pool + smid * 3456 + sq_id;
-    __shared__ int ntasks;
-    if (sq_id == 0 && gout_id == 0) {
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    double *dd_cache = dd_pool + blockIdx.x * 3456 + sq_id;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
         ntasks = 0;
     }
     __syncthreads();
-    int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
     if (jk.lr_factor != 0) {
         _fill_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     } else {
         _fill_sr_ejk_tasks(&ntasks, bas_kl_idx, bas_ij, jk, envs, bounds);
     }
     if (ntasks == 0) {
-        return;
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
     }
 
     int nbas = envs.nbas;
@@ -24042,8 +24273,6 @@ void rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
     double *rw = shared_memory + nsq_per_block * 114 + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (114+nroots*2);
-    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
-    int threads = nsq_per_block * gout_stride;
 
     __shared__ int ish;
     __shared__ int jsh;
@@ -26504,6 +26733,11 @@ void rys_ejk_ip1_2210(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         atomicAdd(ejk+la*3+1, v_ly);
         atomicAdd(ejk+la*3+2, v_lz);
     }
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+}
 }
 
 int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
@@ -26549,55 +26783,60 @@ int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
         break;
     }
 
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = pool + workers * QUEUE_DEPTH;
+    cudaMemset(head, 0, sizeof(int));
+
     dim3 threads(nsq_per_block, gout_stride);
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
-    int npairs_ij = bounds->npairs_ij;
     switch (ijkl) {
     case 0:
-        rys_ejk_ip1_0000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 125:
-        rys_ejk_ip1_1000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 130:
-        rys_ejk_ip1_1010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 131:
-        rys_ejk_ip1_1011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 150:
-        rys_ejk_ip1_1100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 155:
-        rys_ejk_ip1_1110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 156:
         buflen += 3648;
-        rys_ejk_ip1_1111<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 250:
-        rys_ejk_ip1_2000<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 255:
-        rys_ejk_ip1_2010<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 256:
         buflen += 2496;
-        rys_ejk_ip1_2011<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 260:
-        rys_ejk_ip1_2020<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 261:
         buflen += 3264;
-        rys_ejk_ip1_2021<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 275:
-        rys_ejk_ip1_2100<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 280:
         buflen += 2496;
-        rys_ejk_ip1_2110<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 281:
         buflen += 4800;
-        rys_ejk_ip1_2111<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 285:
         buflen += 3264;
-        rys_ejk_ip1_2120<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 300:
-        rys_ejk_ip1_2200<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     case 305:
         buflen += 3648;
-        rys_ejk_ip1_2210<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool); break;
+        rys_ejk_ip1_2210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, dd_pool, head); break;
     default: return 0;
     }
     return 1;

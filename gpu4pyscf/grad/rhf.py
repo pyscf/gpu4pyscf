@@ -121,7 +121,8 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
             l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, QUEUE_DEPTH), dtype=np.int32)
+        # An additional integer to count for the proccessed pair_ijs 
+        pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
