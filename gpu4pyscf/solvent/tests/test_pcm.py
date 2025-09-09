@@ -169,6 +169,20 @@ class KnownValues(unittest.TestCase):
         # call approx_hessian after applying PCM is allowed
         mf.newton().density_fit()
 
+    def test_eps_inf(self):
+        mol = gto.M(atom='''
+C    0.000000    0.000000   -0.542500
+O    0.000000    0.000000    0.677500
+H    0.000000    0.935307   -1.082500
+H    0.000000   -0.935307   -1.082500
+''', basis='sto3g')
+        mf = mol.RKS(xc='b3lyp').to_gpu().PCM()
+        mf.with_solvent.eps = float('inf')
+        mf.with_solvent.method = 'C-PCM'
+        mf.with_solvent.lebedev_order = 29
+        mf.run()
+        assert abs(mf.e_tot - -112.95304419865343) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()
