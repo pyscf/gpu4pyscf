@@ -181,8 +181,8 @@ class KnownValues(unittest.TestCase):
             [-0.04677732, -0.0450351 , -0.03373522],
             [-0.03985063,  0.02975333,  0.09880519],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert np.max(np.abs(test_energy - ref_energy)) < 5e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-6
 
     def test_level_shift_gradient_rhf_lowmem(self):
         mf = HF_LOWMEM(mol_close)

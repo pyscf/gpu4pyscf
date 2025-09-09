@@ -54,7 +54,7 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
-        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac1 = td.nac_method()
         nac1.states=(0,1)
         nac1.kernel()
 
@@ -68,7 +68,7 @@ class KnownValues(unittest.TestCase):
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
-        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac1 = td.nac_method()
         nac1.states=(1,2)
         nac1.kernel()
 

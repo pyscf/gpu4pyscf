@@ -26,8 +26,8 @@
 #define GOUT_WIDTH      54
 #define PAGE_SIZE       30
 #define REMOTE_THRESHOLD 50
-#define PAGES_PER_BLOCK  262144
-// approximately, 2048 images in each ijk shell triplet for 256 threads
+#define PAGES_PER_BLOCK  524288
+// approximately, 4000 images in each ijk shell triplet for 256 threads
 #define KTASKS_PER_BLOCK 16
 
 typedef struct {
@@ -47,14 +47,15 @@ __device__ __forceinline__ unsigned get_smid() {
 #define allocate_page() (page_pool + atomicAdd(&num_pages, 1))
 
 __device__ __forceinline__
-int _filter_images(ImgIdxPage *page_pool, PBCIntEnvVars &envs, PBCInt3c2eBounds &bounds,
-                   int pair_ij, int kcount0, int kcount1, float log_cutoff)
+void _filter_images(int& num_pages, // is stored in shm
+                    ImgIdxPage *page_pool, PBCIntEnvVars &envs,
+                    PBCInt3c2eBounds &bounds, int pair_ij,
+                    int kcount0, int kcount1, float log_cutoff)
 {
     int thread_xy = threadIdx.x + blockDim.x * threadIdx.y;
     int threads_xy = blockDim.x * blockDim.y;
-    int thread_id = thread_xy + threads_xy * blockIdx.z;
-    __shared__ int num_pages;
-    if (thread_id) {
+    int thread_id = thread_xy + threads_xy * threadIdx.z;
+    if (thread_id == 0) {
         num_pages = 0;
     }
     __syncthreads();
@@ -177,8 +178,6 @@ int _filter_images(ImgIdxPage *page_pool, PBCIntEnvVars &envs, PBCInt3c2eBounds 
             }
         }
     }
-    __syncthreads();
-    return num_pages;
 }
 
 // lattice sum over j and k for (ij|k)
@@ -244,8 +243,10 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
     page_pool += get_smid() * PAGES_PER_BLOCK;
     int pair_ij = sp_id + sp0_this_block;
     int nbas = envs.cell0_nbas * ncells;
-    int num_pages = _filter_images(page_pool, envs, bounds, pair_ij,
-                                   kcount0, kcount1, log_cutoff);
+    __shared__ int num_pages;
+    _filter_images(num_pages, page_pool, envs, bounds, pair_ij,
+                   kcount0, kcount1, log_cutoff);
+    __syncthreads();
     if (num_pages >= PAGES_PER_BLOCK) {
         printf("Page overflow\n");
         __trap();

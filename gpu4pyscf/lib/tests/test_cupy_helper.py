@@ -15,6 +15,7 @@
 import unittest
 import numpy
 import cupy
+import cupyx.scipy.linalg
 from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
@@ -253,6 +254,12 @@ class KnownValues(unittest.TestCase):
 
         copy_array(device_view.copy(), host_view)
         assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+    def test_block_diag(self):
+        arrs = [cupy.random.rand(n, n) for n in range(7, 35, 3)]
+        ref = cupyx.scipy.linalg.block_diag(*arrs)
+        dat = cupy_helper.block_diag(arrs)
+        assert cupy.array_equal(ref, dat)
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

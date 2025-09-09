@@ -314,24 +314,25 @@ class PCM(lib.StreamObject):
         D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
 
         epsilon = self.eps
+        inf = float('inf')
         if self.method.upper() in ['C-PCM', 'CPCM']:
-            f_epsilon = (epsilon-1.)/epsilon
+            f_epsilon = (epsilon-1.)/epsilon if epsilon != inf else 1.0
             K = S
             S = None
             # R = -f_epsilon * cupy.eye(K.shape[0])
         elif self.method.upper() == 'COSMO':
-            f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0)
+            f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0) if epsilon != inf else 1.0
             K = S
             S = None
             # R = -f_epsilon * cupy.eye(K.shape[0])
         elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
-            f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
+            f_epsilon = (epsilon - 1.0)/(epsilon + 1.0) if epsilon != inf else 1.0
             DA = D*A
             DAS = cupy.dot(DA, S)
             K = S - f_epsilon/(2.0*PI) * DAS
             # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
         elif self.method.upper() == 'SS(V)PE':
-            f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
+            f_epsilon = (epsilon - 1.0)/(epsilon + 1.0) if epsilon != inf else 1.0
             DA = D*A
             DAS = cupy.dot(DA, S)
             K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)

@@ -384,7 +384,7 @@ class SMD(lib.StreamObject):
         D, S = pcm.get_D_S(self.surface, with_S=True, with_D=True)
 
         epsilon = self.eps
-        f_epsilon = (epsilon - 1.0)/(epsilon + 1.0)
+        f_epsilon = (epsilon - 1.0)/(epsilon + 1.0) if epsilon != float('inf') else 1.
         DA = D*A
         DAS = cupy.dot(DA, S)
         K = S - f_epsilon/(2.0*np.pi) * DAS
