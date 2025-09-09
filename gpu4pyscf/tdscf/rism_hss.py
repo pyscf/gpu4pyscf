@@ -1,0 +1,332 @@
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import numpy as np
+import cupy as cp
+from pyscf import lib
+from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh
+from gpu4pyscf.dft.rks import KohnShamDFT
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, transpose_sum
+from gpu4pyscf.lib import logger
+from gpu4pyscf.tdscf import rhf as tdhf_gpu
+from gpu4pyscf.tdscf import ris
+from gpu4pyscf import dft
+
+__all__ = [
+    'TDA_ris', 'TDDFT_ris', 'TDRKS_ris', 'CasidaTDDFT_ris', 'TDDFTNoHybrid_ris',
+]
+
+def gen_eri2c_eri3c(mol, auxmol, omega=0, tag='_sph'):
+    '''
+    Total number of contracted GTOs for the mole and auxmol object
+    '''
+
+    mol.set_range_coulomb(omega)
+    auxmol.set_range_coulomb(omega)
+    eri2c = auxmol.intor('int2c2e'+tag)
+    pmol = mol + auxmol
+
+    eri3c = pmol.intor('int3c2e'+tag,
+                        shls_slice=(0,mol.nbas,0,mol.nbas,
+                        mol.nbas,mol.nbas+auxmol.nbas))
+
+    eri2c = cp.asarray(eri2c)
+    eri3c = cp.asarray(eri3c)   
+
+    return eri2c, eri3c
+
+
+def gen_response_ris(mf, singlet=True, hermi=0, theta=0.2, J_fit = 'sp', K_fit = 's'):
+    assert hermi != 2
+    assert singlet
+    auxmol_J = ris.get_auxmol(mf.mol, theta, J_fit)
+    auxmol_K = ris.get_auxmol(mf.mol, theta, K_fit)
+    eri2c_J, eri3c_J = gen_eri2c_eri3c(mf.mol, auxmol_J)
+    eri2c_K, eri3c_K = gen_eri2c_eri3c(mf.mol, auxmol_K)
+    eri2c_J_inv = cp.linalg.inv(eri2c_J)
+    eri3c_2c_J = cp.einsum('uvA,AB->uvB', eri3c_J, eri2c_J_inv)
+    eri2c_K_inv = cp.linalg.inv(eri2c_K)
+    eri3c_2c_K = cp.einsum('uvA,AB->uvB', eri3c_K, eri2c_K_inv)
+    
+    if isinstance(mf, dft.KohnShamDFT):
+        hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, mf.mol.spin)[2]
+    else:
+        hyb=1.0
+
+    def vind(dm1):
+        dm1 = cp.asarray(dm1)
+        tmp = cp.einsum('edB,xde->xB', eri3c_J, dm1)
+        vj = cp.einsum('uvA,xA->xuv', eri3c_2c_J, tmp)
+        tmp = cp.einsum('evB,xde->xdvB', eri3c_2c_K, dm1)
+        vk = cp.einsum('xdvA,udA->xuv', tmp, eri3c_K)
+        return vj - vk*hyb*.5
+    return vind
+
+
+def gen_tda_ris_operation(mf, fock_ao=None, singlet=True, wfnsym=None, theta=0.2, J_fit = 'sp', K_fit = 's'):
+    '''Generate function to compute A x
+    '''
+    assert fock_ao is None
+    # assert isinstance(mf, scf.hf.SCF)
+    assert wfnsym is None
+    mo_coeff = mf.mo_coeff
+    assert mo_coeff.dtype == cp.float64
+    mo_energy = mf.mo_energy
+    mo_occ = mf.mo_occ
+    occidx = mo_occ == 2
+    viridx = mo_occ == 0
+    orbv = mo_coeff[:,viridx]
+    orbo = mo_coeff[:,occidx]
+    orbo2 = orbo * 2. # *2 for double occupancy
+
+    e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
+    hdiag = hdiag.ravel()#.get()
+    vresp = gen_response_ris(mf, singlet=singlet, hermi=0, theta=theta, J_fit = J_fit, K_fit = K_fit)
+    nocc, nvir = e_ia.shape
+
+    def vind(zs):
+        zs = cp.asarray(zs).reshape(-1,nocc,nvir)
+        mo1 = contract('xov,pv->xpo', zs, orbv)
+        dms = contract('xpo,qo->xpq', mo1, orbo2.conj())
+        dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
+        v1ao = vresp(dms)
+        v1mo = contract('xpq,qo->xpo', v1ao, orbo)
+        v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
+        v1mo += zs * e_ia
+        return v1mo.reshape(v1mo.shape[0],-1)#.get()
+
+    return vind, hdiag
+
+
+def gen_tdhf_ris_operation(mf, fock_ao=None, singlet=True, wfnsym=None, theta=0.2, J_fit = 'sp', K_fit = 's'):
+    '''Generate function to compute
+
+    [ A   B ][X]
+    [-B* -A*][Y]
+    '''
+    assert fock_ao is None
+    # assert isinstance(mf, scf.hf.SCF)
+    mo_coeff = mf.mo_coeff
+    assert mo_coeff.dtype == cp.float64
+    mo_energy = mf.mo_energy
+    mo_occ = mf.mo_occ
+    occidx = mo_occ == 2
+    viridx = mo_occ == 0
+    orbv = mo_coeff[:,viridx]
+    orbo = mo_coeff[:,occidx]
+
+    e_ia = hdiag = mo_energy[viridx] - mo_energy[occidx,None]
+    vresp = gen_response_ris(mf, singlet=singlet, hermi=0, theta=theta, J_fit = J_fit, K_fit = K_fit)
+    nocc, nvir = e_ia.shape
+
+    def vind(zs):
+        nz = len(zs)
+        xs, ys = zs.reshape(nz,2,nocc,nvir).transpose(1,0,2,3)
+        xs = cp.asarray(xs).reshape(nz,nocc,nvir)
+        ys = cp.asarray(ys).reshape(nz,nocc,nvir)
+        # *2 for double occupancy
+        tmp = contract('xov,pv->xpo', xs, orbv*2)
+        dms = contract('xpo,qo->xpq', tmp, orbo.conj())
+        tmp = contract('xov,qv->xoq', ys, orbv.conj()*2)
+        dms+= contract('xoq,po->xpq', tmp, orbo)
+        v1ao = vresp(dms) # = <mb||nj> Xjb + <mj||nb> Yjb
+        v1_top = contract('xpq,qo->xpo', v1ao, orbo)
+        v1_top = contract('xpo,pv->xov', v1_top, orbv)
+        v1_bot = contract('xpq,po->xoq', v1ao, orbo)
+        v1_bot = contract('xoq,qv->xov', v1_bot, orbv)
+        v1_top += xs * e_ia  # AX
+        v1_bot += ys * e_ia  # (A*)Y
+        return cp.hstack((v1_top.reshape(nz,nocc*nvir),
+                          -v1_bot.reshape(nz,nocc*nvir)))#.get()
+
+    hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
+    return vind, hdiag#.get()
+
+
+class TDA_ris(tdhf_gpu.TDA):
+
+    _keys = {'theta', 'J_fit', 'K_fit'}
+    def __init__(self, mf):
+        super().__init__(mf)
+        self.theta = 0.2
+        self.J_fit = 'sp'
+        self.K_fit = 's'
+
+    def nuc_grad_method(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError("density fitting gradient is not supported.")
+        else:
+            from gpu4pyscf.grad import tdrks_ris
+            return tdrks_ris.Gradients_ris(self)
+        
+    def gen_vind(self, mf=None):
+        '''Generate function to compute Ax'''
+        if mf is None:
+            mf = self._scf
+        return gen_tda_ris_operation(mf, singlet=self.singlet, theta=self.theta, J_fit = self.J_fit, K_fit = self.K_fit)
+    
+    def NAC(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError("density fitting NAC is not supported.")
+        else:
+            from gpu4pyscf.nac import tdrks
+            return tdrks.NAC(self)
+
+class TDDFT_ris(tdhf_gpu.TDHF):
+
+    _keys = {'theta', 'J_fit', 'K_fit'}
+    def __init__(self, mf):
+        super().__init__(mf)
+        self.theta = 0.2
+        self.J_fit = 'sp'
+        self.K_fit = 's'
+
+    def nuc_grad_method(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError("density fitting gradient is not supported.")
+        else:
+            from gpu4pyscf.grad import tdrks_ris
+            return tdrks_ris.Gradients_ris(self)
+        
+    def gen_vind(self, mf=None):
+        if mf is None:
+            mf = self._scf
+        return gen_tdhf_ris_operation(mf, singlet=self.singlet, theta=self.theta, J_fit = self.J_fit, K_fit = self.K_fit)
+
+    def NAC(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError("density fitting NAC is not supported.")
+        else:
+            from gpu4pyscf.nac import tdrks
+            return tdrks.NAC(self)
+TDRKS_ris = TDDFT_ris
+
+class CasidaTDDFT_ris(TDDFT_ris):
+    '''Solve the Casida TDDFT formula (A-B)(A+B)(X+Y) = (X+Y)w^2
+    '''
+
+    init_guess = TDA_ris.init_guess
+    get_precond = TDA_ris.get_precond
+
+    def gen_vind(self, mf=None):
+        if mf is None:
+            mf = self._scf
+        singlet = self.singlet
+        mo_coeff = mf.mo_coeff
+        assert mo_coeff.dtype == cp.double
+        mo_energy = mf.mo_energy
+        mo_occ = mf.mo_occ
+        occidx = mo_occ == 2
+        viridx = mo_occ == 0
+        orbv = mo_coeff[:,viridx]
+        orbo = mo_coeff[:,occidx]
+
+        e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+        d_ia = e_ia ** .5
+        ed_ia = e_ia * d_ia
+        hdiag = e_ia.ravel() ** 2
+        vresp = gen_response_ris(mf, singlet=singlet, hermi=0, theta=self.theta, 
+                                 J_fit = self.J_fit, K_fit = self.K_fit)
+        nocc, nvir = e_ia.shape
+
+        def vind(zs):
+            zs = cp.asarray(zs).reshape(-1,nocc,nvir)
+            # *2 for double occupancy
+            mo1 = contract('xov,pv->xpo', zs*(d_ia*2), orbv)
+            dms = contract('xpo,qo->xpq', mo1, orbo)
+            # +cc for A+B and K_{ai,jb} in A == K_{ai,bj} in B
+            dms = transpose_sum(dms)
+            dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
+            v1ao = vresp(dms)
+            v1mo = contract('xpq,qo->xpo', v1ao, orbo)
+            v1mo = contract('xpo,pv->xov', v1mo, orbv)
+            v1mo += zs * ed_ia
+            v1mo *= d_ia
+            return v1mo.reshape(v1mo.shape[0],-1)
+
+        return vind, hdiag
+
+    def kernel(self, x0=None, nstates=None):
+        '''TDDFT diagonalization solver
+        '''
+        log = logger.new_logger(self)
+        cpu0 = log.init_timer()
+        mf = self._scf
+        if mf._numint.libxc.is_hybrid_xc(mf.xc):
+            raise RuntimeError('%s cannot be used with hybrid functional'
+                               % self.__class__)
+        self.check_sanity()
+        self.dump_flags()
+        if nstates is None:
+            nstates = self.nstates
+        else:
+            self.nstates = nstates
+
+        vind, hdiag = self.gen_vind(self._scf)
+        precond = self.get_precond(hdiag)
+
+        def pickeig(w, v, nroots, envs):
+            idx = cp.where(w > self.positive_eig_threshold)[0]
+            return w[idx], v[:,idx], idx
+
+        x0sym = None
+        if x0 is None:
+            x0 = self.init_guess()
+
+        self.converged, w2, x1 = lr_eigh(
+            vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
+            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
+            max_memory=self.max_memory, verbose=log)
+
+        mo_energy = self._scf.mo_energy
+        mo_occ = self._scf.mo_occ
+        occidx = mo_occ == 2
+        viridx = mo_occ == 0
+        e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+        e_ia = e_ia**.5
+        if isinstance(e_ia, cp.ndarray):
+            e_ia = e_ia.get()
+
+        def norm_xy(w, z):
+            zp = e_ia * z.reshape(e_ia.shape)
+            zm = w/e_ia * z.reshape(e_ia.shape)
+            x = (zp + zm) * .5
+            y = (zp - zm) * .5
+            norm = lib.norm(x)**2 - lib.norm(y)**2
+            norm = abs(.5/norm)**.5  # normalize to 0.5 for alpha spin
+            return (x*norm, y*norm)
+
+        idx = np.where(w2 > self.positive_eig_threshold)[0]
+        self.e = w2[idx]**.5
+        self.xy = [norm_xy(self.e[i], x1[i]) for i in idx]
+        log.timer('TDDFT', *cpu0)
+        self._finalize()
+        return self.e, self.xy
+
+TDDFTNoHybrid_ris = CasidaTDDFT_ris
+
+def tddft_ris(mf):
+    '''Driver to create TDDFT or CasidaTDDFT object'''
+    if mf._numint.libxc.is_hybrid_xc(mf.xc):
+        return TDDFT_ris(mf)
+    else:
+        return CasidaTDDFT_ris(mf)
+
+dft.rks.RKS.TDA_ris           = lib.class_as_method(TDA_ris)
+dft.rks.RKS.TDHF_ris          = None
+#dft.rks.RKS.TDDFT         = lib.class_as_method(TDDFT)
+dft.rks.RKS.TDDFTNoHybrid_ris = lib.class_as_method(TDDFTNoHybrid_ris)
+dft.rks.RKS.CasidaTDDFT_ris   = lib.class_as_method(CasidaTDDFT_ris)
+dft.rks.RKS.TDDFT_ris         = tddft_ris
