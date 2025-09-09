@@ -432,7 +432,7 @@ class Gradients(GradientsBase):
         '''
         if mol is None: mol = self.mol
         if dm is None: dm = self.base.make_rdm1()
-        vhfopt = self.base._opt_gpu.get(None, None)
+        vhfopt = self.base._opt_gpu.get(mol.omega)
         return _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
 
 Grad = Gradients
