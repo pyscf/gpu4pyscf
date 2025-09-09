@@ -21,7 +21,6 @@ from pyscf import grad, hessian
 from pyscf.hessian import uhf as uhf_cpu
 from gpu4pyscf import scf
 from gpu4pyscf.hessian import uhf as uhf_gpu
-from gpu4pyscf.hessian import jk
 
 def setUpModule():
     global mol
@@ -125,7 +124,8 @@ class KnownValues(unittest.TestCase):
         dm = cupy.empty([2,nao,nao])
         dm[0] = mocca.dot(mocca.T)
         dm[1] = moccb.dot(moccb.T)
-        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, mo_occ, hermi=1)
+        hessobj = mol1.UHF().to_gpu().Hessian()
+        vj_mo, vk_mo = uhf_gpu._get_jk_mo(hessobj, mol1, dm, mo_coeff, mo_occ, hermi=1)
         
         mf = scf.UHF(mol1)
         vj, vk = mf.get_jk(mol1, dm, hermi=1)

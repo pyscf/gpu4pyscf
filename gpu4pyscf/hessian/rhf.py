@@ -28,7 +28,7 @@ from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib, gto
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.gto.ecp import get_ecp_ip, get_ecp_ipip
-from gpu4pyscf.scf import cphf
+from gpu4pyscf.scf import cphf, j_engine
 from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
     contract, tag_array, transpose_sum, get_avail_mem, condense,
     krylov)
@@ -41,7 +41,6 @@ from gpu4pyscf.scf.jk import (
     init_constant, _make_tril_tile_mappings, _make_tril_pair_mappings,
     _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.hessian import jk
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
 libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int
@@ -138,7 +137,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = mocc.dot(mocc.T) * 2
-    vhfopt = mf._opt_gpu.get(None, None)
+    vhfopt = mf._opt_gpu.get(mol.omega)
     ejk = _partial_ejk_ip2(mol, dm0, vhfopt, j_factor, k_factor, verbose=log)
     t1 = log.timer_debug1('hessian of 2e part', *t1)
 
@@ -207,8 +206,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
 
         timing_counter = Counter()
         kern_counts = 0
-        kern1 = libvhf_rys.RYS_per_atom_jk_ip2_type12_o0
-        kern2 = libvhf_rys.RYS_per_atom_jk_ip2_type3_o0
+        kern1 = libvhf_rys.RYS_per_atom_jk_ip2_type12
+        kern2 = libvhf_rys.RYS_per_atom_jk_ip2_type3
 
         _dms = cp.asarray(dms, order='C')
         s_ptr = lib.c_null_ptr()
@@ -484,7 +483,6 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                 if err != 0:
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
-                cp.cuda.get_current_stream().synchronize()
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -704,6 +702,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
 def gen_vind(hessobj, mo_coeff, mo_occ):
     mol = hessobj.mol
+    mf = hessobj.base
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     nao, nmo = mo_coeff.shape
@@ -873,22 +872,43 @@ def _e_hcore_generator(hessobj, dm):
 def hcore_generator(hessobj, mol=None):
     raise NotImplementedError
 
+def _ao2mo(v_ao, mocc, mo_coeff):
+    v_ao = contract('nij,jo->nio', v_ao, mocc)
+    return contract('nio,ip->npo', v_ao, mo_coeff)
+
 def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
             hermi=1, with_j=True, with_k=True, omega=None):
     ''' Compute J/K matrices in MO for multiple DMs
     '''
+    assert hermi == 1
     mf = hessobj.base
-    vhfopt = mf._opt_gpu.get(omega)
-    if vhfopt is None:
-        with mol.with_range_coulomb(omega):
-            # Small group size for load balance
-            group_size = None
-            if num_devices > 1: 
-                group_size = GROUP_SIZE
-            vhfopt = _VHFOpt(mol, mf.direct_scf_tol).build(group_size=group_size)
-            mf._opt_gpu[omega] = vhfopt
-    with mol.with_range_coulomb(omega):
-        vj, vk = jk.get_jk(mol, dms, mo_coeff, mo_occ, hermi, vhfopt, with_j, with_k)
+    if omega is None:
+        omega = mol.omega
+    vj = vk = None
+    nao = dms.shape[-1]
+    dms = dms.reshape(-1,nao,nao)
+    n_dm = len(dms)
+    # When hessian obj is converted from CPU instance, _opt_jengine and _opt_gpu
+    # might not be initialized
+    if with_j:
+        if omega not in mf._opt_jengine:
+            mf._opt_jengine[omega] = j_engine._VHFOpt(mol, mf.direct_scf_tol).build()
+        jopt = mf._opt_jengine[omega]
+        _dms = jopt.apply_coeff_C_mat_CT(dms)
+        vj = jopt.get_j(_dms, mf.verbose)
+        _mo_coeff = jopt.apply_coeff_C_mat(mo_coeff)
+        _mocc = _mo_coeff[:,mo_occ>0.5]
+        vj = _ao2mo(vj, _mocc, _mo_coeff).reshape(n_dm,-1)
+    if with_k:
+        if omega not in mf._opt_gpu:
+            with mol.with_range_coulomb(omega):
+                mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol, tile=1).build()
+        kopt = mf._opt_gpu[omega]
+        _dms = kopt.apply_coeff_C_mat_CT(dms)
+        vk = kopt.get_k(_dms, hermi, mf.verbose)
+        _mo_coeff = kopt.apply_coeff_C_mat(mo_coeff)
+        _mocc = _mo_coeff[:,mo_occ>0.5]
+        vk = _ao2mo(vk, _mocc, _mo_coeff).reshape(n_dm,-1)
     return vj, vk
 
 def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):

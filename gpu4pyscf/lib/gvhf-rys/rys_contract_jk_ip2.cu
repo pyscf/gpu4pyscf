@@ -1465,7 +1465,7 @@ int RYS_per_atom_jk_ip2_type12(double *ejk, double j_factor, double k_factor,
     }
     // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
     // Additional factor 1/2 from the two-electron Coulomb operator
-    JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, n_dm};
+    JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, n_dm, omega};
     if (omega >= 0) {
         jk.lr_factor = 1;
         jk.sr_factor = 0;
@@ -1544,7 +1544,7 @@ int RYS_per_atom_jk_ip2_type3(double *ejk, double j_factor, double k_factor,
     }
     // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
     // Additional factor 1/2 from the two-electron Coulomb operator
-    JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, n_dm};
+    JKEnergy jk = {ejk, dm, 4.*j_factor, -k_factor, n_dm, omega};
     if (omega >= 0) {
         jk.lr_factor = 1;
         jk.sr_factor = 0;

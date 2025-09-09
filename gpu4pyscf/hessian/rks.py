@@ -24,6 +24,7 @@ import numpy
 import cupy
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
+from gpu4pyscf.hessian.rhf import _ao2mo
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
@@ -31,7 +32,6 @@ from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
                                        reduce_to_device, transpose_sum)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import _streams, num_devices, min_grid_blksize
-from gpu4pyscf.hessian import jk
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
 import ctypes
 
@@ -79,7 +79,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             k_factor = -alpha
         else: # SR and LR exchange with different ratios
             k_factor = hyb - alpha # =beta
-        vhfopt = mf._opt_gpu.get(omega, None)
+        vhfopt = mf._opt_gpu.get(omega)
         with mol.with_range_coulomb(omega):
             de2 += rhf_hess._partial_ejk_ip2(
                 mol, dm0, vhfopt, j_factor, k_factor, verbose=verbose)
@@ -1754,7 +1754,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             dF += contract('dig,jg->dij', f_rho_A_i_mu, mu * grids_weights[g0:g1])
             f_rho_A_i_mu = None
 
-            vmat_mo[i_atom, :, :, :] += jk._ao2mo(dF, mocc, mo_coeff)
+            vmat_mo[i_atom, :, :, :] += _ao2mo(dF, mocc, mo_coeff)
             dF = None
 
             p0, p1 = aoslices[i_atom][2:]
@@ -1847,7 +1847,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
                 dF_ao += dF_ao.transpose(0,2,1)
 
-                vmat_mo[i_atom, :, :, :] += jk._ao2mo(dF_ao, mocc, mo_coeff)
+                vmat_mo[i_atom, :, :, :] += _ao2mo(dF_ao, mocc, mo_coeff)
                 dF_ao = None
 
     if grid_response:
@@ -1949,7 +1949,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 f_rho_dwdr = None
                 f_gamma_dwdr = None
 
-                vmat_mo[i_atom, :, :, :] += jk._ao2mo(dF_ao, mocc, mo_coeff)
+                vmat_mo[i_atom, :, :, :] += _ao2mo(dF_ao, mocc, mo_coeff)
                 dF_ao = None
 
     return vmat_mo
@@ -2023,7 +2023,7 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
         t0 = log.timer_debug1(f'vxc on Device {device_id} ', *t0)
         if xctype != 'LDA':
             transpose_sum(vmat)
-        vmat = jk._ao2mo(vmat, mocc, mo_coeff)
+        vmat = _ao2mo(vmat, mocc, mo_coeff)
     return vmat
 
 def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, relativity=0, hermi=0,
