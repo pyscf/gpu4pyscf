@@ -71,8 +71,9 @@ class RKS(rks.RKS):
         with mol.with_range_coulomb(omega):
             vhfopt = self._opt_gpu.get(omega)
             if vhfopt is None:
-                vhfopt = self._opt_gpu[omega] = jk._VHFOpt(mol, self.direct_scf_tol).build()
-            return vhfopt.get_jk(dm_or_wfn, hermi, False, True, log)[1]
+                vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
+                    mol, self.direct_scf_tol, tile=1).build()
+            return vhfopt.get_k(dm_or_wfn, hermi, log)
 
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=0, hermi=1):
         '''Constructus the lower-triangular part of the Fock matrix.'''
@@ -104,13 +105,14 @@ class RKS(rks.RKS):
         dm = None
         vxc = pack_tril(vxc)
         log.debug('nelec by numeric integration = %s', n)
-        cput1 = log.timer_debug1('vxc tot', *cput0)
+        cput1 = log.timer('vxc', *cput0)
 
         omega = mol.omega
         if omega in self._opt_gpu:
             vhfopt = self._opt_gpu[omega]
         else:
-            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(
+                mol, self.direct_scf_tol, tile=1).build()
         if omega in self._opt_jengine:
             jopt = self._opt_jengine[omega]
         else:
@@ -141,7 +143,7 @@ class RKS(rks.RKS):
             omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
             dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
             if omega == 0:
-                vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
+                vk = vhfopt.get_k(dm, hermi, log)
                 vk *= hyb
             elif alpha == 0: # LR=0, only SR exchange
                 vk = self._get_k_sorted_mol(dm, hermi, -omega, log)
@@ -150,7 +152,7 @@ class RKS(rks.RKS):
                 vk = self._get_k_sorted_mol(dm, hermi, omega, log)
                 vk *= alpha
             else: # SR and LR exchange with different ratios
-                vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
+                vk = vhfopt.get_k(dm, hermi, log)
                 vk *= hyb
                 vklr = self._get_k_sorted_mol(dm, hermi, omega, log)
                 vklr *= (alpha - hyb)
@@ -169,7 +171,7 @@ class RKS(rks.RKS):
             vk = vk.get()
 
         vxc = vxc.get()
-        log.timer_debug1('veff', *cput0)
+        log.timer('veff', *cput0)
         vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
         return vxc
 

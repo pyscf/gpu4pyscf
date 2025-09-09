@@ -105,7 +105,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     if log.verbose >= logger.DEBUG1:
         mem_avail = log.print_mem_info()
         log.debug1('available GPU memory after SCF initialization: %.3f GB', mem_avail/1e9)
-    t1 = log.timer_debug1('SCF initialization', *cput1)
+    t1 = log.timer('SCF initialization', *cput1)
     natm = mol.natm
 
     for cycle in range(mf.max_cycle):
@@ -134,7 +134,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         norm_gorb = cp.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         fock = None
         e_tot = mf.energy_tot(dm, h1e, vhf)
-        t1 = log.timer_debug1('SCF iteration', *t0)
+        t1 = log.timer(f'cycle={cycle+1}', *t0)
         log.info('cycle= %d E= %.15g  delta_E= %4.3g',
                  cycle+1, e_tot, e_tot-last_hf_e)
 
@@ -235,15 +235,6 @@ class RHF(hf.RHF):
         hcore = hf.get_hcore(mol)
         return pack_tril(hcore).get()
 
-    def get_jk(self, mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None):
-        raise NotImplementedError
-
-    def get_j(self, mol=None, dm=None, hermi=1, omega=None):
-        raise NotImplementedError
-
-    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
-        raise NotImplementedError
-
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
         '''Constructus the lower-triangular part of the Veff matrix.'''
         log = logger.new_logger(mol, self.verbose)
@@ -253,7 +244,8 @@ class RHF(hf.RHF):
         if omega in self._opt_gpu:
             vhfopt = self._opt_gpu[omega]
         else:
-            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(mol, self.direct_scf_tol).build()
+            self._opt_gpu[omega] = vhfopt = jk._VHFOpt(
+                mol, self.direct_scf_tol, tile=1).build()
         if omega in self._opt_jengine:
             jopt = self._opt_jengine[omega]
         else:
@@ -267,7 +259,7 @@ class RHF(hf.RHF):
         vhf, vj = vj, None
 
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
-        vk = vhfopt.get_jk(dm, hermi, False, True, log)[1]
+        vk = vhfopt.get_k(dm, hermi, log)
         assert vk.ndim == 3
         vk = vhfopt.apply_coeff_CT_mat_C(vk)
         vk *= -.5

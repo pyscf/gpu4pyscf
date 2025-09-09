@@ -94,7 +94,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vxc -= vk
         if ground_state:
             exc -= float(cupy.einsum('nij,nij', dm_orig, vk).real) * .5
-    t0 = logger.timer_debug1(ks, 'veff', *t0)
+    t0 = logger.timer(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 

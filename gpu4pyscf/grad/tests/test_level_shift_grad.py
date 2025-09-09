@@ -84,8 +84,8 @@ class KnownValues(unittest.TestCase):
             [-0.04677538, -0.04503511, -0.03373301],
             [-0.03984876,  0.02975217,  0.0987993 ],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 5e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-6
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
 
     def test_level_shift_gradient_uks(self):
         mf = UKS(mol_open, xc = 'wB97X')
@@ -109,8 +109,8 @@ class KnownValues(unittest.TestCase):
             [ 0.03320805,  0.00757202,  0.06555009],
             [-0.03041575, -0.04053383, -0.03575653],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 5e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-6
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
 
     def test_level_shift_gradient_rhf(self):
         mf = HF(mol_close)

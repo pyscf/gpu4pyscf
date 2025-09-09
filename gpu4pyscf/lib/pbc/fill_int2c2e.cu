@@ -23,13 +23,6 @@
 #include "pbc.cuh"
 #include "int3c2e.cuh"
 
-typedef struct {
-    int8_t iprim;
-    int8_t jprim;
-    int8_t nfi;
-    int8_t nfj;
-} PackedPGTO;
-
 #define GOUT_WIDTH      43
 
 __global__
@@ -45,20 +38,23 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     int jsh0 = bas_ij0 % nbas;
 
     int *bas = envs.bas;
-    int li = bas[ish0*BAS_SLOTS+ANG_OF];
-    int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int nroots = (li + lj) / 2 + 1;
-    nroots *= 2; // omega < 0
-    int8_t nfi = (li + 1) * (li + 2) / 2;
-    int8_t nfj = (lj + 1) * (lj + 2) / 2;
-    int8_t iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int8_t jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    PackedPGTO pdata = {iprim, jprim, nfi, nfj};
     double *env = envs.env;
     double *img_coords = envs.img_coords;
+    __shared__ int li, lj, nroots, nfi, nfj, iprim, jprim;
+    if (thread_id == 0) {
+        li = bas[ish0*BAS_SLOTS+ANG_OF];
+        lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+        nroots = (li + lj) / 2 + 1;
+        nroots *= 2; // omega < 0
+        nfi = (li + 1) * (li + 2) / 2;
+        nfj = (lj + 1) * (lj + 2) / 2;
+        iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+        jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+    }
+    __syncthreads();
 
     int gout_stride = bounds.gout_stride_lookup[li*L_AUX1+lj];
-    int nsp_per_block = THREADS / gout_stride;
+    register int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
 
@@ -106,11 +102,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                 Rpq[2*nsp_per_block] = zpq;
                 Rpq[3*nsp_per_block] = rr;
             }
-            int iprim = pdata.iprim;
-            int jprim = pdata.jprim;
             int ijprim = iprim * jprim;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
             int nfij = nfi * nfj;
             int16_t *idx_ij = c_pair_idx + c_pair_offsets[li*L_AUX1+lj];
             int16_t *idy_ij = idx_ij + nfij;
@@ -234,8 +226,6 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
             int i0 = ao_loc[ish];
             int j0 = ao_loc[jshp];
             double *eri_tensor = out + cell_id*nao2 + i0 * nao + j0;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
             int nfij = nfi * nfj;
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {

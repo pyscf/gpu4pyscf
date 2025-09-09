@@ -46,14 +46,14 @@ def get_jk(mol, dm, hermi=1, vhfopt=None, with_j=True, with_k=True, omega=None,
         if with_k: vk = vk.get()
     return vj, vk
 
-def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True,
-            omega=None):
+def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True, omega=None):
     if omega is None:
         omega = mol.omega
     vhfopt = mf._opt_gpu.get(omega)
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
-            vhfopt = mf._opt_gpu[omega] = jk._VHFOpt(mol, mf.direct_scf_tol).build()
+            vhfopt = mf._opt_gpu[omega] = jk._VHFOpt(
+                mol, mf.direct_scf_tol, tile=1).build()
 
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk
@@ -208,7 +208,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
-    t1 = log.timer_debug1('total prep', *t0)
+    t1 = log.timer('SCF initialization', *t0)
     scf_conv = False
 
     # Skip SCF iterations. Compute only the total energy of the initial density
@@ -257,7 +257,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         e_tot = mf.energy_tot(dm, h1e, vhf)
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
-        t1 = log.timer_debug1('total', *t0)
+        t1 = log.timer(f'cycle={cycle+1}', *t0)
+
         log.info('cycle= %d E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
                  cycle+1, e_tot, e_tot-last_hf_e, norm_gorb, norm_ddm)
 
@@ -729,7 +730,17 @@ class SCF(pyscf_lib.StreamObject):
         return vj
 
     def get_k(self, mol=None, dm=None, hermi=1, omega=None):
-        return self.get_jk(mol, dm, hermi, with_j=False, omega=omega)[1]
+        if omega is None:
+            omega = mol.omega
+        vhfopt = self._opt_gpu.get(omega)
+        with mol.with_range_coulomb(omega):
+            if vhfopt is None:
+                vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
+                    mol, self.direct_scf_tol, tile=1).build()
+            vk = jk.get_k(mol, dm, hermi, vhfopt)
+        if not isinstance(dm, cupy.ndarray):
+            vk = vk.get()
+        return vk
 
 class KohnShamDFT:
     '''

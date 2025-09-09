@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 import cupy
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.scf.int4c2e import libgint
-from gpu4pyscf.hessian.jk import _ao2mo
+from gpu4pyscf.hessian.rhf import _ao2mo
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, cart2sph, reduce_to_device
 from gpu4pyscf.__config__ import _streams, num_devices

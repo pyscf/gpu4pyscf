@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,20 +17,22 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
 #include <cuda_runtime.h>
 
 #include "gint/cuda_alloc.cuh"
 #include "vhf.cuh"
-#include "rys_roots.cu"
-#include "rys_contract_k.cuh"
+#include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
+#include "rys_contract_k.cuh"
 
 #define GOUT_WIDTH1     81
 
+// gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
-void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                   int *pool, GXYZOffset *gxyz_offsets,
-                   int gout_pattern, int reserved_shm_size)
+void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
+                  int *pool, GXYZOffset *gxyz_offsets,
+                  int gout_pattern, int reserved_shm_size)
 {
     // sq is short for shl_quartet
     int sq_id = threadIdx.x;
@@ -45,10 +47,10 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx.x];
-    if (jk.omega >= 0) {
-        _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    if (kmat.lr_factor != 0) {
+        _fill_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
-        _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
     if (ntasks == 0) {
         return;
@@ -240,8 +242,8 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 int nroots = bounds.nroots;
-                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block,
-                             gout_id, gout_stride);
+                rys_roots_for_k(nroots, theta, rr, rw, kmat.omega,
+                                kmat.lr_factor, kmat.sr_factor);
                 int lij = li + lj;
                 int lkl = lk + ll;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -332,6 +334,33 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         __syncthreads();
                         if (task_id < ntasks) {
                             int lkl3 = (lkl+1)*3;
+                            //switch (li*5+lj) {
+                            //case 0 : hrr_ij<0,0>(gx, rjri, lkl3, g_size); break;
+                            //case 1 : hrr_ij<0,1>(gx, rjri, lkl3, g_size); break;
+                            //case 2 : hrr_ij<0,2>(gx, rjri, lkl3, g_size); break;
+                            //case 3 : hrr_ij<0,3>(gx, rjri, lkl3, g_size); break;
+                            //case 4 : hrr_ij<0,4>(gx, rjri, lkl3, g_size); break;
+                            //case 5 : hrr_ij<1,0>(gx, rjri, lkl3, g_size); break;
+                            //case 6 : hrr_ij<1,1>(gx, rjri, lkl3, g_size); break;
+                            //case 7 : hrr_ij<1,2>(gx, rjri, lkl3, g_size); break;
+                            //case 8 : hrr_ij<1,3>(gx, rjri, lkl3, g_size); break;
+                            //case 9 : hrr_ij<1,4>(gx, rjri, lkl3, g_size); break;
+                            //case 10: hrr_ij<2,0>(gx, rjri, lkl3, g_size); break;
+                            //case 11: hrr_ij<2,1>(gx, rjri, lkl3, g_size); break;
+                            //case 12: hrr_ij<2,2>(gx, rjri, lkl3, g_size); break;
+                            //case 13: hrr_ij<2,3>(gx, rjri, lkl3, g_size); break;
+                            //case 14: hrr_ij<2,4>(gx, rjri, lkl3, g_size); break;
+                            //case 15: hrr_ij<3,0>(gx, rjri, lkl3, g_size); break;
+                            //case 16: hrr_ij<3,1>(gx, rjri, lkl3, g_size); break;
+                            //case 17: hrr_ij<3,2>(gx, rjri, lkl3, g_size); break;
+                            //case 18: hrr_ij<3,3>(gx, rjri, lkl3, g_size); break;
+                            //case 19: hrr_ij<3,4>(gx, rjri, lkl3, g_size); break;
+                            //case 20: hrr_ij<4,0>(gx, rjri, lkl3, g_size); break;
+                            //case 21: hrr_ij<4,1>(gx, rjri, lkl3, g_size); break;
+                            //case 22: hrr_ij<4,2>(gx, rjri, lkl3, g_size); break;
+                            //case 23: hrr_ij<4,3>(gx, rjri, lkl3, g_size); break;
+                            //case 24: hrr_ij<4,4>(gx, rjri, lkl3, g_size); break;
+                            //default:
                             for (int m = gout_id; m < lkl3; m += gout_stride) {
                                 int k = m / 3;
                                 int _ix = m % 3;
@@ -347,11 +376,39 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                     }
                                 }
                             }
+                            //}
                         }
                     }
                     if (ll > 0) {
                         __syncthreads();
                         if (task_id < ntasks) {
+                            //switch (lk*5+ll) {
+                            //case 0 : hrr_kl<0,0>(gx, rlrk, stride_k); break;
+                            //case 1 : hrr_kl<0,1>(gx, rlrk, stride_k); break;
+                            //case 2 : hrr_kl<0,2>(gx, rlrk, stride_k); break;
+                            //case 3 : hrr_kl<0,3>(gx, rlrk, stride_k); break;
+                            //case 4 : hrr_kl<0,4>(gx, rlrk, stride_k); break;
+                            //case 5 : hrr_kl<1,0>(gx, rlrk, stride_k); break;
+                            //case 6 : hrr_kl<1,1>(gx, rlrk, stride_k); break;
+                            //case 7 : hrr_kl<1,2>(gx, rlrk, stride_k); break;
+                            //case 8 : hrr_kl<1,3>(gx, rlrk, stride_k); break;
+                            //case 9 : hrr_kl<1,4>(gx, rlrk, stride_k); break;
+                            //case 10: hrr_kl<2,0>(gx, rlrk, stride_k); break;
+                            //case 11: hrr_kl<2,1>(gx, rlrk, stride_k); break;
+                            //case 12: hrr_kl<2,2>(gx, rlrk, stride_k); break;
+                            //case 13: hrr_kl<2,3>(gx, rlrk, stride_k); break;
+                            //case 14: hrr_kl<2,4>(gx, rlrk, stride_k); break;
+                            //case 15: hrr_kl<3,0>(gx, rlrk, stride_k); break;
+                            //case 16: hrr_kl<3,1>(gx, rlrk, stride_k); break;
+                            //case 17: hrr_kl<3,2>(gx, rlrk, stride_k); break;
+                            //case 18: hrr_kl<3,3>(gx, rlrk, stride_k); break;
+                            //case 19: hrr_kl<3,4>(gx, rlrk, stride_k); break;
+                            //case 20: hrr_kl<4,0>(gx, rlrk, stride_k); break;
+                            //case 21: hrr_kl<4,1>(gx, rlrk, stride_k); break;
+                            //case 22: hrr_kl<4,2>(gx, rlrk, stride_k); break;
+                            //case 23: hrr_kl<4,3>(gx, rlrk, stride_k); break;
+                            //case 24: hrr_kl<4,4>(gx, rlrk, stride_k); break;
+                            //default:
                             for (int n = gout_id; n < stride_k*3; n += gout_stride) {
                                 int i = n / 3;
                                 int _ix = n % 3;
@@ -367,6 +424,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                     }
                                 }
                             }
+                            //}
                         }
                     }
 
@@ -402,7 +460,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         }
         __syncthreads();
 
-        for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
+        for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
             GXYZOffset goff = gxyz_offsets[gout_id];
             int ioff = goff.ioff;
             int joff = goff.joff;
@@ -424,9 +482,8 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int ldl = bounds.ntiles_l * 3;
             double *dm_cache = shared_memory + sq_id;
             int active = task_id < ntasks;
-            double *dm = jk.dm + i_dm * nao * nao;
-            double *vk = jk.vk + i_dm * nao * nao;
-            double *vj = jk.vj + i_dm * nao * nao;
+            double *dm = kmat.dm + i_dm * nao * nao;
+            double *vk = kmat.vk + i_dm * nao * nao;
             load_dm(dm+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
             dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao, i0, l0,
                                 ioff, joff, koff, loff, ldk, nfi, nfl, active);
@@ -439,19 +496,56 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             load_dm(dm+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
             dot_dm<3, 1, 27, 9>(vk, dm_cache, gout, nao, j0, k0,
                                 joff, ioff, loff, koff, ldl, nfj, nfk, active);
-
-            load_dm(dm+i0*nao+j0, dm_cache, nao, nfi, nfj, ldi, ldj, active);
-            dot_dm<9, 1, 3, 27>(vj, dm_cache, gout, nao, k0, l0,
-                                koff, ioff, joff, loff, ldj, nfk, nfl, active);
-            load_dm(dm+k0*nao+l0, dm_cache, nao, nfk, nfl, ldk, ldl, active);
-            dot_dm<1, 9, 27, 3>(vj, dm_cache, gout, nao, i0, j0,
-                                ioff, koff, loff, joff, ldl, nfi, nfj, active);
         }
     }
 }
 
-static size_t threads_scheme_for_jk(dim3& threads, BoundsInfo &bounds,
-                                    int shm_size, int gout_stride_max)
+GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
+{
+/*
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nfk = (lk + 1) * (lk + 2) // 2
+    nfl = (ll + 1) * (ll + 2) // 2
+    ioff = np.arange(0, nfi, 3, dtype=np.int8)
+    joff = np.arange(0, nfj, 3, dtype=np.int8)
+    koff = np.arange(0, nfk, 3, dtype=np.int8)
+    loff = np.arange(0, nfl, 3, dtype=np.int8)
+    gxyz_offset = lib.cartesian_prod([ioff, joff, koff, loff])
+    copy = 256 // len(gxyz_offset) + 1
+    return cp.vstack([cp.asarray(gxyz_offset)]*copy, dtype=np.int8)
+*/
+    GXYZOffset goff[625];
+    int nfi = bounds.nfi;
+    int nfj = bounds.nfj;
+    int nfk = bounds.nfk;
+    int nfl = bounds.nfl;
+    int nf = 0;
+    for (int i = 0; i < nfi; i += 3) {
+    for (int j = 0; j < nfj; j += 3) {
+    for (int k = 0; k < nfk; k += 3) {
+    for (int l = 0; l < nfl; l += 3) {
+        goff[nf].ioff = i;
+        goff[nf].joff = j;
+        goff[nf].koff = k;
+        goff[nf].loff = l;
+        ++nf;
+    } } } }
+    for (int n = nf; n < 256; n += nf) {
+        for (int m = 0; m < nf; ++m) {
+            goff[n+m] = goff[m];
+        }
+    }
+    checkCudaErrors(
+        cudaMemcpyToSymbol(c_gxyz_offset, goff, max(nf, 256)*sizeof(GXYZOffset),
+                           0, cudaMemcpyHostToDevice));
+    GXYZOffset *p_gxyz_offset;
+    cudaGetSymbolAddress((void**)&p_gxyz_offset, c_gxyz_offset);
+    return p_gxyz_offset;
+}
+
+static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
+                                   int shm_size, int gout_stride_max)
 {
 /*
     order = li + lj + lk + ll
@@ -497,8 +591,6 @@ static size_t threads_scheme_for_jk(dim3& threads, BoundsInfo &bounds,
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
     int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
-    dm_cache_size = max(dm_cache_size, ldi*ldj);
-    dm_cache_size = max(dm_cache_size, ldk*ldl);
     int root_g_cache_size = nroots*2 + g_size*3 + 9;
     int unit = max(root_g_cache_size, dm_cache_size);
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
@@ -515,15 +607,14 @@ static size_t threads_scheme_for_jk(dim3& threads, BoundsInfo &bounds,
     return buflen;
 }
 
-extern GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds);
-extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *pool);
+extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds, int *pool);
 
 extern "C" {
-int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
-                 RysIntEnvVars envs, int *shls_slice, int shm_size,
-                 int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
-                 float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                 int *pool, int *atm, int natm, int *bas, int nbas, double *env)
+int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
+                RysIntEnvVars envs, int *shls_slice, int shm_size,
+                int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
+                float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                int *pool, int *atm, int natm, int *bas, int nbas, double *env)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -562,38 +653,46 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         q_cond, s_estimator, dm_cond, cutoff,
         ntiles_i, ntiles_j, ntiles_k, ntiles_l};
 
-    JKMatrix jk = {vj, vk, dm, n_dm, 0, omega};
-    if (!rys_jk_unrolled(&envs, &jk, &bounds, pool)) {
+    JKMatrix kmat = {NULL, vk, dm, n_dm, 0, omega};
+    if (omega >= 0) {
+        kmat.lr_factor = 1;
+        kmat.sr_factor = 0;
+    } else {
+        kmat.lr_factor = 0;
+        kmat.sr_factor = 1;
+    }
+
+    if (!rys_k_unrolled(&envs, &kmat, &bounds, pool)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
                             ((lk == 0) >> 1) |
                             ( ll == 0));
         dim3 threads;
-        int buflen = threads_scheme_for_jk(threads, bounds, shm_size, 256);
+        int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
-        rys_jk_kernel<<<npairs_ij, threads, buflen>>>(
-            envs, jk, bounds, pool, p_gxyz_offset,
+        rys_k_kernel<<<npairs_ij, threads, buflen>>>(
+            envs, kmat, bounds, pool, p_gxyz_offset,
             gout_pattern, reserved_shm_size);
 
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
-            buflen = threads_scheme_for_jk(threads, bounds, shm_size,
-                                           min(256, n_tiles-256));
+            buflen = threads_scheme_for_k(threads, bounds, shm_size,
+                                          min(256, n_tiles-256));
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            rys_jk_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, jk, bounds, pool, p_gxyz_offset+256,
+            rys_k_kernel<<<npairs_ij, threads, buflen>>>(
+                envs, kmat, bounds, pool, p_gxyz_offset+256,
                 gout_pattern, reserved_shm_size);
         }
 
         if (n_tiles > 512) { // gggg
-            buflen = threads_scheme_for_jk(threads, bounds, shm_size,
-                                           min(256, n_tiles-512));
+            buflen = threads_scheme_for_k(threads, bounds, shm_size,
+                                          min(256, n_tiles-512));
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            rys_jk_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, jk, bounds, pool, p_gxyz_offset+512,
+            rys_k_kernel<<<npairs_ij, threads, buflen>>>(
+                envs, kmat, bounds, pool, p_gxyz_offset+512,
                 gout_pattern, reserved_shm_size);
         }
     }
@@ -604,15 +703,15 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         if (err_get_device_id != cudaSuccess) {
             printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
         }
-        fprintf(stderr, "CUDA Error in RYS_build_jk, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
+        fprintf(stderr, "CUDA Error in RYS_build_k, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
         return 1;
     }
     return 0;
 }
 
-int RYS_build_jk_init(int shm_size)
+int RYS_build_k_init(int shm_size)
 {
-    cudaFuncSetAttribute(rys_jk_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

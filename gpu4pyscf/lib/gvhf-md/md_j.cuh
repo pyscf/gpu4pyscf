@@ -16,10 +16,13 @@
 
 #pragma once
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t ll;
+    int li;
+    int lj;
+    int lk;
+    int ll;
+    int nf3ij;
+    int nf3kl;
+    int nf3ijkl;
     int npairs_ij;
     int npairs_kl;
     int *pair_ij_mapping; // the significant ij pairs, mapping to i*nao+j

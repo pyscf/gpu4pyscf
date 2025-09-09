@@ -52,22 +52,29 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 float *q_cond, float cutoff,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
-    uint16_t ish0 = shls_slice[0];
-    uint16_t jsh0 = shls_slice[2];
-    uint16_t ksh0 = shls_slice[4];
-    uint16_t lsh0 = shls_slice[6];
-    uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
-    uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    uint8_t lk = bas[ANG_OF + ksh0*BAS_SLOTS];
-    uint8_t ll = bas[ANG_OF + lsh0*BAS_SLOTS];
+    int ish0 = shls_slice[0];
+    int jsh0 = shls_slice[2];
+    int ksh0 = shls_slice[4];
+    int lsh0 = shls_slice[6];
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    int lk = bas[ANG_OF + ksh0*BAS_SLOTS];
+    int ll = bas[ANG_OF + lsh0*BAS_SLOTS];
+    int lij = li + lj;
+    int lkl = lk + ll;
+    int order = lij + lkl;
+    int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
+    int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
+    int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
     float *tile16_qd_ij_max = qd_ij_max[block_id_for_threads(16)];
     float *tile16_qd_kl_max = qd_kl_max[block_id_for_threads(16)];
-    MDBoundsInfo bounds = {li, lj, lk, ll,
+    MDBoundsInfo bounds = {li, lj, lk, ll, nf3ij, nf3kl, nf3ijkl,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         pair_ij_loc, pair_kl_loc, tile16_qd_ij_max, tile16_qd_kl_max,
         q_cond, cutoff};
 
-    JKMatrix jk = {vj, NULL, dm, (uint16_t)n_dm};
+    double omega = env[PTR_RANGE_OMEGA];
+    JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
 
     int threads_ij = scheme[0];
     int threads_kl = scheme[1];
@@ -75,7 +82,6 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int tilex = scheme[3];
     int tiley = scheme[4];
     int buflen = scheme[5];
-    double omega = env[PTR_RANGE_OMEGA];
     int bsizex = threads_ij * tilex;
     int bsizey = threads_kl * tiley;
     int nsq_per_block = threads_ij * threads_kl;

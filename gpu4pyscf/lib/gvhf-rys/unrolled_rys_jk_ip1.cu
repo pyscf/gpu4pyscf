@@ -1,89 +1,108 @@
 #include <cuda.h>
+#include <cuda_runtime.h>
 #include "vhf.cuh"
-#include "rys_roots.cu"
-#include "create_tasks_ip1.cu"
+#include "rys_roots_for_k.cu"
+#include "create_tasks.cu"
 
 
-__device__ static
-void _rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+#if CUDA_VERSION >= 12040
+__global__ __maxnreg__(128) static
+#else
+__global__ static
+#endif
+void rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -108,10 +127,20 @@ void _rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -127,30 +156,28 @@ void _rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
-                    fx = ai2 * trr_10x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_10x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += 1 *  fy  * wt;
                     gout0z += 1 * 1 *  fz ;
@@ -158,6 +185,12 @@ void _rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -210,124 +243,113 @@ void _rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0000(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+#if CUDA_VERSION >= 12040
+__global__ __maxnreg__(128) static
+#else
+__global__ static
+#endif
+void rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
     double gout2x, gout2y, gout2z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -358,10 +380,20 @@ void _rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -377,54 +409,50 @@ void _rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
-                    fx = ai2 * trr_11x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_11x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01x = cpx * 1;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += trr_01x *  fy  * wt;
                     gout0z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01y = cpy * 1;
                     gout1x +=  fx  * trr_01y * wt;
                     gout1y += 1 *  fy  * wt;
                     gout1z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout2x +=  fx  * 1 * trr_01z;
                     gout2y += 1 *  fy  * trr_01z;
@@ -433,6 +461,12 @@ void _rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -539,96 +573,92 @@ void _rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0010(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -639,30 +669,19 @@ void _rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout6x, gout6y, gout6z;
     double gout7x, gout7y, gout7z;
     double gout8x, gout8y, gout8z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -711,10 +730,20 @@ void _rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -730,116 +759,106 @@ void _rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                    double hrr_1011x = trr_12x - (rl[0] - rk[0]) * trr_11x;
-                    fx = ai2 * hrr_1011x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    double hrr_1011x = trr_12x - xlxk * trr_11x;
+                    fx = aij_cache[2] * hrr_1011x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
-                    double hrr_0011x = trr_02x - (rl[0] - rk[0]) * trr_01x;
+                    double hrr_0011x = trr_02x - xlxk * trr_01x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0011x *  fy  * wt;
                     gout0z += hrr_0011x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    double hrr_1001x = trr_11x - (rl[0] - rk[0]) * trr_10x;
-                    fx = ai2 * hrr_1001x;
+                    double hrr_1001x = trr_11x - xlxk * trr_10x;
+                    fx = aij_cache[2] * hrr_1001x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001x = trr_01x - (rl[0] - rk[0]) * 1;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001x = trr_01x - xlxk * 1;
                     double trr_01y = cpy * 1;
                     gout1x +=  fx  * trr_01y * wt;
                     gout1y += hrr_0001x *  fy  * wt;
                     gout1z += hrr_0001x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout2x +=  fx  * 1 * trr_01z;
                     gout2y += hrr_0001x *  fy  * trr_01z;
                     gout2z += hrr_0001x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    double hrr_1001y = trr_11y - (rl[1] - rk[1]) * trr_10y;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001y = trr_01y - (rl[1] - rk[1]) * 1;
+                    fx = aij_cache[2] * trr_11x;
+                    double hrr_1001y = trr_11y - ylyk * trr_10y;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001y = trr_01y - ylyk * 1;
                     gout3x +=  fx  * hrr_0001y * wt;
                     gout3y += trr_01x *  fy  * wt;
                     gout3z += trr_01x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    double hrr_1011y = trr_12y - (rl[1] - rk[1]) * trr_11y;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_10z;
+                    double hrr_1011y = trr_12y - ylyk * trr_11y;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
-                    double hrr_0011y = trr_02y - (rl[1] - rk[1]) * trr_01y;
+                    double hrr_0011y = trr_02y - ylyk * trr_01y;
                     gout4x +=  fx  * hrr_0011y * wt;
                     gout4y += 1 *  fy  * wt;
                     gout4z += 1 * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_11z;
                     gout5x +=  fx  * hrr_0001y * trr_01z;
                     gout5y += 1 *  fy  * trr_01z;
                     gout5z += 1 * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1001z = trr_11z - (rl[2] - rk[2]) * trr_10z;
-                    fz = ai2 * hrr_1001z;
-                    double hrr_0001z = trr_01z - (rl[2] - rk[2]) * wt;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1001z = trr_11z - zlzk * trr_10z;
+                    fz = aij_cache[2] * hrr_1001z;
+                    double hrr_0001z = trr_01z - zlzk * wt;
                     gout6x +=  fx  * 1 * hrr_0001z;
                     gout6y += trr_01x *  fy  * hrr_0001z;
                     gout6z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout7x +=  fx  * trr_01y * hrr_0001z;
                     gout7y += 1 *  fy  * hrr_0001z;
                     gout7z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    double hrr_1011z = trr_12z - (rl[2] - rk[2]) * trr_11z;
-                    fz = ai2 * hrr_1011z;
+                    double hrr_1011z = trr_12z - zlzk * trr_11z;
+                    fz = aij_cache[2] * hrr_1011z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                    double hrr_0011z = trr_02z - (rl[2] - rk[2]) * trr_01z;
+                    double hrr_0011z = trr_02z - zlzk * trr_01z;
                     gout8x +=  fx  * 1 * hrr_0011z;
                     gout8y += 1 *  fy  * hrr_0011z;
                     gout8z += 1 * 1 *  fz ;
@@ -847,6 +866,12 @@ void _rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -1091,92 +1116,92 @@ void _rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0011(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -1184,30 +1209,19 @@ void _rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout3x, gout3y, gout3z;
     double gout4x, gout4y, gout4z;
     double gout5x, gout5y, gout5z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1247,10 +1261,20 @@ void _rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -1266,82 +1290,75 @@ void _rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                    fx = ai2 * trr_12x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_12x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += trr_02x *  fy  * wt;
                     gout0z += trr_02x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01y = cpy * 1;
                     gout1x +=  fx  * trr_01y * wt;
                     gout1y += trr_01x *  fy  * wt;
                     gout1z += trr_01x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout2x +=  fx  * 1 * trr_01z;
                     gout2y += trr_01x *  fy  * trr_01z;
                     gout2z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     gout3x +=  fx  * trr_02y * wt;
                     gout3y += 1 *  fy  * wt;
                     gout3z += 1 * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_11z;
                     gout4x +=  fx  * trr_01y * trr_01z;
                     gout4y += 1 *  fy  * trr_01z;
                     gout4z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = ai2 * trr_12z;
+                    fz = aij_cache[2] * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     gout5x +=  fx  * 1 * trr_02z;
                     gout5y += 1 *  fy  * trr_02z;
@@ -1350,6 +1367,12 @@ void _rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -1537,92 +1560,92 @@ void _rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0020(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -1642,30 +1665,19 @@ void _rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1741,10 +1753,20 @@ void _rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -1760,191 +1782,172 @@ void _rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double trr_13x = cpx * trr_12x + 2*b01 * trr_11x + 1*b00 * trr_02x;
-                    double hrr_1021x = trr_13x - (rl[0] - rk[0]) * trr_12x;
-                    fx = ai2 * hrr_1021x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    double hrr_1021x = trr_13x - xlxk * trr_12x;
+                    fx = aij_cache[2] * hrr_1021x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_03x = cpx * trr_02x + 2*b01 * trr_01x;
-                    double hrr_0021x = trr_03x - (rl[0] - rk[0]) * trr_02x;
+                    double hrr_0021x = trr_03x - xlxk * trr_02x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0021x *  fy  * wt;
                     gout0z += hrr_0021x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    double hrr_1011x = trr_12x - (rl[0] - rk[0]) * trr_11x;
-                    fx = ai2 * hrr_1011x;
+                    double hrr_1011x = trr_12x - xlxk * trr_11x;
+                    fx = aij_cache[2] * hrr_1011x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0011x = trr_02x - (rl[0] - rk[0]) * trr_01x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0011x = trr_02x - xlxk * trr_01x;
                     double trr_01y = cpy * 1;
                     gout1x +=  fx  * trr_01y * wt;
                     gout1y += hrr_0011x *  fy  * wt;
                     gout1z += hrr_0011x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1011x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout2x +=  fx  * 1 * trr_01z;
                     gout2y += hrr_0011x *  fy  * trr_01z;
                     gout2z += hrr_0011x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    double hrr_1001x = trr_11x - (rl[0] - rk[0]) * trr_10x;
-                    fx = ai2 * hrr_1001x;
+                    double hrr_1001x = trr_11x - xlxk * trr_10x;
+                    fx = aij_cache[2] * hrr_1001x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001x = trr_01x - (rl[0] - rk[0]) * 1;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001x = trr_01x - xlxk * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     gout3x +=  fx  * trr_02y * wt;
                     gout3y += hrr_0001x *  fy  * wt;
                     gout3z += hrr_0001x * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_11z;
                     gout4x +=  fx  * trr_01y * trr_01z;
                     gout4y += hrr_0001x *  fy  * trr_01z;
                     gout4z += hrr_0001x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = ai2 * trr_12z;
+                    fz = aij_cache[2] * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     gout5x +=  fx  * 1 * trr_02z;
                     gout5y += hrr_0001x *  fy  * trr_02z;
                     gout5z += hrr_0001x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
-                    double hrr_1001y = trr_11y - (rl[1] - rk[1]) * trr_10y;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001y = trr_01y - (rl[1] - rk[1]) * 1;
+                    fx = aij_cache[2] * trr_12x;
+                    double hrr_1001y = trr_11y - ylyk * trr_10y;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001y = trr_01y - ylyk * 1;
                     gout6x +=  fx  * hrr_0001y * wt;
                     gout6y += trr_02x *  fy  * wt;
                     gout6z += trr_02x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    double hrr_1011y = trr_12y - (rl[1] - rk[1]) * trr_11y;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0011y = trr_02y - (rl[1] - rk[1]) * trr_01y;
+                    fx = aij_cache[2] * trr_11x;
+                    double hrr_1011y = trr_12y - ylyk * trr_11y;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0011y = trr_02y - ylyk * trr_01y;
                     gout7x +=  fx  * hrr_0011y * wt;
                     gout7y += trr_01x *  fy  * wt;
                     gout7z += trr_01x * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_11z;
                     gout8x +=  fx  * hrr_0001y * trr_01z;
                     gout8y += trr_01x *  fy  * trr_01z;
                     gout8z += trr_01x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_13y = cpy * trr_12y + 2*b01 * trr_11y + 1*b00 * trr_02y;
-                    double hrr_1021y = trr_13y - (rl[1] - rk[1]) * trr_12y;
-                    fy = ai2 * hrr_1021y;
-                    fz = ai2 * trr_10z;
+                    double hrr_1021y = trr_13y - ylyk * trr_12y;
+                    fy = aij_cache[2] * hrr_1021y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_03y = cpy * trr_02y + 2*b01 * trr_01y;
-                    double hrr_0021y = trr_03y - (rl[1] - rk[1]) * trr_02y;
+                    double hrr_0021y = trr_03y - ylyk * trr_02y;
                     gout9x +=  fx  * hrr_0021y * wt;
                     gout9y += 1 *  fy  * wt;
                     gout9z += 1 * hrr_0021y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_11z;
                     gout10x +=  fx  * hrr_0011y * trr_01z;
                     gout10y += 1 *  fy  * trr_01z;
                     gout10z += 1 * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_12z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_12z;
                     gout11x +=  fx  * hrr_0001y * trr_02z;
                     gout11y += 1 *  fy  * trr_02z;
                     gout11z += 1 * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1001z = trr_11z - (rl[2] - rk[2]) * trr_10z;
-                    fz = ai2 * hrr_1001z;
-                    double hrr_0001z = trr_01z - (rl[2] - rk[2]) * wt;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1001z = trr_11z - zlzk * trr_10z;
+                    fz = aij_cache[2] * hrr_1001z;
+                    double hrr_0001z = trr_01z - zlzk * wt;
                     gout12x +=  fx  * 1 * hrr_0001z;
                     gout12y += trr_02x *  fy  * hrr_0001z;
                     gout12z += trr_02x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout13x +=  fx  * trr_01y * hrr_0001z;
                     gout13y += trr_01x *  fy  * hrr_0001z;
                     gout13z += trr_01x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1011z = trr_12z - (rl[2] - rk[2]) * trr_11z;
-                    fz = ai2 * hrr_1011z;
-                    double hrr_0011z = trr_02z - (rl[2] - rk[2]) * trr_01z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1011z = trr_12z - zlzk * trr_11z;
+                    fz = aij_cache[2] * hrr_1011z;
+                    double hrr_0011z = trr_02z - zlzk * trr_01z;
                     gout14x +=  fx  * 1 * hrr_0011z;
                     gout14y += trr_01x *  fy  * hrr_0011z;
                     gout14z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout15x +=  fx  * trr_02y * hrr_0001z;
                     gout15y += 1 *  fy  * hrr_0001z;
                     gout15z += 1 * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1011z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1011z;
                     gout16x +=  fx  * trr_01y * hrr_0011z;
                     gout16y += 1 *  fy  * hrr_0011z;
                     gout16z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
-                    double hrr_1021z = trr_13z - (rl[2] - rk[2]) * trr_12z;
-                    fz = ai2 * hrr_1021z;
+                    double hrr_1021z = trr_13z - zlzk * trr_12z;
+                    fz = aij_cache[2] * hrr_1021z;
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
-                    double hrr_0021z = trr_03z - (rl[2] - rk[2]) * trr_02z;
+                    double hrr_0021z = trr_03z - zlzk * trr_02z;
                     gout17x +=  fx  * 1 * hrr_0021z;
                     gout17y += 1 *  fy  * hrr_0021z;
                     gout17z += 1 * 1 *  fz ;
@@ -1952,6 +1955,12 @@ void _rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -2403,92 +2412,92 @@ void _rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0021(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -2508,30 +2517,19 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -2607,10 +2605,20 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -2626,26 +2634,24 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
@@ -2654,173 +2660,156 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double trr_13x = cpx * trr_12x + 2*b01 * trr_11x + 1*b00 * trr_02x;
                     double trr_03x = cpx * trr_02x + 2*b01 * trr_01x;
                     double trr_14x = cpx * trr_13x + 3*b01 * trr_12x + 1*b00 * trr_03x;
-                    double hrr_1031x = trr_14x - (rl[0] - rk[0]) * trr_13x;
-                    double hrr_1021x = trr_13x - (rl[0] - rk[0]) * trr_12x;
-                    double hrr_1022x = hrr_1031x - (rl[0] - rk[0]) * hrr_1021x;
-                    fx = ai2 * hrr_1022x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    double hrr_1031x = trr_14x - xlxk * trr_13x;
+                    double hrr_1021x = trr_13x - xlxk * trr_12x;
+                    double hrr_1022x = hrr_1031x - xlxk * hrr_1021x;
+                    fx = aij_cache[2] * hrr_1022x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_04x = cpx * trr_03x + 3*b01 * trr_02x;
-                    double hrr_0031x = trr_04x - (rl[0] - rk[0]) * trr_03x;
-                    double hrr_0021x = trr_03x - (rl[0] - rk[0]) * trr_02x;
-                    double hrr_0022x = hrr_0031x - (rl[0] - rk[0]) * hrr_0021x;
+                    double hrr_0031x = trr_04x - xlxk * trr_03x;
+                    double hrr_0021x = trr_03x - xlxk * trr_02x;
+                    double hrr_0022x = hrr_0031x - xlxk * hrr_0021x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0022x *  fy  * wt;
                     gout0z += hrr_0022x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    double hrr_1011x = trr_12x - (rl[0] - rk[0]) * trr_11x;
-                    double hrr_1012x = hrr_1021x - (rl[0] - rk[0]) * hrr_1011x;
-                    fx = ai2 * hrr_1012x;
+                    double hrr_1011x = trr_12x - xlxk * trr_11x;
+                    double hrr_1012x = hrr_1021x - xlxk * hrr_1011x;
+                    fx = aij_cache[2] * hrr_1012x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0011x = trr_02x - (rl[0] - rk[0]) * trr_01x;
-                    double hrr_0012x = hrr_0021x - (rl[0] - rk[0]) * hrr_0011x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0011x = trr_02x - xlxk * trr_01x;
+                    double hrr_0012x = hrr_0021x - xlxk * hrr_0011x;
                     double trr_01y = cpy * 1;
                     gout1x +=  fx  * trr_01y * wt;
                     gout1y += hrr_0012x *  fy  * wt;
                     gout1z += hrr_0012x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1012x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1012x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout2x +=  fx  * 1 * trr_01z;
                     gout2y += hrr_0012x *  fy  * trr_01z;
                     gout2z += hrr_0012x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    double hrr_1001x = trr_11x - (rl[0] - rk[0]) * trr_10x;
-                    double hrr_1002x = hrr_1011x - (rl[0] - rk[0]) * hrr_1001x;
-                    fx = ai2 * hrr_1002x;
+                    double hrr_1001x = trr_11x - xlxk * trr_10x;
+                    double hrr_1002x = hrr_1011x - xlxk * hrr_1001x;
+                    fx = aij_cache[2] * hrr_1002x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001x = trr_01x - (rl[0] - rk[0]) * 1;
-                    double hrr_0002x = hrr_0011x - (rl[0] - rk[0]) * hrr_0001x;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001x = trr_01x - xlxk * 1;
+                    double hrr_0002x = hrr_0011x - xlxk * hrr_0001x;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     gout3x +=  fx  * trr_02y * wt;
                     gout3y += hrr_0002x *  fy  * wt;
                     gout3z += hrr_0002x * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1002x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1002x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_11z;
                     gout4x +=  fx  * trr_01y * trr_01z;
                     gout4y += hrr_0002x *  fy  * trr_01z;
                     gout4z += hrr_0002x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1002x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1002x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = ai2 * trr_12z;
+                    fz = aij_cache[2] * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     gout5x +=  fx  * 1 * trr_02z;
                     gout5y += hrr_0002x *  fy  * trr_02z;
                     gout5z += hrr_0002x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1021x;
-                    double hrr_1001y = trr_11y - (rl[1] - rk[1]) * trr_10y;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001y = trr_01y - (rl[1] - rk[1]) * 1;
+                    fx = aij_cache[2] * hrr_1021x;
+                    double hrr_1001y = trr_11y - ylyk * trr_10y;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001y = trr_01y - ylyk * 1;
                     gout6x +=  fx  * hrr_0001y * wt;
                     gout6y += hrr_0021x *  fy  * wt;
                     gout6z += hrr_0021x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
-                    double hrr_1011y = trr_12y - (rl[1] - rk[1]) * trr_11y;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0011y = trr_02y - (rl[1] - rk[1]) * trr_01y;
+                    fx = aij_cache[2] * hrr_1011x;
+                    double hrr_1011y = trr_12y - ylyk * trr_11y;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0011y = trr_02y - ylyk * trr_01y;
                     gout7x +=  fx  * hrr_0011y * wt;
                     gout7y += hrr_0011x *  fy  * wt;
                     gout7z += hrr_0011x * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1011x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_11z;
                     gout8x +=  fx  * hrr_0001y * trr_01z;
                     gout8y += hrr_0011x *  fy  * trr_01z;
                     gout8z += hrr_0011x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
+                    fx = aij_cache[2] * hrr_1001x;
                     double trr_13y = cpy * trr_12y + 2*b01 * trr_11y + 1*b00 * trr_02y;
-                    double hrr_1021y = trr_13y - (rl[1] - rk[1]) * trr_12y;
-                    fy = ai2 * hrr_1021y;
-                    fz = ai2 * trr_10z;
+                    double hrr_1021y = trr_13y - ylyk * trr_12y;
+                    fy = aij_cache[2] * hrr_1021y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_03y = cpy * trr_02y + 2*b01 * trr_01y;
-                    double hrr_0021y = trr_03y - (rl[1] - rk[1]) * trr_02y;
+                    double hrr_0021y = trr_03y - ylyk * trr_02y;
                     gout9x +=  fx  * hrr_0021y * wt;
                     gout9y += hrr_0001x *  fy  * wt;
                     gout9z += hrr_0001x * hrr_0021y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_11z;
                     gout10x +=  fx  * hrr_0011y * trr_01z;
                     gout10y += hrr_0001x *  fy  * trr_01z;
                     gout10z += hrr_0001x * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_12z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_12z;
                     gout11x +=  fx  * hrr_0001y * trr_02z;
                     gout11y += hrr_0001x *  fy  * trr_02z;
                     gout11z += hrr_0001x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1021x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1001z = trr_11z - (rl[2] - rk[2]) * trr_10z;
-                    fz = ai2 * hrr_1001z;
-                    double hrr_0001z = trr_01z - (rl[2] - rk[2]) * wt;
+                    fx = aij_cache[2] * hrr_1021x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1001z = trr_11z - zlzk * trr_10z;
+                    fz = aij_cache[2] * hrr_1001z;
+                    double hrr_0001z = trr_01z - zlzk * wt;
                     gout12x +=  fx  * 1 * hrr_0001z;
                     gout12y += hrr_0021x *  fy  * hrr_0001z;
                     gout12z += hrr_0021x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * hrr_1011x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout13x +=  fx  * trr_01y * hrr_0001z;
                     gout13y += hrr_0011x *  fy  * hrr_0001z;
                     gout13z += hrr_0011x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1011z = trr_12z - (rl[2] - rk[2]) * trr_11z;
-                    fz = ai2 * hrr_1011z;
-                    double hrr_0011z = trr_02z - (rl[2] - rk[2]) * trr_01z;
+                    fx = aij_cache[2] * hrr_1011x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1011z = trr_12z - zlzk * trr_11z;
+                    fz = aij_cache[2] * hrr_1011z;
+                    double hrr_0011z = trr_02z - zlzk * trr_01z;
                     gout14x +=  fx  * 1 * hrr_0011z;
                     gout14y += hrr_0011x *  fy  * hrr_0011z;
                     gout14z += hrr_0011x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout15x +=  fx  * trr_02y * hrr_0001z;
                     gout15y += hrr_0001x *  fy  * hrr_0001z;
                     gout15z += hrr_0001x * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1011z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1011z;
                     gout16x +=  fx  * trr_01y * hrr_0011z;
                     gout16y += hrr_0001x *  fy  * hrr_0011z;
                     gout16z += hrr_0001x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
-                    double hrr_1021z = trr_13z - (rl[2] - rk[2]) * trr_12z;
-                    fz = ai2 * hrr_1021z;
+                    double hrr_1021z = trr_13z - zlzk * trr_12z;
+                    fz = aij_cache[2] * hrr_1021z;
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
-                    double hrr_0021z = trr_03z - (rl[2] - rk[2]) * trr_02z;
+                    double hrr_0021z = trr_03z - zlzk * trr_02z;
                     gout17x +=  fx  * 1 * hrr_0021z;
                     gout17y += hrr_0001x *  fy  * hrr_0021z;
                     gout17z += hrr_0001x * 1 *  fz ;
@@ -2828,6 +2817,12 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -3344,10 +3339,20 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -3363,203 +3368,184 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                    fx = ai2 * trr_12x;
+                    fx = aij_cache[2] * trr_12x;
                     double cpy = yqc + ypq*rt_akl;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
                     double trr_01y = cpy * 1;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    double hrr_1011y = trr_12y - (rl[1] - rk[1]) * trr_11y;
-                    double hrr_1001y = trr_11y - (rl[1] - rk[1]) * trr_10y;
-                    double hrr_1002y = hrr_1011y - (rl[1] - rk[1]) * hrr_1001y;
-                    fy = ai2 * hrr_1002y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    double hrr_1011y = trr_12y - ylyk * trr_11y;
+                    double hrr_1001y = trr_11y - ylyk * trr_10y;
+                    double hrr_1002y = hrr_1011y - ylyk * hrr_1001y;
+                    fy = aij_cache[2] * hrr_1002y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
-                    double hrr_0011y = trr_02y - (rl[1] - rk[1]) * trr_01y;
-                    double hrr_0001y = trr_01y - (rl[1] - rk[1]) * 1;
-                    double hrr_0002y = hrr_0011y - (rl[1] - rk[1]) * hrr_0001y;
+                    double hrr_0011y = trr_02y - ylyk * trr_01y;
+                    double hrr_0001y = trr_01y - ylyk * 1;
+                    double hrr_0002y = hrr_0011y - ylyk * hrr_0001y;
                     gout0x +=  fx  * hrr_0002y * wt;
                     gout0y += trr_02x *  fy  * wt;
                     gout0z += trr_02x * hrr_0002y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_13y = cpy * trr_12y + 2*b01 * trr_11y + 1*b00 * trr_02y;
-                    double hrr_1021y = trr_13y - (rl[1] - rk[1]) * trr_12y;
-                    double hrr_1012y = hrr_1021y - (rl[1] - rk[1]) * hrr_1011y;
-                    fy = ai2 * hrr_1012y;
-                    fz = ai2 * trr_10z;
+                    double hrr_1021y = trr_13y - ylyk * trr_12y;
+                    double hrr_1012y = hrr_1021y - ylyk * hrr_1011y;
+                    fy = aij_cache[2] * hrr_1012y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_03y = cpy * trr_02y + 2*b01 * trr_01y;
-                    double hrr_0021y = trr_03y - (rl[1] - rk[1]) * trr_02y;
-                    double hrr_0012y = hrr_0021y - (rl[1] - rk[1]) * hrr_0011y;
+                    double hrr_0021y = trr_03y - ylyk * trr_02y;
+                    double hrr_0012y = hrr_0021y - ylyk * hrr_0011y;
                     gout1x +=  fx  * hrr_0012y * wt;
                     gout1y += trr_01x *  fy  * wt;
                     gout1z += trr_01x * hrr_0012y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1002y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1002y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout2x +=  fx  * hrr_0002y * trr_01z;
                     gout2y += trr_01x *  fy  * trr_01z;
                     gout2z += trr_01x * hrr_0002y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_14y = cpy * trr_13y + 3*b01 * trr_12y + 1*b00 * trr_03y;
-                    double hrr_1031y = trr_14y - (rl[1] - rk[1]) * trr_13y;
-                    double hrr_1022y = hrr_1031y - (rl[1] - rk[1]) * hrr_1021y;
-                    fy = ai2 * hrr_1022y;
-                    fz = ai2 * trr_10z;
+                    double hrr_1031y = trr_14y - ylyk * trr_13y;
+                    double hrr_1022y = hrr_1031y - ylyk * hrr_1021y;
+                    fy = aij_cache[2] * hrr_1022y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_04y = cpy * trr_03y + 3*b01 * trr_02y;
-                    double hrr_0031y = trr_04y - (rl[1] - rk[1]) * trr_03y;
-                    double hrr_0022y = hrr_0031y - (rl[1] - rk[1]) * hrr_0021y;
+                    double hrr_0031y = trr_04y - ylyk * trr_03y;
+                    double hrr_0022y = hrr_0031y - ylyk * hrr_0021y;
                     gout3x +=  fx  * hrr_0022y * wt;
                     gout3y += 1 *  fy  * wt;
                     gout3z += 1 * hrr_0022y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1012y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1012y;
+                    fz = aij_cache[2] * trr_11z;
                     gout4x +=  fx  * hrr_0012y * trr_01z;
                     gout4y += 1 *  fy  * trr_01z;
                     gout4z += 1 * hrr_0012y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1002y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1002y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = ai2 * trr_12z;
+                    fz = aij_cache[2] * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     gout5x +=  fx  * hrr_0002y * trr_02z;
                     gout5y += 1 *  fy  * trr_02z;
                     gout5z += 1 * hrr_0002y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
-                    fy = ai2 * hrr_1001y;
-                    double hrr_1001z = trr_11z - (rl[2] - rk[2]) * trr_10z;
-                    fz = ai2 * hrr_1001z;
-                    double hrr_0001z = trr_01z - (rl[2] - rk[2]) * wt;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    double hrr_1001z = trr_11z - zlzk * trr_10z;
+                    fz = aij_cache[2] * hrr_1001z;
+                    double hrr_0001z = trr_01z - zlzk * wt;
                     gout6x +=  fx  * hrr_0001y * hrr_0001z;
                     gout6y += trr_02x *  fy  * hrr_0001z;
                     gout6z += trr_02x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout7x +=  fx  * hrr_0011y * hrr_0001z;
                     gout7y += trr_01x *  fy  * hrr_0001z;
                     gout7z += trr_01x * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1001y;
-                    double hrr_1011z = trr_12z - (rl[2] - rk[2]) * trr_11z;
-                    fz = ai2 * hrr_1011z;
-                    double hrr_0011z = trr_02z - (rl[2] - rk[2]) * trr_01z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    double hrr_1011z = trr_12z - zlzk * trr_11z;
+                    fz = aij_cache[2] * hrr_1011z;
+                    double hrr_0011z = trr_02z - zlzk * trr_01z;
                     gout8x +=  fx  * hrr_0001y * hrr_0011z;
                     gout8y += trr_01x *  fy  * hrr_0011z;
                     gout8z += trr_01x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1021y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1021y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout9x +=  fx  * hrr_0021y * hrr_0001z;
                     gout9y += 1 *  fy  * hrr_0001z;
                     gout9z += 1 * hrr_0021y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * hrr_1011z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * hrr_1011z;
                     gout10x +=  fx  * hrr_0011y * hrr_0011z;
                     gout10y += 1 *  fy  * hrr_0011z;
                     gout10z += 1 * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1001y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1001y;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
-                    double hrr_1021z = trr_13z - (rl[2] - rk[2]) * trr_12z;
-                    fz = ai2 * hrr_1021z;
+                    double hrr_1021z = trr_13z - zlzk * trr_12z;
+                    fz = aij_cache[2] * hrr_1021z;
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
-                    double hrr_0021z = trr_03z - (rl[2] - rk[2]) * trr_02z;
+                    double hrr_0021z = trr_03z - zlzk * trr_02z;
                     gout11x +=  fx  * hrr_0001y * hrr_0021z;
                     gout11y += 1 *  fy  * hrr_0021z;
                     gout11z += 1 * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1002z = hrr_1011z - (rl[2] - rk[2]) * hrr_1001z;
-                    fz = ai2 * hrr_1002z;
-                    double hrr_0002z = hrr_0011z - (rl[2] - rk[2]) * hrr_0001z;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1002z = hrr_1011z - zlzk * hrr_1001z;
+                    fz = aij_cache[2] * hrr_1002z;
+                    double hrr_0002z = hrr_0011z - zlzk * hrr_0001z;
                     gout12x +=  fx  * 1 * hrr_0002z;
                     gout12y += trr_02x *  fy  * hrr_0002z;
                     gout12z += trr_02x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1002z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1002z;
                     gout13x +=  fx  * trr_01y * hrr_0002z;
                     gout13y += trr_01x *  fy  * hrr_0002z;
                     gout13z += trr_01x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1012z = hrr_1021z - (rl[2] - rk[2]) * hrr_1011z;
-                    fz = ai2 * hrr_1012z;
-                    double hrr_0012z = hrr_0021z - (rl[2] - rk[2]) * hrr_0011z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1012z = hrr_1021z - zlzk * hrr_1011z;
+                    fz = aij_cache[2] * hrr_1012z;
+                    double hrr_0012z = hrr_0021z - zlzk * hrr_0011z;
                     gout14x +=  fx  * 1 * hrr_0012z;
                     gout14y += trr_01x *  fy  * hrr_0012z;
                     gout14z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * hrr_1002z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * hrr_1002z;
                     gout15x +=  fx  * trr_02y * hrr_0002z;
                     gout15y += 1 *  fy  * hrr_0002z;
                     gout15z += 1 * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1012z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1012z;
                     gout16x +=  fx  * trr_01y * hrr_0012z;
                     gout16y += 1 *  fy  * hrr_0012z;
                     gout16z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_14z = cpz * trr_13z + 3*b01 * trr_12z + 1*b00 * trr_03z;
-                    double hrr_1031z = trr_14z - (rl[2] - rk[2]) * trr_13z;
-                    double hrr_1022z = hrr_1031z - (rl[2] - rk[2]) * hrr_1021z;
-                    fz = ai2 * hrr_1022z;
+                    double hrr_1031z = trr_14z - zlzk * trr_13z;
+                    double hrr_1022z = hrr_1031z - zlzk * hrr_1021z;
+                    fz = aij_cache[2] * hrr_1022z;
                     double trr_04z = cpz * trr_03z + 3*b01 * trr_02z;
-                    double hrr_0031z = trr_04z - (rl[2] - rk[2]) * trr_03z;
-                    double hrr_0022z = hrr_0031z - (rl[2] - rk[2]) * hrr_0021z;
+                    double hrr_0031z = trr_04z - zlzk * trr_03z;
+                    double hrr_0022z = hrr_0031z - zlzk * hrr_0021z;
                     gout17x +=  fx  * 1 * hrr_0022z;
                     gout17y += 1 *  fy  * hrr_0022z;
                     gout17z += 1 * 1 *  fz ;
@@ -3567,6 +3553,12 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -4018,120 +4010,113 @@ void _rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0022(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+#if CUDA_VERSION >= 12040
+__global__ __maxnreg__(128) static
+#else
+__global__ static
+#endif
+void rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
     double gout2x, gout2y, gout2z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -4162,10 +4147,20 @@ void _rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -4181,53 +4176,49 @@ void _rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = ai2 * hrr_1100x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_1100x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0100x *  fy  * wt;
                     gout0z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout1x +=  fx  * hrr_0100y * wt;
                     gout1y += 1 *  fy  * wt;
                     gout1z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout2x +=  fx  * 1 * hrr_0100z;
                     gout2y += 1 *  fy  * hrr_0100z;
@@ -4236,6 +4227,12 @@ void _rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -4342,96 +4339,92 @@ void _rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0100(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -4442,30 +4435,19 @@ void _rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout6x, gout6y, gout6z;
     double gout7x, gout7y, gout7z;
     double gout8x, gout8y, gout8z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -4514,10 +4496,20 @@ void _rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -4533,115 +4525,105 @@ void _rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
-                    fx = ai2 * hrr_1110x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_1110x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01x = cpx * 1;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0110x *  fy  * wt;
                     gout0z += hrr_0110x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout1x +=  fx  * hrr_0100y * wt;
                     gout1y += trr_01x *  fy  * wt;
                     gout1z += trr_01x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout2x +=  fx  * 1 * hrr_0100z;
                     gout2y += trr_01x *  fy  * hrr_0100z;
                     gout2z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double trr_01y = cpy * 1;
                     gout3x +=  fx  * trr_01y * wt;
                     gout3y += hrr_0100x *  fy  * wt;
                     gout3z += hrr_0100x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     gout4x +=  fx  * hrr_0110y * wt;
                     gout4y += 1 *  fy  * wt;
                     gout4z += 1 * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout5x +=  fx  * trr_01y * hrr_0100z;
                     gout5y += 1 *  fy  * hrr_0100z;
                     gout5z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout6x +=  fx  * 1 * trr_01z;
                     gout6y += hrr_0100x *  fy  * trr_01z;
                     gout6z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_11z;
                     gout7x +=  fx  * hrr_0100y * trr_01z;
                     gout7y += 1 *  fy  * trr_01z;
                     gout7z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = ai2 * hrr_1110z;
+                    fz = aij_cache[2] * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     gout8x +=  fx  * 1 * hrr_0110z;
                     gout8y += 1 *  fy  * hrr_0110z;
@@ -4650,6 +4632,12 @@ void _rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -4894,92 +4882,92 @@ void _rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0110(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -5008,30 +4996,19 @@ void _rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout24x, gout24y, gout24z;
     double gout25x, gout25y, gout25z;
     double gout26x, gout26y, gout26z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -5134,10 +5111,20 @@ void _rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -5153,281 +5140,253 @@ void _rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
-                    double hrr_2011x = trr_22x - (rl[0] - rk[0]) * trr_21x;
+                    double hrr_2011x = trr_22x - xlxk * trr_21x;
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                    double hrr_1011x = trr_12x - (rl[0] - rk[0]) * trr_11x;
+                    double hrr_1011x = trr_12x - xlxk * trr_11x;
                     double hrr_1111x = hrr_2011x - rjri[0] * hrr_1011x;
-                    fx = ai2 * hrr_1111x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_1111x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
-                    double hrr_0011x = trr_02x - (rl[0] - rk[0]) * trr_01x;
+                    double hrr_0011x = trr_02x - xlxk * trr_01x;
                     double hrr_0111x = hrr_1011x - rjri[0] * hrr_0011x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0111x *  fy  * wt;
                     gout0z += hrr_0111x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
+                    fx = aij_cache[2] * hrr_1011x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout1x +=  fx  * hrr_0100y * wt;
                     gout1y += hrr_0011x *  fy  * wt;
                     gout1z += hrr_0011x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1011x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout2x +=  fx  * 1 * hrr_0100z;
                     gout2y += hrr_0011x *  fy  * hrr_0100z;
                     gout2z += hrr_0011x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    double hrr_2001x = trr_21x - (rl[0] - rk[0]) * trr_20x;
-                    double hrr_1001x = trr_11x - (rl[0] - rk[0]) * trr_10x;
+                    double hrr_2001x = trr_21x - xlxk * trr_20x;
+                    double hrr_1001x = trr_11x - xlxk * trr_10x;
                     double hrr_1101x = hrr_2001x - rjri[0] * hrr_1001x;
-                    fx = ai2 * hrr_1101x;
+                    fx = aij_cache[2] * hrr_1101x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001x = trr_01x - (rl[0] - rk[0]) * 1;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001x = trr_01x - xlxk * 1;
                     double hrr_0101x = hrr_1001x - rjri[0] * hrr_0001x;
                     double trr_01y = cpy * 1;
                     gout3x +=  fx  * trr_01y * wt;
                     gout3y += hrr_0101x *  fy  * wt;
                     gout3z += hrr_0101x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
+                    fx = aij_cache[2] * hrr_1001x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     gout4x +=  fx  * hrr_0110y * wt;
                     gout4y += hrr_0001x *  fy  * wt;
                     gout4z += hrr_0001x * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout5x +=  fx  * trr_01y * hrr_0100z;
                     gout5y += hrr_0001x *  fy  * hrr_0100z;
                     gout5z += hrr_0001x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1101x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1101x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout6x +=  fx  * 1 * trr_01z;
                     gout6y += hrr_0101x *  fy  * trr_01z;
                     gout6z += hrr_0101x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_11z;
                     gout7x +=  fx  * hrr_0100y * trr_01z;
                     gout7y += hrr_0001x *  fy  * trr_01z;
                     gout7z += hrr_0001x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = ai2 * hrr_1110z;
+                    fz = aij_cache[2] * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     gout8x +=  fx  * 1 * hrr_0110z;
                     gout8y += hrr_0001x *  fy  * hrr_0110z;
                     gout8z += hrr_0001x * 1 *  fz ;
-                    ai2 = rjri[5];
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
-                    fx = ai2 * hrr_1110x;
-                    double hrr_1001y = trr_11y - (rl[1] - rk[1]) * trr_10y;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_10z;
+                    fx = aij_cache[2] * hrr_1110x;
+                    double hrr_1001y = trr_11y - ylyk * trr_10y;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
-                    double hrr_0001y = trr_01y - (rl[1] - rk[1]) * 1;
+                    double hrr_0001y = trr_01y - ylyk * 1;
                     gout9x +=  fx  * hrr_0001y * wt;
                     gout9y += hrr_0110x *  fy  * wt;
                     gout9z += hrr_0110x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    double hrr_2001y = trr_21y - (rl[1] - rk[1]) * trr_20y;
+                    fx = aij_cache[2] * trr_11x;
+                    double hrr_2001y = trr_21y - ylyk * trr_20y;
                     double hrr_1101y = hrr_2001y - rjri[1] * hrr_1001y;
-                    fy = ai2 * hrr_1101y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1101y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0101y = hrr_1001y - rjri[1] * hrr_0001y;
                     gout10x +=  fx  * hrr_0101y * wt;
                     gout10y += trr_01x *  fy  * wt;
                     gout10z += trr_01x * hrr_0101y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout11x +=  fx  * hrr_0001y * hrr_0100z;
                     gout11y += trr_01x *  fy  * hrr_0100z;
                     gout11z += trr_01x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    double hrr_1011y = trr_12y - (rl[1] - rk[1]) * trr_11y;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_10z;
+                    double hrr_1011y = trr_12y - ylyk * trr_11y;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
-                    double hrr_0011y = trr_02y - (rl[1] - rk[1]) * trr_01y;
+                    double hrr_0011y = trr_02y - ylyk * trr_01y;
                     gout12x +=  fx  * hrr_0011y * wt;
                     gout12y += hrr_0100x *  fy  * wt;
                     gout12z += hrr_0100x * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
-                    double hrr_2011y = trr_22y - (rl[1] - rk[1]) * trr_21y;
+                    double hrr_2011y = trr_22y - ylyk * trr_21y;
                     double hrr_1111y = hrr_2011y - rjri[1] * hrr_1011y;
-                    fy = ai2 * hrr_1111y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1111y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0111y = hrr_1011y - rjri[1] * hrr_0011y;
                     gout13x +=  fx  * hrr_0111y * wt;
                     gout13y += 1 *  fy  * wt;
                     gout13z += 1 * hrr_0111y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout14x +=  fx  * hrr_0011y * hrr_0100z;
                     gout14y += 1 *  fy  * hrr_0100z;
                     gout14z += 1 * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_11z;
                     gout15x +=  fx  * hrr_0001y * trr_01z;
                     gout15y += hrr_0100x *  fy  * trr_01z;
                     gout15z += hrr_0100x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1101y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1101y;
+                    fz = aij_cache[2] * trr_11z;
                     gout16x +=  fx  * hrr_0101y * trr_01z;
                     gout16y += 1 *  fy  * trr_01z;
                     gout16z += 1 * hrr_0101y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * hrr_1110z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * hrr_1110z;
                     gout17x +=  fx  * hrr_0001y * hrr_0110z;
                     gout17y += 1 *  fy  * hrr_0110z;
                     gout17z += 1 * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1110x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1001z = trr_11z - (rl[2] - rk[2]) * trr_10z;
-                    fz = ai2 * hrr_1001z;
-                    double hrr_0001z = trr_01z - (rl[2] - rk[2]) * wt;
+                    fx = aij_cache[2] * hrr_1110x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1001z = trr_11z - zlzk * trr_10z;
+                    fz = aij_cache[2] * hrr_1001z;
+                    double hrr_0001z = trr_01z - zlzk * wt;
                     gout18x +=  fx  * 1 * hrr_0001z;
                     gout18y += hrr_0110x *  fy  * hrr_0001z;
                     gout18z += hrr_0110x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout19x +=  fx  * hrr_0100y * hrr_0001z;
                     gout19y += trr_01x *  fy  * hrr_0001z;
                     gout19z += trr_01x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
-                    double hrr_2001z = trr_21z - (rl[2] - rk[2]) * trr_20z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_2001z = trr_21z - zlzk * trr_20z;
                     double hrr_1101z = hrr_2001z - rjri[2] * hrr_1001z;
-                    fz = ai2 * hrr_1101z;
+                    fz = aij_cache[2] * hrr_1101z;
                     double hrr_0101z = hrr_1001z - rjri[2] * hrr_0001z;
                     gout20x +=  fx  * 1 * hrr_0101z;
                     gout20y += trr_01x *  fy  * hrr_0101z;
                     gout20z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout21x +=  fx  * trr_01y * hrr_0001z;
                     gout21y += hrr_0100x *  fy  * hrr_0001z;
                     gout21z += hrr_0100x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * hrr_1001z;
                     gout22x +=  fx  * hrr_0110y * hrr_0001z;
                     gout22y += 1 *  fy  * hrr_0001z;
                     gout22z += 1 * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1101z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1101z;
                     gout23x +=  fx  * trr_01y * hrr_0101z;
                     gout23y += 1 *  fy  * hrr_0101z;
                     gout23z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    double hrr_1011z = trr_12z - (rl[2] - rk[2]) * trr_11z;
-                    fz = ai2 * hrr_1011z;
+                    double hrr_1011z = trr_12z - zlzk * trr_11z;
+                    fz = aij_cache[2] * hrr_1011z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                    double hrr_0011z = trr_02z - (rl[2] - rk[2]) * trr_01z;
+                    double hrr_0011z = trr_02z - zlzk * trr_01z;
                     gout24x +=  fx  * 1 * hrr_0011z;
                     gout24y += hrr_0100x *  fy  * hrr_0011z;
                     gout24z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * hrr_1011z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1011z;
                     gout25x +=  fx  * hrr_0100y * hrr_0011z;
                     gout25y += 1 *  fy  * hrr_0011z;
                     gout25z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    double hrr_2011z = trr_22z - (rl[2] - rk[2]) * trr_21z;
+                    double hrr_2011z = trr_22z - zlzk * trr_21z;
                     double hrr_1111z = hrr_2011z - rjri[2] * hrr_1011z;
-                    fz = ai2 * hrr_1111z;
+                    fz = aij_cache[2] * hrr_1111z;
                     double hrr_0111z = hrr_1011z - rjri[2] * hrr_0011z;
                     gout26x +=  fx  * 1 * hrr_0111z;
                     gout26y += 1 *  fy  * hrr_0111z;
@@ -5436,6 +5395,12 @@ void _rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -6046,92 +6011,92 @@ void _rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0111(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -6151,30 +6116,19 @@ void _rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -6250,10 +6204,20 @@ void _rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -6269,27 +6233,25 @@ void _rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
@@ -6298,165 +6260,148 @@ void _rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double trr_01x = cpx * 1;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
                     double hrr_1120x = trr_22x - rjri[0] * trr_12x;
-                    fx = ai2 * hrr_1120x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_1120x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     double hrr_0120x = trr_12x - rjri[0] * trr_02x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0120x *  fy  * wt;
                     gout0z += hrr_0120x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
+                    fx = aij_cache[2] * trr_12x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout1x +=  fx  * hrr_0100y * wt;
                     gout1y += trr_02x *  fy  * wt;
                     gout1z += trr_02x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout2x +=  fx  * 1 * hrr_0100z;
                     gout2y += trr_02x *  fy  * hrr_0100z;
                     gout2z += trr_02x * 1 *  fz ;
-                    ai2 = rjri[5];
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
-                    fx = ai2 * hrr_1110x;
+                    fx = aij_cache[2] * hrr_1110x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     double trr_01y = cpy * 1;
                     gout3x +=  fx  * trr_01y * wt;
                     gout3y += hrr_0110x *  fy  * wt;
                     gout3z += hrr_0110x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     gout4x +=  fx  * hrr_0110y * wt;
                     gout4y += trr_01x *  fy  * wt;
                     gout4z += trr_01x * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout5x +=  fx  * trr_01y * hrr_0100z;
                     gout5y += trr_01x *  fy  * hrr_0100z;
                     gout5z += trr_01x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1110x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1110x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout6x +=  fx  * 1 * trr_01z;
                     gout6y += hrr_0110x *  fy  * trr_01z;
                     gout6z += hrr_0110x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_11z;
                     gout7x +=  fx  * hrr_0100y * trr_01z;
                     gout7y += trr_01x *  fy  * trr_01z;
                     gout7z += trr_01x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = ai2 * hrr_1110z;
+                    fz = aij_cache[2] * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     gout8x +=  fx  * 1 * hrr_0110z;
                     gout8y += trr_01x *  fy  * hrr_0110z;
                     gout8z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     gout9x +=  fx  * trr_02y * wt;
                     gout9y += hrr_0100x *  fy  * wt;
                     gout9z += hrr_0100x * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
                     double hrr_1120y = trr_22y - rjri[1] * trr_12y;
-                    fy = ai2 * hrr_1120y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1120y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0120y = trr_12y - rjri[1] * trr_02y;
                     gout10x +=  fx  * hrr_0120y * wt;
                     gout10y += 1 *  fy  * wt;
                     gout10z += 1 * hrr_0120y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout11x +=  fx  * trr_02y * hrr_0100z;
                     gout11y += 1 *  fy  * hrr_0100z;
                     gout11z += 1 * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_11z;
                     gout12x +=  fx  * trr_01y * trr_01z;
                     gout12y += hrr_0100x *  fy  * trr_01z;
                     gout12z += hrr_0100x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_11z;
                     gout13x +=  fx  * hrr_0110y * trr_01z;
                     gout13y += 1 *  fy  * trr_01z;
                     gout13z += 1 * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1110z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1110z;
                     gout14x +=  fx  * trr_01y * hrr_0110z;
                     gout14y += 1 *  fy  * hrr_0110z;
                     gout14z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = ai2 * trr_12z;
+                    fz = aij_cache[2] * trr_12z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     gout15x +=  fx  * 1 * trr_02z;
                     gout15y += hrr_0100x *  fy  * trr_02z;
                     gout15z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_12z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_12z;
                     gout16x +=  fx  * hrr_0100y * trr_02z;
                     gout16y += 1 *  fy  * trr_02z;
                     gout16z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double hrr_1120z = trr_22z - rjri[2] * trr_12z;
-                    fz = ai2 * hrr_1120z;
+                    fz = aij_cache[2] * hrr_1120z;
                     double hrr_0120z = trr_12z - rjri[2] * trr_02z;
                     gout17x +=  fx  * 1 * hrr_0120z;
                     gout17y += 1 *  fy  * hrr_0120z;
@@ -6465,6 +6410,12 @@ void _rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -6916,103 +6867,98 @@ void _rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0120(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1536;
-    double *gz = gy + 1536;
-    double *rlrk = gz + 1536;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 81 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (81+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -7028,30 +6974,19 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout11x, gout11y, gout11z;
     double gout12x, gout12y, gout12z;
     double gout13x, gout13y, gout13z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -7065,6 +7000,7 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -7116,18 +7052,26 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -7140,8 +7084,6 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -7149,12 +7091,23 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -7163,11 +7116,11 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[3072] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1536;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -7175,7 +7128,7 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 1 * b10 * s0;
                         _gx[128] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -7274,396 +7227,348 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[1408];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1472] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3072];
+                    gout0x += aij_cache[2] * gx[1472] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[1088] * Iy * Iz;
-                    gout1y += ai2 * gy[448] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3072];
+                    gout1x += aij_cache[2] * gx[1088] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout2x += ai2 * gx[1088] * Iy * Iz;
-                    gout2y += ai2 * gy[64] * Ix * Iz;
-                    gout2z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3456];
+                    gout2x += aij_cache[2] * gx[1088] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[896];
-                    Iy = gy[256];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[960] * Iy * Iz;
-                    gout3y += ai2 * gy[320] * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3328];
+                    gout3x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[128];
-                    Iz = gz[512];
-                    gout4x += ai2 * gx[832] * Iy * Iz;
-                    gout4y += ai2 * gy[192] * Ix * Iz;
-                    gout4z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3584];
+                    gout4x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[768];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[576] * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3200];
+                    gout5x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[768];
-                    Iz = gz[256];
-                    gout6x += ai2 * gx[448] * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3328];
+                    gout6x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1408];
-                    Iz = gz[0];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[1472] * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2944];
+                    Iz = gx[3072];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[3008] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1024];
-                    Iz = gz[384];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[1088] * Ix * Iz;
-                    gout8z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3456];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2624] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout9x += ai2 * gx[704] * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3840];
+                    gout9x += aij_cache[2] * gx[704] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[384];
-                    Iz = gz[768];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += ai2 * gy[448] * Ix * Iz;
-                    gout10z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3840];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[1152];
-                    gout11x += ai2 * gx[320] * Iy * Iz;
-                    gout11y += ai2 * gy[64] * Ix * Iz;
-                    gout11z += ai2 * gz[1216] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4224];
+                    gout11x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[4288] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[256];
-                    Iz = gz[1024];
-                    gout12x += ai2 * gx[192] * Iy * Iz;
-                    gout12y += ai2 * gy[320] * Ix * Iz;
-                    gout12z += ai2 * gz[1088] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[4096];
+                    gout12x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4160] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[128];
-                    Iz = gz[1280];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[192] * Ix * Iz;
-                    gout13z += ai2 * gz[1344] * Ix * Iy;
+                    Iy = gx[1664];
+                    Iz = gx[4352];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[4416] * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[1280];
-                    Iy = gy[128];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1344] * Iy * Iz;
-                    gout0y += ai2 * gy[192] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3072];
+                    gout0x += aij_cache[2] * gx[1344] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[256];
-                    Iz = gz[128];
-                    gout1x += ai2 * gx[1088] * Iy * Iz;
-                    gout1y += ai2 * gy[320] * Ix * Iz;
-                    gout1z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3200];
+                    gout1x += aij_cache[2] * gx[1088] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[896];
-                    Iy = gy[512];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[960] * Iy * Iz;
-                    gout2y += ai2 * gy[576] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3072];
+                    gout2x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[384];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[832] * Iy * Iz;
-                    gout3y += ai2 * gy[448] * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3328];
+                    gout3x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout4x += ai2 * gx[832] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += ai2 * gz[704] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3712];
+                    gout4x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3776] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[1024];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += ai2 * gy[1088] * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3072];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2624] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[896];
-                    Iz = gz[256];
-                    gout6x += ai2 * gx[320] * Iy * Iz;
-                    gout6y += ai2 * gy[960] * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2432];
+                    Iz = gx[3328];
+                    gout6x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2496] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1280];
-                    Iz = gz[128];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[1344] * Ix * Iz;
-                    gout7z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2816];
+                    Iz = gx[3200];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2880] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[768];
-                    Iz = gz[512];
-                    gout8x += ai2 * gx[192] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3584];
+                    gout8x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[128];
-                    Iz = gz[768];
-                    gout9x += ai2 * gx[576] * Iy * Iz;
-                    gout9y += ai2 * gy[192] * Ix * Iz;
-                    gout9z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3840];
+                    gout9x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[256];
-                    Iz = gz[896];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += ai2 * gy[320] * Ix * Iz;
-                    gout10z += ai2 * gz[960] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3968];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[4032] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[512];
-                    Iz = gz[768];
-                    gout11x += ai2 * gx[192] * Iy * Iz;
-                    gout11y += ai2 * gy[576] * Ix * Iz;
-                    gout11z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3840];
+                    gout11x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[1024];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += ai2 * gy[448] * Ix * Iz;
-                    gout12z += ai2 * gz[1088] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[4096];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4160] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[1408];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += ai2 * gz[1472] * Ix * Iy;
+                    Iy = gx[1536];
+                    Iz = gx[4480];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[4544] * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[1280];
-                    Iy = gy[0];
-                    Iz = gz[128];
-                    gout0x += ai2 * gx[1344] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3200];
+                    gout0x += aij_cache[2] * gx[1344] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[1152];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout1x += ai2 * gx[1216] * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3328];
+                    gout1x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[704] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[3072];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[2240] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[256];
-                    Iz = gz[384];
-                    gout3x += ai2 * gx[832] * Iy * Iz;
-                    gout3y += ai2 * gy[320] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3456];
+                    gout3x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[704] * Iy * Iz;
-                    gout4y += ai2 * gy[832] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3072];
+                    gout4x += aij_cache[2] * gx[704] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[1152];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += ai2 * gy[1216] * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3072];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[768];
-                    Iz = gz[384];
-                    gout6x += ai2 * gx[320] * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3456];
+                    gout6x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[1024];
-                    Iz = gz[256];
-                    gout7x += ai2 * gx[192] * Iy * Iz;
-                    gout7y += ai2 * gy[1088] * Ix * Iz;
-                    gout7z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3328];
+                    gout7x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2624] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[896];
-                    Iz = gz[512];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[960] * Ix * Iz;
-                    gout8z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2432];
+                    Iz = gx[3584];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2496] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[0];
-                    Iz = gz[896];
-                    gout9x += ai2 * gx[576] * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[960] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3968];
+                    gout9x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[4032] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[1024];
-                    gout10x += ai2 * gx[448] * Iy * Iz;
-                    gout10y += ai2 * gy[64] * Ix * Iz;
-                    gout10z += ai2 * gz[1088] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4096];
+                    gout10x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[4160] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[768];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[704] * Ix * Iz;
-                    gout11z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[3840];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2240] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[1152];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += ai2 * gy[320] * Ix * Iz;
-                    gout12z += ai2 * gz[1216] * Ix * Iy;
+                    Iy = gx[1792];
+                    Iz = gx[4224];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4288] * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[1152];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1216] * Iy * Iz;
-                    gout0y += ai2 * gy[320] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3072];
+                    gout0x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[128];
-                    Iz = gz[256];
-                    gout1x += ai2 * gx[1088] * Iy * Iz;
-                    gout1y += ai2 * gy[192] * Ix * Iz;
-                    gout1z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3328];
+                    gout1x += aij_cache[2] * gx[1088] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[512];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[576] * Ix * Iz;
-                    gout2z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3200];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[896];
-                    Iy = gy[0];
-                    Iz = gz[512];
-                    gout3x += ai2 * gx[960] * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3584];
+                    gout3x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[896];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[576] * Iy * Iz;
-                    gout4y += ai2 * gy[960] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2432];
+                    Iz = gx[3072];
+                    gout4x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[2496] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[1024];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += ai2 * gy[1088] * Ix * Iz;
-                    gout5z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3200];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2624] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[1280];
-                    Iz = gz[0];
-                    gout6x += ai2 * gx[192] * Iy * Iz;
-                    gout6y += ai2 * gy[1344] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2816];
+                    Iz = gx[3072];
+                    gout6x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2880] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1152];
-                    Iz = gz[256];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[1216] * Ix * Iz;
-                    gout7z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3328];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[640];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += ai2 * gz[704] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3712];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3776] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[256];
-                    Iz = gz[768];
-                    gout9x += ai2 * gx[448] * Iy * Iz;
-                    gout9y += ai2 * gy[320] * Ix * Iz;
-                    gout9z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3840];
+                    gout9x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[128];
-                    Iz = gz[1024];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += ai2 * gy[192] * Ix * Iz;
-                    gout10z += ai2 * gz[1088] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[4096];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[4160] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[512];
-                    Iz = gz[896];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[576] * Ix * Iz;
-                    gout11z += ai2 * gz[960] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3968];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[4032] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[0];
-                    Iz = gz[1280];
-                    gout12x += ai2 * gx[192] * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[1344] * Ix * Iy;
+                    Iy = gx[1536];
+                    Iz = gx[4352];
+                    gout12x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4416] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -9194,92 +9099,92 @@ void _rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0121(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -9287,30 +9192,19 @@ void _rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout3x, gout3y, gout3z;
     double gout4x, gout4y, gout4z;
     double gout5x, gout5y, gout5z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -9350,10 +9244,20 @@ void _rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -9369,86 +9273,79 @@ void _rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
-                    fx = ai2 * hrr_1200x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_1200x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0200x *  fy  * wt;
                     gout0z += hrr_0200x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout1x +=  fx  * hrr_0100y * wt;
                     gout1y += hrr_0100x *  fy  * wt;
                     gout1z += hrr_0100x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout2x +=  fx  * 1 * hrr_0100z;
                     gout2y += hrr_0100x *  fy  * hrr_0100z;
                     gout2z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = ai2 * hrr_1200y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     gout3x +=  fx  * hrr_0200y * wt;
                     gout3y += 1 *  fy  * wt;
                     gout3z += 1 * hrr_0200y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout4x +=  fx  * hrr_0100y * hrr_0100z;
                     gout4y += 1 *  fy  * hrr_0100z;
                     gout4z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = ai2 * hrr_1200z;
+                    fz = aij_cache[2] * hrr_1200z;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     gout5x +=  fx  * 1 * hrr_0200z;
                     gout5y += 1 *  fy  * hrr_0200z;
@@ -9457,6 +9354,12 @@ void _rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -9644,92 +9547,92 @@ void _rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0200(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -9749,30 +9652,19 @@ void _rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -9848,10 +9740,20 @@ void _rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -9867,26 +9769,24 @@ void _rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
@@ -9896,173 +9796,156 @@ void _rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double hrr_1110x = trr_21x - rjri[0] * trr_11x;
                     double hrr_1210x = hrr_2110x - rjri[0] * hrr_1110x;
-                    fx = ai2 * hrr_1210x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_1210x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01x = cpx * 1;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
                     double hrr_0210x = hrr_1110x - rjri[0] * hrr_0110x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_0210x *  fy  * wt;
                     gout0z += hrr_0210x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1110x;
+                    fx = aij_cache[2] * hrr_1110x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout1x +=  fx  * hrr_0100y * wt;
                     gout1y += hrr_0110x *  fy  * wt;
                     gout1z += hrr_0110x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1110x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1110x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout2x +=  fx  * 1 * hrr_0100z;
                     gout2y += hrr_0110x *  fy  * hrr_0100z;
                     gout2z += hrr_0110x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = ai2 * hrr_1200y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     gout3x +=  fx  * hrr_0200y * wt;
                     gout3y += trr_01x *  fy  * wt;
                     gout3z += trr_01x * hrr_0200y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout4x +=  fx  * hrr_0100y * hrr_0100z;
                     gout4y += trr_01x *  fy  * hrr_0100z;
                     gout4z += trr_01x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = ai2 * hrr_1200z;
+                    fz = aij_cache[2] * hrr_1200z;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     gout5x +=  fx  * 1 * hrr_0200z;
                     gout5y += trr_01x *  fy  * hrr_0200z;
                     gout5z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_1200x = hrr_2100x - rjri[0] * hrr_1100x;
-                    fx = ai2 * hrr_1200x;
+                    fx = aij_cache[2] * hrr_1200x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
                     double trr_01y = cpy * 1;
                     gout6x +=  fx  * trr_01y * wt;
                     gout6y += hrr_0200x *  fy  * wt;
                     gout6z += hrr_0200x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     gout7x +=  fx  * hrr_0110y * wt;
                     gout7y += hrr_0100x *  fy  * wt;
                     gout7z += hrr_0100x * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout8x +=  fx  * trr_01y * hrr_0100z;
                     gout8y += hrr_0100x *  fy  * hrr_0100z;
                     gout8z += hrr_0100x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     double hrr_2110y = trr_31y - rjri[1] * trr_21y;
                     double hrr_1210y = hrr_2110y - rjri[1] * hrr_1110y;
-                    fy = ai2 * hrr_1210y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1210y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0210y = hrr_1110y - rjri[1] * hrr_0110y;
                     gout9x +=  fx  * hrr_0210y * wt;
                     gout9y += 1 *  fy  * wt;
                     gout9z += 1 * hrr_0210y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * hrr_1100z;
                     gout10x +=  fx  * hrr_0110y * hrr_0100z;
                     gout10y += 1 *  fy  * hrr_0100z;
                     gout10z += 1 * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1200z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1200z;
                     gout11x +=  fx  * trr_01y * hrr_0200z;
                     gout11y += 1 *  fy  * hrr_0200z;
                     gout11z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1200x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1200x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     double trr_01z = cpz * wt;
                     gout12x +=  fx  * 1 * trr_01z;
                     gout12y += hrr_0200x *  fy  * trr_01z;
                     gout12z += hrr_0200x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_11z;
                     gout13x +=  fx  * hrr_0100y * trr_01z;
                     gout13y += hrr_0100x *  fy  * trr_01z;
                     gout13z += hrr_0100x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = ai2 * hrr_1110z;
+                    fz = aij_cache[2] * hrr_1110z;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     gout14x +=  fx  * 1 * hrr_0110z;
                     gout14y += hrr_0100x *  fy  * hrr_0110z;
                     gout14z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1200y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_11z;
                     gout15x +=  fx  * hrr_0200y * trr_01z;
                     gout15y += 1 *  fy  * trr_01z;
                     gout15z += 1 * hrr_0200y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * hrr_1110z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1110z;
                     gout16x +=  fx  * hrr_0100y * hrr_0110z;
                     gout16y += 1 *  fy  * hrr_0110z;
                     gout16z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double hrr_2110z = trr_31z - rjri[2] * trr_21z;
                     double hrr_1210z = hrr_2110z - rjri[2] * hrr_1110z;
-                    fz = ai2 * hrr_1210z;
+                    fz = aij_cache[2] * hrr_1210z;
                     double hrr_0210z = hrr_1110z - rjri[2] * hrr_0110z;
                     gout17x +=  fx  * 1 * hrr_0210z;
                     gout17y += 1 *  fy  * hrr_0210z;
@@ -10071,6 +9954,12 @@ void _rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -10522,103 +10411,98 @@ void _rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0210(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1536;
-    double *gz = gy + 1536;
-    double *rlrk = gz + 1536;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 81 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (81+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -10634,30 +10518,19 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout11x, gout11y, gout11z;
     double gout12x, gout12y, gout12z;
     double gout13x, gout13y, gout13z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -10671,6 +10544,7 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -10722,18 +10596,26 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -10746,8 +10628,6 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -10755,12 +10635,23 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -10769,11 +10660,11 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[3072] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1536;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -10785,7 +10676,7 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -10898,396 +10789,348 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[1408];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1472] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3072];
+                    gout0x += aij_cache[2] * gx[1472] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1152];
-                    Iy = gy[128];
-                    Iz = gz[128];
-                    gout1x += ai2 * gx[1216] * Iy * Iz;
-                    gout1y += ai2 * gy[192] * Ix * Iz;
-                    gout1z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3200];
+                    gout1x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[896];
-                    Iy = gy[384];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[960] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3200];
+                    gout2x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout3x += ai2 * gx[1088] * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3456];
+                    gout3x += aij_cache[2] * gx[1088] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[128];
-                    Iz = gz[512];
-                    gout4x += ai2 * gx[832] * Iy * Iz;
-                    gout4y += ai2 * gy[192] * Ix * Iz;
-                    gout4z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3584];
+                    gout4x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[768];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[576] * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3200];
+                    gout5x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[1152];
-                    Iz = gz[0];
-                    gout6x += ai2 * gx[320] * Iy * Iz;
-                    gout6y += ai2 * gy[1216] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3072];
+                    gout6x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1280];
-                    Iz = gz[128];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[1344] * Ix * Iz;
-                    gout7z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2816];
+                    Iz = gx[3200];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2880] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[768];
-                    Iz = gz[512];
-                    gout8x += ai2 * gx[192] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3584];
+                    gout8x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout9x += ai2 * gx[704] * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3840];
+                    gout9x += aij_cache[2] * gx[704] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[128];
-                    Iz = gz[896];
-                    gout10x += ai2 * gx[448] * Iy * Iz;
-                    gout10y += ai2 * gy[192] * Ix * Iz;
-                    gout10z += ai2 * gz[960] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3968];
+                    gout10x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[4032] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[384];
-                    Iz = gz[896];
-                    gout11x += ai2 * gx[192] * Iy * Iz;
-                    gout11y += ai2 * gy[448] * Ix * Iz;
-                    gout11z += ai2 * gz[960] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3968];
+                    gout11x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[4032] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[1152];
-                    gout12x += ai2 * gx[320] * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[1216] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4224];
+                    gout12x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4288] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[128];
-                    Iz = gz[1280];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[192] * Ix * Iz;
-                    gout13z += ai2 * gz[1344] * Ix * Iy;
+                    Iy = gx[1664];
+                    Iz = gx[4352];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[4416] * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[1280];
-                    Iy = gy[128];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1344] * Iy * Iz;
-                    gout0y += ai2 * gy[192] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3072];
+                    gout0x += aij_cache[2] * gx[1344] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1152];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout1x += ai2 * gx[1216] * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3328];
+                    gout1x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[704] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[3072];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[2240] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[896];
-                    Iy = gy[128];
-                    Iz = gz[384];
-                    gout3x += ai2 * gx[960] * Iy * Iz;
-                    gout3y += ai2 * gy[192] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3456];
+                    gout3x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout4x += ai2 * gx[832] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += ai2 * gz[704] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3712];
+                    gout4x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3776] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[1024];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += ai2 * gy[1088] * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3072];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2624] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[1280];
-                    Iz = gz[0];
-                    gout6x += ai2 * gx[192] * Iy * Iz;
-                    gout6y += ai2 * gy[1344] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2816];
+                    Iz = gx[3072];
+                    gout6x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2880] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1152];
-                    Iz = gz[256];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[1216] * Ix * Iz;
-                    gout7z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3328];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1024];
-                    Iz = gz[384];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[1088] * Ix * Iz;
-                    gout8z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3456];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2624] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[128];
-                    Iz = gz[768];
-                    gout9x += ai2 * gx[576] * Iy * Iz;
-                    gout9y += ai2 * gy[192] * Ix * Iz;
-                    gout9z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[3840];
+                    gout9x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[1024];
-                    gout10x += ai2 * gx[448] * Iy * Iz;
-                    gout10y += ai2 * gy[64] * Ix * Iz;
-                    gout10z += ai2 * gz[1088] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4096];
+                    gout10x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[4160] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[768];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[704] * Ix * Iz;
-                    gout11z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[3840];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2240] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[128];
-                    Iz = gz[1152];
-                    gout12x += ai2 * gx[192] * Iy * Iz;
-                    gout12y += ai2 * gy[192] * Ix * Iz;
-                    gout12z += ai2 * gz[1216] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[4224];
+                    gout12x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4288] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[1408];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += ai2 * gz[1472] * Ix * Iy;
+                    Iy = gx[1536];
+                    Iz = gx[4480];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[4544] * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[1280];
-                    Iy = gy[0];
-                    Iz = gz[128];
-                    gout0x += ai2 * gx[1344] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3200];
+                    gout0x += aij_cache[2] * gx[1344] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[1088] * Iy * Iz;
-                    gout1y += ai2 * gy[448] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3072];
+                    gout1x += aij_cache[2] * gx[1088] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[512];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[576] * Ix * Iz;
-                    gout2z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3200];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[896];
-                    Iy = gy[0];
-                    Iz = gz[512];
-                    gout3x += ai2 * gx[960] * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3584];
+                    gout3x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[704] * Iy * Iz;
-                    gout4y += ai2 * gy[832] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3072];
+                    gout4x += aij_cache[2] * gx[704] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[896];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += ai2 * gy[960] * Ix * Iz;
-                    gout5z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2432];
+                    Iz = gx[3200];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2496] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[1152];
-                    Iz = gz[128];
-                    gout6x += ai2 * gx[192] * Iy * Iz;
-                    gout6y += ai2 * gy[1216] * Ix * Iz;
-                    gout6z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3200];
+                    gout6x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3264] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[768];
-                    Iz = gz[384];
-                    gout7x += ai2 * gx[320] * Iy * Iz;
-                    gout7y += ai2 * gy[832] * Ix * Iz;
-                    gout7z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3456];
+                    gout7x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[896];
-                    Iz = gz[512];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[960] * Ix * Iz;
-                    gout8z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2432];
+                    Iz = gx[3584];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2496] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3648] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[0];
-                    Iz = gz[896];
-                    gout9x += ai2 * gx[576] * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[960] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3968];
+                    gout9x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[4032] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[384];
-                    Iz = gz[768];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += ai2 * gy[448] * Ix * Iz;
-                    gout10z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3840];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[512];
-                    Iz = gz[896];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[576] * Ix * Iz;
-                    gout11z += ai2 * gz[960] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3968];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[4032] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[0];
-                    Iz = gz[1280];
-                    gout12x += ai2 * gx[192] * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[1344] * Ix * Iy;
+                    Iy = gx[1536];
+                    Iz = gx[4352];
+                    gout12x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4416] * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[1152];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1216] * Iy * Iz;
-                    gout0y += ai2 * gy[320] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3072];
+                    gout0x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[896];
-                    Iy = gy[512];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[960] * Iy * Iz;
-                    gout1y += ai2 * gy[576] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3072];
+                    gout1x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[384];
-                    Iz = gz[256];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3328];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[256];
-                    Iz = gz[384];
-                    gout3x += ai2 * gx[832] * Iy * Iz;
-                    gout3y += ai2 * gy[320] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3456];
+                    gout3x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[896];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[576] * Iy * Iz;
-                    gout4y += ai2 * gy[960] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2432];
+                    Iz = gx[3072];
+                    gout4x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[2496] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[768];
-                    Iz = gz[256];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3328];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3392] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1408];
-                    Iz = gz[0];
-                    gout6x += ai2 * gx[64] * Iy * Iz;
-                    gout6y += ai2 * gy[1472] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2944];
+                    Iz = gx[3072];
+                    gout6x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[3008] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[896];
-                    Iz = gz[384];
-                    gout7x += ai2 * gx[192] * Iy * Iz;
-                    gout7y += ai2 * gy[960] * Ix * Iz;
-                    gout7z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2432];
+                    Iz = gx[3456];
+                    gout7x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2496] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[640];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += ai2 * gz[704] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3712];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3776] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[256];
-                    Iz = gz[768];
-                    gout9x += ai2 * gx[448] * Iy * Iz;
-                    gout9y += ai2 * gy[320] * Ix * Iz;
-                    gout9z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3840];
+                    gout9x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[512];
-                    Iz = gz[768];
-                    gout10x += ai2 * gx[192] * Iy * Iz;
-                    gout10y += ai2 * gy[576] * Ix * Iz;
-                    gout10z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[3840];
+                    gout10x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[1024];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[448] * Ix * Iz;
-                    gout11z += ai2 * gz[1088] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[4096];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[4160] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[1152];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += ai2 * gy[320] * Ix * Iz;
-                    gout12z += ai2 * gz[1216] * Ix * Iy;
+                    Iy = gx[1792];
+                    Iz = gx[4224];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[4288] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -12728,103 +12571,98 @@ void _rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0211(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1152;
-    double *gz = gy + 1152;
-    double *rlrk = gz + 1152;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 63 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (63+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -12835,30 +12673,19 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout6x, gout6y, gout6z;
     double gout7x, gout7y, gout7z;
     double gout8x, gout8y, gout8z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -12872,6 +12699,7 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -12908,18 +12736,26 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -12932,8 +12768,6 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -12941,12 +12775,23 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -12955,11 +12800,11 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[2304] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -12971,7 +12816,7 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -13048,270 +12893,240 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[1024];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1088] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2304];
+                    gout0x += aij_cache[2] * gx[1088] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[128];
-                    Iz = gz[128];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += ai2 * gy[192] * Ix * Iz;
-                    gout1z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2432];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2496] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[384];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[576] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2432];
+                    gout2x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2496] * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout3x += ai2 * gx[704] * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2688];
+                    gout3x += aij_cache[2] * gx[704] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[128];
-                    Iz = gz[512];
-                    gout4x += ai2 * gx[448] * Iy * Iz;
-                    gout4y += ai2 * gy[192] * Ix * Iz;
-                    gout4z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2816];
+                    gout4x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[768];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[192] * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2432];
+                    gout5x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2496] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[384];
-                    Iz = gz[384];
-                    gout6x += ai2 * gx[320] * Iy * Iz;
-                    gout6y += ai2 * gy[448] * Ix * Iz;
-                    gout6z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2688];
+                    gout6x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[512];
-                    Iz = gz[512];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[576] * Ix * Iz;
-                    gout7z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2816];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[0];
-                    Iz = gz[896];
-                    gout8x += ai2 * gx[192] * Iy * Iz;
-                    gout8y += ai2 * gy[64] * Ix * Iz;
-                    gout8z += ai2 * gz[960] * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3200];
+                    gout8x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3264] * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[896];
-                    Iy = gy[128];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[960] * Iy * Iz;
-                    gout0y += ai2 * gy[192] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2304];
+                    gout0x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2560];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[448] * Iy * Iz;
-                    gout2y += ai2 * gy[704] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2304];
+                    gout2x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[128];
-                    Iz = gz[384];
-                    gout3x += ai2 * gx[576] * Iy * Iz;
-                    gout3y += ai2 * gy[192] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2688];
+                    gout3x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout4x += ai2 * gx[448] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += ai2 * gz[704] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2944];
+                    gout4x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3008] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1024];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += ai2 * gy[1088] * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[2304];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2240] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[512];
-                    Iz = gz[384];
-                    gout6x += ai2 * gx[192] * Iy * Iz;
-                    gout6y += ai2 * gy[576] * Ix * Iz;
-                    gout6z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2688];
+                    gout6x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[640];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[448] * Ix * Iz;
-                    gout7z += ai2 * gz[704] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2944];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3008] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[768];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[320] * Ix * Iz;
-                    gout8z += ai2 * gz[832] * Ix * Iy;
+                    Iy = gx[1408];
+                    Iz = gx[3072];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1472] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3136] * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[896];
-                    Iy = gy[0];
-                    Iz = gz[128];
-                    gout0x += ai2 * gx[960] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2432];
+                    gout0x += aij_cache[2] * gx[960] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2496] * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[704] * Iy * Iz;
-                    gout1y += ai2 * gy[448] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2304];
+                    gout1x += aij_cache[2] * gx[704] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[512];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[448] * Iy * Iz;
-                    gout2y += ai2 * gy[576] * Ix * Iz;
-                    gout2z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2432];
+                    gout2x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2496] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[0];
-                    Iz = gz[512];
-                    gout3x += ai2 * gx[576] * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2816];
+                    gout3x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[320] * Iy * Iz;
-                    gout4y += ai2 * gy[832] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2304];
+                    gout4x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[896];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += ai2 * gy[960] * Ix * Iz;
-                    gout5z += ai2 * gz[192] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[2432];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2496] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[384];
-                    Iz = gz[512];
-                    gout6x += ai2 * gx[192] * Iy * Iz;
-                    gout6y += ai2 * gy[448] * Ix * Iz;
-                    gout6z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2816];
+                    gout6x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout7x += ai2 * gx[320] * Iy * Iz;
-                    gout7y += ai2 * gy[64] * Ix * Iz;
-                    gout7z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[3072];
+                    gout7x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[128];
-                    Iz = gz[896];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[192] * Ix * Iz;
-                    gout8z += ai2 * gz[960] * Ix * Iy;
+                    Iy = gx[1280];
+                    Iz = gx[3200];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3264] * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[768];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[832] * Iy * Iz;
-                    gout0y += ai2 * gy[320] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2304];
+                    gout0x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1472] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[512];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[576] * Iy * Iz;
-                    gout1y += ai2 * gy[576] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2304];
+                    gout1x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1728] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[384];
-                    Iz = gz[256];
-                    gout2x += ai2 * gx[448] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2560];
+                    gout2x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[256];
-                    Iz = gz[384];
-                    gout3x += ai2 * gx[448] * Iy * Iz;
-                    gout3y += ai2 * gy[320] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2688];
+                    gout3x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1472] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[896];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[192] * Iy * Iz;
-                    gout4y += ai2 * gy[960] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2048];
+                    Iz = gx[2304];
+                    gout4x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[2112] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[256];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2560];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[384];
-                    gout6x += ai2 * gx[64] * Iy * Iz;
-                    gout6y += ai2 * gy[704] * Ix * Iz;
-                    gout6z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2688];
+                    gout6x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[128];
-                    Iz = gz[768];
-                    gout7x += ai2 * gx[192] * Iy * Iz;
-                    gout7y += ai2 * gy[192] * Ix * Iz;
-                    gout7z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[3072];
+                    gout7x += aij_cache[2] * gx[192] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[1024];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[64] * Ix * Iz;
-                    gout8z += ai2 * gz[1088] * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3328];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3392] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -14332,120 +14147,113 @@ void _rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_0220(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+#if CUDA_VERSION >= 12040
+__global__ __maxnreg__(128) static
+#else
+__global__ static
+#endif
+void rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
     double gout2x, gout2y, gout2z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -14476,10 +14284,20 @@ void _rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -14495,50 +14313,46 @@ void _rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
-                    fx = ai2 * trr_20x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_20x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += trr_10x *  fy  * wt;
                     gout0z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += 1 *  fy  * wt;
                     gout1z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += 1 *  fy  * trr_10z;
@@ -14547,6 +14361,12 @@ void _rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -14653,96 +14473,92 @@ void _rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1000(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -14753,30 +14569,19 @@ void _rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout6x, gout6y, gout6z;
     double gout7x, gout7y, gout7z;
     double gout8x, gout8y, gout8z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -14825,10 +14630,20 @@ void _rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -14844,112 +14659,102 @@ void _rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
-                    fx = ai2 * trr_21x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_21x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01x = cpx * 1;
                     fx -= 1 * trr_01x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += trr_11x *  fy  * wt;
                     gout0z += trr_11x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += trr_01x *  fy  * wt;
                     gout1z += trr_01x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += trr_01x *  fy  * trr_10z;
                     gout2z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     double trr_01y = cpy * 1;
                     gout3x +=  fx  * trr_01y * wt;
                     gout3y += trr_10x *  fy  * wt;
                     gout3z += trr_10x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * trr_01y;
                     gout4x +=  fx  * trr_11y * wt;
                     gout4y += 1 *  fy  * wt;
                     gout4z += 1 * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout5x +=  fx  * trr_01y * trr_10z;
                     gout5y += 1 *  fy  * trr_10z;
                     gout5z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * 1;
                     double trr_01z = cpz * wt;
                     gout6x +=  fx  * 1 * trr_01z;
                     gout6y += trr_10x *  fy  * trr_01z;
                     gout6z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 1 * 1;
                     gout7x +=  fx  * trr_10y * trr_01z;
                     gout7y += 1 *  fy  * trr_01z;
                     gout7z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = ai2 * trr_21z;
+                    fz = aij_cache[2] * trr_21z;
                     fz -= 1 * trr_01z;
                     gout8x +=  fx  * 1 * trr_11z;
                     gout8y += 1 *  fy  * trr_11z;
@@ -14958,6 +14763,12 @@ void _rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -15202,92 +15013,92 @@ void _rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1010(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -15316,30 +15127,19 @@ void _rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout24x, gout24y, gout24z;
     double gout25x, gout25y, gout25z;
     double gout26x, gout26y, gout26z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -15442,10 +15242,20 @@ void _rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -15461,284 +15271,256 @@ void _rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
-                    double hrr_2011x = trr_22x - (rl[0] - rk[0]) * trr_21x;
-                    fx = ai2 * hrr_2011x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    double hrr_2011x = trr_22x - xlxk * trr_21x;
+                    fx = aij_cache[2] * hrr_2011x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01x = cpx * 1;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
-                    double hrr_0011x = trr_02x - (rl[0] - rk[0]) * trr_01x;
+                    double hrr_0011x = trr_02x - xlxk * trr_01x;
                     fx -= 1 * hrr_0011x;
                     double trr_12x = cpx * trr_11x + 1*b01 * trr_10x + 1*b00 * trr_01x;
-                    double hrr_1011x = trr_12x - (rl[0] - rk[0]) * trr_11x;
+                    double hrr_1011x = trr_12x - xlxk * trr_11x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_1011x *  fy  * wt;
                     gout0z += hrr_1011x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
+                    fx = aij_cache[2] * hrr_1011x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += hrr_0011x *  fy  * wt;
                     gout1z += hrr_0011x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1011x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1011x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += hrr_0011x *  fy  * trr_10z;
                     gout2z += hrr_0011x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    double hrr_2001x = trr_21x - (rl[0] - rk[0]) * trr_20x;
-                    fx = ai2 * hrr_2001x;
+                    double hrr_2001x = trr_21x - xlxk * trr_20x;
+                    fx = aij_cache[2] * hrr_2001x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
-                    double hrr_0001x = trr_01x - (rl[0] - rk[0]) * 1;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
+                    double hrr_0001x = trr_01x - xlxk * 1;
                     fx -= 1 * hrr_0001x;
-                    double hrr_1001x = trr_11x - (rl[0] - rk[0]) * trr_10x;
+                    double hrr_1001x = trr_11x - xlxk * trr_10x;
                     double trr_01y = cpy * 1;
                     gout3x +=  fx  * trr_01y * wt;
                     gout3y += hrr_1001x *  fy  * wt;
                     gout3z += hrr_1001x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
+                    fx = aij_cache[2] * hrr_1001x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * trr_01y;
                     gout4x +=  fx  * trr_11y * wt;
                     gout4y += hrr_0001x *  fy  * wt;
                     gout4z += hrr_0001x * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout5x +=  fx  * trr_01y * trr_10z;
                     gout5y += hrr_0001x *  fy  * trr_10z;
                     gout5z += hrr_0001x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_2001x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_2001x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * hrr_0001x;
                     double trr_01z = cpz * wt;
                     gout6x +=  fx  * 1 * trr_01z;
                     gout6y += hrr_1001x *  fy  * trr_01z;
                     gout6z += hrr_1001x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 1 * 1;
                     gout7x +=  fx  * trr_10y * trr_01z;
                     gout7y += hrr_0001x *  fy  * trr_01z;
                     gout7z += hrr_0001x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1001x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1001x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = ai2 * trr_21z;
+                    fz = aij_cache[2] * trr_21z;
                     fz -= 1 * trr_01z;
                     gout8x +=  fx  * 1 * trr_11z;
                     gout8y += hrr_0001x *  fy  * trr_11z;
                     gout8z += hrr_0001x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
-                    double hrr_1001y = trr_11y - (rl[1] - rk[1]) * trr_10y;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_10z;
+                    fx = aij_cache[2] * trr_21x;
+                    double hrr_1001y = trr_11y - ylyk * trr_10y;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * trr_01x;
-                    double hrr_0001y = trr_01y - (rl[1] - rk[1]) * 1;
+                    double hrr_0001y = trr_01y - ylyk * 1;
                     gout9x +=  fx  * hrr_0001y * wt;
                     gout9y += trr_11x *  fy  * wt;
                     gout9z += trr_11x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    double hrr_2001y = trr_21y - (rl[1] - rk[1]) * trr_20y;
-                    fy = ai2 * hrr_2001y;
-                    fz = ai2 * trr_10z;
+                    fx = aij_cache[2] * trr_11x;
+                    double hrr_2001y = trr_21y - ylyk * trr_20y;
+                    fy = aij_cache[2] * hrr_2001y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * hrr_0001y;
                     gout10x +=  fx  * hrr_1001y * wt;
                     gout10y += trr_01x *  fy  * wt;
                     gout10z += trr_01x * hrr_1001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout11x +=  fx  * hrr_0001y * trr_10z;
                     gout11y += trr_01x *  fy  * trr_10z;
                     gout11z += trr_01x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    double hrr_1011y = trr_12y - (rl[1] - rk[1]) * trr_11y;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_10z;
+                    double hrr_1011y = trr_12y - ylyk * trr_11y;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
-                    double hrr_0011y = trr_02y - (rl[1] - rk[1]) * trr_01y;
+                    double hrr_0011y = trr_02y - ylyk * trr_01y;
                     gout12x +=  fx  * hrr_0011y * wt;
                     gout12y += trr_10x *  fy  * wt;
                     gout12z += trr_10x * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
-                    double hrr_2011y = trr_22y - (rl[1] - rk[1]) * trr_21y;
-                    fy = ai2 * hrr_2011y;
-                    fz = ai2 * trr_10z;
+                    double hrr_2011y = trr_22y - ylyk * trr_21y;
+                    fy = aij_cache[2] * hrr_2011y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * hrr_0011y;
                     gout13x +=  fx  * hrr_1011y * wt;
                     gout13y += 1 *  fy  * wt;
                     gout13z += 1 * hrr_1011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1011y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1011y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout14x +=  fx  * hrr_0011y * trr_10z;
                     gout14y += 1 *  fy  * trr_10z;
                     gout14z += 1 * hrr_0011y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * 1;
                     gout15x +=  fx  * hrr_0001y * trr_01z;
                     gout15y += trr_10x *  fy  * trr_01z;
                     gout15z += trr_10x * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_2001y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_2001y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 1 * hrr_0001y;
                     gout16x +=  fx  * hrr_1001y * trr_01z;
                     gout16y += 1 *  fy  * trr_01z;
                     gout16z += 1 * hrr_1001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1001y;
-                    fz = ai2 * trr_21z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1001y;
+                    fz = aij_cache[2] * trr_21z;
                     fz -= 1 * trr_01z;
                     gout17x +=  fx  * hrr_0001y * trr_11z;
                     gout17y += 1 *  fy  * trr_11z;
                     gout17z += 1 * hrr_0001y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
-                    fy = ai2 * trr_10y;
-                    double hrr_1001z = trr_11z - (rl[2] - rk[2]) * trr_10z;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_21x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_1001z = trr_11z - zlzk * trr_10z;
+                    fz = aij_cache[2] * hrr_1001z;
                     fx -= 1 * trr_01x;
-                    double hrr_0001z = trr_01z - (rl[2] - rk[2]) * wt;
+                    double hrr_0001z = trr_01z - zlzk * wt;
                     gout18x +=  fx  * 1 * hrr_0001z;
                     gout18y += trr_11x *  fy  * hrr_0001z;
                     gout18z += trr_11x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1001z;
                     fy -= 1 * 1;
                     gout19x +=  fx  * trr_10y * hrr_0001z;
                     gout19y += trr_01x *  fy  * hrr_0001z;
                     gout19z += trr_01x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
-                    double hrr_2001z = trr_21z - (rl[2] - rk[2]) * trr_20z;
-                    fz = ai2 * hrr_2001z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
+                    double hrr_2001z = trr_21z - zlzk * trr_20z;
+                    fz = aij_cache[2] * hrr_2001z;
                     fz -= 1 * hrr_0001z;
                     gout20x +=  fx  * 1 * hrr_1001z;
                     gout20y += trr_01x *  fy  * hrr_1001z;
                     gout20z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1001z;
                     fx -= 1 * 1;
                     gout21x +=  fx  * trr_01y * hrr_0001z;
                     gout21y += trr_10x *  fy  * hrr_0001z;
                     gout21z += trr_10x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * hrr_1001z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * hrr_1001z;
                     fy -= 1 * trr_01y;
                     gout22x +=  fx  * trr_11y * hrr_0001z;
                     gout22y += 1 *  fy  * hrr_0001z;
                     gout22z += 1 * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_2001z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_2001z;
                     fz -= 1 * hrr_0001z;
                     gout23x +=  fx  * trr_01y * hrr_1001z;
                     gout23y += 1 *  fy  * hrr_1001z;
                     gout23z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    double hrr_1011z = trr_12z - (rl[2] - rk[2]) * trr_11z;
-                    fz = ai2 * hrr_1011z;
+                    double hrr_1011z = trr_12z - zlzk * trr_11z;
+                    fz = aij_cache[2] * hrr_1011z;
                     fx -= 1 * 1;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                    double hrr_0011z = trr_02z - (rl[2] - rk[2]) * trr_01z;
+                    double hrr_0011z = trr_02z - zlzk * trr_01z;
                     gout24x +=  fx  * 1 * hrr_0011z;
                     gout24y += trr_10x *  fy  * hrr_0011z;
                     gout24z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1011z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1011z;
                     fy -= 1 * 1;
                     gout25x +=  fx  * trr_10y * hrr_0011z;
                     gout25y += 1 *  fy  * hrr_0011z;
                     gout25z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    double hrr_2011z = trr_22z - (rl[2] - rk[2]) * trr_21z;
-                    fz = ai2 * hrr_2011z;
+                    double hrr_2011z = trr_22z - zlzk * trr_21z;
+                    fz = aij_cache[2] * hrr_2011z;
                     fz -= 1 * hrr_0011z;
                     gout26x +=  fx  * 1 * hrr_1011z;
                     gout26y += 1 *  fy  * hrr_1011z;
@@ -15747,6 +15529,12 @@ void _rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -16357,92 +16145,92 @@ void _rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1011(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -16462,30 +16250,19 @@ void _rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -16561,10 +16338,20 @@ void _rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -16580,39 +16367,37 @@ void _rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_22x = cpx * trr_21x + 1*b01 * trr_20x + 2*b00 * trr_11x;
-                    fx = ai2 * trr_22x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_22x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01x = cpx * 1;
                     double trr_02x = cpx * trr_01x + 1*b01 * 1;
                     fx -= 1 * trr_02x;
@@ -16620,154 +16405,137 @@ void _rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout0x +=  fx  * 1 * wt;
                     gout0y += trr_12x *  fy  * wt;
                     gout0z += trr_12x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
+                    fx = aij_cache[2] * trr_12x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += trr_02x *  fy  * wt;
                     gout1z += trr_02x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_12x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_12x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += trr_02x *  fy  * trr_10z;
                     gout2z += trr_02x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
+                    fx = aij_cache[2] * trr_21x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * trr_01x;
                     double trr_01y = cpy * 1;
                     gout3x +=  fx  * trr_01y * wt;
                     gout3y += trr_11x *  fy  * wt;
                     gout3z += trr_11x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * trr_01y;
                     gout4x +=  fx  * trr_11y * wt;
                     gout4y += trr_01x *  fy  * wt;
                     gout4z += trr_01x * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout5x +=  fx  * trr_01y * trr_10z;
                     gout5y += trr_01x *  fy  * trr_10z;
                     gout5z += trr_01x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_21x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * trr_01x;
                     double trr_01z = cpz * wt;
                     gout6x +=  fx  * 1 * trr_01z;
                     gout6y += trr_11x *  fy  * trr_01z;
                     gout6z += trr_11x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 1 * 1;
                     gout7x +=  fx  * trr_10y * trr_01z;
                     gout7y += trr_01x *  fy  * trr_01z;
                     gout7z += trr_01x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = ai2 * trr_21z;
+                    fz = aij_cache[2] * trr_21z;
                     fz -= 1 * trr_01z;
                     gout8x +=  fx  * 1 * trr_11z;
                     gout8y += trr_01x *  fy  * trr_11z;
                     gout8z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double trr_12y = cpy * trr_11y + 1*b01 * trr_10y + 1*b00 * trr_01y;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     double trr_02y = cpy * trr_01y + 1*b01 * 1;
                     gout9x +=  fx  * trr_02y * wt;
                     gout9y += trr_10x *  fy  * wt;
                     gout9z += trr_10x * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_22y = cpy * trr_21y + 1*b01 * trr_20y + 2*b00 * trr_11y;
-                    fy = ai2 * trr_22y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_22y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * trr_02y;
                     gout10x +=  fx  * trr_12y * wt;
                     gout10y += 1 *  fy  * wt;
                     gout10z += 1 * trr_12y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_12y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_12y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout11x +=  fx  * trr_02y * trr_10z;
                     gout11y += 1 *  fy  * trr_10z;
                     gout11z += 1 * trr_02y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * 1;
                     gout12x +=  fx  * trr_01y * trr_01z;
                     gout12y += trr_10x *  fy  * trr_01z;
                     gout12z += trr_10x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 1 * trr_01y;
                     gout13x +=  fx  * trr_11y * trr_01z;
                     gout13y += 1 *  fy  * trr_01z;
                     gout13z += 1 * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_21z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_21z;
                     fz -= 1 * trr_01z;
                     gout14x +=  fx  * trr_01y * trr_11z;
                     gout14y += 1 *  fy  * trr_11z;
                     gout14z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    fz = ai2 * trr_12z;
+                    fz = aij_cache[2] * trr_12z;
                     fx -= 1 * 1;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     gout15x +=  fx  * 1 * trr_02z;
                     gout15y += trr_10x *  fy  * trr_02z;
                     gout15z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_12z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_12z;
                     fy -= 1 * 1;
                     gout16x +=  fx  * trr_10y * trr_02z;
                     gout16y += 1 *  fy  * trr_02z;
                     gout16z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    fz = ai2 * trr_22z;
+                    fz = aij_cache[2] * trr_22z;
                     fz -= 1 * trr_02z;
                     gout17x +=  fx  * 1 * trr_12z;
                     gout17y += 1 *  fy  * trr_12z;
@@ -16776,6 +16544,12 @@ void _rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -17227,103 +17001,98 @@ void _rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1020(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1152;
-    double *gz = gy + 1152;
-    double *rlrk = gz + 1152;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 63 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (63+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -17339,30 +17108,19 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout11x, gout11y, gout11z;
     double gout12x, gout12y, gout12z;
     double gout13x, gout13y, gout13z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -17376,6 +17134,7 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -17427,18 +17186,26 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -17451,8 +17218,6 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -17460,12 +17225,23 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -17474,11 +17250,11 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[2304] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -17486,7 +17262,7 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 1 * b10 * s0;
                         _gx[128] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -17552,396 +17328,348 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[1024];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[1088] - 1 * gx[960]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2304];
+                    gout0x += (aij_cache[2] * gx[1088] - 1 * gx[960]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2304];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[64] * Ix * Iz;
-                    gout2z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2560];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[192];
-                    Iz = gz[192];
-                    gout3x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout3y += ai2 * gy[256] * Ix * Iz;
-                    gout3z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2496];
+                    gout3x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[640] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2688];
+                    gout4x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += ai2 * gy[640] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2368];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[576];
-                    Iz = gz[192];
-                    gout6x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout6y += ai2 * gy[640] * Ix * Iz;
-                    gout6z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2496];
+                    gout6x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1024];
-                    Iz = gz[0];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[1088] - 1 * gy[960]) * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[2304];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2240] - 1 * gx[2112]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[256];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2560];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout9x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2880];
+                    gout9x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[256];
-                    Iz = gz[576];
-                    gout10x += ai2 * gx[256] * Iy * Iz;
-                    gout10y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout10z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2880];
+                    gout10x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[0];
-                    Iz = gz[832];
-                    gout11x += ai2 * gx[256] * Iy * Iz;
-                    gout11y += ai2 * gy[64] * Ix * Iz;
-                    gout11z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[3136];
+                    gout11x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[192];
-                    Iz = gz[768];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[256] * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[3072];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[960];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout13z += ai2 * gz[1024] * Ix * Iy;
+                    Iy = gx[1216];
+                    Iz = gx[3264];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[3328] * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[960];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1024] * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2304];
+                    gout0x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[192];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += ai2 * gy[256] * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2368];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2304];
+                    gout2x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[256];
-                    Iz = gz[192];
-                    gout3x += ai2 * gx[640] * Iy * Iz;
-                    gout3y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout3z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2496];
+                    gout3x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[448];
-                    gout4x += ai2 * gx[640] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2752];
+                    gout4x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout5x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2304];
+                    gout5x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[640];
-                    Iz = gz[192];
-                    gout6x += ai2 * gx[256] * Iy * Iz;
-                    gout6y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout6z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2496];
+                    gout6x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[960];
-                    Iz = gz[64];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[1024] * Ix * Iz;
-                    gout7z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[2368];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[384];
-                    gout8x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout8y += ai2 * gy[640] * Ix * Iz;
-                    gout8z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2688];
+                    gout8x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout9x += ai2 * gx[448] * Iy * Iz;
-                    gout9y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout9z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2880];
+                    gout9x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[192];
-                    Iz = gz[640];
-                    gout10x += ai2 * gx[256] * Iy * Iz;
-                    gout10y += ai2 * gy[256] * Ix * Iz;
-                    gout10z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2944];
+                    gout10x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[384];
-                    Iz = gz[576];
-                    gout11x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout11y += ai2 * gy[448] * Ix * Iz;
-                    gout11z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2880];
+                    gout11x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[768];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[3072];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[1024];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += (ai2 * gz[1088] - 1 * gz[960]) * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3328];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[3392] - 1 * gx[3264]) * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[960];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += ai2 * gx[1024] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2368];
+                    gout0x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[832];
-                    Iy = gy[0];
-                    Iz = gz[192];
-                    gout1x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2496];
+                    gout1x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[448];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[640] * Iy * Iz;
-                    gout2y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2304];
+                    gout2x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[192];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[640] * Iy * Iz;
-                    gout3y += ai2 * gy[256] * Ix * Iz;
-                    gout3z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2560];
+                    gout3x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout4y += ai2 * gy[640] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2304];
+                    gout4x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[832];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[256] * Iy * Iz;
-                    gout5y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[2304];
+                    gout5x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[576];
-                    Iz = gz[256];
-                    gout6x += ai2 * gx[256] * Iy * Iz;
-                    gout6y += ai2 * gy[640] * Ix * Iz;
-                    gout6z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2560];
+                    gout6x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[768];
-                    Iz = gz[192];
-                    gout7x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout7y += ai2 * gy[832] * Ix * Iz;
-                    gout7z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2496];
+                    gout7x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[384];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout8z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2688];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout9x += ai2 * gx[448] * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2944];
+                    gout9x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout9z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout10x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout10y += ai2 * gy[64] * Ix * Iz;
-                    gout10z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[3072];
+                    gout10x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[448];
-                    Iz = gz[576];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout11z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2880];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[192];
-                    Iz = gz[832];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += ai2 * gy[256] * Ix * Iz;
-                    gout12z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
+                    Iy = gx[1344];
+                    Iz = gx[3136];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout12z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[832];
-                    Iy = gy[192];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout0y += ai2 * gy[256] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2304];
+                    gout0x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[64];
-                    Iz = gz[192];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2496];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[384];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[640] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2368];
+                    gout2x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout3x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2688];
+                    gout3x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[448] * Iy * Iz;
-                    gout4y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2304];
+                    gout4x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[768];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[256] * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2368];
+                    gout5x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[960];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += ai2 * gy[1024] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[2304];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[832];
-                    Iz = gz[192];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout7z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[2496];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[448];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[640] * Ix * Iz;
-                    gout8z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2752];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[192];
-                    Iz = gz[576];
-                    gout9x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout9y += ai2 * gy[256] * Ix * Iz;
-                    gout9z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2880];
+                    gout9x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[64];
-                    Iz = gz[768];
-                    gout10x += ai2 * gx[256] * Iy * Iz;
-                    gout10y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout10z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[3072];
+                    gout10x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[640];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[448] * Ix * Iz;
-                    gout11z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2944];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[960];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[1024] * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3264];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3328] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -19472,92 +19200,92 @@ void _rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1021(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -19568,30 +19296,19 @@ void _rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout6x, gout6y, gout6z;
     double gout7x, gout7y, gout7z;
     double gout8x, gout8y, gout8z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -19640,10 +19357,20 @@ void _rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -19659,110 +19386,100 @@ void _rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
-                    fx = ai2 * hrr_2100x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_2100x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     fx -= 1 * hrr_0100x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_1100x *  fy  * wt;
                     gout0z += hrr_1100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += hrr_0100x *  fy  * wt;
                     gout1z += hrr_0100x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += hrr_0100x *  fy  * trr_10z;
                     gout2z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout3x +=  fx  * hrr_0100y * wt;
                     gout3y += trr_10x *  fy  * wt;
                     gout3z += trr_10x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = ai2 * hrr_2100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * hrr_0100y;
                     gout4x +=  fx  * hrr_1100y * wt;
                     gout4y += 1 *  fy  * wt;
                     gout4z += 1 * hrr_1100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout5x +=  fx  * hrr_0100y * trr_10z;
                     gout5y += 1 *  fy  * trr_10z;
                     gout5z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     fx -= 1 * 1;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout6x +=  fx  * 1 * hrr_0100z;
                     gout6y += trr_10x *  fy  * hrr_0100z;
                     gout6z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fy -= 1 * 1;
                     gout7x +=  fx  * trr_10y * hrr_0100z;
                     gout7y += 1 *  fy  * hrr_0100z;
                     gout7z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = ai2 * hrr_2100z;
+                    fz = aij_cache[2] * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     gout8x +=  fx  * 1 * hrr_1100z;
                     gout8y += 1 *  fy  * hrr_1100z;
@@ -19771,6 +19488,12 @@ void _rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -20015,92 +19738,92 @@ void _rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1100(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -20129,30 +19852,19 @@ void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout24x, gout24y, gout24z;
     double gout25x, gout25y, gout25z;
     double gout26x, gout26y, gout26z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -20255,10 +19967,20 @@ void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -20274,39 +19996,37 @@ void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     double hrr_2110x = trr_31x - rjri[0] * trr_21x;
-                    fx = ai2 * hrr_2110x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_2110x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     double trr_01x = cpx * 1;
                     double hrr_0110x = trr_11x - rjri[0] * trr_01x;
@@ -20315,87 +20035,78 @@ void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_1110x *  fy  * wt;
                     gout0z += hrr_1110x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1110x;
+                    fx = aij_cache[2] * hrr_1110x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += hrr_0110x *  fy  * wt;
                     gout1z += hrr_0110x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1110x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1110x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += hrr_0110x *  fy  * trr_10z;
                     gout2z += hrr_0110x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
+                    fx = aij_cache[2] * trr_21x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * trr_01x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout3x +=  fx  * hrr_0100y * wt;
                     gout3y += trr_11x *  fy  * wt;
                     gout3z += trr_11x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = ai2 * hrr_2100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * hrr_0100y;
                     gout4x +=  fx  * hrr_1100y * wt;
                     gout4y += trr_01x *  fy  * wt;
                     gout4z += trr_01x * hrr_1100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout5x +=  fx  * hrr_0100y * trr_10z;
                     gout5y += trr_01x *  fy  * trr_10z;
                     gout5z += trr_01x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_21x;
+                    fy = aij_cache[2] * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     fx -= 1 * trr_01x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout6x +=  fx  * 1 * hrr_0100z;
                     gout6y += trr_11x *  fy  * hrr_0100z;
                     gout6z += trr_11x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fy -= 1 * 1;
                     gout7x +=  fx  * trr_10y * hrr_0100z;
                     gout7y += trr_01x *  fy  * hrr_0100z;
                     gout7z += trr_01x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = ai2 * hrr_2100z;
+                    fz = aij_cache[2] * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     gout8x +=  fx  * 1 * hrr_1100z;
                     gout8y += trr_01x *  fy  * hrr_1100z;
                     gout8z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
-                    fx = ai2 * hrr_2100x;
+                    fx = aij_cache[2] * hrr_2100x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     fx -= 1 * hrr_0100x;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
@@ -20403,151 +20114,134 @@ void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout9x +=  fx  * trr_01y * wt;
                     gout9y += hrr_1100x *  fy  * wt;
                     gout9z += hrr_1100x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * trr_01y;
                     gout10x +=  fx  * trr_11y * wt;
                     gout10y += hrr_0100x *  fy  * wt;
                     gout10z += hrr_0100x * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout11x +=  fx  * trr_01y * trr_10z;
                     gout11y += hrr_0100x *  fy  * trr_10z;
                     gout11z += hrr_0100x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double hrr_1110y = trr_21y - rjri[1] * trr_11y;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     double hrr_0110y = trr_11y - rjri[1] * trr_01y;
                     gout12x +=  fx  * hrr_0110y * wt;
                     gout12y += trr_10x *  fy  * wt;
                     gout12z += trr_10x * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     double hrr_2110y = trr_31y - rjri[1] * trr_21y;
-                    fy = ai2 * hrr_2110y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_2110y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * hrr_0110y;
                     gout13x +=  fx  * hrr_1110y * wt;
                     gout13y += 1 *  fy  * wt;
                     gout13z += 1 * hrr_1110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1110y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1110y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout14x +=  fx  * hrr_0110y * trr_10z;
                     gout14y += 1 *  fy  * trr_10z;
                     gout14z += 1 * hrr_0110y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fx -= 1 * 1;
                     gout15x +=  fx  * trr_01y * hrr_0100z;
                     gout15y += trr_10x *  fy  * hrr_0100z;
                     gout15z += trr_10x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fy -= 1 * trr_01y;
                     gout16x +=  fx  * trr_11y * hrr_0100z;
                     gout16y += 1 *  fy  * hrr_0100z;
                     gout16z += 1 * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * hrr_2100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     gout17x +=  fx  * trr_01y * hrr_1100z;
                     gout17y += 1 *  fy  * hrr_1100z;
                     gout17z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_2100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_2100x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * hrr_0100x;
                     double trr_01z = cpz * wt;
                     gout18x +=  fx  * 1 * trr_01z;
                     gout18y += hrr_1100x *  fy  * trr_01z;
                     gout18z += hrr_1100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 1 * 1;
                     gout19x +=  fx  * trr_10y * trr_01z;
                     gout19y += hrr_0100x *  fy  * trr_01z;
                     gout19z += hrr_0100x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = ai2 * trr_21z;
+                    fz = aij_cache[2] * trr_21z;
                     fz -= 1 * trr_01z;
                     gout20x +=  fx  * 1 * trr_11z;
                     gout20y += hrr_0100x *  fy  * trr_11z;
                     gout20z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * 1;
                     gout21x +=  fx  * hrr_0100y * trr_01z;
                     gout21y += trr_10x *  fy  * trr_01z;
                     gout21z += trr_10x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_2100y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 1 * hrr_0100y;
                     gout22x +=  fx  * hrr_1100y * trr_01z;
                     gout22y += 1 *  fy  * trr_01z;
                     gout22z += 1 * hrr_1100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_21z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_21z;
                     fz -= 1 * trr_01z;
                     gout23x +=  fx  * hrr_0100y * trr_11z;
                     gout23y += 1 *  fy  * trr_11z;
                     gout23z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double hrr_1110z = trr_21z - rjri[2] * trr_11z;
-                    fz = ai2 * hrr_1110z;
+                    fz = aij_cache[2] * hrr_1110z;
                     fx -= 1 * 1;
                     double hrr_0110z = trr_11z - rjri[2] * trr_01z;
                     gout24x +=  fx  * 1 * hrr_0110z;
                     gout24y += trr_10x *  fy  * hrr_0110z;
                     gout24z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1110z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1110z;
                     fy -= 1 * 1;
                     gout25x +=  fx  * trr_10y * hrr_0110z;
                     gout25y += 1 *  fy  * hrr_0110z;
                     gout25z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double hrr_2110z = trr_31z - rjri[2] * trr_21z;
-                    fz = ai2 * hrr_2110z;
+                    fz = aij_cache[2] * hrr_2110z;
                     fz -= 1 * hrr_0110z;
                     gout26x +=  fx  * 1 * hrr_1110z;
                     gout26y += 1 *  fy  * hrr_1110z;
@@ -20556,6 +20250,12 @@ void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -21166,103 +20866,98 @@ void _rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1110(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1536;
-    double *gz = gy + 1536;
-    double *rlrk = gz + 1536;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 81 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (81+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -21285,30 +20980,19 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout18x, gout18y, gout18z;
     double gout19x, gout19y, gout19z;
     double gout20x, gout20y, gout20z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -21322,6 +21006,7 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -21394,18 +21079,26 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -21418,8 +21111,6 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -21427,12 +21118,23 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1536] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -21441,11 +21143,11 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[3072] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1536;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -21457,7 +21159,7 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -21552,585 +21254,510 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[1408];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[1472] - 1 * gx[1344]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3072];
+                    gout0x += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1152];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[1216] * Iy * Iz;
-                    gout1y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3072];
+                    gout1x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1152];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout2x += ai2 * gx[1216] * Iy * Iz;
-                    gout2y += ai2 * gy[64] * Ix * Iz;
-                    gout2z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3328];
+                    gout2x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[3392] - 1 * gx[3264]) * Ix * Iy;
                     Ix = gx[832];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout3x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout3y += ai2 * gy[640] * Ix * Iz;
-                    gout3z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[3072];
+                    gout3x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[448];
-                    Iz = gz[192];
-                    gout4x += ai2 * gx[832] * Iy * Iz;
-                    gout4y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout4z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[3264];
+                    gout4x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[960];
-                    Iy = gy[0];
-                    Iz = gz[448];
-                    gout5x += ai2 * gx[1024] * Iy * Iz;
-                    gout5y += ai2 * gy[64] * Ix * Iz;
-                    gout5z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3520];
+                    gout5x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[3584] - 1 * gx[3456]) * Ix * Iy;
                     Ix = gx[832];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout6x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout6y += ai2 * gy[64] * Ix * Iz;
-                    gout6z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3648];
+                    gout6x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3712] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[832];
-                    Iz = gz[0];
-                    gout7x += ai2 * gx[640] * Iy * Iz;
-                    gout7y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2368];
+                    Iz = gx[3072];
+                    gout7x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[960];
-                    Iz = gz[64];
-                    gout8x += ai2 * gx[448] * Iy * Iz;
-                    gout8y += ai2 * gy[1024] * Ix * Iz;
-                    gout8z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2496];
+                    Iz = gx[3136];
+                    gout8x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2560] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[1152];
-                    Iz = gz[0];
-                    gout9x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout9y += ai2 * gy[1216] * Ix * Iz;
-                    gout9z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3072];
+                    gout9x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1408];
-                    Iz = gz[0];
-                    gout10x += ai2 * gx[64] * Iy * Iz;
-                    gout10y += (ai2 * gy[1472] - 1 * gy[1344]) * Ix * Iz;
-                    gout10z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2944];
+                    Iz = gx[3072];
+                    gout10x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1152];
-                    Iz = gz[256];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[1216] * Ix * Iz;
-                    gout11z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3328];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3392] - 1 * gx[3264]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[960];
-                    Iz = gz[384];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[1024] * Ix * Iz;
-                    gout12z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2496];
+                    Iz = gx[3456];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[2560] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[832];
-                    Iz = gz[576];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout13z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2368];
+                    Iz = gx[3648];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[3712] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[832];
-                    gout14x += ai2 * gx[640] * Iy * Iz;
-                    gout14y += ai2 * gy[64] * Ix * Iz;
-                    gout14z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3904];
+                    gout14x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout14y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout14z += (aij_cache[2] * gx[3968] - 1 * gx[3840]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[0];
-                    Iz = gz[960];
-                    gout15x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout15y += ai2 * gy[64] * Ix * Iz;
-                    gout15z += ai2 * gz[1024] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4032];
+                    gout15x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout15y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout15z += aij_cache[2] * gx[4096] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[448];
-                    Iz = gz[768];
-                    gout16x += ai2 * gx[256] * Iy * Iz;
-                    gout16y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout16z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[3840];
+                    gout16x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout16y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout16z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[832];
-                    gout17x += ai2 * gx[64] * Iy * Iz;
-                    gout17y += ai2 * gy[640] * Ix * Iz;
-                    gout17z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[3904];
+                    gout17x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout17y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout17z += (aij_cache[2] * gx[3968] - 1 * gx[3840]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[1152];
-                    gout18x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout18y += ai2 * gy[64] * Ix * Iz;
-                    gout18z += ai2 * gz[1216] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4224];
+                    gout18x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout18y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout18z += aij_cache[2] * gx[4288] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[1152];
-                    gout19x += ai2 * gx[64] * Iy * Iz;
-                    gout19y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout19z += ai2 * gz[1216] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[4224];
+                    gout19x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout19y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout19z += aij_cache[2] * gx[4288] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[1408];
-                    gout20x += ai2 * gx[64] * Iy * Iz;
-                    gout20y += ai2 * gy[64] * Ix * Iz;
-                    gout20z += (ai2 * gz[1472] - 1 * gz[1344]) * Ix * Iy;
+                    Iy = gx[1536];
+                    Iz = gx[4480];
+                    gout20x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout20y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout20z += (aij_cache[2] * gx[4544] - 1 * gx[4416]) * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[1344];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1408] * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[3072];
+                    gout0x += aij_cache[2] * gx[1408] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1152];
-                    Iy = gy[192];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[1216] * Iy * Iz;
-                    gout1y += ai2 * gy[256] * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[3136];
+                    gout1x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += (ai2 * gx[1088] - 1 * gx[960]) * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3072];
+                    gout2x += (aij_cache[2] * gx[1088] - 1 * gx[960]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout3x += ai2 * gx[832] * Iy * Iz;
-                    gout3y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout3z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[3072];
+                    gout3x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[2240] - 1 * gx[2112]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[384];
-                    Iz = gz[256];
-                    gout4x += ai2 * gx[832] * Iy * Iz;
-                    gout4y += ai2 * gy[448] * Ix * Iz;
-                    gout4z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3328];
+                    gout4x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[3392] - 1 * gx[3264]) * Ix * Iy;
                     Ix = gx[832];
-                    Iy = gy[192];
-                    Iz = gz[384];
-                    gout5x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout5y += ai2 * gy[256] * Ix * Iz;
-                    gout5z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[3456];
+                    gout5x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout6x += ai2 * gx[832] * Iy * Iz;
-                    gout6y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout6z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[3648];
+                    gout6x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3712] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[768];
-                    Iz = gz[64];
-                    gout7x += ai2 * gx[640] * Iy * Iz;
-                    gout7y += ai2 * gy[832] * Ix * Iz;
-                    gout7z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3136];
+                    gout7x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[768];
-                    Iz = gz[192];
-                    gout8x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3264];
+                    gout8x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[1216];
-                    Iz = gz[0];
-                    gout9x += ai2 * gx[256] * Iy * Iz;
-                    gout9y += (ai2 * gy[1280] - 1 * gy[1152]) * Ix * Iz;
-                    gout9z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2752];
+                    Iz = gx[3072];
+                    gout9x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1344];
-                    Iz = gz[64];
-                    gout10x += ai2 * gx[64] * Iy * Iz;
-                    gout10y += ai2 * gy[1408] * Ix * Iz;
-                    gout10z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2880];
+                    Iz = gx[3136];
+                    gout10x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[2944] * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[768];
-                    Iz = gz[384];
-                    gout11x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout11y += ai2 * gy[832] * Ix * Iz;
-                    gout11z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3456];
+                    gout11x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1024];
-                    Iz = gz[384];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += (ai2 * gy[1088] - 1 * gy[960]) * Ix * Iz;
-                    gout12z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3456];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[640];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[832] * Ix * Iz;
-                    gout13z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3712];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[3776] - 1 * gx[3648]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[192];
-                    Iz = gz[768];
-                    gout14x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout14y += ai2 * gy[256] * Ix * Iz;
-                    gout14z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[3840];
+                    gout14x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout14y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout14z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[64];
-                    Iz = gz[960];
-                    gout15x += ai2 * gx[448] * Iy * Iz;
-                    gout15y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout15z += ai2 * gz[1024] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[4032];
+                    gout15x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout15y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout15z += aij_cache[2] * gx[4096] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[384];
-                    Iz = gz[832];
-                    gout16x += ai2 * gx[256] * Iy * Iz;
-                    gout16y += ai2 * gy[448] * Ix * Iz;
-                    gout16z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3904];
+                    gout16x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout16y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout16z += (aij_cache[2] * gx[3968] - 1 * gx[3840]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[384];
-                    Iz = gz[960];
-                    gout17x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout17y += ai2 * gy[448] * Ix * Iz;
-                    gout17z += ai2 * gz[1024] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[4032];
+                    gout17x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout17y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout17z += aij_cache[2] * gx[4096] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[64];
-                    Iz = gz[1152];
-                    gout18x += ai2 * gx[256] * Iy * Iz;
-                    gout18y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout18z += ai2 * gz[1216] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[4224];
+                    gout18x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout18y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout18z += aij_cache[2] * gx[4288] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[192];
-                    Iz = gz[1216];
-                    gout19x += ai2 * gx[64] * Iy * Iz;
-                    gout19y += ai2 * gy[256] * Ix * Iz;
-                    gout19z += (ai2 * gz[1280] - 1 * gz[1152]) * Ix * Iy;
+                    Iy = gx[1728];
+                    Iz = gx[4288];
+                    gout19x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout19y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout19z += (aij_cache[2] * gx[4352] - 1 * gx[4224]) * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[1344];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += ai2 * gx[1408] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3136];
+                    gout0x += aij_cache[2] * gx[1408] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[1216];
-                    Iy = gy[0];
-                    Iz = gz[192];
-                    gout1x += (ai2 * gx[1280] - 1 * gx[1152]) * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3264];
+                    gout1x += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[960];
-                    Iy = gy[448];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[1024] * Iy * Iz;
-                    gout2y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[3072];
+                    gout2x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout3x += ai2 * gx[832] * Iy * Iz;
-                    gout3y += ai2 * gy[640] * Ix * Iz;
-                    gout3z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[3136];
+                    gout3x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[1024];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout4x += (ai2 * gx[1088] - 1 * gx[960]) * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3456];
+                    gout4x += (aij_cache[2] * gx[1088] - 1 * gx[960]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[256];
-                    Iz = gz[384];
-                    gout5x += ai2 * gx[832] * Iy * Iz;
-                    gout5y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout5z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3456];
+                    gout5x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout6x += ai2 * gx[832] * Iy * Iz;
-                    gout6y += ai2 * gy[64] * Ix * Iz;
-                    gout6z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3712];
+                    gout6x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[3776] - 1 * gx[3648]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[960];
-                    Iz = gz[0];
-                    gout7x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout7y += ai2 * gy[1024] * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2496];
+                    Iz = gx[3072];
+                    gout7x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2560] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[832];
-                    Iz = gz[192];
-                    gout8x += ai2 * gx[448] * Iy * Iz;
-                    gout8y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout8z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2368];
+                    Iz = gx[3264];
+                    gout8x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[1152];
-                    Iz = gz[64];
-                    gout9x += ai2 * gx[256] * Iy * Iz;
-                    gout9y += ai2 * gy[1216] * Ix * Iz;
-                    gout9z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3136];
+                    gout9x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout9z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[1152];
-                    Iz = gz[192];
-                    gout10x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout10y += ai2 * gy[1216] * Ix * Iz;
-                    gout10z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2688];
+                    Iz = gx[3264];
+                    gout10x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[2752] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[832];
-                    Iz = gz[384];
-                    gout11x += ai2 * gx[256] * Iy * Iz;
-                    gout11y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout11z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2368];
+                    Iz = gx[3456];
+                    gout11x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[960];
-                    Iz = gz[448];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += ai2 * gy[1024] * Ix * Iz;
-                    gout12z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2496];
+                    Iz = gx[3520];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[2560] * Ix * Iz;
+                    gout12z += (aij_cache[2] * gx[3584] - 1 * gx[3456]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout13x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[3840];
+                    gout13x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[256];
-                    Iz = gz[768];
-                    gout14x += ai2 * gx[448] * Iy * Iz;
-                    gout14y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout14z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[3840];
+                    gout14x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout14y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout14z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[1024];
-                    gout15x += ai2 * gx[448] * Iy * Iz;
-                    gout15y += ai2 * gy[64] * Ix * Iz;
-                    gout15z += (ai2 * gz[1088] - 1 * gz[960]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4096];
+                    gout15x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout15y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout15z += (aij_cache[2] * gx[4160] - 1 * gx[4032]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[768];
-                    gout16x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout16y += ai2 * gy[640] * Ix * Iz;
-                    gout16z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[3840];
+                    gout16x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout16y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout16z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[448];
-                    Iz = gz[960];
-                    gout17x += ai2 * gx[64] * Iy * Iz;
-                    gout17y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout17z += ai2 * gz[1024] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[4032];
+                    gout17x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout17y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout17z += aij_cache[2] * gx[4096] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[0];
-                    Iz = gz[1216];
-                    gout18x += ai2 * gx[256] * Iy * Iz;
-                    gout18y += ai2 * gy[64] * Ix * Iz;
-                    gout18z += (ai2 * gz[1280] - 1 * gz[1152]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[4288];
+                    gout18x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout18y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout18z += (aij_cache[2] * gx[4352] - 1 * gx[4224]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[1344];
-                    gout19x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout19y += ai2 * gy[64] * Ix * Iz;
-                    gout19z += ai2 * gz[1408] * Ix * Iy;
+                    Iy = gx[1536];
+                    Iz = gx[4416];
+                    gout19x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout19y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout19z += aij_cache[2] * gx[4480] * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[1216];
-                    Iy = gy[192];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[1280] - 1 * gx[1152]) * Iy * Iz;
-                    gout0y += ai2 * gy[256] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[3072];
+                    gout0x += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[1152];
-                    Iy = gy[64];
-                    Iz = gz[192];
-                    gout1x += ai2 * gx[1216] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[3264];
+                    gout1x += aij_cache[2] * gx[1216] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[960];
-                    Iy = gy[384];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[1024] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3136];
+                    gout2x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[832];
-                    Iy = gy[384];
-                    Iz = gz[192];
-                    gout3x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout3y += ai2 * gy[448] * Ix * Iz;
-                    gout3z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3264];
+                    gout3x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[960];
-                    Iy = gy[64];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[1024] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[3456];
+                    gout4x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[3520] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[192];
-                    Iz = gz[448];
-                    gout5x += ai2 * gx[832] * Iy * Iz;
-                    gout5y += ai2 * gy[256] * Ix * Iz;
-                    gout5z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[3520];
+                    gout5x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[3584] - 1 * gx[3456]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3072];
+                    gout6x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[1024];
-                    Iz = gz[0];
-                    gout7x += ai2 * gx[448] * Iy * Iz;
-                    gout7y += (ai2 * gy[1088] - 1 * gy[960]) * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2560];
+                    Iz = gx[3072];
+                    gout7x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[768];
-                    Iz = gz[256];
-                    gout8x += ai2 * gx[448] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3328];
+                    gout8x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[3392] - 1 * gx[3264]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[1344];
-                    Iz = gz[0];
-                    gout9x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout9y += ai2 * gy[1408] * Ix * Iz;
-                    gout9z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2880];
+                    Iz = gx[3072];
+                    gout9x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[2944] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1216];
-                    Iz = gz[192];
-                    gout10x += ai2 * gx[64] * Iy * Iz;
-                    gout10y += (ai2 * gy[1280] - 1 * gy[1152]) * Ix * Iz;
-                    gout10z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2752];
+                    Iz = gx[3264];
+                    gout10x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3328] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[768];
-                    Iz = gz[448];
-                    gout11x += ai2 * gx[256] * Iy * Iz;
-                    gout11y += ai2 * gy[832] * Ix * Iz;
-                    gout11z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3520];
+                    gout11x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3584] - 1 * gx[3456]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[768];
-                    Iz = gz[576];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[832] * Ix * Iz;
-                    gout12z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2304];
+                    Iz = gx[3648];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[2368] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3712] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[768];
-                    gout13x += ai2 * gx[640] * Iy * Iz;
-                    gout13y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout13z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[3840];
+                    gout13x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout13y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[192];
-                    Iz = gz[832];
-                    gout14x += ai2 * gx[448] * Iy * Iz;
-                    gout14y += ai2 * gy[256] * Ix * Iz;
-                    gout14z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[3904];
+                    gout14x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout14y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout14z += (aij_cache[2] * gx[3968] - 1 * gx[3840]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[384];
-                    Iz = gz[768];
-                    gout15x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout15y += ai2 * gy[448] * Ix * Iz;
-                    gout15z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[3840];
+                    gout15x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout15y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout15z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[768];
-                    gout16x += ai2 * gx[64] * Iy * Iz;
-                    gout16y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout16z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[3840];
+                    gout16x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout16y += (aij_cache[2] * gx[2240] - 1 * gx[2112]) * Ix * Iz;
+                    gout16z += aij_cache[2] * gx[3904] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[1024];
-                    gout17x += ai2 * gx[64] * Iy * Iz;
-                    gout17y += ai2 * gy[448] * Ix * Iz;
-                    gout17z += (ai2 * gz[1088] - 1 * gz[960]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[4096];
+                    gout17x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout17y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout17z += (aij_cache[2] * gx[4160] - 1 * gx[4032]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[192];
-                    Iz = gz[1152];
-                    gout18x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout18y += ai2 * gy[256] * Ix * Iz;
-                    gout18z += ai2 * gz[1216] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[4224];
+                    gout18x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout18y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout18z += aij_cache[2] * gx[4288] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[1344];
-                    gout19x += ai2 * gx[64] * Iy * Iz;
-                    gout19y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout19z += ai2 * gz[1408] * Ix * Iy;
+                    Iy = gx[1600];
+                    Iz = gx[4416];
+                    gout19x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout19y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout19z += aij_cache[2] * gx[4480] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -24273,103 +23900,98 @@ void _rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1111(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1152;
-    double *gz = gy + 1152;
-    double *rlrk = gz + 1152;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 63 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (63+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -24385,30 +24007,19 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout11x, gout11y, gout11z;
     double gout12x, gout12y, gout12z;
     double gout13x, gout13y, gout13z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -24422,6 +24033,7 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -24473,18 +24085,26 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -24497,8 +24117,6 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -24506,12 +24124,23 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -24520,11 +24149,11 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[2304] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -24536,7 +24165,7 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -24595,396 +24224,348 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[1024];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[1088] - 1 * gx[960]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2304];
+                    gout0x += (aij_cache[2] * gx[1088] - 1 * gx[960]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2304];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[64] * Ix * Iz;
-                    gout2z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2560];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout3x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout3y += ai2 * gy[640] * Ix * Iz;
-                    gout3z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2304];
+                    gout3x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[448];
-                    Iz = gz[192];
-                    gout4x += ai2 * gx[448] * Iy * Iz;
-                    gout4y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout4z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2496];
+                    gout4x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[448];
-                    gout5x += ai2 * gx[640] * Iy * Iz;
-                    gout5y += ai2 * gy[64] * Ix * Iz;
-                    gout5z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2752];
+                    gout5x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout6x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout6y += ai2 * gy[64] * Ix * Iz;
-                    gout6z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2880];
+                    gout6x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[832];
-                    Iz = gz[0];
-                    gout7x += ai2 * gx[256] * Iy * Iz;
-                    gout7y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[2304];
+                    gout7x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[960];
-                    Iz = gz[64];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[1024] * Ix * Iz;
-                    gout8z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[2368];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[384];
-                    Iz = gz[384];
-                    gout9x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout9y += ai2 * gy[448] * Ix * Iz;
-                    gout9z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2688];
+                    gout9x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[384];
-                    gout10x += ai2 * gx[64] * Iy * Iz;
-                    gout10y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout10z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2688];
+                    gout10x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[640];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[448] * Ix * Iz;
-                    gout11z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2944];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[192];
-                    Iz = gz[768];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[256] * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[3072];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[960];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout13z += ai2 * gz[1024] * Ix * Iy;
+                    Iy = gx[1216];
+                    Iz = gx[3264];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[3328] * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[960];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1024] * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2304];
+                    gout0x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[192];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += ai2 * gy[256] * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2368];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2304];
+                    gout2x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout3x += ai2 * gx[448] * Iy * Iz;
-                    gout3y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout3z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2304];
+                    gout3x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[384];
-                    Iz = gz[256];
-                    gout4x += ai2 * gx[448] * Iy * Iz;
-                    gout4y += ai2 * gy[448] * Ix * Iz;
-                    gout4z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2560];
+                    gout4x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[192];
-                    Iz = gz[384];
-                    gout5x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout5y += ai2 * gy[256] * Ix * Iz;
-                    gout5z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2688];
+                    gout5x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout6x += ai2 * gx[448] * Iy * Iz;
-                    gout6y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout6z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2880];
+                    gout6x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[768];
-                    Iz = gz[64];
-                    gout7x += ai2 * gx[256] * Iy * Iz;
-                    gout7y += ai2 * gy[832] * Ix * Iz;
-                    gout7z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2368];
+                    gout7x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[768];
-                    Iz = gz[192];
-                    gout8x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2496];
+                    gout8x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[448];
-                    Iz = gz[384];
-                    gout9x += ai2 * gx[256] * Iy * Iz;
-                    gout9y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout9z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2688];
+                    gout9x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[448];
-                    gout10x += ai2 * gx[64] * Iy * Iz;
-                    gout10y += ai2 * gy[640] * Ix * Iz;
-                    gout10z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2752];
+                    gout10x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout11x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout11y += ai2 * gy[64] * Ix * Iz;
-                    gout11z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[3072];
+                    gout11x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[768];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[3072];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[1024];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += (ai2 * gz[1088] - 1 * gz[960]) * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3328];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[3392] - 1 * gx[3264]) * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[960];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += ai2 * gx[1024] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2368];
+                    gout0x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[832];
-                    Iy = gy[0];
-                    Iz = gz[192];
-                    gout1x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2496];
+                    gout1x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[448];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[640] * Iy * Iz;
-                    gout2y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2304];
+                    gout2x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout3x += ai2 * gx[448] * Iy * Iz;
-                    gout3y += ai2 * gy[640] * Ix * Iz;
-                    gout3z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2368];
+                    gout3x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout4x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2688];
+                    gout4x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[256];
-                    Iz = gz[384];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout5z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2688];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout6x += ai2 * gx[448] * Iy * Iz;
-                    gout6y += ai2 * gy[64] * Ix * Iz;
-                    gout6z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2944];
+                    gout6x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[960];
-                    Iz = gz[0];
-                    gout7x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout7y += ai2 * gy[1024] * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[2304];
+                    gout7x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[832];
-                    Iz = gz[192];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout8z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[2496];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[384];
-                    Iz = gz[448];
-                    gout9x += ai2 * gx[256] * Iy * Iz;
-                    gout9y += ai2 * gy[448] * Ix * Iz;
-                    gout9z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2752];
+                    gout9x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout9z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[384];
-                    Iz = gz[576];
-                    gout10x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout10y += ai2 * gy[448] * Ix * Iz;
-                    gout10z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2880];
+                    gout10x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[64];
-                    Iz = gz[768];
-                    gout11x += ai2 * gx[256] * Iy * Iz;
-                    gout11y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout11z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[3072];
+                    gout11x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[192];
-                    Iz = gz[832];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += ai2 * gy[256] * Ix * Iz;
-                    gout12z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
+                    Iy = gx[1344];
+                    Iz = gx[3136];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout12z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[832];
-                    Iy = gy[192];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout0y += ai2 * gy[256] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2304];
+                    gout0x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[64];
-                    Iz = gz[192];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2496];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[384];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[640] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2368];
+                    gout2x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[384];
-                    Iz = gz[192];
-                    gout3x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout3y += ai2 * gy[448] * Ix * Iz;
-                    gout3z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2496];
+                    gout3x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[640] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2688];
+                    gout4x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[192];
-                    Iz = gz[448];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += ai2 * gy[256] * Ix * Iz;
-                    gout5z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2752];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2304];
+                    gout6x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1024];
-                    Iz = gz[0];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[1088] - 1 * gy[960]) * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[2304];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2240] - 1 * gx[2112]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[256];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2560];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[384];
-                    gout9x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout9y += ai2 * gy[640] * Ix * Iz;
-                    gout9z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2688];
+                    gout9x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[448];
-                    Iz = gz[576];
-                    gout10x += ai2 * gx[64] * Iy * Iz;
-                    gout10y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout10z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2880];
+                    gout10x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[0];
-                    Iz = gz[832];
-                    gout11x += ai2 * gx[256] * Iy * Iz;
-                    gout11y += ai2 * gy[64] * Ix * Iz;
-                    gout11z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[3136];
+                    gout11x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[960];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[1024] * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3264];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3328] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -26569,92 +26150,92 @@ void _rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1120(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -26674,30 +26255,19 @@ void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -26773,10 +26343,20 @@ void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -26792,23 +26372,21 @@ void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
@@ -26816,13 +26394,13 @@ void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double hrr_3100x = trr_40x - rjri[0] * trr_30x;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     double hrr_2200x = hrr_3100x - rjri[0] * hrr_2100x;
-                    fx = ai2 * hrr_2200x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_2200x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     double hrr_0200x = hrr_1100x - rjri[0] * hrr_0100x;
@@ -26831,158 +26409,141 @@ void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_1200x *  fy  * wt;
                     gout0z += hrr_1200x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1200x;
+                    fx = aij_cache[2] * hrr_1200x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += hrr_0200x *  fy  * wt;
                     gout1z += hrr_0200x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1200x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1200x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += hrr_0200x *  fy  * trr_10z;
                     gout2z += hrr_0200x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_2100x;
+                    fx = aij_cache[2] * hrr_2100x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * hrr_0100x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout3x +=  fx  * hrr_0100y * wt;
                     gout3y += hrr_1100x *  fy  * wt;
                     gout3z += hrr_1100x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = ai2 * hrr_2100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * hrr_0100y;
                     gout4x +=  fx  * hrr_1100y * wt;
                     gout4y += hrr_0100x *  fy  * wt;
                     gout4z += hrr_0100x * hrr_1100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout5x +=  fx  * hrr_0100y * trr_10z;
                     gout5y += hrr_0100x *  fy  * trr_10z;
                     gout5z += hrr_0100x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_2100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_2100x;
+                    fy = aij_cache[2] * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     fx -= 1 * hrr_0100x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout6x +=  fx  * 1 * hrr_0100z;
                     gout6y += hrr_1100x *  fy  * hrr_0100z;
                     gout6z += hrr_1100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fy -= 1 * 1;
                     gout7x +=  fx  * trr_10y * hrr_0100z;
                     gout7y += hrr_0100x *  fy  * hrr_0100z;
                     gout7z += hrr_0100x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = ai2 * hrr_2100z;
+                    fz = aij_cache[2] * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     gout8x +=  fx  * 1 * hrr_1100z;
                     gout8y += hrr_0100x *  fy  * hrr_1100z;
                     gout8z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double hrr_1200y = hrr_2100y - rjri[1] * hrr_1100y;
-                    fy = ai2 * hrr_1200y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     double hrr_0200y = hrr_1100y - rjri[1] * hrr_0100y;
                     gout9x +=  fx  * hrr_0200y * wt;
                     gout9y += trr_10x *  fy  * wt;
                     gout9z += trr_10x * hrr_0200y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
                     double hrr_3100y = trr_40y - rjri[1] * trr_30y;
                     double hrr_2200y = hrr_3100y - rjri[1] * hrr_2100y;
-                    fy = ai2 * hrr_2200y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_2200y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 1 * hrr_0200y;
                     gout10x +=  fx  * hrr_1200y * wt;
                     gout10y += 1 *  fy  * wt;
                     gout10z += 1 * hrr_1200y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1200y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1200y;
+                    fz = aij_cache[2] * trr_20z;
                     fz -= 1 * wt;
                     gout11x +=  fx  * hrr_0200y * trr_10z;
                     gout11y += 1 *  fy  * trr_10z;
                     gout11z += 1 * hrr_0200y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fx -= 1 * 1;
                     gout12x +=  fx  * hrr_0100y * hrr_0100z;
                     gout12y += trr_10x *  fy  * hrr_0100z;
                     gout12z += trr_10x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_2100y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fy -= 1 * hrr_0100y;
                     gout13x +=  fx  * hrr_1100y * hrr_0100z;
                     gout13y += 1 *  fy  * hrr_0100z;
                     gout13z += 1 * hrr_1100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * hrr_2100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * hrr_2100z;
                     fz -= 1 * hrr_0100z;
                     gout14x +=  fx  * hrr_0100y * hrr_1100z;
                     gout14y += 1 *  fy  * hrr_1100z;
                     gout14z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double hrr_1200z = hrr_2100z - rjri[2] * hrr_1100z;
-                    fz = ai2 * hrr_1200z;
+                    fz = aij_cache[2] * hrr_1200z;
                     fx -= 1 * 1;
                     double hrr_0200z = hrr_1100z - rjri[2] * hrr_0100z;
                     gout15x +=  fx  * 1 * hrr_0200z;
                     gout15y += trr_10x *  fy  * hrr_0200z;
                     gout15z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1200z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1200z;
                     fy -= 1 * 1;
                     gout16x +=  fx  * trr_10y * hrr_0200z;
                     gout16y += 1 *  fy  * hrr_0200z;
                     gout16z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
                     double hrr_3100z = trr_40z - rjri[2] * trr_30z;
                     double hrr_2200z = hrr_3100z - rjri[2] * hrr_2100z;
-                    fz = ai2 * hrr_2200z;
+                    fz = aij_cache[2] * hrr_2200z;
                     fz -= 1 * hrr_0200z;
                     gout17x +=  fx  * 1 * hrr_1200z;
                     gout17y += 1 *  fy  * hrr_1200z;
@@ -26991,6 +26552,12 @@ void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -27442,103 +27009,98 @@ void _rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1200(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1152;
-    double *gz = gy + 1152;
-    double *rlrk = gz + 1152;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 63 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (63+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -27554,30 +27116,19 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout11x, gout11y, gout11z;
     double gout12x, gout12y, gout12z;
     double gout13x, gout13y, gout13z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -27591,6 +27142,7 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -27642,18 +27194,26 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -27666,8 +27226,6 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -27675,12 +27233,23 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1152] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -27688,11 +27257,11 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[2304] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1152;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -27708,7 +27277,7 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[256] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -27775,396 +27344,348 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[1024];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[1088] - 1 * gx[960]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2304];
+                    gout0x += (aij_cache[2] * gx[1088] - 1 * gx[960]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2304];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout2x += ai2 * gx[832] * Iy * Iz;
-                    gout2y += ai2 * gy[64] * Ix * Iz;
-                    gout2z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2560];
+                    gout2x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[192];
-                    Iz = gz[192];
-                    gout3x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout3y += ai2 * gy[256] * Ix * Iz;
-                    gout3z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2496];
+                    gout3x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[640] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2688];
+                    gout4x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[448] * Iy * Iz;
-                    gout5y += ai2 * gy[640] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2368];
+                    gout5x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[576];
-                    Iz = gz[192];
-                    gout6x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout6y += ai2 * gy[640] * Ix * Iz;
-                    gout6z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2496];
+                    gout6x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[1024];
-                    Iz = gz[0];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[1088] - 1 * gy[960]) * Ix * Iz;
-                    gout7z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2176];
+                    Iz = gx[2304];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2240] - 1 * gx[2112]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[256];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[832] * Ix * Iz;
-                    gout8z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2560];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout9x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2880];
+                    gout9x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[256];
-                    Iz = gz[576];
-                    gout10x += ai2 * gx[256] * Iy * Iz;
-                    gout10y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout10z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2880];
+                    gout10x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[0];
-                    Iz = gz[832];
-                    gout11x += ai2 * gx[256] * Iy * Iz;
-                    gout11y += ai2 * gy[64] * Ix * Iz;
-                    gout11z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[3136];
+                    gout11x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[192];
-                    Iz = gz[768];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[256] * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[3072];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[960];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout13z += ai2 * gz[1024] * Ix * Iy;
+                    Iy = gx[1216];
+                    Iz = gx[3264];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout13z += aij_cache[2] * gx[3328] * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[960];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[1024] * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2304];
+                    gout0x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[192];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += ai2 * gy[256] * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2368];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2304];
+                    gout2x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[256];
-                    Iz = gz[192];
-                    gout3x += ai2 * gx[640] * Iy * Iz;
-                    gout3y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout3z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2496];
+                    gout3x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[448];
-                    gout4x += ai2 * gx[640] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2752];
+                    gout4x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout5x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2304];
+                    gout5x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[640];
-                    Iz = gz[192];
-                    gout6x += ai2 * gx[256] * Iy * Iz;
-                    gout6y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout6z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2496];
+                    gout6x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[960];
-                    Iz = gz[64];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[1024] * Ix * Iz;
-                    gout7z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[2368];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[384];
-                    gout8x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout8y += ai2 * gy[640] * Ix * Iz;
-                    gout8z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2688];
+                    gout8x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout9x += ai2 * gx[448] * Iy * Iz;
-                    gout9y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout9z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2880];
+                    gout9x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[192];
-                    Iz = gz[640];
-                    gout10x += ai2 * gx[256] * Iy * Iz;
-                    gout10y += ai2 * gy[256] * Ix * Iz;
-                    gout10z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2944];
+                    gout10x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[384];
-                    Iz = gz[576];
-                    gout11x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout11y += ai2 * gy[448] * Ix * Iz;
-                    gout11z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2880];
+                    gout11x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[768];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += (ai2 * gy[320] - 1 * gy[192]) * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[3072];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[1472] - 1 * gx[1344]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[1024];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += (ai2 * gz[1088] - 1 * gz[960]) * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3328];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[3392] - 1 * gx[3264]) * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[960];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += ai2 * gx[1024] * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2368];
+                    gout0x += aij_cache[2] * gx[1024] * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[832];
-                    Iy = gy[0];
-                    Iz = gz[192];
-                    gout1x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2496];
+                    gout1x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[448];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[640] * Iy * Iz;
-                    gout2y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2304];
+                    gout2x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[192];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[640] * Iy * Iz;
-                    gout3y += ai2 * gy[256] * Ix * Iz;
-                    gout3z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2560];
+                    gout3x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[448];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[512] - 1 * gx[384]) * Iy * Iz;
-                    gout4y += ai2 * gy[640] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2304];
+                    gout4x += (aij_cache[2] * gx[512] - 1 * gx[384]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[832];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[256] * Iy * Iz;
-                    gout5y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[2304];
+                    gout5x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[576];
-                    Iz = gz[256];
-                    gout6x += ai2 * gx[256] * Iy * Iz;
-                    gout6y += ai2 * gy[640] * Ix * Iz;
-                    gout6z += (ai2 * gz[320] - 1 * gz[192]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2560];
+                    gout6x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[2624] - 1 * gx[2496]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[768];
-                    Iz = gz[192];
-                    gout7x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout7y += ai2 * gy[832] * Ix * Iz;
-                    gout7z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2496];
+                    gout7x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[384];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout8z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2688];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout9x += ai2 * gx[448] * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2944];
+                    gout9x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout9z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout10x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout10y += ai2 * gy[64] * Ix * Iz;
-                    gout10z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[3072];
+                    gout10x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[448];
-                    Iz = gz[576];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += (ai2 * gy[512] - 1 * gy[384]) * Ix * Iz;
-                    gout11z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2880];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[192];
-                    Iz = gz[832];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += ai2 * gy[256] * Ix * Iz;
-                    gout12z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
+                    Iy = gx[1344];
+                    Iz = gx[3136];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout12z += (aij_cache[2] * gx[3200] - 1 * gx[3072]) * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[832];
-                    Iy = gy[192];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout0y += ai2 * gy[256] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2304];
+                    gout0x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[64];
-                    Iz = gz[192];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[2496];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[384];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[640] * Iy * Iz;
-                    gout2y += ai2 * gy[448] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2368];
+                    gout2x += aij_cache[2] * gx[640] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout3x += (ai2 * gx[704] - 1 * gx[576]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[448] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2688];
+                    gout3x += (aij_cache[2] * gx[704] - 1 * gx[576]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2752] * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout4x += ai2 * gx[448] * Iy * Iz;
-                    gout4y += (ai2 * gy[704] - 1 * gy[576]) * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2304];
+                    gout4x += aij_cache[2] * gx[448] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1856] - 1 * gx[1728]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[768];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[256] * Iy * Iz;
-                    gout5y += ai2 * gy[832] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2368];
+                    gout5x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1984] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[960];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += ai2 * gy[1024] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[2112];
+                    Iz = gx[2304];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[2176] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[832];
-                    Iz = gz[192];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout7z += ai2 * gz[256] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1984];
+                    Iz = gx[2496];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[2048] - 1 * gx[1920]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2560] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[448];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[640] * Ix * Iz;
-                    gout8z += (ai2 * gz[512] - 1 * gz[384]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1728];
+                    Iz = gx[2752];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1792] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2816] - 1 * gx[2688]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[192];
-                    Iz = gz[576];
-                    gout9x += (ai2 * gx[320] - 1 * gx[192]) * Iy * Iz;
-                    gout9y += ai2 * gy[256] * Ix * Iz;
-                    gout9z += ai2 * gz[640] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2880];
+                    gout9x += (aij_cache[2] * gx[320] - 1 * gx[192]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1408] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2944] * Ix * Iy;
                     Ix = gx[192];
-                    Iy = gy[64];
-                    Iz = gz[768];
-                    gout10x += ai2 * gx[256] * Iy * Iz;
-                    gout10y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout10z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1216];
+                    Iz = gx[3072];
+                    gout10x += aij_cache[2] * gx[256] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1280] - 1 * gx[1152]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[3136] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[640];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[448] * Ix * Iz;
-                    gout11z += (ai2 * gz[704] - 1 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2944];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[3008] - 1 * gx[2880]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[960];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[1024] * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[3264];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1216] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[3328] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -29695,92 +29216,92 @@ void _rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_1210(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -29788,30 +29309,19 @@ void _rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout3x, gout3y, gout3z;
     double gout4x, gout4y, gout4z;
     double gout5x, gout5y, gout5z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -29851,10 +29361,20 @@ void _rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -29870,80 +29390,73 @@ void _rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
-                    fx = ai2 * trr_30x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_30x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 2 * trr_10x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += trr_20x *  fy  * wt;
                     gout0z += trr_20x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += trr_10x *  fy  * wt;
                     gout1z += trr_10x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += trr_10x *  fy  * trr_10z;
                     gout2z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = ai2 * trr_30y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 2 * trr_10y;
                     gout3x +=  fx  * trr_20y * wt;
                     gout3y += 1 *  fy  * wt;
                     gout3z += 1 * trr_20y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     gout4x +=  fx  * trr_10y * trr_10z;
                     gout4y += 1 *  fy  * trr_10z;
                     gout4z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = ai2 * trr_30z;
+                    fz = aij_cache[2] * trr_30z;
                     fz -= 2 * trr_10z;
                     gout5x +=  fx  * 1 * trr_20z;
                     gout5y += 1 *  fy  * trr_20z;
@@ -29952,6 +29465,12 @@ void _rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -30139,92 +29658,92 @@ void _rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_2000(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -30244,30 +29763,19 @@ void _rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -30343,10 +29851,20 @@ void _rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -30362,199 +29880,180 @@ void _rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double b00 = .5 * rt_aa;
-                    ai2 = rjri[5];
                     double rt_akl = rt_aa * aij;
                     double cpx = xqc + xpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double trr_31x = cpx * trr_30x + 3*b00 * trr_20x;
-                    fx = ai2 * trr_31x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * trr_31x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_11x = cpx * trr_10x + 1*b00 * 1;
                     fx -= 2 * trr_11x;
                     double trr_21x = cpx * trr_20x + 2*b00 * trr_10x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += trr_21x *  fy  * wt;
                     gout0z += trr_21x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
+                    fx = aij_cache[2] * trr_21x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     double trr_01x = cpx * 1;
                     fx -= 1 * trr_01x;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += trr_11x *  fy  * wt;
                     gout1z += trr_11x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_21x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_21x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fx -= 1 * trr_01x;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += trr_11x *  fy  * trr_10z;
                     gout2z += trr_11x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
+                    fx = aij_cache[2] * trr_11x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = ai2 * trr_30y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 2 * trr_10y;
                     gout3x +=  fx  * trr_20y * wt;
                     gout3y += trr_01x *  fy  * wt;
                     gout3z += trr_01x * trr_20y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     gout4x +=  fx  * trr_10y * trr_10z;
                     gout4y += trr_01x *  fy  * trr_10z;
                     gout4z += trr_01x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_11x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_11x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = ai2 * trr_30z;
+                    fz = aij_cache[2] * trr_30z;
                     fz -= 2 * trr_10z;
                     gout5x +=  fx  * 1 * trr_20z;
                     gout5y += trr_01x *  fy  * trr_20z;
                     gout5z += trr_01x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_30x;
+                    fx = aij_cache[2] * trr_30x;
                     double cpy = yqc + ypq*rt_akl;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 2 * trr_10x;
                     double trr_01y = cpy * 1;
                     gout6x +=  fx  * trr_01y * wt;
                     gout6y += trr_20x *  fy  * wt;
                     gout6z += trr_20x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * trr_01y;
                     gout7x +=  fx  * trr_11y * wt;
                     gout7y += trr_10x *  fy  * wt;
                     gout7z += trr_10x * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     gout8x +=  fx  * trr_01y * trr_10z;
                     gout8y += trr_10x *  fy  * trr_10z;
                     gout8z += trr_10x * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
-                    fy = ai2 * trr_31y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_31y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 2 * trr_11y;
                     gout9x +=  fx  * trr_21y * wt;
                     gout9y += 1 *  fy  * wt;
                     gout9z += 1 * trr_21y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_21y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_21y;
+                    fz = aij_cache[2] * trr_20z;
                     fy -= 1 * trr_01y;
                     fz -= 1 * wt;
                     gout10x +=  fx  * trr_11y * trr_10z;
                     gout10y += 1 *  fy  * trr_10z;
                     gout10z += 1 * trr_11y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_11y;
-                    fz = ai2 * trr_30z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_11y;
+                    fz = aij_cache[2] * trr_30z;
                     fz -= 2 * trr_10z;
                     gout11x +=  fx  * trr_01y * trr_20z;
                     gout11y += 1 *  fy  * trr_20z;
                     gout11z += 1 * trr_01y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_30x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_30x;
+                    fy = aij_cache[2] * trr_10y;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    fz = ai2 * trr_11z;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 2 * trr_10x;
                     double trr_01z = cpz * wt;
                     gout12x +=  fx  * 1 * trr_01z;
                     gout12y += trr_20x *  fy  * trr_01z;
                     gout12z += trr_20x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_11z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     gout13x +=  fx  * trr_10y * trr_01z;
                     gout13y += trr_10x *  fy  * trr_01z;
                     gout13z += trr_10x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    fz = ai2 * trr_21z;
+                    fz = aij_cache[2] * trr_21z;
                     fx -= 1 * 1;
                     fz -= 1 * trr_01z;
                     gout14x +=  fx  * 1 * trr_11z;
                     gout14y += trr_10x *  fy  * trr_11z;
                     gout14z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_30y;
-                    fz = ai2 * trr_11z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_11z;
                     fy -= 2 * trr_10y;
                     gout15x +=  fx  * trr_20y * trr_01z;
                     gout15y += 1 *  fy  * trr_01z;
                     gout15z += 1 * trr_20y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_21z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_21z;
                     fy -= 1 * 1;
                     fz -= 1 * trr_01z;
                     gout16x +=  fx  * trr_10y * trr_11z;
                     gout16y += 1 *  fy  * trr_11z;
                     gout16z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
-                    fz = ai2 * trr_31z;
+                    fz = aij_cache[2] * trr_31z;
                     fz -= 2 * trr_11z;
                     gout17x +=  fx  * 1 * trr_21z;
                     gout17y += 1 *  fy  * trr_21z;
@@ -30563,6 +30062,12 @@ void _rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -31014,103 +30519,98 @@ void _rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_2010(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1024;
-    double *gz = gy + 1024;
-    double *rlrk = gz + 1024;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 57 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (57+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -31126,30 +30626,19 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout11x, gout11y, gout11z;
     double gout12x, gout12y, gout12z;
     double gout13x, gout13y, gout13z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -31163,6 +30652,7 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -31214,18 +30704,26 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -31238,8 +30736,6 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -31247,12 +30743,23 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1024] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -31261,11 +30768,11 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[2048] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1024;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -31277,7 +30784,7 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -31333,396 +30840,348 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[896];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[960] - 2 * gx[832]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2048];
+                    gout0x += (aij_cache[2] * gx[960] - 2 * gx[832]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[64];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2112];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[256];
-                    Iz = gz[64];
-                    gout2x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2112];
+                    gout2x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2304];
+                    gout3x += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[64];
-                    Iz = gz[320];
-                    gout4x += ai2 * gx[576] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2368];
+                    gout4x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[512];
-                    Iz = gz[64];
-                    gout5x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2112];
+                    gout5x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2048];
+                    gout6x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[832];
-                    Iz = gz[64];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout7z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1856];
+                    Iz = gx[2112];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[512];
-                    Iz = gz[320];
-                    gout8x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout8y += ai2 * gy[576] * Ix * Iz;
-                    gout8z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2368];
+                    gout8x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[512];
-                    gout9x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2560];
+                    gout9x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout10z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2624];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[256];
-                    Iz = gz[576];
-                    gout11x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout11y += ai2 * gy[320] * Ix * Iz;
-                    gout11z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2624];
+                    gout11x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout12x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2816];
+                    gout12x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[832];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout13z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
+                    Iy = gx[1088];
+                    Iz = gx[2880];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[2944] - 1 * gx[2816]) * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[832];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2048];
+                    gout0x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[128];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2176];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[576] * Iy * Iz;
-                    gout2y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2048];
+                    gout2x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout3y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2304];
+                    gout3x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[576] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2432];
+                    gout4x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[2496] - 2 * gx[2368]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += (ai2 * gy[704] - 2 * gy[576]) * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2048];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[832];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1856];
+                    Iz = gx[2048];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[128];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[832] * Ix * Iz;
-                    gout7z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2176];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[256];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[704] - 2 * gy[576]) * Ix * Iz;
-                    gout8z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2304];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[64];
-                    Iz = gz[512];
-                    gout9x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout9y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout9z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2560];
+                    gout9x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += ai2 * gy[64] * Ix * Iz;
-                    gout10z += (ai2 * gz[704] - 2 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2688];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[2752] - 2 * gx[2624]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[512];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout11z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2560];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[64];
-                    Iz = gz[768];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2816];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[896];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += (ai2 * gz[960] - 2 * gz[832]) * Ix * Iy;
+                    Iy = gx[1024];
+                    Iz = gx[2944];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[3008] - 2 * gx[2880]) * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[832];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2112];
+                    gout0x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gout1y += ai2 * gy[320] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2048];
+                    gout1x += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[320];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[576] * Iy * Iz;
-                    gout2y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2112];
+                    gout2x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[320];
-                    gout3x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2368];
+                    gout3x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[512];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout4y += ai2 * gy[576] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2048];
+                    gout4x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2112];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[768];
-                    Iz = gz[64];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2112];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[512];
-                    Iz = gz[256];
-                    gout7x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout7y += ai2 * gy[576] * Ix * Iz;
-                    gout7z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2304];
+                    gout7x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[320];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout8z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2368];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout9x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2624];
+                    gout9x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout9z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[256];
-                    Iz = gz[512];
-                    gout10x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout10y += ai2 * gy[320] * Ix * Iz;
-                    gout10z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2560];
+                    gout10x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[320];
-                    Iz = gz[576];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout11z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2624];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[832];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
+                    Iy = gx[1024];
+                    Iz = gx[2880];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout12z += (aij_cache[2] * gx[2944] - 1 * gx[2816]) * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[768];
-                    Iy = gy[128];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[832] * Iy * Iz;
-                    gout0y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2048];
+                    gout0x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[320];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout1y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2048];
+                    gout1x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[256];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[576] * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2176];
+                    gout2x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[128];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[576] * Iy * Iz;
-                    gout3y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2304];
+                    gout3x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout4y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2048];
+                    gout4x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[512];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2176];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[896];
-                    Iz = gz[0];
-                    gout6x += ai2 * gx[64] * Iy * Iz;
-                    gout6y += (ai2 * gy[960] - 2 * gy[832]) * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2048];
+                    gout6x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[256];
-                    gout7x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout7y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout7z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2304];
+                    gout7x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[512];
-                    Iz = gz[384];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[576] * Ix * Iz;
-                    gout8z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2432];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2496] - 2 * gx[2368]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[128];
-                    Iz = gz[512];
-                    gout9x += ai2 * gx[320] * Iy * Iz;
-                    gout9y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout9z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2560];
+                    gout9x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[320];
-                    Iz = gz[512];
-                    gout10x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout10y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout10z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2560];
+                    gout10x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[640];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[320] * Ix * Iz;
-                    gout11z += (ai2 * gz[704] - 2 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2688];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[2752] - 2 * gx[2624]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[128];
-                    Iz = gz[768];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[2816];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[2880] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -33163,103 +32622,98 @@ void _rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_2011(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 768;
-    double *gz = gy + 768;
-    double *rlrk = gz + 768;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 45 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (45+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -33270,30 +32724,19 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout6x, gout6y, gout6z;
     double gout7x, gout7y, gout7z;
     double gout8x, gout8y, gout8z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -33307,6 +32750,7 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -33343,18 +32787,26 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -33367,8 +32819,6 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -33376,12 +32826,23 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[768] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -33390,11 +32851,11 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[1536] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 768;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -33406,7 +32867,7 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 2 * b10 * s0;
                         _gx[192] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -33438,270 +32899,240 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1536];
+                    gout0x += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[64];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[576] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1600];
+                    gout1x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[256];
-                    Iz = gz[64];
-                    gout2x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1600];
+                    gout2x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1792];
+                    gout3x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[64];
-                    Iz = gz[320];
-                    gout4x += ai2 * gx[320] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1856];
+                    gout4x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[512];
-                    Iz = gz[64];
-                    gout5x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[1600];
+                    gout5x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[256];
-                    Iz = gz[256];
-                    gout6x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout6y += ai2 * gy[320] * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1792];
+                    gout6x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[320];
-                    Iz = gz[320];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout7z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1856];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout8x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout8y += ai2 * gy[64] * Ix * Iz;
-                    gout8z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
+                    Iy = gx[768];
+                    Iz = gx[2112];
+                    gout8x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1536];
+                    gout0x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[0];
-                    Iz = gz[128];
-                    gout1x += ai2 * gx[576] * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1664];
+                    gout1x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[320] * Iy * Iz;
-                    gout2y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[1536];
+                    gout2x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[64];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout3y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1792];
+                    gout3x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[320] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1920];
+                    gout4x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += (ai2 * gy[704] - 2 * gy[576]) * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[1536];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[320];
-                    Iz = gz[256];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1792];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[384];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[320] * Ix * Iz;
-                    gout7z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1920];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[128];
-                    Iz = gz[512];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout8z += ai2 * gz[576] * Ix * Iy;
+                    Iy = gx[896];
+                    Iz = gx[2048];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2112] * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1600];
+                    gout0x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout1y += ai2 * gy[320] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1536];
+                    gout1x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[320];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[320] * Iy * Iz;
-                    gout2y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1600];
+                    gout2x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[0];
-                    Iz = gz[320];
-                    gout3x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1856];
+                    gout3x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[512];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout4y += ai2 * gy[576] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[1536];
+                    gout4x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[1600];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[256];
-                    Iz = gz[320];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += ai2 * gy[320] * Ix * Iz;
-                    gout6z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1856];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[0];
-                    Iz = gz[512];
-                    gout7x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout7y += ai2 * gy[64] * Ix * Iz;
-                    gout7z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[2048];
+                    gout7x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout8z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
+                    Iy = gx[832];
+                    Iz = gx[2112];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[512];
-                    Iy = gy[128];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[576] * Iy * Iz;
-                    gout0y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[896];
+                    Iz = gx[1536];
+                    gout0x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[320];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout1y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1536];
+                    gout1x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[256];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[320] * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1664];
+                    gout2x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[128];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[320] * Iy * Iz;
-                    gout3y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[896];
+                    Iz = gx[1792];
+                    gout3x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout4y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[1536];
+                    gout4x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[512];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[1664];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[256];
-                    gout6x += ai2 * gx[64] * Iy * Iz;
-                    gout6y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[1792];
+                    gout6x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[64];
-                    Iz = gz[512];
-                    gout7x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout7y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout7z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[2048];
+                    gout7x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[64] * Ix * Iz;
-                    gout8z += (ai2 * gz[704] - 2 * gz[576]) * Ix * Iy;
+                    Iy = gx[768];
+                    Iz = gx[2176];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -34722,92 +34153,92 @@ void _rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_2020(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -34827,30 +34258,19 @@ void _rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout15x, gout15y, gout15z;
     double gout16x, gout16y, gout16z;
     double gout17x, gout17y, gout17z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -34926,10 +34346,20 @@ void _rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
+                __syncthreads();
+                if (sq_id == 0) {
+                    aij_cache[0] = aij;
+                    aij_cache[1] = aj_aij;
+                    aij_cache[2] = ai * 2;
+                }
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -34945,197 +34375,178 @@ void _rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 if (task_id >= ntasks) {
                     continue;
                 }
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block] * fac;
                     double rt = rw[ 2*irys   *nsq_per_block];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
                     double rt_aa = rt / (aij + akl);
-                    ai2 = rjri[5];
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0x = rjri[0] * aj_aij - xpq*rt_aij;
+                    double c0x = rjri[0] * aij_cache[1] - xpq*rt_aij;
                     double trr_10x = c0x * 1;
                     double trr_20x = c0x * trr_10x + 1*b10 * 1;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
                     double trr_40x = c0x * trr_30x + 3*b10 * trr_20x;
                     double hrr_3100x = trr_40x - rjri[0] * trr_30x;
-                    fx = ai2 * hrr_3100x;
-                    double c0y = rjri[1] * aj_aij - ypq*rt_aij;
+                    fx = aij_cache[2] * hrr_3100x;
+                    double c0y = rjri[1] * aij_cache[1] - ypq*rt_aij;
                     double trr_10y = c0y * 1;
-                    fy = ai2 * trr_10y;
-                    double c0z = rjri[2] * aj_aij - zpq*rt_aij;
+                    fy = aij_cache[2] * trr_10y;
+                    double c0z = rjri[2] * aij_cache[1] - zpq*rt_aij;
                     double trr_10z = c0z * wt;
-                    fz = ai2 * trr_10z;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_1100x = trr_20x - rjri[0] * trr_10x;
                     fx -= 2 * hrr_1100x;
                     double hrr_2100x = trr_30x - rjri[0] * trr_20x;
                     gout0x +=  fx  * 1 * wt;
                     gout0y += hrr_2100x *  fy  * wt;
                     gout0z += hrr_2100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_2100x;
+                    fx = aij_cache[2] * hrr_2100x;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_10z;
                     double hrr_0100x = trr_10x - rjri[0] * 1;
                     fx -= 1 * hrr_0100x;
                     fy -= 1 * 1;
                     gout1x +=  fx  * trr_10y * wt;
                     gout1y += hrr_1100x *  fy  * wt;
                     gout1z += hrr_1100x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_2100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_2100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    fz = ai2 * trr_20z;
+                    fz = aij_cache[2] * trr_20z;
                     fx -= 1 * hrr_0100x;
                     fz -= 1 * wt;
                     gout2x +=  fx  * 1 * trr_10z;
                     gout2y += hrr_1100x *  fy  * trr_10z;
                     gout2z += hrr_1100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
+                    fx = aij_cache[2] * hrr_1100x;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
-                    fy = ai2 * trr_30y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 2 * trr_10y;
                     gout3x +=  fx  * trr_20y * wt;
                     gout3y += hrr_0100x *  fy  * wt;
                     gout3z += hrr_0100x * trr_20y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * trr_20z;
                     fy -= 1 * 1;
                     fz -= 1 * wt;
                     gout4x +=  fx  * trr_10y * trr_10z;
                     gout4y += hrr_0100x *  fy  * trr_10z;
                     gout4z += hrr_0100x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * hrr_1100x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * hrr_1100x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    fz = ai2 * trr_30z;
+                    fz = aij_cache[2] * trr_30z;
                     fz -= 2 * trr_10z;
                     gout5x +=  fx  * 1 * trr_20z;
                     gout5y += hrr_0100x *  fy  * trr_20z;
                     gout5z += hrr_0100x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_30x;
+                    fx = aij_cache[2] * trr_30x;
                     double hrr_1100y = trr_20y - rjri[1] * trr_10y;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 2 * trr_10x;
                     double hrr_0100y = trr_10y - rjri[1] * 1;
                     gout6x +=  fx  * hrr_0100y * wt;
                     gout6y += trr_20x *  fy  * wt;
                     gout6z += trr_20x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
+                    fx = aij_cache[2] * trr_20x;
                     double hrr_2100y = trr_30y - rjri[1] * trr_20y;
-                    fy = ai2 * hrr_2100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_10z;
                     fx -= 1 * 1;
                     fy -= 1 * hrr_0100y;
                     gout7x +=  fx  * hrr_1100y * wt;
                     gout7y += trr_10x *  fy  * wt;
                     gout7z += trr_10x * hrr_1100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_20z;
                     fx -= 1 * 1;
                     fz -= 1 * wt;
                     gout8x +=  fx  * hrr_0100y * trr_10z;
                     gout8y += trr_10x *  fy  * trr_10z;
                     gout8z += trr_10x * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
+                    fx = aij_cache[2] * trr_10x;
                     double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
                     double hrr_3100y = trr_40y - rjri[1] * trr_30y;
-                    fy = ai2 * hrr_3100y;
-                    fz = ai2 * trr_10z;
+                    fy = aij_cache[2] * hrr_3100y;
+                    fz = aij_cache[2] * trr_10z;
                     fy -= 2 * hrr_1100y;
                     gout9x +=  fx  * hrr_2100y * wt;
                     gout9y += 1 *  fy  * wt;
                     gout9z += 1 * hrr_2100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_2100y;
-                    fz = ai2 * trr_20z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_2100y;
+                    fz = aij_cache[2] * trr_20z;
                     fy -= 1 * hrr_0100y;
                     fz -= 1 * wt;
                     gout10x +=  fx  * hrr_1100y * trr_10z;
                     gout10y += 1 *  fy  * trr_10z;
                     gout10z += 1 * hrr_1100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * hrr_1100y;
-                    fz = ai2 * trr_30z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * hrr_1100y;
+                    fz = aij_cache[2] * trr_30z;
                     fz -= 2 * trr_10z;
                     gout11x +=  fx  * hrr_0100y * trr_20z;
                     gout11y += 1 *  fy  * trr_20z;
                     gout11z += 1 * hrr_0100y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_30x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_30x;
+                    fy = aij_cache[2] * trr_10y;
                     double hrr_1100z = trr_20z - rjri[2] * trr_10z;
-                    fz = ai2 * hrr_1100z;
+                    fz = aij_cache[2] * hrr_1100z;
                     fx -= 2 * trr_10x;
                     double hrr_0100z = trr_10z - rjri[2] * wt;
                     gout12x +=  fx  * 1 * hrr_0100z;
                     gout12y += trr_20x *  fy  * hrr_0100z;
                     gout12z += trr_20x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fx -= 1 * 1;
                     fy -= 1 * 1;
                     gout13x +=  fx  * trr_10y * hrr_0100z;
                     gout13y += trr_10x *  fy  * hrr_0100z;
                     gout13z += trr_10x * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_20x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_20x;
+                    fy = aij_cache[2] * trr_10y;
                     double hrr_2100z = trr_30z - rjri[2] * trr_20z;
-                    fz = ai2 * hrr_2100z;
+                    fz = aij_cache[2] * hrr_2100z;
                     fx -= 1 * 1;
                     fz -= 1 * hrr_0100z;
                     gout14x +=  fx  * 1 * hrr_1100z;
                     gout14y += trr_10x *  fy  * hrr_1100z;
                     gout14z += trr_10x * 1 *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_30y;
-                    fz = ai2 * hrr_1100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_30y;
+                    fz = aij_cache[2] * hrr_1100z;
                     fy -= 2 * trr_10y;
                     gout15x +=  fx  * trr_20y * hrr_0100z;
                     gout15y += 1 *  fy  * hrr_0100z;
                     gout15z += 1 * trr_20y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_20y;
-                    fz = ai2 * hrr_2100z;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_20y;
+                    fz = aij_cache[2] * hrr_2100z;
                     fy -= 1 * 1;
                     fz -= 1 * hrr_0100z;
                     gout16x +=  fx  * trr_10y * hrr_1100z;
                     gout16y += 1 *  fy  * hrr_1100z;
                     gout16z += 1 * trr_10y *  fz ;
-                    ai2 = rjri[5];
-                    fx = ai2 * trr_10x;
-                    fy = ai2 * trr_10y;
+                    fx = aij_cache[2] * trr_10x;
+                    fy = aij_cache[2] * trr_10y;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
                     double hrr_3100z = trr_40z - rjri[2] * trr_30z;
-                    fz = ai2 * hrr_3100z;
+                    fz = aij_cache[2] * hrr_3100z;
                     fz -= 2 * hrr_1100z;
                     gout17x +=  fx  * 1 * hrr_2100z;
                     gout17y += 1 *  fy  * hrr_2100z;
@@ -35144,6 +34555,12 @@ void _rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -35595,103 +35012,98 @@ void _rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_2100(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 1024;
-    double *gz = gy + 1024;
-    double *rlrk = gz + 1024;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 57 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (57+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -35707,30 +35119,19 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout11x, gout11y, gout11z;
     double gout12x, gout12y, gout12z;
     double gout13x, gout13y, gout13z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -35744,6 +35145,7 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -35795,18 +35197,26 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -35819,8 +35229,6 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -35828,12 +35236,23 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[1024] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
@@ -35841,11 +35260,11 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[2048] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 1024;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -35861,7 +35280,7 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                         s2 = c0x * s1 + 3 * b10 * s0;
                         _gx[256] = s2;
                         double xlxk = rlrk[n*64];
-                        double Rqc = xlxk * al_akl;
+                        double Rqc = xlxk * akl_cache[64];
                         double cpx = Rqc + rt_akl * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = cpx * s0;
@@ -35910,396 +35329,348 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[896];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[960] - 2 * gx[832]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2048];
+                    gout0x += (aij_cache[2] * gx[960] - 2 * gx[832]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[64];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2112];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[256];
-                    Iz = gz[64];
-                    gout2x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2112];
+                    gout2x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2304];
+                    gout3x += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[64];
-                    Iz = gz[320];
-                    gout4x += ai2 * gx[576] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2368];
+                    gout4x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[512];
-                    Iz = gz[64];
-                    gout5x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2112];
+                    gout5x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[768];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2048];
+                    gout6x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[832];
-                    Iz = gz[64];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout7z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1856];
+                    Iz = gx[2112];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[512];
-                    Iz = gz[320];
-                    gout8x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout8y += ai2 * gy[576] * Ix * Iz;
-                    gout8z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2368];
+                    gout8x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[512];
-                    gout9x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2560];
+                    gout9x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout10z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2624];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[256];
-                    Iz = gz[576];
-                    gout11x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout11y += ai2 * gy[320] * Ix * Iz;
-                    gout11z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2624];
+                    gout11x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[0];
-                    Iz = gz[768];
-                    gout12x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2816];
+                    gout12x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[832];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout13z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
+                    Iy = gx[1088];
+                    Iz = gx[2880];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[2944] - 1 * gx[2816]) * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[832];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2048];
+                    gout0x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[768];
-                    Iy = gy[0];
-                    Iz = gz[128];
-                    gout1x += ai2 * gx[832] * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2176];
+                    gout1x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[576] * Iy * Iz;
-                    gout2y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2048];
+                    gout2x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout3y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2304];
+                    gout3x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[576] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2432];
+                    gout4x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[2496] - 2 * gx[2368]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += (ai2 * gy[704] - 2 * gy[576]) * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2048];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[832];
-                    Iz = gz[0];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += (ai2 * gy[896] - 1 * gy[768]) * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1856];
+                    Iz = gx[2048];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[768];
-                    Iz = gz[128];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[832] * Ix * Iz;
-                    gout7z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2176];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[256];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[704] - 2 * gy[576]) * Ix * Iz;
-                    gout8z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1664];
+                    Iz = gx[2304];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[64];
-                    Iz = gz[512];
-                    gout9x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout9y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout9z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2560];
+                    gout9x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout10x += ai2 * gx[320] * Iy * Iz;
-                    gout10y += ai2 * gy[64] * Ix * Iz;
-                    gout10z += (ai2 * gz[704] - 2 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2688];
+                    gout10x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout10z += (aij_cache[2] * gx[2752] - 2 * gx[2624]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[512];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout11z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[2560];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
+                    gout11z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[64];
-                    Iz = gz[768];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[2816];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[2880] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[896];
-                    gout13x += ai2 * gx[64] * Iy * Iz;
-                    gout13y += ai2 * gy[64] * Ix * Iz;
-                    gout13z += (ai2 * gz[960] - 2 * gz[832]) * Ix * Iy;
+                    Iy = gx[1024];
+                    Iz = gx[2944];
+                    gout13x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout13y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout13z += (aij_cache[2] * gx[3008] - 2 * gx[2880]) * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[832];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += (ai2 * gx[896] - 1 * gx[768]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2112];
+                    gout0x += (aij_cache[2] * gx[896] - 1 * gx[768]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[640];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gout1y += ai2 * gy[320] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2048];
+                    gout1x += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[320];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[576] * Iy * Iz;
-                    gout2y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2112];
+                    gout2x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[320];
-                    gout3x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2368];
+                    gout3x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[512];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout4y += ai2 * gy[576] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2048];
+                    gout4x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2112];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[768];
-                    Iz = gz[64];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += ai2 * gy[832] * Ix * Iz;
-                    gout6z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1792];
+                    Iz = gx[2112];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1856] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[512];
-                    Iz = gz[256];
-                    gout7x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout7y += ai2 * gy[576] * Ix * Iz;
-                    gout7z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2304];
+                    gout7x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[320];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout8z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2368];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2432] - 1 * gx[2304]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout9x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout9y += ai2 * gy[64] * Ix * Iz;
-                    gout9z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[2624];
+                    gout9x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout9y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout9z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[256];
-                    Iz = gz[512];
-                    gout10x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout10y += ai2 * gy[320] * Ix * Iz;
-                    gout10z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2560];
+                    gout10x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout10y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[320];
-                    Iz = gz[576];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout11z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2624];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[2688] - 1 * gx[2560]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[832];
-                    gout12x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout12y += ai2 * gy[64] * Ix * Iz;
-                    gout12z += (ai2 * gz[896] - 1 * gz[768]) * Ix * Iy;
+                    Iy = gx[1024];
+                    Iz = gx[2880];
+                    gout12x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout12y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout12z += (aij_cache[2] * gx[2944] - 1 * gx[2816]) * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[768];
-                    Iy = gy[128];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[832] * Iy * Iz;
-                    gout0y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2048];
+                    gout0x += aij_cache[2] * gx[832] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[576];
-                    Iy = gy[320];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout1y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2048];
+                    gout1x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[256];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[576] * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2176];
+                    gout2x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[128];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[576] * Iy * Iz;
-                    gout3y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2304];
+                    gout3x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout4y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2048];
+                    gout4x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[512];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[320] * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2176];
+                    gout5x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[896];
-                    Iz = gz[0];
-                    gout6x += ai2 * gx[64] * Iy * Iz;
-                    gout6y += (ai2 * gy[960] - 2 * gy[832]) * Ix * Iz;
-                    gout6z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1920];
+                    Iz = gx[2048];
+                    gout6x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[256];
-                    gout7x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout7y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout7z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1600];
+                    Iz = gx[2304];
+                    gout7x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2368] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[512];
-                    Iz = gz[384];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[576] * Ix * Iz;
-                    gout8z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1536];
+                    Iz = gx[2432];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[1600] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2496] - 2 * gx[2368]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[128];
-                    Iz = gz[512];
-                    gout9x += ai2 * gx[320] * Iy * Iz;
-                    gout9y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout9z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[2560];
+                    gout9x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout9y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout9z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[320];
-                    Iz = gz[512];
-                    gout10x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout10y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout10z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[2560];
+                    gout10x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout10y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout10z += aij_cache[2] * gx[2624] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[640];
-                    gout11x += ai2 * gx[64] * Iy * Iz;
-                    gout11y += ai2 * gy[320] * Ix * Iz;
-                    gout11z += (ai2 * gz[704] - 2 * gz[576]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[2688];
+                    gout11x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout11y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout11z += (aij_cache[2] * gx[2752] - 2 * gx[2624]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[128];
-                    Iz = gz[768];
-                    gout12x += ai2 * gx[64] * Iy * Iz;
-                    gout12y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout12z += ai2 * gz[832] * Ix * Iy;
+                    Iy = gx[1152];
+                    Iz = gx[2816];
+                    gout12x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout12y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout12z += aij_cache[2] * gx[2880] * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -37740,103 +37111,98 @@ void _rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_2110(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks)
+__global__ static
+void rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    // sq is short for shl_quartet
     int sq_id = threadIdx.x;
-    int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
-    int gout_stride = blockDim.y;
+    constexpr int nsq_per_block = 64;
+    constexpr int gout_stride = 4;
+    int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+    int threads = nsq_per_block * gout_stride;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (thread_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.lr_factor != 0) {
+        _fill_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    } else {
+        _fill_sr_vjk_tasks_nosym(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (thread_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
-    int *ao_loc = envs.ao_loc;
-    int nbas = envs.nbas;
-    int nao = ao_loc[nbas];
-    int *bas = envs.bas;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double rjri_cache[];
-    double *rw = rjri_cache + iprim*jprim*6 + sq_id;
-    double *gx = rw + 128 * nroots;
-    double *gy = gx + 768;
-    double *gz = gy + 768;
-    double *rlrk = gz + 768;
-    double *Rpq = rlrk + 192;
-    if (gout_id == 0) {
-        gx[0] = 1.;
-        gy[0] = 1.;
-    }
-    double s0, s1, s2;
-    double Ix, Iy, Iz;
+    extern __shared__ double shared_memory[];
+    double *rlrk = shared_memory + sq_id;
+    double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
+    double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
+    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
+    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
+    double *rw = shared_memory + nsq_per_block * 45 + sq_id;
+    double *cicj_cache = shared_memory + nsq_per_block * (45+nroots*2);
 
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double aij_cache[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (thread_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (thread_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[thread_id] = env[ri_ptr+thread_id];
+        rjri[thread_id] = env[rj_ptr+thread_id] - ri[thread_id];
+    }
     __syncthreads();
-    ShellQuartet sq = shl_quartet_idx[0];
-    int ish = sq.i;
-    int jsh = sq.j;
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xjxi = rj[0] - ri[0];
-    double yjyi = rj[1] - ri[1];
-    double zjzi = rj[2] - ri[2];
-    double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-    int thread_id = nsq_per_block * gout_id + sq_id;
-    int threads = nsq_per_block * gout_stride;
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
     for (int ij = thread_id; ij < iprim*jprim; ij += threads) {
         int ip = ij / jprim;
         int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double *rjri = rjri_cache + ij*6;
-        rjri[0] = xjxi;
-        rjri[1] = yjyi;
-        rjri[2] = zjzi;
         double theta_ij = ai * aj / aij;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        rjri[3] = ci[ip] * cj[jp] * Kab;
-        rjri[4] = aij;
-        rjri[5] = ai * 2;
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
     double gout0x, gout0y, gout0z;
     double gout1x, gout1y, gout1z;
@@ -37847,30 +37213,19 @@ void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double gout6x, gout6y, gout6z;
     double gout7x, gout7y, gout7z;
     double gout8x, gout8y, gout8z;
-    double ai2, fx, fy, fz;
+    double fx, fy, fz;
 
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
+        if (task_id < ntasks) {
+            if (ksh == lsh) fac_sym *= .5;
         } else {
-            sq = shl_quartet_idx[task_id];
+            fac_sym = 0;
         }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        if (ksh == lsh) fac_sym *= .5;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        int k0 = ao_loc[ksh];
-        int l0 = ao_loc[lsh];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -37884,6 +37239,7 @@ void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             rlrk[0] = xlxk;
             rlrk[64] = ylyk;
             rlrk[128] = zlzk;
+            fac_ijkl[0] = fac_sym;
         }
         
         gout0x = 0;
@@ -37920,18 +37276,26 @@ void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             double al = expl[lp];
             double akl = ak + al;
             double al_akl = al / akl;
-            __syncthreads();
-            double xlxk = rlrk[0];
-            double ylyk = rlrk[64];
-            double zlzk = rlrk[128];
             double theta_kl = ak * al_akl;
-            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-            double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
+            __syncthreads();
+            if (gout_id == 0) {
+                double xlxk = rlrk[0];
+                double ylyk = rlrk[64];
+                double zlzk = rlrk[128];
+                double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+                double ckcl = ck[kp] * cl[lp] * Kcd;
+                double fac_sym = fac_ijkl[0];
+                gx[0] = fac_sym * ckcl;
+                akl_cache[0] = akl;
+                akl_cache[nsq_per_block] = al_akl;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-                double *rjri = rjri_cache + ijp*6;
-                double aij = rjri[4];
-                double ai = rjri[5] * .5;
-                double aj_aij = 1. - ai / aij;
+                int ip = ijp / jprim;
+                int jp = ijp % jprim;
+                double ai = expi[ip];
+                double aj = expj[jp];
+                double aij = ai + aj;
+                double aj_aij = aj / aij;
                 double xpa = rjri[0] * aj_aij;
                 double ypa = rjri[1] * aj_aij;
                 double zpa = rjri[2] * aj_aij;
@@ -37944,8 +37308,6 @@ void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;
-                double cicj = rjri[3];
-                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                 __syncthreads();
@@ -37953,22 +37315,33 @@ void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     Rpq[0] = xpq;
                     Rpq[64] = ypq;
                     Rpq[128] = zpq;
+                    double cicj = cicj_cache[ijp];
+                    gx[768] = cicj / (aij*akl*sqrt(aij+akl));
+                    if (sq_id == 0) {
+                        aij_cache[0] = aij;
+                        aij_cache[1] = aj_aij;
+                        aij_cache[2] = ai * 2;
+                    }
                 }
-                rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, gout_id, gout_stride);
+                double s0, s1, s2;
+                double Ix, Iy, Iz;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     double rt = rw[irys*128];
-                    double aij = rjri[4];
+                    double aij = aij_cache[0];
+                    double akl = akl_cache[0];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
                     for (int n = gout_id; n < 3; n += 4) {
                         if (n == 2) {
-                            gz[0] = rw[irys*128+64] * fac;
+                            gx[1536] = rw[irys*128+64];
                         }
                         double *_gx = gx + n * 768;
                         double xjxi = rjri[n];
-                        double Rpa = xjxi * aj_aij;
+                        double Rpa = xjxi * aij_cache[1];
                         double c0x = Rpa - rt_aij * Rpq[n*64];
                         s0 = _gx[0];
                         s1 = c0x * s0;
@@ -38018,270 +37391,240 @@ void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     __syncthreads();
                     switch (gout_id) {
                     case 0:
-                    ai2 = rjri[5];
                     Ix = gx[640];
-                    Iy = gy[0];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[704] - 2 * gx[576]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1536];
+                    gout0x += (aij_cache[2] * gx[704] - 2 * gx[576]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[64];
-                    Iz = gz[64];
-                    gout1x += ai2 * gx[576] * Iy * Iz;
-                    gout1y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout1z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1600];
+                    gout1x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[256];
-                    Iz = gz[64];
-                    gout2x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1600];
+                    gout2x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[0];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1792];
+                    gout3x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[64];
-                    Iz = gz[320];
-                    gout4x += ai2 * gx[320] * Iy * Iz;
-                    gout4y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout4z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1856];
+                    gout4x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[512];
-                    Iz = gz[64];
-                    gout5x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[1600];
+                    gout5x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[256];
-                    Iz = gz[256];
-                    gout6x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout6y += ai2 * gy[320] * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1792];
+                    gout6x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[320];
-                    Iz = gz[320];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout7z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1856];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[0];
-                    Iz = gz[576];
-                    gout8x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout8y += ai2 * gy[64] * Ix * Iz;
-                    gout8z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
+                    Iy = gx[768];
+                    Iz = gx[2112];
+                    gout8x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     break;
                     case 1:
-                    ai2 = rjri[5];
                     Ix = gx[576];
-                    Iy = gy[64];
-                    Iz = gz[0];
-                    gout0x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout0y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1536];
+                    gout0x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[512];
-                    Iy = gy[0];
-                    Iz = gz[128];
-                    gout1x += ai2 * gx[576] * Iy * Iz;
-                    gout1y += ai2 * gy[64] * Ix * Iz;
-                    gout1z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1664];
+                    gout1x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout1z += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[384];
-                    Iz = gz[0];
-                    gout2x += ai2 * gx[320] * Iy * Iz;
-                    gout2y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout2z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[1536];
+                    gout2x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout2z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[64];
-                    Iz = gz[256];
-                    gout3x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout3y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[1792];
+                    gout3x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[0];
-                    Iz = gz[384];
-                    gout4x += ai2 * gx[320] * Iy * Iz;
-                    gout4y += ai2 * gy[64] * Ix * Iz;
-                    gout4z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1920];
+                    gout4x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout4z += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[640];
-                    Iz = gz[0];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += (ai2 * gy[704] - 2 * gy[576]) * Ix * Iz;
-                    gout5z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1408];
+                    Iz = gx[1536];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1472] - 2 * gx[1344]) * Ix * Iz;
+                    gout5z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[320];
-                    Iz = gz[256];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1792];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[256];
-                    Iz = gz[384];
-                    gout7x += ai2 * gx[64] * Iy * Iz;
-                    gout7y += ai2 * gy[320] * Ix * Iz;
-                    gout7z += (ai2 * gz[448] - 2 * gz[320]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1920];
+                    gout7x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout7z += (aij_cache[2] * gx[1984] - 2 * gx[1856]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[128];
-                    Iz = gz[512];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout8z += ai2 * gz[576] * Ix * Iy;
+                    Iy = gx[896];
+                    Iz = gx[2048];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
+                    gout8z += aij_cache[2] * gx[2112] * Ix * Iy;
                     break;
                     case 2:
-                    ai2 = rjri[5];
                     Ix = gx[576];
-                    Iy = gy[0];
-                    Iz = gz[64];
-                    gout0x += (ai2 * gx[640] - 1 * gx[512]) * Iy * Iz;
-                    gout0y += ai2 * gy[64] * Ix * Iz;
-                    gout0z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1600];
+                    gout0x += (aij_cache[2] * gx[640] - 1 * gx[512]) * Iy * Iz;
+                    gout0y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout0z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[384];
-                    Iy = gy[256];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[448] - 2 * gx[320]) * Iy * Iz;
-                    gout1y += ai2 * gy[320] * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1536];
+                    gout1x += (aij_cache[2] * gx[448] - 2 * gx[320]) * Iy * Iz;
+                    gout1y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[320];
-                    Iz = gz[64];
-                    gout2x += ai2 * gx[320] * Iy * Iz;
-                    gout2y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout2z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1600];
+                    gout2x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout2y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[0];
-                    Iz = gz[320];
-                    gout3x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout3y += ai2 * gy[64] * Ix * Iz;
-                    gout3z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[1856];
+                    gout3x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout3y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout3z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[512];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout4y += ai2 * gy[576] * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[1536];
+                    gout4x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout4y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[576];
-                    Iz = gz[64];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout5z += (ai2 * gz[128] - 1 * gz[0]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[1600];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[1664] - 1 * gx[1536]) * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[256];
-                    Iz = gz[320];
-                    gout6x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout6y += ai2 * gy[320] * Ix * Iz;
-                    gout6z += (ai2 * gz[384] - 1 * gz[256]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1856];
+                    gout6x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout6y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout6z += (aij_cache[2] * gx[1920] - 1 * gx[1792]) * Ix * Iy;
                     Ix = gx[128];
-                    Iy = gy[0];
-                    Iz = gz[512];
-                    gout7x += (ai2 * gx[192] - 2 * gx[64]) * Iy * Iz;
-                    gout7y += ai2 * gy[64] * Ix * Iz;
-                    gout7z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[768];
+                    Iz = gx[2048];
+                    gout7x += (aij_cache[2] * gx[192] - 2 * gx[64]) * Iy * Iz;
+                    gout7y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[64];
-                    Iz = gz[576];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout8z += (ai2 * gz[640] - 1 * gz[512]) * Ix * Iy;
+                    Iy = gx[832];
+                    Iz = gx[2112];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2176] - 1 * gx[2048]) * Ix * Iy;
                     break;
                     case 3:
-                    ai2 = rjri[5];
                     Ix = gx[512];
-                    Iy = gy[128];
-                    Iz = gz[0];
-                    gout0x += ai2 * gx[576] * Iy * Iz;
-                    gout0y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout0z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[896];
+                    Iz = gx[1536];
+                    gout0x += aij_cache[2] * gx[576] * Iy * Iz;
+                    gout0y += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
+                    gout0z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[320];
-                    Iy = gy[320];
-                    Iz = gz[0];
-                    gout1x += (ai2 * gx[384] - 1 * gx[256]) * Iy * Iz;
-                    gout1y += (ai2 * gy[384] - 1 * gy[256]) * Ix * Iz;
-                    gout1z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1088];
+                    Iz = gx[1536];
+                    gout1x += (aij_cache[2] * gx[384] - 1 * gx[256]) * Iy * Iz;
+                    gout1y += (aij_cache[2] * gx[1152] - 1 * gx[1024]) * Ix * Iz;
+                    gout1z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[256];
-                    Iz = gz[128];
-                    gout2x += ai2 * gx[320] * Iy * Iz;
-                    gout2y += ai2 * gy[320] * Ix * Iz;
-                    gout2z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1024];
+                    Iz = gx[1664];
+                    gout2x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout2y += aij_cache[2] * gx[1088] * Ix * Iz;
+                    gout2z += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
                     Ix = gx[256];
-                    Iy = gy[128];
-                    Iz = gz[256];
-                    gout3x += ai2 * gx[320] * Iy * Iz;
-                    gout3y += (ai2 * gy[192] - 2 * gy[64]) * Ix * Iz;
-                    gout3z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[896];
+                    Iz = gx[1792];
+                    gout3x += aij_cache[2] * gx[320] * Iy * Iz;
+                    gout3y += (aij_cache[2] * gx[960] - 2 * gx[832]) * Ix * Iz;
+                    gout3z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[576];
-                    Iz = gz[0];
-                    gout4x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout4y += (ai2 * gy[640] - 1 * gy[512]) * Ix * Iz;
-                    gout4z += ai2 * gz[64] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1344];
+                    Iz = gx[1536];
+                    gout4x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout4y += (aij_cache[2] * gx[1408] - 1 * gx[1280]) * Ix * Iz;
+                    gout4z += aij_cache[2] * gx[1600] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[512];
-                    Iz = gz[128];
-                    gout5x += ai2 * gx[64] * Iy * Iz;
-                    gout5y += ai2 * gy[576] * Ix * Iz;
-                    gout5z += (ai2 * gz[192] - 2 * gz[64]) * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1280];
+                    Iz = gx[1664];
+                    gout5x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout5y += aij_cache[2] * gx[1344] * Ix * Iz;
+                    gout5z += (aij_cache[2] * gx[1728] - 2 * gx[1600]) * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[384];
-                    Iz = gz[256];
-                    gout6x += ai2 * gx[64] * Iy * Iz;
-                    gout6y += (ai2 * gy[448] - 2 * gy[320]) * Ix * Iz;
-                    gout6z += ai2 * gz[320] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[1152];
+                    Iz = gx[1792];
+                    gout6x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout6y += (aij_cache[2] * gx[1216] - 2 * gx[1088]) * Ix * Iz;
+                    gout6z += aij_cache[2] * gx[1856] * Ix * Iy;
                     Ix = gx[64];
-                    Iy = gy[64];
-                    Iz = gz[512];
-                    gout7x += (ai2 * gx[128] - 1 * gx[0]) * Iy * Iz;
-                    gout7y += (ai2 * gy[128] - 1 * gy[0]) * Ix * Iz;
-                    gout7z += ai2 * gz[576] * Ix * Iy;
-                    ai2 = rjri[5];
+                    Iy = gx[832];
+                    Iz = gx[2048];
+                    gout7x += (aij_cache[2] * gx[128] - 1 * gx[0]) * Iy * Iz;
+                    gout7y += (aij_cache[2] * gx[896] - 1 * gx[768]) * Ix * Iz;
+                    gout7z += aij_cache[2] * gx[2112] * Ix * Iy;
                     Ix = gx[0];
-                    Iy = gy[0];
-                    Iz = gz[640];
-                    gout8x += ai2 * gx[64] * Iy * Iz;
-                    gout8y += ai2 * gy[64] * Ix * Iz;
-                    gout8z += (ai2 * gz[704] - 2 * gz[576]) * Ix * Iy;
+                    Iy = gx[768];
+                    Iz = gx[2176];
+                    gout8x += aij_cache[2] * gx[64] * Iy * Iz;
+                    gout8y += aij_cache[2] * gx[832] * Ix * Iz;
+                    gout8z += (aij_cache[2] * gx[2240] - 2 * gx[2112]) * Ix * Iy;
                     break;
                     }
                 }
             }
         }
         if (task_id < ntasks) {
+            int *ao_loc = envs.ao_loc;
+            int nao = ao_loc[nbas];
+            int i0 = ao_loc[ish];
+            int j0 = ao_loc[jsh];
+            int k0 = ao_loc[ksh];
+            int l0 = ao_loc[lsh];
             int ia = bas[ish*BAS_SLOTS+ATOM_OF] - jk.atom_offset;
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
@@ -39302,40 +38645,14 @@ void _rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             }
         }
     }
-}
-__global__
-static void rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH1;
-    extern __shared__ int batch_id[];
-    if (t_id == 0) {
-        batch_id[0] = atomicAdd(batch_head, 1);
+    if (thread_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.npairs_kl + QUEUE_DEPTH1 - 1) / QUEUE_DEPTH1;
-    int nbatches = bounds.npairs_ij * nbatches_kl;
-    while (batch_id[0] < nbatches) {
-        int batch_ij = batch_id[0] / nbatches_kl;
-        int batch_kl = batch_id[0] % nbatches_kl;
-        int ntasks = _fill_jk_tasks_s2kl(shl_quartet_idx, envs, jk, bounds,
-                                         batch_ij, batch_kl);
-        if (ntasks > 0) {
-            _rys_vjk_ip1_2200(envs, jk, bounds, shl_quartet_idx, ntasks);
-            __syncthreads();
-        }
-        if (t_id == 0) {
-            batch_id[0] = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                    ShellQuartet *pool, uint32_t *batch_head, int *scheme, int workers)
+int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *pool)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -39343,10 +38660,6 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     int ll = bounds->ll;
     int ijkl = li*125 + lj*25 + lk*5 + ll;
     int nroots = bounds->nroots;
-    int iprim = bounds->iprim;
-    int jprim = bounds->jprim;
-    int ij_prims = iprim * jprim;
-    int buflen = ij_prims*6;
     int nsq_per_block = 256;
     int gout_stride = 1;
 
@@ -39404,91 +38717,103 @@ int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     case 25: nsq_per_block *= 2; break;
     case 125: nsq_per_block *= 2; break;
     }
+#else
+    switch (ijkl) {
+    case 0: adjust_threads(rys_vjk_ip1_0000, nsq_per_block); break;
+    case 5: adjust_threads(rys_vjk_ip1_0010, nsq_per_block); break;
+    case 25: adjust_threads(rys_vjk_ip1_0100, nsq_per_block); break;
+    case 125: adjust_threads(rys_vjk_ip1_1000, nsq_per_block); break;
+    }
 #endif
 
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = pool + workers * QUEUE_DEPTH;
+    cudaMemset(head, 0, sizeof(int));
+
     dim3 threads(nsq_per_block, gout_stride);
-    buflen += nroots*2 * nsq_per_block;
+    int iprim = bounds->iprim;
+    int jprim = bounds->jprim;
+    int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0:
-        rys_vjk_ip1_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 5:
-        rys_vjk_ip1_0010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 6:
-        rys_vjk_ip1_0011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 10:
-        rys_vjk_ip1_0020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 11:
-        rys_vjk_ip1_0021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 12:
-        rys_vjk_ip1_0022<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0022<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 25:
-        rys_vjk_ip1_0100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 30:
-        rys_vjk_ip1_0110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 31:
-        rys_vjk_ip1_0111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 35:
-        rys_vjk_ip1_0120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 36:
-        buflen += 4992;
-        cudaFuncSetAttribute(rys_vjk_ip1_0121, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
-        rys_vjk_ip1_0121<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 5184;
+        rys_vjk_ip1_0121<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 50:
-        rys_vjk_ip1_0200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 55:
-        rys_vjk_ip1_0210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_0210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 56:
-        buflen += 4992;
-        cudaFuncSetAttribute(rys_vjk_ip1_0211, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
-        rys_vjk_ip1_0211<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 5184;
+        rys_vjk_ip1_0211<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 60:
-        buflen += 3840;
-        rys_vjk_ip1_0220<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 4032;
+        rys_vjk_ip1_0220<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 125:
-        rys_vjk_ip1_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 130:
-        rys_vjk_ip1_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 131:
-        rys_vjk_ip1_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 135:
-        rys_vjk_ip1_1020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_1020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 136:
-        buflen += 3840;
-        rys_vjk_ip1_1021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 4032;
+        rys_vjk_ip1_1021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 150:
-        rys_vjk_ip1_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 155:
-        rys_vjk_ip1_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 156:
-        buflen += 4992;
-        cudaFuncSetAttribute(rys_vjk_ip1_1111, cudaFuncAttributeMaxDynamicSharedMemorySize, buflen*sizeof(double));
-        rys_vjk_ip1_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 5184;
+        rys_vjk_ip1_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 160:
-        buflen += 3840;
-        rys_vjk_ip1_1120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 4032;
+        rys_vjk_ip1_1120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 175:
-        rys_vjk_ip1_1200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_1200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 180:
-        buflen += 3840;
-        rys_vjk_ip1_1210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 4032;
+        rys_vjk_ip1_1210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 250:
-        rys_vjk_ip1_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 255:
-        rys_vjk_ip1_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 256:
-        buflen += 3456;
-        rys_vjk_ip1_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 3648;
+        rys_vjk_ip1_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 260:
-        buflen += 2688;
-        rys_vjk_ip1_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 2880;
+        rys_vjk_ip1_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 275:
-        rys_vjk_ip1_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        rys_vjk_ip1_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 280:
-        buflen += 3456;
-        rys_vjk_ip1_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 3648;
+        rys_vjk_ip1_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     case 300:
-        buflen += 2688;
-        rys_vjk_ip1_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+        buflen += 2880;
+        rys_vjk_ip1_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     default: return 0;
     }
     return 1;

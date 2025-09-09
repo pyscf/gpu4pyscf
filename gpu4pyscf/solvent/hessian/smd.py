@@ -23,8 +23,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.solvent import smd
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
-from gpu4pyscf.hessian.jk import _ao2mo
-from gpu4pyscf.hessian.rhf import HessianBase
+from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
 
 def get_cds(smdobj):
     mol = smdobj.mol

@@ -53,7 +53,7 @@ libpbc.PBCsr_int3c2e_latsum23_init.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
-GOUT_WIDTH = 45
+GOUT_WIDTH = 54
 THREADS = 256
 PAGES_PER_BLOCK = 524288
 PAGE_SIZE = 32 * 4 # Bytes

@@ -45,8 +45,7 @@
 #define PI_FAC          34.98683665524972497
 
 
-#ifndef HAVE_DEFINED_INTENVVAS_H
-#define HAVE_DEFINED_INTENVVAS_H
+#pragma once
 typedef struct {
     uint16_t natm;
     uint16_t nbas;
@@ -60,8 +59,11 @@ typedef struct {
     double *vj;
     double *vk;
     double *dm;
-    uint16_t n_dm;
-    uint16_t atom_offset;
+    int n_dm;
+    int atom_offset;
+    double omega;
+    double lr_factor; // Long-range part of HF exchange
+    double sr_factor; // Song-range part of HF exchange
 } JKMatrix;
 
 typedef struct {
@@ -69,36 +71,50 @@ typedef struct {
     double *dm;
     double j_factor;
     double k_factor;
-    uint16_t n_dm;
+    int n_dm;
+    double omega;
+    double lr_factor;
+    double sr_factor;
 } JKEnergy;
 
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t ll;
-    uint8_t nfi;
-    uint8_t nfk;
-    uint8_t nfij;
-    uint8_t nfkl;
-    uint8_t nroots;
-    uint8_t stride_j;
-    uint8_t stride_k;
-    uint8_t stride_l;
-    uint8_t iprim;
-    uint8_t jprim;
-    uint8_t kprim;
-    uint8_t lprim;
-    union {int ntile_ij_pairs; int npairs_ij;};
-    union {int ntile_kl_pairs; int npairs_kl;};
-    union {int *tile_ij_mapping; int *pair_ij_mapping;};
-    union {int *tile_kl_mapping; int *pair_kl_mapping;};
+    int li;
+    int lj;
+    int lk;
+    int ll;
+    int nfi;
+    int nfj;
+    int nfk;
+    int nfl;
+    int nroots;
+    int stride_j;
+    int stride_k;
+    int stride_l;
+    int g_size;
+    int iprim;
+    int jprim;
+    int kprim;
+    int lprim;
+    int npairs_ij;
+    int npairs_kl;
+    int *pair_ij_mapping;
+    int *pair_kl_mapping;
     float *q_cond;
-    float *tile_q_cond;
     float *s_estimator;
     float *dm_cond;
     float cutoff;
+    int ntiles_i;
+    int ntiles_j;
+    int ntiles_k;
+    int ntiles_l;
 } BoundsInfo;
+
+typedef struct {
+    int8_t ioff;
+    int8_t joff;
+    int8_t koff;
+    int8_t loff;
+} GXYZOffset;
 
 typedef struct {
     uint16_t i;
@@ -119,12 +135,24 @@ typedef struct {
     uint8_t z;
     uint8_t fold2yz;
 } Fold3Index;
-#endif
 
 #ifdef __CUDACC__
-extern __constant__ int c_g_pair_idx[];
-extern __constant__ int c_g_pair_offsets[];
-//extern __constant__ double c_env[];
+__device__ __forceinline__ unsigned get_smid()
+{
+    unsigned smid;
+    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
+    return smid;
+}
+
+// to ensure that each SM only executes one block
+#define adjust_threads(kernel, threads) { \
+    cudaFuncAttributes attr; \
+    cudaFuncGetAttributes(&attr, kernel); \
+    if (attr.numRegs <= 128) threads *= 2; }
+
 extern __constant__ Fold2Index c_i_in_fold2idx[];
 extern __constant__ Fold3Index c_i_in_fold3idx[];
+
+extern __constant__ int _c_cartesian_lexical_xyz[];
+extern __constant__ GXYZOffset c_gxyz_offset[];
 #endif

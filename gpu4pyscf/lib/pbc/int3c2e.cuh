@@ -30,19 +30,19 @@
 #define PI_FAC          34.98683665524972497
 
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t nroots;
-    uint8_t nfij;
-    uint8_t nfk;
-    uint8_t kprim;
-    uint8_t stride_j;
-    uint8_t stride_k;
-    uint8_t g_size;
-    uint16_t naux;
-    uint16_t nksh;
-    uint16_t ksh0;
+    int li;
+    int lj;
+    int lk;
+    int nroots;
+    int nfij;
+    int nfk;
+    int kprim;
+    int stride_j;
+    int stride_k;
+    int g_size;
+    int naux;
+    int nksh;
+    int ksh0;
     int n_prim_pairs;
     int n_ctr_pairs;
     int *bas_ij_idx;

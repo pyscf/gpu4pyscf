@@ -282,8 +282,6 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     '''Splits l_ctr patterns into small groups with group_size the maximum
     number of AOs in each group
     '''
-    l = uniq_l_ctr[:,0]
-    nf = l * (l + 1) // 2
     _l_ctrs = []
     _l_ctr_counts = []
     for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):

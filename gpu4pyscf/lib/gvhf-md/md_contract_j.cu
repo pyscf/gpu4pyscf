@@ -43,7 +43,6 @@ __device__
 inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
                       int nsq_per_block, int gout_id, int gout_stride)
 {
-
     int offsets = l*(l+1)*(l+2)*(l+3)/24;
     uint16_t *p1 = c_Rt_idx + offsets - l;
     double *pout = out + nsq_per_block;
@@ -114,7 +113,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int lij = li + lj;
     int lkl = lk + ll;
     int order = lij + lkl;
-    int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
+    int nf3ijkl = bounds.nf3ijkl;
     int *bas = envs.bas;
     int *pair_ij_loc = bounds.pair_ij_loc;
     int *pair_kl_loc = bounds.pair_kl_loc;
@@ -122,16 +121,16 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *dm = jk.dm;
     double *vj = jk.vj;
-    int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
-    int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
+    int nf3ij = bounds.nf3ij;
+    int nf3kl = bounds.nf3kl;
 
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;
     extern __shared__ double vj_kl_cache[];
     double *Rq_cache = vj_kl_cache + nf3kl*bsizey;
-    double *Rp_cache = Rq_cache + bsizey*4;
-    double *dm_ij_cache = Rp_cache + threadsx*4;
-    double *gamma_inc = dm_ij_cache + nf3ij * threadsx;
+    double *Rp_cache = vj_kl_cache + bsizey*(4+nf3kl);
+    double *dm_ij_cache = vj_kl_cache + bsizey*(4+nf3kl) + threadsx*4;
+    double *gamma_inc = vj_kl_cache + bsizey*(4+nf3kl) + threadsx*(4+nf3ij);
     double *Rt_buf = gamma_inc + (order+1) * nsq_per_block;
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
@@ -420,14 +419,14 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int lij = li + lj;
     int lkl = lk + ll;
     int order = lij + lkl;
-    int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
+    int nf3ijkl = bounds.nf3ijkl;
     int *bas = envs.bas;
     int *pair_ij_loc = bounds.pair_ij_loc;
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
-    int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
+    int nf3ij = bounds.nf3ij;
+    int nf3kl = bounds.nf3kl;
 
     int npairs_ij = bounds.npairs_ij;
     int npairs_kl = bounds.npairs_kl;

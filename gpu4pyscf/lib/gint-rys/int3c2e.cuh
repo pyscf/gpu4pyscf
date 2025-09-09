@@ -31,23 +31,23 @@ typedef struct {
 } Int3c2eEnvVars;
 
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t nroots;
-    uint8_t nfi;
-    uint8_t nfij;
-    uint8_t nfk;
-    uint8_t iprim;
-    uint8_t jprim;
-    uint8_t kprim;
-    uint8_t stride_i;
-    uint8_t stride_j;
-    uint8_t stride_k;
-    uint8_t g_size;
-    uint16_t naux;
-    uint16_t nksh;
-    uint16_t ksh0;
+    int li;
+    int lj;
+    int lk;
+    int nroots;
+    int nfi;
+    int nfij;
+    int nfk;
+    int iprim;
+    int jprim;
+    int kprim;
+    int stride_i;
+    int stride_j;
+    int stride_k;
+    int g_size;
+    int naux;
+    int nksh;
+    int ksh0;
     int nshl_pair;
     // The effective basis pair Id = ish*nbas+jsh
     int *bas_ij_idx;

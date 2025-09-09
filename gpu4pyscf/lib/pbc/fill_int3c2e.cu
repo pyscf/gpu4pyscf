@@ -23,8 +23,7 @@
 #include "pbc.cuh"
 #include "int3c2e.cuh"
 
-// TODO: benchmark performance for 32, 38, 40, 45, 54
-#define GOUT_WIDTH      45
+#define GOUT_WIDTH      54
 
 __global__
 void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds)
@@ -71,7 +70,6 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
     double *img_coords = envs.img_coords;
     int *img_idx = bounds.img_idx;
     uint32_t *sp_img_offsets = bounds.img_offsets;
-    double omega = env[PTR_RANGE_OMEGA];
 
     int gx_len = g_size * nksp_per_block;
     extern __shared__ double rw_buffer[];
@@ -124,8 +122,7 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
 
-        for (int gout_start = 0; gout_start < nfij*nfk;
-             gout_start+=gout_stride*GOUT_WIDTH) {
+        for (int gout_start = 0; gout_start < nfij*nfk; gout_start+=gout_stride*GOUT_WIDTH) {
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
@@ -181,6 +178,7 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
                         double cijk = fac_ij * ck[kp];
                         gx[0] = cijk / (aij*ak*sqrt(aij+ak));
                     }
+                    double omega = env[PTR_RANGE_OMEGA];
                     double omega2 = omega * omega;
                     double theta_fac = omega2 / (omega2 + theta);
                     double theta_rr = theta * Rpq[3*nksp_per_block];

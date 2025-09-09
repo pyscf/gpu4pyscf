@@ -4,84 +4,99 @@
 #include "create_tasks.cu"
 
 
-__device__ static
-void _rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_0_0 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -106,12 +121,12 @@ void _rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -123,7 +138,8 @@ void _rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     gout_0_0 += fac * 1 * wt;
@@ -134,8 +150,6 @@ void _rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+0, gout_0_0*dm[kl_pair0+0]);
             atomicAdd(vj+kl_pair0+0, gout_0_0*dm[ij_pair0+0]);
@@ -143,135 +157,108 @@ void _rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_j_0_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_0_0(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_1_0 = 0.;
         double gout_2_0 = 0.;
         double gout_3_0 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -296,12 +283,12 @@ void _rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -313,19 +300,20 @@ void _rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     gout_1_0 += fac * 1 * trr_10z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     gout_2_0 += fac * trr_10y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_3_0 += trr_10x * 1 * wt;
                 }
@@ -335,8 +323,6 @@ void _rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+1, gout_1_0*dm[kl_pair0+0]);
             atomicAdd(vj+ij_pair0+2, gout_2_0*dm[kl_pair0+0]);
@@ -346,125 +332,101 @@ void _rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_j_1_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_1_0(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_1_1 = 0.;
         double gout_1_2 = 0.;
         double gout_1_3 = 0.;
@@ -474,13 +436,10 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double gout_3_1 = 0.;
         double gout_3_2 = 0.;
         double gout_3_3 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -505,12 +464,12 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -522,7 +481,8 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -531,7 +491,7 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double rt_akl = rt_aa * aij;
                     double cpz = zqc + zpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     gout_1_1 += fac * 1 * trr_11z;
@@ -541,14 +501,14 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double cpx = xqc + xpq*rt_akl;
                     double trr_01x = cpx * fac;
                     gout_1_3 += trr_01x * 1 * trr_10z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_01z = cpz * wt;
                     gout_2_1 += fac * trr_10y * trr_01z;
                     double trr_11y = cpy * trr_10y + 1*b00 * 1;
                     gout_2_2 += fac * trr_11y * wt;
                     gout_2_3 += trr_01x * trr_10y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_3_1 += trr_10x * 1 * trr_01z;
                     gout_3_2 += trr_10x * trr_01y * wt;
@@ -561,8 +521,6 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+1, gout_1_1*dm[kl_pair0+1] + gout_1_2*dm[kl_pair0+2] + gout_1_3*dm[kl_pair0+3]);
             atomicAdd(vj+ij_pair0+2, gout_2_1*dm[kl_pair0+1] + gout_2_2*dm[kl_pair0+2] + gout_2_3*dm[kl_pair0+3]);
@@ -574,125 +532,101 @@ void _rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_j_1_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_1_1(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_1_1 = 0.;
         double gout_1_2 = 0.;
         double gout_1_3 = 0.;
@@ -720,13 +654,10 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double gout_3_7 = 0.;
         double gout_3_8 = 0.;
         double gout_3_9 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -751,12 +682,12 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -768,7 +699,8 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -778,7 +710,7 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpz = zqc + zpq*rt_akl;
                     double rt_aij = rt_aa * akl;
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     gout_1_1 += fac * 1 * trr_11z;
@@ -798,7 +730,7 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout_1_8 += trr_01x * trr_01y * trr_10z;
                     double trr_02x = cpx * trr_01x + 1*b01 * fac;
                     gout_1_9 += trr_02x * 1 * trr_10z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     gout_2_1 += fac * trr_10y * trr_01z;
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
@@ -812,7 +744,7 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout_2_7 += trr_01x * trr_10y * trr_01z;
                     gout_2_8 += trr_01x * trr_11y * wt;
                     gout_2_9 += trr_02x * trr_10y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_3_1 += trr_10x * 1 * trr_01z;
                     gout_3_2 += trr_10x * 1 * trr_02z;
@@ -832,8 +764,6 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+1, gout_1_1*dm[kl_pair0+1] + gout_1_2*dm[kl_pair0+2] + gout_1_3*dm[kl_pair0+3] + gout_1_4*dm[kl_pair0+4] + gout_1_5*dm[kl_pair0+5] + gout_1_6*dm[kl_pair0+6] + gout_1_7*dm[kl_pair0+7] + gout_1_8*dm[kl_pair0+8] + gout_1_9*dm[kl_pair0+9]);
             atomicAdd(vj+ij_pair0+2, gout_2_1*dm[kl_pair0+1] + gout_2_2*dm[kl_pair0+2] + gout_2_3*dm[kl_pair0+3] + gout_2_4*dm[kl_pair0+4] + gout_2_5*dm[kl_pair0+5] + gout_2_6*dm[kl_pair0+6] + gout_2_7*dm[kl_pair0+7] + gout_2_8*dm[kl_pair0+8] + gout_2_9*dm[kl_pair0+9]);
@@ -851,121 +781,101 @@ void _rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-__global__
-static void rys_j_1_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_1_2(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_1_0 = 0.;
         double gout_2_0 = 0.;
         double gout_3_0 = 0.;
@@ -975,13 +885,10 @@ void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double gout_7_0 = 0.;
         double gout_8_0 = 0.;
         double gout_9_0 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -1006,12 +913,12 @@ void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -1023,25 +930,26 @@ void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     gout_1_0 += fac * 1 * trr_10z;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     gout_2_0 += fac * 1 * trr_20z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     gout_3_0 += fac * trr_10y * wt;
                     gout_4_0 += fac * trr_10y * trr_10z;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     gout_5_0 += fac * trr_20y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_6_0 += trr_10x * 1 * wt;
                     gout_7_0 += trr_10x * 1 * trr_10z;
@@ -1055,8 +963,6 @@ void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+1, gout_1_0*dm[kl_pair0+0]);
             atomicAdd(vj+ij_pair0+2, gout_2_0*dm[kl_pair0+0]);
@@ -1072,125 +978,101 @@ void _rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-#if CUDA_VERSION >= 12040
-__global__ __maxnreg__(128)
-#else
-__global__
-#endif
-static void rys_j_2_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_2_0(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_1_1 = 0.;
         double gout_1_2 = 0.;
         double gout_1_3 = 0.;
@@ -1218,13 +1100,10 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double gout_9_1 = 0.;
         double gout_9_2 = 0.;
         double gout_9_3 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -1249,12 +1128,12 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -1266,7 +1145,8 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -1276,7 +1156,7 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double cpz = zqc + zpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     gout_1_1 += fac * 1 * trr_11z;
@@ -1291,7 +1171,7 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout_2_1 += fac * 1 * trr_21z;
                     gout_2_2 += fac * trr_01y * trr_20z;
                     gout_2_3 += trr_01x * 1 * trr_20z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_01z = cpz * wt;
                     gout_3_1 += fac * trr_10y * trr_01z;
@@ -1306,7 +1186,7 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double trr_21y = cpy * trr_20y + 2*b00 * trr_10y;
                     gout_5_2 += fac * trr_21y * wt;
                     gout_5_3 += trr_01x * trr_20y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_6_1 += trr_10x * 1 * trr_01z;
                     gout_6_2 += trr_10x * trr_01y * wt;
@@ -1330,8 +1210,6 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+1, gout_1_1*dm[kl_pair0+1] + gout_1_2*dm[kl_pair0+2] + gout_1_3*dm[kl_pair0+3]);
             atomicAdd(vj+ij_pair0+2, gout_2_1*dm[kl_pair0+1] + gout_2_2*dm[kl_pair0+2] + gout_2_3*dm[kl_pair0+3]);
@@ -1349,131 +1227,102 @@ void _rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-__global__
-static void rys_j_2_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_2_1(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *dm_ij_cache = Rpa_cicj + iprim*jprim*TILE2*4;
-    double *rw = dm_ij_cache + 10*TILE2 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *dm_ij_cache = shared_memory + iprim*jprim;
+    double *rw = dm_ij_cache + 10 + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-    double *dm = jk.dm;
-    for (int n = sq_id; n < 10*TILE2; n += nsq_per_block) {
-        int m = n / TILE2;
-        int ij_sh = n % TILE2;
-        int ish = ish0 + ij_sh / TILE;
-        int jsh = jsh0 + ij_sh % TILE;
-        int ij_pair0 = pair_loc[ish*nbas+jsh];
-        dm_ij_cache[ij_sh+m*TILE2] = dm[ij_pair0+m];
-    }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double dm_kl_001 = dm[kl_pair0+1];
         double dm_kl_002 = dm[kl_pair0+2];
         double dm_kl_010 = dm[kl_pair0+3];
@@ -1501,13 +1350,10 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double vj_kl_101 = 0;
         double vj_kl_110 = 0;
         double vj_kl_200 = 0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -1532,12 +1378,12 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -1549,7 +1395,8 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -1557,37 +1404,37 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    double dot_lij_z_000 = trr_10z * dm_ij_cache[sh_ij+1*TILE2] + trr_20z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_000 = trr_10z * dm_ij_cache[1] + trr_20z * dm_ij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    double dot_lij_z_001 = trr_11z * dm_ij_cache[sh_ij+1*TILE2] + trr_21z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_001 = trr_11z * dm_ij_cache[1] + trr_21z * dm_ij_cache[2];
                     double trr_01z = cpz * wt;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    double dot_lij_z_002 = trr_12z * dm_ij_cache[sh_ij+1*TILE2] + trr_22z * dm_ij_cache[sh_ij+2*TILE2];
-                    double dot_lij_z_010 = wt * dm_ij_cache[sh_ij+3*TILE2] + trr_10z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_011 = trr_01z * dm_ij_cache[sh_ij+3*TILE2] + trr_11z * dm_ij_cache[sh_ij+4*TILE2];
+                    double dot_lij_z_002 = trr_12z * dm_ij_cache[1] + trr_22z * dm_ij_cache[2];
+                    double dot_lij_z_010 = wt * dm_ij_cache[3] + trr_10z * dm_ij_cache[4];
+                    double dot_lij_z_011 = trr_01z * dm_ij_cache[3] + trr_11z * dm_ij_cache[4];
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                    double dot_lij_z_012 = trr_02z * dm_ij_cache[sh_ij+3*TILE2] + trr_12z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_020 = wt * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_021 = trr_01z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_022 = trr_02z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_100 = wt * dm_ij_cache[sh_ij+6*TILE2] + trr_10z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_101 = trr_01z * dm_ij_cache[sh_ij+6*TILE2] + trr_11z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_102 = trr_02z * dm_ij_cache[sh_ij+6*TILE2] + trr_12z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_110 = wt * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_111 = trr_01z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_112 = trr_02z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_200 = wt * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_201 = trr_01z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_202 = trr_02z * dm_ij_cache[sh_ij+9*TILE2];
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double dot_lij_z_012 = trr_02z * dm_ij_cache[3] + trr_12z * dm_ij_cache[4];
+                    double dot_lij_z_020 = wt * dm_ij_cache[5];
+                    double dot_lij_z_021 = trr_01z * dm_ij_cache[5];
+                    double dot_lij_z_022 = trr_02z * dm_ij_cache[5];
+                    double dot_lij_z_100 = wt * dm_ij_cache[6] + trr_10z * dm_ij_cache[7];
+                    double dot_lij_z_101 = trr_01z * dm_ij_cache[6] + trr_11z * dm_ij_cache[7];
+                    double dot_lij_z_102 = trr_02z * dm_ij_cache[6] + trr_12z * dm_ij_cache[7];
+                    double dot_lij_z_110 = wt * dm_ij_cache[8];
+                    double dot_lij_z_111 = trr_01z * dm_ij_cache[8];
+                    double dot_lij_z_112 = trr_02z * dm_ij_cache[8];
+                    double dot_lij_z_200 = wt * dm_ij_cache[9];
+                    double dot_lij_z_201 = trr_01z * dm_ij_cache[9];
+                    double dot_lij_z_202 = trr_02z * dm_ij_cache[9];
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double dot_lij_y_000 = 1 * dot_lij_z_000 + trr_10y * dot_lij_z_010 + trr_20y * dot_lij_z_020;
@@ -1615,7 +1462,7 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double dot_lij_y_210 = trr_01y * dot_lij_z_200;
                     double dot_lij_y_211 = trr_01y * dot_lij_z_201;
                     double dot_lij_y_220 = trr_02y * dot_lij_z_200;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     double trr_20x = c0x * trr_10x + 1*b10 * fac;
                     vj_kl_001 += fac * dot_lij_y_001 + trr_10x * dot_lij_y_101 + trr_20x * dot_lij_y_201;
@@ -1685,7 +1532,6 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_id >= ntasks) {
             continue;
         }
-        double *vj = jk.vj;
         atomicAdd(vj+ij_pair0+1, vj_ij_001);
         atomicAdd(vj+ij_pair0+2, vj_ij_002);
         atomicAdd(vj+ij_pair0+3, vj_ij_010);
@@ -1705,131 +1551,102 @@ void _rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         atomicAdd(vj+kl_pair0+8, vj_kl_110);
         atomicAdd(vj+kl_pair0+9, vj_kl_200);
     }
-}
-__global__
-static void rys_j_2_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_2_2(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *dm_ij_cache = Rpa_cicj + iprim*jprim*TILE2*4;
-    double *rw = dm_ij_cache + 10*TILE2 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *dm_ij_cache = shared_memory + iprim*jprim;
+    double *rw = dm_ij_cache + 10 + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-    double *dm = jk.dm;
-    for (int n = sq_id; n < 10*TILE2; n += nsq_per_block) {
-        int m = n / TILE2;
-        int ij_sh = n % TILE2;
-        int ish = ish0 + ij_sh / TILE;
-        int jsh = jsh0 + ij_sh % TILE;
-        int ij_pair0 = pair_loc[ish*nbas+jsh];
-        dm_ij_cache[ij_sh+m*TILE2] = dm[ij_pair0+m];
-    }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double dm_kl_002 = dm[kl_pair0+2];
         double dm_kl_003 = dm[kl_pair0+3];
         double dm_kl_011 = dm[kl_pair0+5];
@@ -1871,13 +1688,10 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double vj_kl_201 = 0;
         double vj_kl_210 = 0;
         double vj_kl_300 = 0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -1902,12 +1716,12 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -1919,7 +1733,8 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -1927,46 +1742,46 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    double dot_lij_z_000 = trr_10z * dm_ij_cache[sh_ij+1*TILE2] + trr_20z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_000 = trr_10z * dm_ij_cache[1] + trr_20z * dm_ij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    double dot_lij_z_001 = trr_11z * dm_ij_cache[sh_ij+1*TILE2] + trr_21z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_001 = trr_11z * dm_ij_cache[1] + trr_21z * dm_ij_cache[2];
                     double trr_01z = cpz * wt;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    double dot_lij_z_002 = trr_12z * dm_ij_cache[sh_ij+1*TILE2] + trr_22z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_002 = trr_12z * dm_ij_cache[1] + trr_22z * dm_ij_cache[2];
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
                     double trr_23z = cpz * trr_22z + 2*b01 * trr_21z + 2*b00 * trr_12z;
-                    double dot_lij_z_003 = trr_13z * dm_ij_cache[sh_ij+1*TILE2] + trr_23z * dm_ij_cache[sh_ij+2*TILE2];
-                    double dot_lij_z_010 = wt * dm_ij_cache[sh_ij+3*TILE2] + trr_10z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_011 = trr_01z * dm_ij_cache[sh_ij+3*TILE2] + trr_11z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_012 = trr_02z * dm_ij_cache[sh_ij+3*TILE2] + trr_12z * dm_ij_cache[sh_ij+4*TILE2];
+                    double dot_lij_z_003 = trr_13z * dm_ij_cache[1] + trr_23z * dm_ij_cache[2];
+                    double dot_lij_z_010 = wt * dm_ij_cache[3] + trr_10z * dm_ij_cache[4];
+                    double dot_lij_z_011 = trr_01z * dm_ij_cache[3] + trr_11z * dm_ij_cache[4];
+                    double dot_lij_z_012 = trr_02z * dm_ij_cache[3] + trr_12z * dm_ij_cache[4];
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
-                    double dot_lij_z_013 = trr_03z * dm_ij_cache[sh_ij+3*TILE2] + trr_13z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_020 = wt * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_021 = trr_01z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_022 = trr_02z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_023 = trr_03z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_100 = wt * dm_ij_cache[sh_ij+6*TILE2] + trr_10z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_101 = trr_01z * dm_ij_cache[sh_ij+6*TILE2] + trr_11z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_102 = trr_02z * dm_ij_cache[sh_ij+6*TILE2] + trr_12z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_103 = trr_03z * dm_ij_cache[sh_ij+6*TILE2] + trr_13z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_110 = wt * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_111 = trr_01z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_112 = trr_02z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_113 = trr_03z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_200 = wt * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_201 = trr_01z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_202 = trr_02z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_203 = trr_03z * dm_ij_cache[sh_ij+9*TILE2];
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double dot_lij_z_013 = trr_03z * dm_ij_cache[3] + trr_13z * dm_ij_cache[4];
+                    double dot_lij_z_020 = wt * dm_ij_cache[5];
+                    double dot_lij_z_021 = trr_01z * dm_ij_cache[5];
+                    double dot_lij_z_022 = trr_02z * dm_ij_cache[5];
+                    double dot_lij_z_023 = trr_03z * dm_ij_cache[5];
+                    double dot_lij_z_100 = wt * dm_ij_cache[6] + trr_10z * dm_ij_cache[7];
+                    double dot_lij_z_101 = trr_01z * dm_ij_cache[6] + trr_11z * dm_ij_cache[7];
+                    double dot_lij_z_102 = trr_02z * dm_ij_cache[6] + trr_12z * dm_ij_cache[7];
+                    double dot_lij_z_103 = trr_03z * dm_ij_cache[6] + trr_13z * dm_ij_cache[7];
+                    double dot_lij_z_110 = wt * dm_ij_cache[8];
+                    double dot_lij_z_111 = trr_01z * dm_ij_cache[8];
+                    double dot_lij_z_112 = trr_02z * dm_ij_cache[8];
+                    double dot_lij_z_113 = trr_03z * dm_ij_cache[8];
+                    double dot_lij_z_200 = wt * dm_ij_cache[9];
+                    double dot_lij_z_201 = trr_01z * dm_ij_cache[9];
+                    double dot_lij_z_202 = trr_02z * dm_ij_cache[9];
+                    double dot_lij_z_203 = trr_03z * dm_ij_cache[9];
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double dot_lij_y_000 = 1 * dot_lij_z_000 + trr_10y * dot_lij_z_010 + trr_20y * dot_lij_z_020;
@@ -2009,7 +1824,7 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double dot_lij_y_220 = trr_02y * dot_lij_z_200;
                     double dot_lij_y_221 = trr_02y * dot_lij_z_201;
                     double dot_lij_y_230 = trr_03y * dot_lij_z_200;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     double trr_20x = c0x * trr_10x + 1*b10 * fac;
                     vj_kl_002 += fac * dot_lij_y_002 + trr_10x * dot_lij_y_102 + trr_20x * dot_lij_y_202;
@@ -2107,7 +1922,6 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_id >= ntasks) {
             continue;
         }
-        double *vj = jk.vj;
         atomicAdd(vj+ij_pair0+1, vj_ij_001);
         atomicAdd(vj+ij_pair0+2, vj_ij_002);
         atomicAdd(vj+ij_pair0+3, vj_ij_010);
@@ -2134,131 +1948,102 @@ void _rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         atomicAdd(vj+kl_pair0+18, vj_kl_210);
         atomicAdd(vj+kl_pair0+19, vj_kl_300);
     }
-}
-__global__
-static void rys_j_2_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_2_3(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *dm_ij_cache = Rpa_cicj + iprim*jprim*TILE2*4;
-    double *rw = dm_ij_cache + 10*TILE2 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *dm_ij_cache = shared_memory + iprim*jprim;
+    double *rw = dm_ij_cache + 10 + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-    double *dm = jk.dm;
-    for (int n = sq_id; n < 10*TILE2; n += nsq_per_block) {
-        int m = n / TILE2;
-        int ij_sh = n % TILE2;
-        int ish = ish0 + ij_sh / TILE;
-        int jsh = jsh0 + ij_sh % TILE;
-        int ij_pair0 = pair_loc[ish*nbas+jsh];
-        dm_ij_cache[ij_sh+m*TILE2] = dm[ij_pair0+m];
-    }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double dm_kl_002 = dm[kl_pair0+2];
         double dm_kl_003 = dm[kl_pair0+3];
         double dm_kl_004 = dm[kl_pair0+4];
@@ -2330,13 +2115,10 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double vj_kl_301 = 0;
         double vj_kl_310 = 0;
         double vj_kl_400 = 0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -2361,12 +2143,12 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -2378,7 +2160,8 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -2386,55 +2169,55 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
-                    double dot_lij_z_000 = trr_10z * dm_ij_cache[sh_ij+1*TILE2] + trr_20z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_000 = trr_10z * dm_ij_cache[1] + trr_20z * dm_ij_cache[2];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpz = zqc + zpq*rt_akl;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
-                    double dot_lij_z_001 = trr_11z * dm_ij_cache[sh_ij+1*TILE2] + trr_21z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_001 = trr_11z * dm_ij_cache[1] + trr_21z * dm_ij_cache[2];
                     double trr_01z = cpz * wt;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
-                    double dot_lij_z_002 = trr_12z * dm_ij_cache[sh_ij+1*TILE2] + trr_22z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_002 = trr_12z * dm_ij_cache[1] + trr_22z * dm_ij_cache[2];
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
                     double trr_23z = cpz * trr_22z + 2*b01 * trr_21z + 2*b00 * trr_12z;
-                    double dot_lij_z_003 = trr_13z * dm_ij_cache[sh_ij+1*TILE2] + trr_23z * dm_ij_cache[sh_ij+2*TILE2];
+                    double dot_lij_z_003 = trr_13z * dm_ij_cache[1] + trr_23z * dm_ij_cache[2];
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
                     double trr_14z = cpz * trr_13z + 3*b01 * trr_12z + 1*b00 * trr_03z;
                     double trr_24z = cpz * trr_23z + 3*b01 * trr_22z + 2*b00 * trr_13z;
-                    double dot_lij_z_004 = trr_14z * dm_ij_cache[sh_ij+1*TILE2] + trr_24z * dm_ij_cache[sh_ij+2*TILE2];
-                    double dot_lij_z_010 = wt * dm_ij_cache[sh_ij+3*TILE2] + trr_10z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_011 = trr_01z * dm_ij_cache[sh_ij+3*TILE2] + trr_11z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_012 = trr_02z * dm_ij_cache[sh_ij+3*TILE2] + trr_12z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_013 = trr_03z * dm_ij_cache[sh_ij+3*TILE2] + trr_13z * dm_ij_cache[sh_ij+4*TILE2];
+                    double dot_lij_z_004 = trr_14z * dm_ij_cache[1] + trr_24z * dm_ij_cache[2];
+                    double dot_lij_z_010 = wt * dm_ij_cache[3] + trr_10z * dm_ij_cache[4];
+                    double dot_lij_z_011 = trr_01z * dm_ij_cache[3] + trr_11z * dm_ij_cache[4];
+                    double dot_lij_z_012 = trr_02z * dm_ij_cache[3] + trr_12z * dm_ij_cache[4];
+                    double dot_lij_z_013 = trr_03z * dm_ij_cache[3] + trr_13z * dm_ij_cache[4];
                     double trr_04z = cpz * trr_03z + 3*b01 * trr_02z;
-                    double dot_lij_z_014 = trr_04z * dm_ij_cache[sh_ij+3*TILE2] + trr_14z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_020 = wt * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_021 = trr_01z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_022 = trr_02z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_023 = trr_03z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_024 = trr_04z * dm_ij_cache[sh_ij+5*TILE2];
-                    double dot_lij_z_100 = wt * dm_ij_cache[sh_ij+6*TILE2] + trr_10z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_101 = trr_01z * dm_ij_cache[sh_ij+6*TILE2] + trr_11z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_102 = trr_02z * dm_ij_cache[sh_ij+6*TILE2] + trr_12z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_103 = trr_03z * dm_ij_cache[sh_ij+6*TILE2] + trr_13z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_104 = trr_04z * dm_ij_cache[sh_ij+6*TILE2] + trr_14z * dm_ij_cache[sh_ij+7*TILE2];
-                    double dot_lij_z_110 = wt * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_111 = trr_01z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_112 = trr_02z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_113 = trr_03z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_114 = trr_04z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_200 = wt * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_201 = trr_01z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_202 = trr_02z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_203 = trr_03z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_204 = trr_04z * dm_ij_cache[sh_ij+9*TILE2];
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double dot_lij_z_014 = trr_04z * dm_ij_cache[3] + trr_14z * dm_ij_cache[4];
+                    double dot_lij_z_020 = wt * dm_ij_cache[5];
+                    double dot_lij_z_021 = trr_01z * dm_ij_cache[5];
+                    double dot_lij_z_022 = trr_02z * dm_ij_cache[5];
+                    double dot_lij_z_023 = trr_03z * dm_ij_cache[5];
+                    double dot_lij_z_024 = trr_04z * dm_ij_cache[5];
+                    double dot_lij_z_100 = wt * dm_ij_cache[6] + trr_10z * dm_ij_cache[7];
+                    double dot_lij_z_101 = trr_01z * dm_ij_cache[6] + trr_11z * dm_ij_cache[7];
+                    double dot_lij_z_102 = trr_02z * dm_ij_cache[6] + trr_12z * dm_ij_cache[7];
+                    double dot_lij_z_103 = trr_03z * dm_ij_cache[6] + trr_13z * dm_ij_cache[7];
+                    double dot_lij_z_104 = trr_04z * dm_ij_cache[6] + trr_14z * dm_ij_cache[7];
+                    double dot_lij_z_110 = wt * dm_ij_cache[8];
+                    double dot_lij_z_111 = trr_01z * dm_ij_cache[8];
+                    double dot_lij_z_112 = trr_02z * dm_ij_cache[8];
+                    double dot_lij_z_113 = trr_03z * dm_ij_cache[8];
+                    double dot_lij_z_114 = trr_04z * dm_ij_cache[8];
+                    double dot_lij_z_200 = wt * dm_ij_cache[9];
+                    double dot_lij_z_201 = trr_01z * dm_ij_cache[9];
+                    double dot_lij_z_202 = trr_02z * dm_ij_cache[9];
+                    double dot_lij_z_203 = trr_03z * dm_ij_cache[9];
+                    double dot_lij_z_204 = trr_04z * dm_ij_cache[9];
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double dot_lij_y_000 = 1 * dot_lij_z_000 + trr_10y * dot_lij_z_010 + trr_20y * dot_lij_z_020;
@@ -2495,7 +2278,7 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double dot_lij_y_230 = trr_03y * dot_lij_z_200;
                     double dot_lij_y_231 = trr_03y * dot_lij_z_201;
                     double dot_lij_y_240 = trr_04y * dot_lij_z_200;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     double trr_20x = c0x * trr_10x + 1*b10 * fac;
                     vj_kl_002 += fac * dot_lij_y_002 + trr_10x * dot_lij_y_102 + trr_20x * dot_lij_y_202;
@@ -2632,7 +2415,6 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_id >= ntasks) {
             continue;
         }
-        double *vj = jk.vj;
         atomicAdd(vj+ij_pair0+1, vj_ij_001);
         atomicAdd(vj+ij_pair0+2, vj_ij_002);
         atomicAdd(vj+ij_pair0+3, vj_ij_010);
@@ -2674,121 +2456,101 @@ void _rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         atomicAdd(vj+kl_pair0+33, vj_kl_310);
         atomicAdd(vj+kl_pair0+34, vj_kl_400);
     }
-}
-__global__
-static void rys_j_2_4(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_2_4(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_2_0 = 0.;
         double gout_3_0 = 0.;
         double gout_5_0 = 0.;
@@ -2805,13 +2567,10 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double gout_17_0 = 0.;
         double gout_18_0 = 0.;
         double gout_19_0 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -2836,12 +2595,12 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -2853,20 +2612,21 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     gout_2_0 += fac * 1 * trr_20z;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     gout_3_0 += fac * 1 * trr_30z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     gout_5_0 += fac * trr_10y * trr_10z;
                     gout_6_0 += fac * trr_10y * trr_20z;
@@ -2875,7 +2635,7 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout_8_0 += fac * trr_20y * trr_10z;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
                     gout_9_0 += fac * trr_30y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_11_0 += trr_10x * 1 * trr_10z;
                     gout_12_0 += trr_10x * 1 * trr_20z;
@@ -2895,8 +2655,6 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+2, gout_2_0*dm[kl_pair0+0]);
             atomicAdd(vj+ij_pair0+3, gout_3_0*dm[kl_pair0+0]);
@@ -2919,121 +2677,101 @@ void _rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-__global__
-static void rys_j_3_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_3_0(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_2_1 = 0.;
         double gout_2_2 = 0.;
         double gout_2_3 = 0.;
@@ -3082,13 +2820,10 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double gout_19_1 = 0.;
         double gout_19_2 = 0.;
         double gout_19_3 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -3113,12 +2848,12 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -3130,7 +2865,8 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -3140,7 +2876,7 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double cpz = zqc + zpq*rt_akl;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
@@ -3156,7 +2892,7 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout_3_1 += fac * 1 * trr_31z;
                     gout_3_2 += fac * trr_01y * trr_30z;
                     gout_3_3 += trr_01x * 1 * trr_30z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     gout_5_1 += fac * trr_10y * trr_11z;
@@ -3180,7 +2916,7 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double trr_31y = cpy * trr_30y + 3*b00 * trr_20y;
                     gout_9_2 += fac * trr_31y * wt;
                     gout_9_3 += trr_01x * trr_30y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_11_1 += trr_10x * 1 * trr_11z;
                     gout_11_2 += trr_10x * trr_01y * trr_10z;
@@ -3221,8 +2957,6 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+2, gout_2_1*dm[kl_pair0+1] + gout_2_2*dm[kl_pair0+2] + gout_2_3*dm[kl_pair0+3]);
             atomicAdd(vj+ij_pair0+3, gout_3_1*dm[kl_pair0+1] + gout_3_2*dm[kl_pair0+2] + gout_3_3*dm[kl_pair0+3]);
@@ -3247,131 +2981,102 @@ void _rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-__global__
-static void rys_j_3_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_3_1(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *dm_ij_cache = Rpa_cicj + iprim*jprim*TILE2*4;
-    double *rw = dm_ij_cache + 20*TILE2 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *dm_ij_cache = shared_memory + iprim*jprim;
+    double *rw = dm_ij_cache + 20 + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-    double *dm = jk.dm;
-    for (int n = sq_id; n < 20*TILE2; n += nsq_per_block) {
-        int m = n / TILE2;
-        int ij_sh = n % TILE2;
-        int ish = ish0 + ij_sh / TILE;
-        int jsh = jsh0 + ij_sh % TILE;
-        int ij_pair0 = pair_loc[ish*nbas+jsh];
-        dm_ij_cache[ij_sh+m*TILE2] = dm[ij_pair0+m];
-    }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double dm_kl_001 = dm[kl_pair0+1];
         double dm_kl_002 = dm[kl_pair0+2];
         double dm_kl_010 = dm[kl_pair0+3];
@@ -3406,13 +3111,10 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double vj_kl_101 = 0;
         double vj_kl_110 = 0;
         double vj_kl_200 = 0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -3437,12 +3139,12 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -3454,7 +3156,8 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -3462,52 +3165,52 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    double dot_lij_z_000 = trr_20z * dm_ij_cache[sh_ij+2*TILE2] + trr_30z * dm_ij_cache[sh_ij+3*TILE2];
+                    double dot_lij_z_000 = trr_20z * dm_ij_cache[2] + trr_30z * dm_ij_cache[3];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpz = zqc + zpq*rt_akl;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
-                    double dot_lij_z_001 = trr_21z * dm_ij_cache[sh_ij+2*TILE2] + trr_31z * dm_ij_cache[sh_ij+3*TILE2];
+                    double dot_lij_z_001 = trr_21z * dm_ij_cache[2] + trr_31z * dm_ij_cache[3];
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
-                    double dot_lij_z_002 = trr_22z * dm_ij_cache[sh_ij+2*TILE2] + trr_32z * dm_ij_cache[sh_ij+3*TILE2];
-                    double dot_lij_z_010 = trr_10z * dm_ij_cache[sh_ij+5*TILE2] + trr_20z * dm_ij_cache[sh_ij+6*TILE2];
-                    double dot_lij_z_011 = trr_11z * dm_ij_cache[sh_ij+5*TILE2] + trr_21z * dm_ij_cache[sh_ij+6*TILE2];
+                    double dot_lij_z_002 = trr_22z * dm_ij_cache[2] + trr_32z * dm_ij_cache[3];
+                    double dot_lij_z_010 = trr_10z * dm_ij_cache[5] + trr_20z * dm_ij_cache[6];
+                    double dot_lij_z_011 = trr_11z * dm_ij_cache[5] + trr_21z * dm_ij_cache[6];
                     double trr_01z = cpz * wt;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    double dot_lij_z_012 = trr_12z * dm_ij_cache[sh_ij+5*TILE2] + trr_22z * dm_ij_cache[sh_ij+6*TILE2];
-                    double dot_lij_z_020 = wt * dm_ij_cache[sh_ij+7*TILE2] + trr_10z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_021 = trr_01z * dm_ij_cache[sh_ij+7*TILE2] + trr_11z * dm_ij_cache[sh_ij+8*TILE2];
+                    double dot_lij_z_012 = trr_12z * dm_ij_cache[5] + trr_22z * dm_ij_cache[6];
+                    double dot_lij_z_020 = wt * dm_ij_cache[7] + trr_10z * dm_ij_cache[8];
+                    double dot_lij_z_021 = trr_01z * dm_ij_cache[7] + trr_11z * dm_ij_cache[8];
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                    double dot_lij_z_022 = trr_02z * dm_ij_cache[sh_ij+7*TILE2] + trr_12z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_030 = wt * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_031 = trr_01z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_032 = trr_02z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_100 = trr_10z * dm_ij_cache[sh_ij+11*TILE2] + trr_20z * dm_ij_cache[sh_ij+12*TILE2];
-                    double dot_lij_z_101 = trr_11z * dm_ij_cache[sh_ij+11*TILE2] + trr_21z * dm_ij_cache[sh_ij+12*TILE2];
-                    double dot_lij_z_102 = trr_12z * dm_ij_cache[sh_ij+11*TILE2] + trr_22z * dm_ij_cache[sh_ij+12*TILE2];
-                    double dot_lij_z_110 = wt * dm_ij_cache[sh_ij+13*TILE2] + trr_10z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_111 = trr_01z * dm_ij_cache[sh_ij+13*TILE2] + trr_11z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_112 = trr_02z * dm_ij_cache[sh_ij+13*TILE2] + trr_12z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_120 = wt * dm_ij_cache[sh_ij+15*TILE2];
-                    double dot_lij_z_121 = trr_01z * dm_ij_cache[sh_ij+15*TILE2];
-                    double dot_lij_z_122 = trr_02z * dm_ij_cache[sh_ij+15*TILE2];
-                    double dot_lij_z_200 = wt * dm_ij_cache[sh_ij+16*TILE2] + trr_10z * dm_ij_cache[sh_ij+17*TILE2];
-                    double dot_lij_z_201 = trr_01z * dm_ij_cache[sh_ij+16*TILE2] + trr_11z * dm_ij_cache[sh_ij+17*TILE2];
-                    double dot_lij_z_202 = trr_02z * dm_ij_cache[sh_ij+16*TILE2] + trr_12z * dm_ij_cache[sh_ij+17*TILE2];
-                    double dot_lij_z_210 = wt * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_211 = trr_01z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_212 = trr_02z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_300 = wt * dm_ij_cache[sh_ij+19*TILE2];
-                    double dot_lij_z_301 = trr_01z * dm_ij_cache[sh_ij+19*TILE2];
-                    double dot_lij_z_302 = trr_02z * dm_ij_cache[sh_ij+19*TILE2];
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double dot_lij_z_022 = trr_02z * dm_ij_cache[7] + trr_12z * dm_ij_cache[8];
+                    double dot_lij_z_030 = wt * dm_ij_cache[9];
+                    double dot_lij_z_031 = trr_01z * dm_ij_cache[9];
+                    double dot_lij_z_032 = trr_02z * dm_ij_cache[9];
+                    double dot_lij_z_100 = trr_10z * dm_ij_cache[11] + trr_20z * dm_ij_cache[12];
+                    double dot_lij_z_101 = trr_11z * dm_ij_cache[11] + trr_21z * dm_ij_cache[12];
+                    double dot_lij_z_102 = trr_12z * dm_ij_cache[11] + trr_22z * dm_ij_cache[12];
+                    double dot_lij_z_110 = wt * dm_ij_cache[13] + trr_10z * dm_ij_cache[14];
+                    double dot_lij_z_111 = trr_01z * dm_ij_cache[13] + trr_11z * dm_ij_cache[14];
+                    double dot_lij_z_112 = trr_02z * dm_ij_cache[13] + trr_12z * dm_ij_cache[14];
+                    double dot_lij_z_120 = wt * dm_ij_cache[15];
+                    double dot_lij_z_121 = trr_01z * dm_ij_cache[15];
+                    double dot_lij_z_122 = trr_02z * dm_ij_cache[15];
+                    double dot_lij_z_200 = wt * dm_ij_cache[16] + trr_10z * dm_ij_cache[17];
+                    double dot_lij_z_201 = trr_01z * dm_ij_cache[16] + trr_11z * dm_ij_cache[17];
+                    double dot_lij_z_202 = trr_02z * dm_ij_cache[16] + trr_12z * dm_ij_cache[17];
+                    double dot_lij_z_210 = wt * dm_ij_cache[18];
+                    double dot_lij_z_211 = trr_01z * dm_ij_cache[18];
+                    double dot_lij_z_212 = trr_02z * dm_ij_cache[18];
+                    double dot_lij_z_300 = wt * dm_ij_cache[19];
+                    double dot_lij_z_301 = trr_01z * dm_ij_cache[19];
+                    double dot_lij_z_302 = trr_02z * dm_ij_cache[19];
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
@@ -3544,7 +3247,7 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double dot_lij_y_310 = trr_01y * dot_lij_z_300;
                     double dot_lij_y_311 = trr_01y * dot_lij_z_301;
                     double dot_lij_y_320 = trr_02y * dot_lij_z_300;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     double trr_20x = c0x * trr_10x + 1*b10 * fac;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
@@ -3642,7 +3345,6 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_id >= ntasks) {
             continue;
         }
-        double *vj = jk.vj;
         atomicAdd(vj+ij_pair0+2, vj_ij_002);
         atomicAdd(vj+ij_pair0+3, vj_ij_003);
         atomicAdd(vj+ij_pair0+5, vj_ij_011);
@@ -3669,131 +3371,102 @@ void _rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         atomicAdd(vj+kl_pair0+8, vj_kl_110);
         atomicAdd(vj+kl_pair0+9, vj_kl_200);
     }
-}
-__global__
-static void rys_j_3_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_3_2(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *dm_ij_cache = Rpa_cicj + iprim*jprim*TILE2*4;
-    double *rw = dm_ij_cache + 20*TILE2 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *dm_ij_cache = shared_memory + iprim*jprim;
+    double *rw = dm_ij_cache + 20 + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-    double *dm = jk.dm;
-    for (int n = sq_id; n < 20*TILE2; n += nsq_per_block) {
-        int m = n / TILE2;
-        int ij_sh = n % TILE2;
-        int ish = ish0 + ij_sh / TILE;
-        int jsh = jsh0 + ij_sh % TILE;
-        int ij_pair0 = pair_loc[ish*nbas+jsh];
-        dm_ij_cache[ij_sh+m*TILE2] = dm[ij_pair0+m];
-    }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double dm_kl_002 = dm[kl_pair0+2];
         double dm_kl_003 = dm[kl_pair0+3];
         double dm_kl_011 = dm[kl_pair0+5];
@@ -3842,13 +3515,10 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double vj_kl_201 = 0;
         double vj_kl_210 = 0;
         double vj_kl_300 = 0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -3873,12 +3543,12 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -3890,7 +3560,8 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -3898,66 +3569,66 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
-                    double dot_lij_z_000 = trr_20z * dm_ij_cache[sh_ij+2*TILE2] + trr_30z * dm_ij_cache[sh_ij+3*TILE2];
+                    double dot_lij_z_000 = trr_20z * dm_ij_cache[2] + trr_30z * dm_ij_cache[3];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpz = zqc + zpq*rt_akl;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
-                    double dot_lij_z_001 = trr_21z * dm_ij_cache[sh_ij+2*TILE2] + trr_31z * dm_ij_cache[sh_ij+3*TILE2];
+                    double dot_lij_z_001 = trr_21z * dm_ij_cache[2] + trr_31z * dm_ij_cache[3];
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
-                    double dot_lij_z_002 = trr_22z * dm_ij_cache[sh_ij+2*TILE2] + trr_32z * dm_ij_cache[sh_ij+3*TILE2];
+                    double dot_lij_z_002 = trr_22z * dm_ij_cache[2] + trr_32z * dm_ij_cache[3];
                     double trr_01z = cpz * wt;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
                     double trr_23z = cpz * trr_22z + 2*b01 * trr_21z + 2*b00 * trr_12z;
                     double trr_33z = cpz * trr_32z + 2*b01 * trr_31z + 3*b00 * trr_22z;
-                    double dot_lij_z_003 = trr_23z * dm_ij_cache[sh_ij+2*TILE2] + trr_33z * dm_ij_cache[sh_ij+3*TILE2];
-                    double dot_lij_z_010 = trr_10z * dm_ij_cache[sh_ij+5*TILE2] + trr_20z * dm_ij_cache[sh_ij+6*TILE2];
-                    double dot_lij_z_011 = trr_11z * dm_ij_cache[sh_ij+5*TILE2] + trr_21z * dm_ij_cache[sh_ij+6*TILE2];
-                    double dot_lij_z_012 = trr_12z * dm_ij_cache[sh_ij+5*TILE2] + trr_22z * dm_ij_cache[sh_ij+6*TILE2];
+                    double dot_lij_z_003 = trr_23z * dm_ij_cache[2] + trr_33z * dm_ij_cache[3];
+                    double dot_lij_z_010 = trr_10z * dm_ij_cache[5] + trr_20z * dm_ij_cache[6];
+                    double dot_lij_z_011 = trr_11z * dm_ij_cache[5] + trr_21z * dm_ij_cache[6];
+                    double dot_lij_z_012 = trr_12z * dm_ij_cache[5] + trr_22z * dm_ij_cache[6];
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
                     double trr_13z = cpz * trr_12z + 2*b01 * trr_11z + 1*b00 * trr_02z;
-                    double dot_lij_z_013 = trr_13z * dm_ij_cache[sh_ij+5*TILE2] + trr_23z * dm_ij_cache[sh_ij+6*TILE2];
-                    double dot_lij_z_020 = wt * dm_ij_cache[sh_ij+7*TILE2] + trr_10z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_021 = trr_01z * dm_ij_cache[sh_ij+7*TILE2] + trr_11z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_022 = trr_02z * dm_ij_cache[sh_ij+7*TILE2] + trr_12z * dm_ij_cache[sh_ij+8*TILE2];
+                    double dot_lij_z_013 = trr_13z * dm_ij_cache[5] + trr_23z * dm_ij_cache[6];
+                    double dot_lij_z_020 = wt * dm_ij_cache[7] + trr_10z * dm_ij_cache[8];
+                    double dot_lij_z_021 = trr_01z * dm_ij_cache[7] + trr_11z * dm_ij_cache[8];
+                    double dot_lij_z_022 = trr_02z * dm_ij_cache[7] + trr_12z * dm_ij_cache[8];
                     double trr_03z = cpz * trr_02z + 2*b01 * trr_01z;
-                    double dot_lij_z_023 = trr_03z * dm_ij_cache[sh_ij+7*TILE2] + trr_13z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_030 = wt * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_031 = trr_01z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_032 = trr_02z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_033 = trr_03z * dm_ij_cache[sh_ij+9*TILE2];
-                    double dot_lij_z_100 = trr_10z * dm_ij_cache[sh_ij+11*TILE2] + trr_20z * dm_ij_cache[sh_ij+12*TILE2];
-                    double dot_lij_z_101 = trr_11z * dm_ij_cache[sh_ij+11*TILE2] + trr_21z * dm_ij_cache[sh_ij+12*TILE2];
-                    double dot_lij_z_102 = trr_12z * dm_ij_cache[sh_ij+11*TILE2] + trr_22z * dm_ij_cache[sh_ij+12*TILE2];
-                    double dot_lij_z_103 = trr_13z * dm_ij_cache[sh_ij+11*TILE2] + trr_23z * dm_ij_cache[sh_ij+12*TILE2];
-                    double dot_lij_z_110 = wt * dm_ij_cache[sh_ij+13*TILE2] + trr_10z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_111 = trr_01z * dm_ij_cache[sh_ij+13*TILE2] + trr_11z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_112 = trr_02z * dm_ij_cache[sh_ij+13*TILE2] + trr_12z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_113 = trr_03z * dm_ij_cache[sh_ij+13*TILE2] + trr_13z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_120 = wt * dm_ij_cache[sh_ij+15*TILE2];
-                    double dot_lij_z_121 = trr_01z * dm_ij_cache[sh_ij+15*TILE2];
-                    double dot_lij_z_122 = trr_02z * dm_ij_cache[sh_ij+15*TILE2];
-                    double dot_lij_z_123 = trr_03z * dm_ij_cache[sh_ij+15*TILE2];
-                    double dot_lij_z_200 = wt * dm_ij_cache[sh_ij+16*TILE2] + trr_10z * dm_ij_cache[sh_ij+17*TILE2];
-                    double dot_lij_z_201 = trr_01z * dm_ij_cache[sh_ij+16*TILE2] + trr_11z * dm_ij_cache[sh_ij+17*TILE2];
-                    double dot_lij_z_202 = trr_02z * dm_ij_cache[sh_ij+16*TILE2] + trr_12z * dm_ij_cache[sh_ij+17*TILE2];
-                    double dot_lij_z_203 = trr_03z * dm_ij_cache[sh_ij+16*TILE2] + trr_13z * dm_ij_cache[sh_ij+17*TILE2];
-                    double dot_lij_z_210 = wt * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_211 = trr_01z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_212 = trr_02z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_213 = trr_03z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_300 = wt * dm_ij_cache[sh_ij+19*TILE2];
-                    double dot_lij_z_301 = trr_01z * dm_ij_cache[sh_ij+19*TILE2];
-                    double dot_lij_z_302 = trr_02z * dm_ij_cache[sh_ij+19*TILE2];
-                    double dot_lij_z_303 = trr_03z * dm_ij_cache[sh_ij+19*TILE2];
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double dot_lij_z_023 = trr_03z * dm_ij_cache[7] + trr_13z * dm_ij_cache[8];
+                    double dot_lij_z_030 = wt * dm_ij_cache[9];
+                    double dot_lij_z_031 = trr_01z * dm_ij_cache[9];
+                    double dot_lij_z_032 = trr_02z * dm_ij_cache[9];
+                    double dot_lij_z_033 = trr_03z * dm_ij_cache[9];
+                    double dot_lij_z_100 = trr_10z * dm_ij_cache[11] + trr_20z * dm_ij_cache[12];
+                    double dot_lij_z_101 = trr_11z * dm_ij_cache[11] + trr_21z * dm_ij_cache[12];
+                    double dot_lij_z_102 = trr_12z * dm_ij_cache[11] + trr_22z * dm_ij_cache[12];
+                    double dot_lij_z_103 = trr_13z * dm_ij_cache[11] + trr_23z * dm_ij_cache[12];
+                    double dot_lij_z_110 = wt * dm_ij_cache[13] + trr_10z * dm_ij_cache[14];
+                    double dot_lij_z_111 = trr_01z * dm_ij_cache[13] + trr_11z * dm_ij_cache[14];
+                    double dot_lij_z_112 = trr_02z * dm_ij_cache[13] + trr_12z * dm_ij_cache[14];
+                    double dot_lij_z_113 = trr_03z * dm_ij_cache[13] + trr_13z * dm_ij_cache[14];
+                    double dot_lij_z_120 = wt * dm_ij_cache[15];
+                    double dot_lij_z_121 = trr_01z * dm_ij_cache[15];
+                    double dot_lij_z_122 = trr_02z * dm_ij_cache[15];
+                    double dot_lij_z_123 = trr_03z * dm_ij_cache[15];
+                    double dot_lij_z_200 = wt * dm_ij_cache[16] + trr_10z * dm_ij_cache[17];
+                    double dot_lij_z_201 = trr_01z * dm_ij_cache[16] + trr_11z * dm_ij_cache[17];
+                    double dot_lij_z_202 = trr_02z * dm_ij_cache[16] + trr_12z * dm_ij_cache[17];
+                    double dot_lij_z_203 = trr_03z * dm_ij_cache[16] + trr_13z * dm_ij_cache[17];
+                    double dot_lij_z_210 = wt * dm_ij_cache[18];
+                    double dot_lij_z_211 = trr_01z * dm_ij_cache[18];
+                    double dot_lij_z_212 = trr_02z * dm_ij_cache[18];
+                    double dot_lij_z_213 = trr_03z * dm_ij_cache[18];
+                    double dot_lij_z_300 = wt * dm_ij_cache[19];
+                    double dot_lij_z_301 = trr_01z * dm_ij_cache[19];
+                    double dot_lij_z_302 = trr_02z * dm_ij_cache[19];
+                    double dot_lij_z_303 = trr_03z * dm_ij_cache[19];
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
@@ -4014,7 +3685,7 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double dot_lij_y_320 = trr_02y * dot_lij_z_300;
                     double dot_lij_y_321 = trr_02y * dot_lij_z_301;
                     double dot_lij_y_330 = trr_03y * dot_lij_z_300;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     double trr_20x = c0x * trr_10x + 1*b10 * fac;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
@@ -4149,7 +3820,6 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_id >= ntasks) {
             continue;
         }
-        double *vj = jk.vj;
         atomicAdd(vj+ij_pair0+2, vj_ij_002);
         atomicAdd(vj+ij_pair0+3, vj_ij_003);
         atomicAdd(vj+ij_pair0+5, vj_ij_011);
@@ -4183,121 +3853,101 @@ void _rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         atomicAdd(vj+kl_pair0+18, vj_kl_210);
         atomicAdd(vj+kl_pair0+19, vj_kl_300);
     }
-}
-__global__
-static void rys_j_3_3(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_3_3(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *rw = Rpa_cicj + iprim*jprim*TILE2*4 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *rw = shared_memory + iprim*jprim + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double gout_2_0 = 0.;
         double gout_3_0 = 0.;
         double gout_4_0 = 0.;
@@ -4329,13 +3979,10 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double gout_32_0 = 0.;
         double gout_33_0 = 0.;
         double gout_34_0 = 0.;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -4360,12 +4007,12 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -4377,14 +4024,15 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
                     double rt_aa = rt / (aij + akl);
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     gout_2_0 += fac * 1 * trr_20z;
@@ -4392,7 +4040,7 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout_3_0 += fac * 1 * trr_30z;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
                     gout_4_0 += fac * 1 * trr_40z;
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     gout_6_0 += fac * trr_10y * trr_10z;
                     gout_7_0 += fac * trr_10y * trr_20z;
@@ -4406,7 +4054,7 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     gout_13_0 += fac * trr_30y * trr_10z;
                     double trr_40y = c0y * trr_30y + 3*b10 * trr_20y;
                     gout_14_0 += fac * trr_40y * wt;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     gout_16_0 += trr_10x * 1 * trr_10z;
                     gout_17_0 += trr_10x * 1 * trr_20z;
@@ -4437,8 +4085,6 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             continue;
         }
         int nao_pairs = pair_loc[nbas*nbas];
-        double *vj = jk.vj;
-        double *dm = jk.dm;
         for (int i_dm = 0; i_dm < jk.n_dm; ++i_dm) {
             atomicAdd(vj+ij_pair0+2, gout_2_0*dm[kl_pair0+0]);
             atomicAdd(vj+ij_pair0+3, gout_3_0*dm[kl_pair0+0]);
@@ -4476,131 +4122,102 @@ void _rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             dm += nao_pairs;
         }
     }
-}
-__global__
-static void rys_j_4_0(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_4_0(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *dm_ij_cache = Rpa_cicj + iprim*jprim*TILE2*4;
-    double *rw = dm_ij_cache + 35*TILE2 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *dm_ij_cache = shared_memory + iprim*jprim;
+    double *rw = dm_ij_cache + 35 + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-    double *dm = jk.dm;
-    for (int n = sq_id; n < 35*TILE2; n += nsq_per_block) {
-        int m = n / TILE2;
-        int ij_sh = n % TILE2;
-        int ish = ish0 + ij_sh / TILE;
-        int jsh = jsh0 + ij_sh % TILE;
-        int ij_pair0 = pair_loc[ish*nbas+jsh];
-        dm_ij_cache[ij_sh+m*TILE2] = dm[ij_pair0+m];
-    }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double dm_kl_001 = dm[kl_pair0+1];
         double dm_kl_010 = dm[kl_pair0+2];
         double dm_kl_100 = dm[kl_pair0+3];
@@ -4638,13 +4255,10 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double vj_kl_001 = 0;
         double vj_kl_010 = 0;
         double vj_kl_100 = 0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -4669,12 +4283,12 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -4686,7 +4300,8 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -4694,49 +4309,49 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
-                    double dot_lij_z_000 = trr_20z * dm_ij_cache[sh_ij+2*TILE2] + trr_30z * dm_ij_cache[sh_ij+3*TILE2] + trr_40z * dm_ij_cache[sh_ij+4*TILE2];
+                    double dot_lij_z_000 = trr_20z * dm_ij_cache[2] + trr_30z * dm_ij_cache[3] + trr_40z * dm_ij_cache[4];
                     double rt_akl = rt_aa * aij;
                     double cpz = zqc + zpq*rt_akl;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double trr_41z = cpz * trr_40z + 4*b00 * trr_30z;
-                    double dot_lij_z_001 = trr_21z * dm_ij_cache[sh_ij+2*TILE2] + trr_31z * dm_ij_cache[sh_ij+3*TILE2] + trr_41z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_010 = trr_10z * dm_ij_cache[sh_ij+6*TILE2] + trr_20z * dm_ij_cache[sh_ij+7*TILE2] + trr_30z * dm_ij_cache[sh_ij+8*TILE2];
+                    double dot_lij_z_001 = trr_21z * dm_ij_cache[2] + trr_31z * dm_ij_cache[3] + trr_41z * dm_ij_cache[4];
+                    double dot_lij_z_010 = trr_10z * dm_ij_cache[6] + trr_20z * dm_ij_cache[7] + trr_30z * dm_ij_cache[8];
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
-                    double dot_lij_z_011 = trr_11z * dm_ij_cache[sh_ij+6*TILE2] + trr_21z * dm_ij_cache[sh_ij+7*TILE2] + trr_31z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_020 = wt * dm_ij_cache[sh_ij+9*TILE2] + trr_10z * dm_ij_cache[sh_ij+10*TILE2] + trr_20z * dm_ij_cache[sh_ij+11*TILE2];
+                    double dot_lij_z_011 = trr_11z * dm_ij_cache[6] + trr_21z * dm_ij_cache[7] + trr_31z * dm_ij_cache[8];
+                    double dot_lij_z_020 = wt * dm_ij_cache[9] + trr_10z * dm_ij_cache[10] + trr_20z * dm_ij_cache[11];
                     double trr_01z = cpz * wt;
-                    double dot_lij_z_021 = trr_01z * dm_ij_cache[sh_ij+9*TILE2] + trr_11z * dm_ij_cache[sh_ij+10*TILE2] + trr_21z * dm_ij_cache[sh_ij+11*TILE2];
-                    double dot_lij_z_030 = wt * dm_ij_cache[sh_ij+12*TILE2] + trr_10z * dm_ij_cache[sh_ij+13*TILE2];
-                    double dot_lij_z_031 = trr_01z * dm_ij_cache[sh_ij+12*TILE2] + trr_11z * dm_ij_cache[sh_ij+13*TILE2];
-                    double dot_lij_z_040 = wt * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_041 = trr_01z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_100 = trr_10z * dm_ij_cache[sh_ij+16*TILE2] + trr_20z * dm_ij_cache[sh_ij+17*TILE2] + trr_30z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_101 = trr_11z * dm_ij_cache[sh_ij+16*TILE2] + trr_21z * dm_ij_cache[sh_ij+17*TILE2] + trr_31z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_110 = wt * dm_ij_cache[sh_ij+19*TILE2] + trr_10z * dm_ij_cache[sh_ij+20*TILE2] + trr_20z * dm_ij_cache[sh_ij+21*TILE2];
-                    double dot_lij_z_111 = trr_01z * dm_ij_cache[sh_ij+19*TILE2] + trr_11z * dm_ij_cache[sh_ij+20*TILE2] + trr_21z * dm_ij_cache[sh_ij+21*TILE2];
-                    double dot_lij_z_120 = wt * dm_ij_cache[sh_ij+22*TILE2] + trr_10z * dm_ij_cache[sh_ij+23*TILE2];
-                    double dot_lij_z_121 = trr_01z * dm_ij_cache[sh_ij+22*TILE2] + trr_11z * dm_ij_cache[sh_ij+23*TILE2];
-                    double dot_lij_z_130 = wt * dm_ij_cache[sh_ij+24*TILE2];
-                    double dot_lij_z_131 = trr_01z * dm_ij_cache[sh_ij+24*TILE2];
-                    double dot_lij_z_200 = wt * dm_ij_cache[sh_ij+25*TILE2] + trr_10z * dm_ij_cache[sh_ij+26*TILE2] + trr_20z * dm_ij_cache[sh_ij+27*TILE2];
-                    double dot_lij_z_201 = trr_01z * dm_ij_cache[sh_ij+25*TILE2] + trr_11z * dm_ij_cache[sh_ij+26*TILE2] + trr_21z * dm_ij_cache[sh_ij+27*TILE2];
-                    double dot_lij_z_210 = wt * dm_ij_cache[sh_ij+28*TILE2] + trr_10z * dm_ij_cache[sh_ij+29*TILE2];
-                    double dot_lij_z_211 = trr_01z * dm_ij_cache[sh_ij+28*TILE2] + trr_11z * dm_ij_cache[sh_ij+29*TILE2];
-                    double dot_lij_z_220 = wt * dm_ij_cache[sh_ij+30*TILE2];
-                    double dot_lij_z_221 = trr_01z * dm_ij_cache[sh_ij+30*TILE2];
-                    double dot_lij_z_300 = wt * dm_ij_cache[sh_ij+31*TILE2] + trr_10z * dm_ij_cache[sh_ij+32*TILE2];
-                    double dot_lij_z_301 = trr_01z * dm_ij_cache[sh_ij+31*TILE2] + trr_11z * dm_ij_cache[sh_ij+32*TILE2];
-                    double dot_lij_z_310 = wt * dm_ij_cache[sh_ij+33*TILE2];
-                    double dot_lij_z_311 = trr_01z * dm_ij_cache[sh_ij+33*TILE2];
-                    double dot_lij_z_400 = wt * dm_ij_cache[sh_ij+34*TILE2];
-                    double dot_lij_z_401 = trr_01z * dm_ij_cache[sh_ij+34*TILE2];
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double dot_lij_z_021 = trr_01z * dm_ij_cache[9] + trr_11z * dm_ij_cache[10] + trr_21z * dm_ij_cache[11];
+                    double dot_lij_z_030 = wt * dm_ij_cache[12] + trr_10z * dm_ij_cache[13];
+                    double dot_lij_z_031 = trr_01z * dm_ij_cache[12] + trr_11z * dm_ij_cache[13];
+                    double dot_lij_z_040 = wt * dm_ij_cache[14];
+                    double dot_lij_z_041 = trr_01z * dm_ij_cache[14];
+                    double dot_lij_z_100 = trr_10z * dm_ij_cache[16] + trr_20z * dm_ij_cache[17] + trr_30z * dm_ij_cache[18];
+                    double dot_lij_z_101 = trr_11z * dm_ij_cache[16] + trr_21z * dm_ij_cache[17] + trr_31z * dm_ij_cache[18];
+                    double dot_lij_z_110 = wt * dm_ij_cache[19] + trr_10z * dm_ij_cache[20] + trr_20z * dm_ij_cache[21];
+                    double dot_lij_z_111 = trr_01z * dm_ij_cache[19] + trr_11z * dm_ij_cache[20] + trr_21z * dm_ij_cache[21];
+                    double dot_lij_z_120 = wt * dm_ij_cache[22] + trr_10z * dm_ij_cache[23];
+                    double dot_lij_z_121 = trr_01z * dm_ij_cache[22] + trr_11z * dm_ij_cache[23];
+                    double dot_lij_z_130 = wt * dm_ij_cache[24];
+                    double dot_lij_z_131 = trr_01z * dm_ij_cache[24];
+                    double dot_lij_z_200 = wt * dm_ij_cache[25] + trr_10z * dm_ij_cache[26] + trr_20z * dm_ij_cache[27];
+                    double dot_lij_z_201 = trr_01z * dm_ij_cache[25] + trr_11z * dm_ij_cache[26] + trr_21z * dm_ij_cache[27];
+                    double dot_lij_z_210 = wt * dm_ij_cache[28] + trr_10z * dm_ij_cache[29];
+                    double dot_lij_z_211 = trr_01z * dm_ij_cache[28] + trr_11z * dm_ij_cache[29];
+                    double dot_lij_z_220 = wt * dm_ij_cache[30];
+                    double dot_lij_z_221 = trr_01z * dm_ij_cache[30];
+                    double dot_lij_z_300 = wt * dm_ij_cache[31] + trr_10z * dm_ij_cache[32];
+                    double dot_lij_z_301 = trr_01z * dm_ij_cache[31] + trr_11z * dm_ij_cache[32];
+                    double dot_lij_z_310 = wt * dm_ij_cache[33];
+                    double dot_lij_z_311 = trr_01z * dm_ij_cache[33];
+                    double dot_lij_z_400 = wt * dm_ij_cache[34];
+                    double dot_lij_z_401 = trr_01z * dm_ij_cache[34];
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
@@ -4762,7 +4377,7 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double dot_lij_y_400 = 1 * dot_lij_z_400;
                     double dot_lij_y_401 = 1 * dot_lij_z_401;
                     double dot_lij_y_410 = trr_01y * dot_lij_z_400;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     double trr_20x = c0x * trr_10x + 1*b10 * fac;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
@@ -4858,7 +4473,6 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_id >= ntasks) {
             continue;
         }
-        double *vj = jk.vj;
         atomicAdd(vj+ij_pair0+2, vj_ij_002);
         atomicAdd(vj+ij_pair0+3, vj_ij_003);
         atomicAdd(vj+ij_pair0+4, vj_ij_004);
@@ -4894,131 +4508,102 @@ void _rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         atomicAdd(vj+kl_pair0+2, vj_kl_010);
         atomicAdd(vj+kl_pair0+3, vj_kl_100);
     }
-}
-__global__
-static void rys_j_4_1(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_4_1(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-__device__ static
-void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *shl_quartet_idx, int ntasks, int ish0, int jsh0)
+__global__ static
+void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head)
 {
-    int sq_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nsq_per_block = blockDim.x * blockDim.y;
+    int sq_id = threadIdx.x;
+    int nsq_per_block = blockDim.x;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    __shared__ int ntasks, pair_ij;
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+    if (jk.omega >= 0) {
+        _fill_vj_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
+    }
+    if (ntasks == 0) {
+        if (sq_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
-    int kprim = bounds.kprim;
-    int lprim = bounds.lprim;
-    int nroots = bounds.nroots;
     int nbas = envs.nbas;
     int *bas = envs.bas;
     int *pair_loc = envs.ao_loc;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    extern __shared__ double Rpa_cicj[];
-    double *dm_ij_cache = Rpa_cicj + iprim*jprim*TILE2*4;
-    double *rw = dm_ij_cache + 35*TILE2 + sq_id;
-    for (int n = sq_id; n < iprim*jprim*TILE2; n += nsq_per_block) {
-        int ijp = n / TILE2;
-        int sh_ij = n % TILE2;
-        int ish = ish0 + sh_ij / TILE;
-        int jsh = jsh0 + sh_ij % TILE;
-        int ip = ijp / jprim;
-        int jp = ijp % jprim;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+    extern __shared__ double shared_memory[];
+    double *cicj_cache = shared_memory;
+    double *dm_ij_cache = shared_memory + iprim*jprim;
+    double *rw = dm_ij_cache + 35 + sq_id;
+
+    __shared__ int ish;
+    __shared__ int jsh;
+    __shared__ double ri[3];
+    __shared__ double rjri[3];
+    __shared__ double *expi;
+    __shared__ double *expj;
+    if (sq_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+    }
+    if (sq_id < 3) {
+        int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        ri[sq_id] = env[ri_ptr+sq_id];
+        rjri[sq_id] = env[rj_ptr+sq_id] - ri[sq_id];
+    }
+    __syncthreads();
+    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+    double xjxi = rjri[0];
+    double yjyi = rjri[1];
+    double zjzi = rjri[2];
+    for (int ij = sq_id; ij < iprim*jprim; ij += nsq_per_block) {
+        int ip = ij / jprim;
+        int jp = ij % jprim;
         double ai = expi[ip];
         double aj = expj[jp];
         double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
-        double *Rpa = Rpa_cicj + ijp * TILE2*4;
-        Rpa[sh_ij+0*TILE2] = xjxi * aj_aij;
-        Rpa[sh_ij+1*TILE2] = yjyi * aj_aij;
-        Rpa[sh_ij+2*TILE2] = zjzi * aj_aij;
         double theta_ij = ai * aj / aij;
-        double Kab = exp(-theta_ij * (xjxi*xjxi+yjyi*yjyi+zjzi*zjzi));
-        Rpa[sh_ij+3*TILE2] = ci[ip] * cj[jp] * Kab;
+        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        double Kab = exp(-theta_ij * rr_ij);
+        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
-    double *dm = jk.dm;
-    for (int n = sq_id; n < 35*TILE2; n += nsq_per_block) {
-        int m = n / TILE2;
-        int ij_sh = n % TILE2;
-        int ish = ish0 + ij_sh / TILE;
-        int jsh = jsh0 + ij_sh % TILE;
-        int ij_pair0 = pair_loc[ish*nbas+jsh];
-        dm_ij_cache[ij_sh+m*TILE2] = dm[ij_pair0+m];
-    }
-
-    for (int task0 = 0; task0 < ntasks; task0 += nsq_per_block) {
+    for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
         __syncthreads();
-        int task_id = task0 + sq_id;
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
-        ShellQuartet sq;
-        if (task_id >= ntasks) {
-            // To avoid __syncthreads blocking blocking idle warps, all remaining
-            // threads compute a valid shell quartet with zero normalization factor
-            sq = shl_quartet_idx[0];
-            fac_sym = 0.;
-        } else {
-            sq = shl_quartet_idx[task_id];
-        }
-        int ish = sq.i;
-        int jsh = sq.j;
-        int ksh = sq.k;
-        int lsh = sq.l;
-        int sh_ij = (ish % TILE) * TILE + (jsh % TILE);
         if (ish == jsh) fac_sym *= .5;
         if (ksh == lsh) fac_sym *= .5;
         if (ish*nbas+jsh == ksh*nbas+lsh) fac_sym *= .5;
         int ij_pair0 = pair_loc[ish*nbas+jsh];
         int kl_pair0 = pair_loc[ksh*nbas+lsh];
+        double *dm = jk.dm;
+        double *vj = jk.vj;
         double dm_kl_001 = dm[kl_pair0+1];
         double dm_kl_002 = dm[kl_pair0+2];
         double dm_kl_010 = dm[kl_pair0+3];
@@ -5068,13 +4653,10 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double vj_kl_101 = 0;
         double vj_kl_110 = 0;
         double vj_kl_200 = 0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *cl = env + bas[lsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -5099,12 +4681,12 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double ai = expi[ip];
                 double aj = expj[jp];
                 double aij = ai + aj;
-                double *Rpa = Rpa_cicj + ijp * TILE2*4;
-                double cicj = Rpa[sh_ij+3*TILE2];
+                double aj_aij = aj / aij;
+                double cicj = cicj_cache[ijp];
                 double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
-                double xpa = Rpa[sh_ij+0*TILE2];
-                double ypa = Rpa[sh_ij+1*TILE2];
-                double zpa = Rpa[sh_ij+2*TILE2];
+                double xpa = rjri[0] * aj_aij;
+                double ypa = rjri[1] * aj_aij;
+                double zpa = rjri[2] * aj_aij;
                 double xij = ri[0] + xpa;
                 double yij = ri[1] + ypa;
                 double zij = ri[2] + zpa;
@@ -5116,7 +4698,8 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 double zpq = zij - zkl;
                 double theta = aij * akl / (aij + akl);
                 double rr = xpq * xpq + ypq * ypq + zpq * zpq;
-                rys_roots_rs(nroots, theta, rr, omega, rw, nsq_per_block, 0, 1);
+                int nroots = bounds.nroots;
+                rys_roots_rs(nroots, theta, rr, jk.omega, rw, nsq_per_block, 0, 1);
                 for (int irys = 0; irys < nroots; ++irys) {
                     double wt = rw[(2*irys+1)*nsq_per_block];
                     double rt = rw[ 2*irys   *nsq_per_block];
@@ -5124,70 +4707,70 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double b00 = .5 * rt_aa;
                     double rt_aij = rt_aa * akl;
                     double b10 = .5/aij * (1 - rt_aij);
-                    double c0z = Rpa[sh_ij+2*TILE2] - zpq*rt_aij;
+                    double c0z = rjri[2]*aj_aij - zpq*rt_aij;
                     double trr_10z = c0z * wt;
                     double trr_20z = c0z * trr_10z + 1*b10 * wt;
                     double trr_30z = c0z * trr_20z + 2*b10 * trr_10z;
                     double trr_40z = c0z * trr_30z + 3*b10 * trr_20z;
-                    double dot_lij_z_000 = trr_20z * dm_ij_cache[sh_ij+2*TILE2] + trr_30z * dm_ij_cache[sh_ij+3*TILE2] + trr_40z * dm_ij_cache[sh_ij+4*TILE2];
+                    double dot_lij_z_000 = trr_20z * dm_ij_cache[2] + trr_30z * dm_ij_cache[3] + trr_40z * dm_ij_cache[4];
                     double rt_akl = rt_aa * aij;
                     double b01 = .5/akl * (1 - rt_akl);
                     double cpz = zqc + zpq*rt_akl;
                     double trr_21z = cpz * trr_20z + 2*b00 * trr_10z;
                     double trr_31z = cpz * trr_30z + 3*b00 * trr_20z;
                     double trr_41z = cpz * trr_40z + 4*b00 * trr_30z;
-                    double dot_lij_z_001 = trr_21z * dm_ij_cache[sh_ij+2*TILE2] + trr_31z * dm_ij_cache[sh_ij+3*TILE2] + trr_41z * dm_ij_cache[sh_ij+4*TILE2];
+                    double dot_lij_z_001 = trr_21z * dm_ij_cache[2] + trr_31z * dm_ij_cache[3] + trr_41z * dm_ij_cache[4];
                     double trr_11z = cpz * trr_10z + 1*b00 * wt;
                     double trr_22z = cpz * trr_21z + 1*b01 * trr_20z + 2*b00 * trr_11z;
                     double trr_32z = cpz * trr_31z + 1*b01 * trr_30z + 3*b00 * trr_21z;
                     double trr_42z = cpz * trr_41z + 1*b01 * trr_40z + 4*b00 * trr_31z;
-                    double dot_lij_z_002 = trr_22z * dm_ij_cache[sh_ij+2*TILE2] + trr_32z * dm_ij_cache[sh_ij+3*TILE2] + trr_42z * dm_ij_cache[sh_ij+4*TILE2];
-                    double dot_lij_z_010 = trr_10z * dm_ij_cache[sh_ij+6*TILE2] + trr_20z * dm_ij_cache[sh_ij+7*TILE2] + trr_30z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_011 = trr_11z * dm_ij_cache[sh_ij+6*TILE2] + trr_21z * dm_ij_cache[sh_ij+7*TILE2] + trr_31z * dm_ij_cache[sh_ij+8*TILE2];
+                    double dot_lij_z_002 = trr_22z * dm_ij_cache[2] + trr_32z * dm_ij_cache[3] + trr_42z * dm_ij_cache[4];
+                    double dot_lij_z_010 = trr_10z * dm_ij_cache[6] + trr_20z * dm_ij_cache[7] + trr_30z * dm_ij_cache[8];
+                    double dot_lij_z_011 = trr_11z * dm_ij_cache[6] + trr_21z * dm_ij_cache[7] + trr_31z * dm_ij_cache[8];
                     double trr_01z = cpz * wt;
                     double trr_12z = cpz * trr_11z + 1*b01 * trr_10z + 1*b00 * trr_01z;
-                    double dot_lij_z_012 = trr_12z * dm_ij_cache[sh_ij+6*TILE2] + trr_22z * dm_ij_cache[sh_ij+7*TILE2] + trr_32z * dm_ij_cache[sh_ij+8*TILE2];
-                    double dot_lij_z_020 = wt * dm_ij_cache[sh_ij+9*TILE2] + trr_10z * dm_ij_cache[sh_ij+10*TILE2] + trr_20z * dm_ij_cache[sh_ij+11*TILE2];
-                    double dot_lij_z_021 = trr_01z * dm_ij_cache[sh_ij+9*TILE2] + trr_11z * dm_ij_cache[sh_ij+10*TILE2] + trr_21z * dm_ij_cache[sh_ij+11*TILE2];
+                    double dot_lij_z_012 = trr_12z * dm_ij_cache[6] + trr_22z * dm_ij_cache[7] + trr_32z * dm_ij_cache[8];
+                    double dot_lij_z_020 = wt * dm_ij_cache[9] + trr_10z * dm_ij_cache[10] + trr_20z * dm_ij_cache[11];
+                    double dot_lij_z_021 = trr_01z * dm_ij_cache[9] + trr_11z * dm_ij_cache[10] + trr_21z * dm_ij_cache[11];
                     double trr_02z = cpz * trr_01z + 1*b01 * wt;
-                    double dot_lij_z_022 = trr_02z * dm_ij_cache[sh_ij+9*TILE2] + trr_12z * dm_ij_cache[sh_ij+10*TILE2] + trr_22z * dm_ij_cache[sh_ij+11*TILE2];
-                    double dot_lij_z_030 = wt * dm_ij_cache[sh_ij+12*TILE2] + trr_10z * dm_ij_cache[sh_ij+13*TILE2];
-                    double dot_lij_z_031 = trr_01z * dm_ij_cache[sh_ij+12*TILE2] + trr_11z * dm_ij_cache[sh_ij+13*TILE2];
-                    double dot_lij_z_032 = trr_02z * dm_ij_cache[sh_ij+12*TILE2] + trr_12z * dm_ij_cache[sh_ij+13*TILE2];
-                    double dot_lij_z_040 = wt * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_041 = trr_01z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_042 = trr_02z * dm_ij_cache[sh_ij+14*TILE2];
-                    double dot_lij_z_100 = trr_10z * dm_ij_cache[sh_ij+16*TILE2] + trr_20z * dm_ij_cache[sh_ij+17*TILE2] + trr_30z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_101 = trr_11z * dm_ij_cache[sh_ij+16*TILE2] + trr_21z * dm_ij_cache[sh_ij+17*TILE2] + trr_31z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_102 = trr_12z * dm_ij_cache[sh_ij+16*TILE2] + trr_22z * dm_ij_cache[sh_ij+17*TILE2] + trr_32z * dm_ij_cache[sh_ij+18*TILE2];
-                    double dot_lij_z_110 = wt * dm_ij_cache[sh_ij+19*TILE2] + trr_10z * dm_ij_cache[sh_ij+20*TILE2] + trr_20z * dm_ij_cache[sh_ij+21*TILE2];
-                    double dot_lij_z_111 = trr_01z * dm_ij_cache[sh_ij+19*TILE2] + trr_11z * dm_ij_cache[sh_ij+20*TILE2] + trr_21z * dm_ij_cache[sh_ij+21*TILE2];
-                    double dot_lij_z_112 = trr_02z * dm_ij_cache[sh_ij+19*TILE2] + trr_12z * dm_ij_cache[sh_ij+20*TILE2] + trr_22z * dm_ij_cache[sh_ij+21*TILE2];
-                    double dot_lij_z_120 = wt * dm_ij_cache[sh_ij+22*TILE2] + trr_10z * dm_ij_cache[sh_ij+23*TILE2];
-                    double dot_lij_z_121 = trr_01z * dm_ij_cache[sh_ij+22*TILE2] + trr_11z * dm_ij_cache[sh_ij+23*TILE2];
-                    double dot_lij_z_122 = trr_02z * dm_ij_cache[sh_ij+22*TILE2] + trr_12z * dm_ij_cache[sh_ij+23*TILE2];
-                    double dot_lij_z_130 = wt * dm_ij_cache[sh_ij+24*TILE2];
-                    double dot_lij_z_131 = trr_01z * dm_ij_cache[sh_ij+24*TILE2];
-                    double dot_lij_z_132 = trr_02z * dm_ij_cache[sh_ij+24*TILE2];
-                    double dot_lij_z_200 = wt * dm_ij_cache[sh_ij+25*TILE2] + trr_10z * dm_ij_cache[sh_ij+26*TILE2] + trr_20z * dm_ij_cache[sh_ij+27*TILE2];
-                    double dot_lij_z_201 = trr_01z * dm_ij_cache[sh_ij+25*TILE2] + trr_11z * dm_ij_cache[sh_ij+26*TILE2] + trr_21z * dm_ij_cache[sh_ij+27*TILE2];
-                    double dot_lij_z_202 = trr_02z * dm_ij_cache[sh_ij+25*TILE2] + trr_12z * dm_ij_cache[sh_ij+26*TILE2] + trr_22z * dm_ij_cache[sh_ij+27*TILE2];
-                    double dot_lij_z_210 = wt * dm_ij_cache[sh_ij+28*TILE2] + trr_10z * dm_ij_cache[sh_ij+29*TILE2];
-                    double dot_lij_z_211 = trr_01z * dm_ij_cache[sh_ij+28*TILE2] + trr_11z * dm_ij_cache[sh_ij+29*TILE2];
-                    double dot_lij_z_212 = trr_02z * dm_ij_cache[sh_ij+28*TILE2] + trr_12z * dm_ij_cache[sh_ij+29*TILE2];
-                    double dot_lij_z_220 = wt * dm_ij_cache[sh_ij+30*TILE2];
-                    double dot_lij_z_221 = trr_01z * dm_ij_cache[sh_ij+30*TILE2];
-                    double dot_lij_z_222 = trr_02z * dm_ij_cache[sh_ij+30*TILE2];
-                    double dot_lij_z_300 = wt * dm_ij_cache[sh_ij+31*TILE2] + trr_10z * dm_ij_cache[sh_ij+32*TILE2];
-                    double dot_lij_z_301 = trr_01z * dm_ij_cache[sh_ij+31*TILE2] + trr_11z * dm_ij_cache[sh_ij+32*TILE2];
-                    double dot_lij_z_302 = trr_02z * dm_ij_cache[sh_ij+31*TILE2] + trr_12z * dm_ij_cache[sh_ij+32*TILE2];
-                    double dot_lij_z_310 = wt * dm_ij_cache[sh_ij+33*TILE2];
-                    double dot_lij_z_311 = trr_01z * dm_ij_cache[sh_ij+33*TILE2];
-                    double dot_lij_z_312 = trr_02z * dm_ij_cache[sh_ij+33*TILE2];
-                    double dot_lij_z_400 = wt * dm_ij_cache[sh_ij+34*TILE2];
-                    double dot_lij_z_401 = trr_01z * dm_ij_cache[sh_ij+34*TILE2];
-                    double dot_lij_z_402 = trr_02z * dm_ij_cache[sh_ij+34*TILE2];
-                    double c0y = Rpa[sh_ij+1*TILE2] - ypq*rt_aij;
+                    double dot_lij_z_022 = trr_02z * dm_ij_cache[9] + trr_12z * dm_ij_cache[10] + trr_22z * dm_ij_cache[11];
+                    double dot_lij_z_030 = wt * dm_ij_cache[12] + trr_10z * dm_ij_cache[13];
+                    double dot_lij_z_031 = trr_01z * dm_ij_cache[12] + trr_11z * dm_ij_cache[13];
+                    double dot_lij_z_032 = trr_02z * dm_ij_cache[12] + trr_12z * dm_ij_cache[13];
+                    double dot_lij_z_040 = wt * dm_ij_cache[14];
+                    double dot_lij_z_041 = trr_01z * dm_ij_cache[14];
+                    double dot_lij_z_042 = trr_02z * dm_ij_cache[14];
+                    double dot_lij_z_100 = trr_10z * dm_ij_cache[16] + trr_20z * dm_ij_cache[17] + trr_30z * dm_ij_cache[18];
+                    double dot_lij_z_101 = trr_11z * dm_ij_cache[16] + trr_21z * dm_ij_cache[17] + trr_31z * dm_ij_cache[18];
+                    double dot_lij_z_102 = trr_12z * dm_ij_cache[16] + trr_22z * dm_ij_cache[17] + trr_32z * dm_ij_cache[18];
+                    double dot_lij_z_110 = wt * dm_ij_cache[19] + trr_10z * dm_ij_cache[20] + trr_20z * dm_ij_cache[21];
+                    double dot_lij_z_111 = trr_01z * dm_ij_cache[19] + trr_11z * dm_ij_cache[20] + trr_21z * dm_ij_cache[21];
+                    double dot_lij_z_112 = trr_02z * dm_ij_cache[19] + trr_12z * dm_ij_cache[20] + trr_22z * dm_ij_cache[21];
+                    double dot_lij_z_120 = wt * dm_ij_cache[22] + trr_10z * dm_ij_cache[23];
+                    double dot_lij_z_121 = trr_01z * dm_ij_cache[22] + trr_11z * dm_ij_cache[23];
+                    double dot_lij_z_122 = trr_02z * dm_ij_cache[22] + trr_12z * dm_ij_cache[23];
+                    double dot_lij_z_130 = wt * dm_ij_cache[24];
+                    double dot_lij_z_131 = trr_01z * dm_ij_cache[24];
+                    double dot_lij_z_132 = trr_02z * dm_ij_cache[24];
+                    double dot_lij_z_200 = wt * dm_ij_cache[25] + trr_10z * dm_ij_cache[26] + trr_20z * dm_ij_cache[27];
+                    double dot_lij_z_201 = trr_01z * dm_ij_cache[25] + trr_11z * dm_ij_cache[26] + trr_21z * dm_ij_cache[27];
+                    double dot_lij_z_202 = trr_02z * dm_ij_cache[25] + trr_12z * dm_ij_cache[26] + trr_22z * dm_ij_cache[27];
+                    double dot_lij_z_210 = wt * dm_ij_cache[28] + trr_10z * dm_ij_cache[29];
+                    double dot_lij_z_211 = trr_01z * dm_ij_cache[28] + trr_11z * dm_ij_cache[29];
+                    double dot_lij_z_212 = trr_02z * dm_ij_cache[28] + trr_12z * dm_ij_cache[29];
+                    double dot_lij_z_220 = wt * dm_ij_cache[30];
+                    double dot_lij_z_221 = trr_01z * dm_ij_cache[30];
+                    double dot_lij_z_222 = trr_02z * dm_ij_cache[30];
+                    double dot_lij_z_300 = wt * dm_ij_cache[31] + trr_10z * dm_ij_cache[32];
+                    double dot_lij_z_301 = trr_01z * dm_ij_cache[31] + trr_11z * dm_ij_cache[32];
+                    double dot_lij_z_302 = trr_02z * dm_ij_cache[31] + trr_12z * dm_ij_cache[32];
+                    double dot_lij_z_310 = wt * dm_ij_cache[33];
+                    double dot_lij_z_311 = trr_01z * dm_ij_cache[33];
+                    double dot_lij_z_312 = trr_02z * dm_ij_cache[33];
+                    double dot_lij_z_400 = wt * dm_ij_cache[34];
+                    double dot_lij_z_401 = trr_01z * dm_ij_cache[34];
+                    double dot_lij_z_402 = trr_02z * dm_ij_cache[34];
+                    double c0y = rjri[1]*aj_aij - ypq*rt_aij;
                     double trr_10y = c0y * 1;
                     double trr_20y = c0y * trr_10y + 1*b10 * 1;
                     double trr_30y = c0y * trr_20y + 2*b10 * trr_10y;
@@ -5233,7 +4816,7 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     double dot_lij_y_410 = trr_01y * dot_lij_z_400;
                     double dot_lij_y_411 = trr_01y * dot_lij_z_401;
                     double dot_lij_y_420 = trr_02y * dot_lij_z_400;
-                    double c0x = Rpa[sh_ij+0*TILE2] - xpq*rt_aij;
+                    double c0x = rjri[0]*aj_aij - xpq*rt_aij;
                     double trr_10x = c0x * fac;
                     double trr_20x = c0x * trr_10x + 1*b10 * fac;
                     double trr_30x = c0x * trr_20x + 2*b10 * trr_10x;
@@ -5370,7 +4953,6 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         if (task_id >= ntasks) {
             continue;
         }
-        double *vj = jk.vj;
         atomicAdd(vj+ij_pair0+2, vj_ij_002);
         atomicAdd(vj+ij_pair0+3, vj_ij_003);
         atomicAdd(vj+ij_pair0+4, vj_ij_004);
@@ -5412,95 +4994,72 @@ void _rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         atomicAdd(vj+kl_pair0+8, vj_kl_110);
         atomicAdd(vj+kl_pair0+9, vj_kl_200);
     }
-}
-__global__
-static void rys_j_4_2(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
-                ShellQuartet *pool, uint32_t *batch_head)
-{
-    int b_id = blockIdx.x;
-    int t_id = threadIdx.x + blockDim.x * threadIdx.y;
-    ShellQuartet *shl_quartet_idx = pool + b_id * QUEUE_DEPTH;
-    __shared__ int batch_id;
-    if (t_id == 0) {
-        batch_id = atomicAdd(batch_head, 1);
+    if (sq_id == 0) {
+        pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
-    int nbatches_kl = (bounds.ntile_kl_pairs + TILES_IN_BATCH - 1) / TILES_IN_BATCH;
-    int nbatches = bounds.ntile_ij_pairs * nbatches_kl;
-    while (batch_id < nbatches) {
-        int batch_ij = batch_id / nbatches_kl;
-        int batch_kl = batch_id % nbatches_kl;
-        double omega = envs.env[PTR_RANGE_OMEGA];
-        int ntasks;
-        if (omega >= 0) {
-            ntasks = _fill_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                    batch_ij, batch_kl);
-        } else {
-            ntasks = _fill_sr_jk_tasks(shl_quartet_idx, envs, jk, bounds,
-                                       batch_ij, batch_kl);
-        }
-        if (ntasks > 0) {
-            int tile_ij = bounds.tile_ij_mapping[batch_ij];
-            int nbas = envs.nbas;
-            int nbas_tiles = nbas / TILE;
-            int tile_i = tile_ij / nbas_tiles;
-            int tile_j = tile_ij % nbas_tiles;
-            int ish0 = tile_i * TILE;
-            int jsh0 = tile_j * TILE;
-            _rys_j_4_2(envs, jk, bounds, shl_quartet_idx, ntasks, ish0, jsh0);
-        }
-        if (t_id == 0) {
-            batch_id = atomicAdd(batch_head, 1);
-            atomicAdd(batch_head+1, ntasks);
-        }
-        __syncthreads();
-    }
+}
 }
 
-int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
-                   ShellQuartet *pool, uint32_t *batch_head,
-                   int *scheme, int workers)
+int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *pool)
 {
     int li = bounds->li;
     int lj = bounds->lj;
     int lk = bounds->lk;
     int ll = bounds->ll;
-    int lij = li + lj;
-    int lkl = lk + ll;
-    int threads = 256;
+    int ijkl = li*125 + lj*25 + lk*5 + ll;
     int nroots = bounds->nroots;
+    int lij = li + lj;
     int nf3_ij = (lij+1)*(lij+2)*(lij+3)/6;
+    int nsq_per_block = 256;
+    int gout_stride = 1;
+
+    switch (ijkl) {
+    case 0: adjust_threads(rys_j_0_0, nsq_per_block); break;
+    case 9: adjust_threads(rys_j_1_0, nsq_per_block); break;
+    case 10: adjust_threads(rys_j_1_1, nsq_per_block); break;
+    case 11: adjust_threads(rys_j_1_2, nsq_per_block); break;
+    case 18: adjust_threads(rys_j_2_0, nsq_per_block); break;
+    case 19: adjust_threads(rys_j_2_1, nsq_per_block); break;
+    case 20: adjust_threads(rys_j_2_2, nsq_per_block); break;
+    case 21: adjust_threads(rys_j_2_3, nsq_per_block); break;
+    case 22: adjust_threads(rys_j_2_4, nsq_per_block); break;
+    case 27: adjust_threads(rys_j_3_0, nsq_per_block); break;
+    case 28: adjust_threads(rys_j_3_1, nsq_per_block); break;
+    case 29: adjust_threads(rys_j_3_2, nsq_per_block); break;
+    case 30: adjust_threads(rys_j_3_3, nsq_per_block); break;
+    case 36: adjust_threads(rys_j_4_0, nsq_per_block); break;
+    case 37: adjust_threads(rys_j_4_1, nsq_per_block); break;
+    case 38: adjust_threads(rys_j_4_2, nsq_per_block); break;
+    }
+
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    int *head = pool + workers * QUEUE_DEPTH;
+    cudaMemset(head, 0, sizeof(int));
+
+    dim3 threads(nsq_per_block, gout_stride);
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;
-    int ijkl = lij*9 + lkl;
-
-#if CUDA_VERSION >= 12040
+    int buflen = nroots*2 * nsq_per_block + iprim*jprim + nf3_ij;
     switch (ijkl) {
-    case 0: threads *= 2; break;
-    case 9: threads *= 2; break;
-    case 10: threads *= 2; break;
-    case 18: threads *= 2; break;
-    }
-#endif
-
-    int buflen = (nroots*2) * threads + iprim*jprim*TILE2*4 + nf3_ij*TILE2;
-    switch (ijkl) {
-    case 0: rys_j_0_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 9: rys_j_1_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 10: rys_j_1_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 11: rys_j_1_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 18: rys_j_2_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 19: rys_j_2_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 20: rys_j_2_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 21: rys_j_2_3<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 22: rys_j_2_4<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 27: rys_j_3_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 28: rys_j_3_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 29: rys_j_3_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 30: rys_j_3_3<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 36: rys_j_4_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 37: rys_j_4_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
-    case 38: rys_j_4_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, batch_head); break;
+    case 0: rys_j_0_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 9: rys_j_1_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 10: rys_j_1_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 11: rys_j_1_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 18: rys_j_2_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 19: rys_j_2_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 20: rys_j_2_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 21: rys_j_2_3<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 22: rys_j_2_4<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 27: rys_j_3_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 28: rys_j_3_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 29: rys_j_3_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 30: rys_j_3_3<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 36: rys_j_4_0<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 37: rys_j_4_1<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+    case 38: rys_j_4_2<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
     default: return 0;
     }
     return 1;
