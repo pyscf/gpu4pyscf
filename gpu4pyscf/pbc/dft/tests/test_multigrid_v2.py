@@ -175,8 +175,6 @@ class KnownValues(unittest.TestCase):
         #     n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_uks(
         #         pcell, None, xc, dm, kpts=kpts)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True, kpts=kpts)
-        print(f"n0 = {n0}, n1 = {n1}")
-        print(f"exc0 = {exc0}, exc1 = {exc1}")
         assert abs(n0-n1).max() < 1e-8
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
