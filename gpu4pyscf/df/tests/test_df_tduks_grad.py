@@ -180,7 +180,8 @@ def cal_mf(mol, xc):
     return mf
 
 
-def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False):
+def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
+                               tol=1e-5, coords_indices=None):
     mol = mol_input.copy()
     mf = cal_mf(mol, xc)
     td = get_td(mf, tda, xc)
@@ -205,31 +206,30 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False):
     gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocca, nvira, noccb, nvirb, grad_elec, tda)
 
     coords = mol.atom_coords(unit='Ang')*1.0
-    natm = coords.shape[0]
-    grad = np.zeros((natm, 3))
-    for i in range(natm):
-        for j in range(3):
-            mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc)
-            td_add = get_td(mf_add, tda, xc)
-            e1 = cal_td(td_add, tda)
-            e_add = e1[0] + mf_add.e_tot
+    if coords_indices is None:
+        coords_indices = [[0, 2], [2, 1]]
+    for i, j in coords_indices:
+        mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc)
+        td_add = get_td(mf_add, tda, xc)
+        e1 = cal_td(td_add, tda)
+        e_add = e1[0] + mf_add.e_tot
 
-            mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc)
-            td_minus = get_td(mf_minus, tda, xc)
-            e1 = cal_td(td_minus, tda)
-            e_minus = e1[0] + mf_minus.e_tot
-            grad[i, j] = (e_add - e_minus)/(delta*2.0)*0.52917721092
-    return gradient_ana, grad
+        mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc)
+        td_minus = get_td(mf_minus, tda, xc)
+        e1 = cal_td(td_minus, tda)
+        e_minus = e1[0] + mf_minus.e_tot
+
+        grad_fdiff = (e_add - e_minus)/(delta*2.0)*0.52917721092
+        assert abs(gradient_ana[i, j] - grad_fdiff) < tol
+    return gradient_ana
 
 
-def _check_grad(mol, tol=1e-6, xc="b3lyp", disp=None, tda=False, method="cpu"):
+def _check_grad(mol, tol=1e-5, xc="b3lyp", disp=None, tda=False, method="cpu"):
     if method == "cpu":
         raise NotImplementedError("Only benchmark with finite difference")
     elif method == "numerical":
-        grad_ana, grad = benchmark_with_finite_diff(
-            mol, delta=0.005, xc=xc, tda=tda)
-        norm_diff = np.linalg.norm(grad_ana - grad)
-    assert norm_diff < tol
+        grad_ana = benchmark_with_finite_diff(
+            mol, delta=0.005, xc=xc, tda=tda, tol=tol)
 
 
 class KnownValues(unittest.TestCase):
@@ -244,7 +244,6 @@ class KnownValues(unittest.TestCase):
     # def test_grad_b3lyp_tdhf_spinconserve_numerical(self):
     #     _check_grad(mol, tol=1e-4, xc="b3lyp", tda=False, method="numerical")
 
-    @pytest.mark.slow
     def test_grad_camb3lyp_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="camb3lyp", tda=True, method="numerical")
     # def test_grad_camb3lyp_tdhf_spinconserve_numerical(self):

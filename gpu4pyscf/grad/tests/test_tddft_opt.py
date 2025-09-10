@@ -60,9 +60,9 @@ class KnownValues(unittest.TestCase):
 
         mol_gpu = optimize(td)
         ref = np.array(
-            [[0,  0       , 0.739513]
-             [0, -2.228518, 0.739513]
-             [0,  2.228518, 0.739513]])
+            [[0,  0       , 0.739513],
+             [0, -2.228518, 0.739513],
+             [0,  2.228518, 0.739513],])
         assert np.linalg.norm(mol_gpu.atom_coords() - ref) < 1e-4
 
     @pytest.mark.slow
