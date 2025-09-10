@@ -15,6 +15,7 @@
 import cupy as cp
 import sys
 import scipy.linalg
+import inspect
 
 from gpu4pyscf.tdscf import math_helper
 from gpu4pyscf.lib import logger, cusolver
@@ -40,6 +41,14 @@ Please cite the TDDFT-ris preconditioning method if you are happy with the fast 
 
 
 '''
+def get_memory_info(words):
+    cp.cuda.PinnedMemoryPool().free_all_blocks()
+    cp.get_default_memory_pool().free_all_blocks()
+    device = cp.cuda.Device()
+    free_mem, total_mem = device.mem_info
+    used_mem = total_mem - free_mem
+    memory_info = f"{words} memory usage: {used_mem / 1024**3:.2f} GB / {total_mem / 1024**3:.2f} GB"
+    return memory_info
 
 def _time_add(log, t_total, t_start):
     ''' t_total: list
@@ -316,8 +325,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     log.info(f'  V and W holder use {holder_mem:.2f} MB memory, with {hdiag.dtype}')
 
     # Initialize arrays
-    V_holder = cp.empty((max_N_mv, A_size))
-    W_holder = cp.empty_like(V_holder)
+    V_holder = cp.empty((max_N_mv, A_size), dtype=hdiag.dtype)
+    W_holder = cp.empty_like(V_holder, dtype=hdiag.dtype)
     sub_A_holder = cp.empty((max_N_mv, max_N_mv), dtype=hdiag.dtype)
 
     if problem_type in ['linear','shifted_linear']:
@@ -387,7 +396,11 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         ''' Matrix-vector product '''
         t0 = log.init_timer()
-        W_holder[size_old:size_new, :] = matrix_vector_product(V_holder[size_old:size_new, :])
+        if 'out' in inspect.signature(matrix_vector_product).parameters:
+            matrix_vector_product(V_holder[size_old:size_new, :], out=W_holder[size_old:size_new, :])
+        else:
+            W_holder[size_old:size_new, :] = matrix_vector_product(V_holder[size_old:size_new, :])
+
         _time_add(log, t_mvp, t0)
 
         ''' Project into Krylov subspace '''
@@ -891,20 +904,20 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     holder_mem = 4 * max_N_mv * A_size * hdiag.itemsize/(1024**2)
     log.info(f'  V W U1 U2 holder use {holder_mem:.2f} MB memory')
 
-    V_holder = cp.zeros((max_N_mv, A_size),dtype=hdiag.dtype)
-    W_holder = cp.zeros_like(V_holder)
+    V_holder = cp.zeros((max_N_mv, A_size), dtype=hdiag.dtype)
+    W_holder = cp.zeros_like(V_holder, dtype=hdiag.dtype)
 
-    U1_holder = cp.empty_like(V_holder)
-    U2_holder = cp.empty_like(V_holder)
+    U1_holder = cp.empty_like(V_holder, dtype=hdiag.dtype)
+    U2_holder = cp.empty_like(V_holder, dtype=hdiag.dtype)
 
-    VU1_holder = cp.empty((max_N_mv,max_N_mv),dtype=hdiag.dtype)
-    VU2_holder = cp.empty_like(VU1_holder)
-    WU1_holder = cp.empty_like(VU1_holder)
-    WU2_holder = cp.empty_like(VU1_holder)
+    VU1_holder = cp.empty((max_N_mv,max_N_mv), dtype=hdiag.dtype)
+    VU2_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
+    WU1_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
+    WU2_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
 
-    VV_holder = cp.empty_like(VU1_holder)
-    VW_holder = cp.empty_like(VU1_holder)
-    WW_holder = cp.empty_like(VU1_holder)
+    VV_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
+    VW_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
+    WW_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
 
     '''
     set up initial guess, V= TDA initial guess, W=0
