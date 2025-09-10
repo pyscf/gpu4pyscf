@@ -26,6 +26,7 @@ from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df import int3c2e_bdiv
+from cupyx import scatter_add
 
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
@@ -307,51 +308,6 @@ def get_Tpq_old(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         return Tia, Tij, Tab
    
-def get_Tpq_bdiv_raw(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
-           calc='JK', omega=None, alpha=None, beta=None,
-           log=None, in_ram=True, single=True):
-    nao = mol.nao
-    naux = auxmol.nao
-
-    # siz_p = C_p.shape[1]
-    # siz_q = C_q.shape[1]
-
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
-    ao_idx = cp.asarray(int3c2e_opt.ao_idx)
-    print('ao_idx.shape', ao_idx.shape)
-
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    print('nao, nao_orig', nao, nao_orig) # 220 208
-
-    aux_coeff = cp.array(int3c2e_opt.aux_coeff) # aux_coeff is contraction coeff of GTO, not the MO coeff
-    naux = aux_coeff.shape[0]
-    print('aux_coeff.shape', aux_coeff.shape)
-
-    out = cp.zeros((nao*nao, naux))
-    print('out.shape', out.shape)
-     
-    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
-    # eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
-    eri3c = eri3c.dot(aux_coeff)
-
-    print('eri3c.shape', eri3c.shape)
-    print('eri3c.flags', eri3c.flags)
-
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
-    rows, cols = divmod(ao_pair_mapping, nao)
-    out[rows*nao+cols] = eri3c
-    out[cols*nao+rows] = eri3c
-    out = out.reshape(nao, nao, naux)
-
-    coeff = cp.asarray(int3c2e_opt.coeff)
-    print('coeff.shape', coeff.shape)
-    # out = contract('pqr,rk->pqk', out, aux_coeff)
-    out = contract('pqk,qj->pjk', out, coeff)
-    out = contract('pjk,pi->ijk', out, coeff)
-    from pyscf.df import incore
-    ref = incore.aux_e2(mol, auxmol)
-    assert abs(out.get()-ref).max() < 1e-10
-
 
 def get_Tpq_bdiv_success(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
            calc='JK', omega=None, alpha=None, beta=None,
@@ -549,7 +505,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
 
     aux_offset = 0
-    batch_size = 16
+    batch_size = 24
 
     for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
         # print('eri3c_batch.shape', eri3c_batch.shape)
@@ -658,7 +614,7 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     print('eri3c.shape', eri3c.shape)
     return eri3c, int3c2e_opt
 
-def gen_iajb_MVP_bdiv(eri3c, int3c2e_opt, C_p, C_q): 
+def gen_iajb_MVP_bdiv(eri3c, int3c2e_opt, C_p, C_q, log): 
     '''
     (ia|jb)V = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
              = Σ_P [ T_left_ia^P Σ_jb(T_right_jb^P V_jb^m) ]
@@ -676,58 +632,59 @@ def gen_iajb_MVP_bdiv(eri3c, int3c2e_opt, C_p, C_q):
 
     C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
     C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    
+    n_p = C_p.shape[1]
 
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=False)
     # print('ao_pair_mapping.shape', ao_pair_mapping.shape)
 
     rows, cols = divmod(ao_pair_mapping, nao_orig)
 
-    def iajb_MVP(V):
+    def iajb_MVP(V, out):
         '''
         Optimized calculation of (ia|jb) = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
         by chunking along the auxao dimension to reduce memory usage.
 
         Parameters:
-            V (cupy.ndarray): Input tensor of shape (m, n_occ * n_vir).
+            V   (cupy.ndarray): Input tensor of shape (m, n_occ, n_vir).
+            out (cupy.ndarray): output holder of shape (m, n_occ, n_vir).
 
         Returns:
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
 
-        n_state, n_occ, n_vir = V.shape
-        # Initialize result tensor
-        iajb_V = cp.zeros((n_state, n_occ, n_vir), dtype=V.dtype)
+        aux_batch_size = 10
+        # print('iajb batchs', len(range(0, nauxao, aux_batch_size)))
+        log.info(get_memory_info('  iajb_V before slicing aux')) 
+        # Iterate over batchs of the auxao dimension
+        for aux_start in range(0, nauxao, aux_batch_size):
+            aux_end = min(aux_start + aux_batch_size, nauxao)
+            tmp_aux_batch_size = aux_end - aux_start
 
-        aux_chunk_size = 5
-        # print('iajb chunks', len(range(0, nauxao, aux_chunk_size)))
-        print(get_memory_info('  iajb_V before slicing aux')) 
-        # Iterate over chunks of the auxao dimension
-        for aux_start in range(0, nauxao, aux_chunk_size):
-            aux_end = min(aux_start + aux_chunk_size, nauxao)
-            tmp_aux_chunk_size = aux_end - aux_start
-
-            eri3c_chunk = cp.asarray(eri3c[:, aux_start:aux_end], order='F')
+            eri3c_batch = cp.asarray(eri3c[:, aux_start:aux_end], order='F')
             
-            eri3c_unzip_chunk = cp.zeros((nao_orig*nao_orig, tmp_aux_chunk_size), order='F')
+            eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, tmp_aux_batch_size), order='F')
 
-            eri3c_unzip_chunk[ao_pair_mapping,   :] = eri3c_chunk
-            eri3c_unzip_chunk[cols*nao_orig+rows,:] = eri3c_chunk
+            eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
+            eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
 
-            eri3c_unzip_chunk = eri3c_unzip_chunk.reshape(nao_orig, nao_orig, tmp_aux_chunk_size)
+            eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, tmp_aux_batch_size)
 
-            tmp_Ppv = contract('uvP,up->Ppv', eri3c_unzip_chunk, C_p)
-            Tjb_chunk = contract('Ppv,vq->Ppq', tmp_Ppv, C_q)
+            tmp_Ppv = contract('uvP,up->Ppv', eri3c_unzip_batch, C_p)
+
+            Tjb_batch = contract('Ppv,vq->Ppq', tmp_Ppv, C_q)
  
-            Tjb_Vjb_chunk = contract("Pjb,mjb->Pm", Tjb_chunk, V)
-            Tia_chunk = Tjb_chunk  # Shape: (aux_range, n_occ, n_vir)
-            iajb_V += contract("Pia,Pm->mia", Tia_chunk, Tjb_Vjb_chunk)
+            Tjb_Vjb_batch = contract("Pjb,mjb->Pm", Tjb_batch, V)
+            Tia_batch = Tjb_batch  
+            
+            out += 2*contract("Pia,Pm->mia", Tia_batch, Tjb_Vjb_batch)
 
             # Release intermediate variables and clean up memory, must!
-            del eri3c_unzip_chunk, Tjb_chunk, Tia_chunk, Tjb_Vjb_chunk
+            del eri3c_unzip_batch, Tjb_batch, Tia_batch, Tjb_Vjb_batch
+
             release_memory()
 
-        return iajb_V
-
+    log.info(get_memory_info('after generate iajb_MVP'))
     return iajb_MVP
 
 def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None, dtype=cp.float64):
@@ -829,15 +786,15 @@ def gen_iajb_MVP(T_ia):
         available_gpu_memory = get_avail_mem()
 
         # Estimate the optimal chunk size based on available GPU memory
-        aux_chunk_size = int(available_gpu_memory * 0.8 // estimated_chunk_size_bytes)
+        aux_batch_size = int(available_gpu_memory * 0.8 // estimated_chunk_size_bytes)
 
         # Ensure the chunk size is at least 1 and doesn't exceed the total number of auxao
-        aux_chunk_size = max(1, min(nauxao, aux_chunk_size))
-        # print('iajb chunks', len(range(0, nauxao, aux_chunk_size)))
+        aux_batch_size = max(1, min(nauxao, aux_batch_size))
+        # print('iajb chunks', len(range(0, nauxao, aux_batch_size)))
         # print(get_memory_info('  iajb_V before slicing aux')) 
         # Iterate over chunks of the auxao dimension
-        for aux_start in range(0, nauxao, aux_chunk_size):
-            aux_end = min(aux_start + aux_chunk_size, nauxao)
+        for aux_start in range(0, nauxao, aux_batch_size):
+            aux_end = min(aux_start + aux_batch_size, nauxao)
 
             
             Tjb_chunk = cp.asarray(T_ia[aux_start:aux_end, :, :])   # Shape: (aux_range, n_occ * n_vir)
@@ -933,6 +890,89 @@ def gen_ijab_MVP(T_ij, T_ab):
         
 
     return ijab_MVP
+
+
+def gen_ijab_MVP_out(T_ij, T_ab, log):
+    '''
+    (ij|ab)V = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
+             = Σ_P [T_ij^P Σ_jb(T_ab^P V_jb^m)]
+    V in shape (m, n_occ * n_vir)
+    '''
+
+    # def ijab_MVP(V):
+    #     T_ab_V = contract("Pab,mjb->Pamj", T_ab, V)
+    #     ijab_V = contract("Pij,Pamj->mia", T_ij, T_ab_V)
+    #     return ijab_V
+
+    def ijab_MVP(V, a_x=None, out=None):
+        '''
+        Optimized calculation of (ij|ab) = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
+        by chunking along the n_vir dimension to reduce memory usage.
+
+        Parameters:
+            V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
+
+        Returns:
+            ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
+        '''
+        T_ij_gpu = cp.asarray(T_ij) # if T_ij was in RAM, upload to GPU on calling
+        nauxao, n_occ, n_occ = T_ij.shape
+
+        nauxao, n_vir, n_vir = T_ab.shape  # Dimensions of T_ab
+        n_state, n_occ, n_vir = V.shape    # Dimensions of V
+
+        # Initialize result tensor
+        if out is None:
+            ijab_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ab.dtype)
+        # else:
+        #     out = out.reshape(n_state, n_occ, n_vir)
+        # Get free memory and dynamically calculate chunk size
+        available_gpu_memory = get_avail_mem()
+
+        # 1 denotes one vir MO, we are slucing the n_vir dimension.
+        n_T_ab_chunk = nauxao * 1 * n_vir
+        n_T_ab_V_chunk = nauxao * 1 * n_state * n_occ 
+        n_ijab_V_chunk = n_state * n_occ * 1
+
+        bytes_per_vir = 2*( n_T_ab_chunk + n_T_ab_V_chunk + n_ijab_V_chunk) * T_ab.itemsize  
+        # print('available_gpu_memory', available_gpu_memory)
+        vir_chunk_size = max(1, int(available_gpu_memory * 0.4 // bytes_per_vir)) 
+
+        # Iterate over chunks of the n_vir dimension
+        # i = 0
+        for vir_start in range(0, n_vir, vir_chunk_size):
+            # print(' vir chunk', i,  available_gpu_memory)
+            # i += 1
+
+            vir_end = min(vir_start + vir_chunk_size, n_vir)
+            # vir_range = vir_end - vir_start
+
+            # Extract the corresponding chunk of T_ab
+            T_ab_chunk = T_ab[:, vir_start:vir_end, :]  # Shape: (nauxao, vir_range, n_vir)
+
+            # Compute T_ab_V for the current chunk
+            T_ab_chunk_V = contract("Pab,mjb->Pamj", T_ab_chunk, V)
+
+            # Compute ijab_V for the current chunk
+            if out is None:
+                ijab_V[:, :, vir_start:vir_end] = contract("Pij,Pamj->mia", T_ij_gpu, T_ab_chunk_V)
+            else:
+               out[:, :, vir_start:vir_end] -= a_x*contract("Pij,Pamj->mia", T_ij_gpu, T_ab_chunk_V)
+
+            # Release intermediate variables and clean up memory, must!
+            del T_ab_chunk, T_ab_chunk_V
+            release_memory()
+
+        del T_ij_gpu
+
+        if out is None:
+            return ijab_V
+        # else:
+        #     return out
+    log.info(get_memory_info('after generate ijab_MVP'))    
+    return ijab_MVP
+
+
 
 def gen_ibja_MVP(T_ia):
     '''
@@ -1582,15 +1622,15 @@ class TDA(RisBase):
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
         # iajb_MVP = gen_iajb_MVP(T_ia=T_ia_J)
-        iajb_MVP = gen_iajb_MVP_bdiv(eri3c=eri3c, int3c2e_opt=int3c2e_opt, C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc)
-        ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K, T_ab=T_ab_K)
+        iajb_MVP = gen_iajb_MVP_bdiv(eri3c=eri3c, int3c2e_opt=int3c2e_opt, C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log)
+        ijab_MVP = gen_ijab_MVP_out(T_ij=T_ij_K, T_ab=T_ab_K, log=log)
 
         del self._scf 
         del self.chkfile 
         gc.collect()
         release_memory()
 
-        def RKS_TDA_hybrid_MVP(X):
+        def RKS_TDA_hybrid_MVP(X, out=None):
             ''' hybrid or range-sparated hybrid, a_x > 0
                 return AX
                 AV = hdiag_MVP(V) + 2*iajb_MVP(V) - a_x*ijab_MVP(V)
@@ -1627,19 +1667,33 @@ class TDA(RisBase):
             '''
             nstates = X.shape[0]
             X = X.reshape(nstates, self.n_occ, self.n_vir)
-            cpu0 = log.init_timer()
-            AX = hdiag_MVP(X) 
-            AX += 2 * iajb_MVP(X) 
-            log.timer('--iajb_MVP', *cpu0)
+            
+            if out is None:
+                cpu0 = log.init_timer()
+                AX = hdiag_MVP(X) 
+                AX += 2 * iajb_MVP(X) 
+                log.timer('--iajb_MVP', *cpu0)
 
-            cpu1 = log.init_timer()
-            exchange = self.a_x * ijab_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
-            log.timer('--ijab_MVP', *cpu1)
+                cpu1 = log.init_timer()
+                exchange = self.a_x * ijab_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
+                log.timer('--ijab_MVP', *cpu1)
 
-            AX[:,self.n_occ-self.rest_occ:,:self.rest_vir] -= exchange
-            AX = AX.reshape(nstates, self.n_occ*self.n_vir)
+                AX[:,self.n_occ-self.rest_occ:,:self.rest_vir] -= exchange
+                AX = AX.reshape(nstates, self.n_occ*self.n_vir)
+                return AX
 
-            return AX
+            else:
+                cpu0 = log.init_timer()
+                out = out.reshape(nstates, self.n_occ, self.n_vir)
+                out[:,:,:] = hdiag_MVP(X)
+                iajb_MVP(X, out=out)
+                log.timer('--iajb_MVP', *cpu0)
+
+                cpu1 = log.init_timer()
+                ijab_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir], a_x=self.a_x, out=out[:,self.n_occ-self.rest_occ:,:self.rest_vir])
+                log.timer('--ijab_MVP', *cpu1)
+                out = out.reshape(nstates, self.n_occ*self.n_vir)
+                # return out
 
         return RKS_TDA_hybrid_MVP, self.hdiag
             
