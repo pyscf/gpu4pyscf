@@ -169,8 +169,6 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
     gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda)
 
     coords = mol.atom_coords(unit='Ang')*1.0
-    natm = coords.shape[0]
-    grad = np.zeros((natm, 3))
     if coords_indices is None:
         coords_indices = [[0, 2], [2, 1]]
     for i, j in coords_indices:
@@ -200,6 +198,7 @@ def _check_grad(mol, tol=1e-5, disp=None, tda=False, method="numerical"):
         grad_ana = benchmark_with_finite_diff(
             mol, delta=0.005, xc="hf", tda=tda, tol=tol
         )
+    return grad_ana
 
 
 class KnownValues(unittest.TestCase):

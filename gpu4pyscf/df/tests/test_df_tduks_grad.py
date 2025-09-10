@@ -230,6 +230,7 @@ def _check_grad(mol, tol=1e-5, xc="b3lyp", disp=None, tda=False, method="cpu"):
     elif method == "numerical":
         grad_ana = benchmark_with_finite_diff(
             mol, delta=0.005, xc=xc, tda=tda, tol=tol)
+    return grad_ana
 
 
 class KnownValues(unittest.TestCase):

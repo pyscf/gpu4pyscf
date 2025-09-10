@@ -19,6 +19,7 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
+import pytest
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
