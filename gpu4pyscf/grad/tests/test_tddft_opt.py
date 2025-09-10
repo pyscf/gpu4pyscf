@@ -58,11 +58,12 @@ class KnownValues(unittest.TestCase):
         td = mf.TDA().set(nstates=3)
         td.kernel()
 
-        # TODO: store CPU results for comparison
-        td_cpu = td.to_cpu()
         mol_gpu = optimize(td)
-        mol_cpu = optimize(td_cpu)
-        assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
+        ref = np.array(
+            [[0,  0       , 0.739513]
+             [0, -2.228518, 0.739513]
+             [0,  2.228518, 0.739513]])
+        assert np.linalg.norm(mol_gpu.atom_coords() - ref) < 1e-4
 
     @pytest.mark.slow
     def test_opt_rks_tda(self):
@@ -95,6 +96,7 @@ class KnownValues(unittest.TestCase):
         excited_gradf.kernel()
         assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
+    @pytest.mark.slow
     def test_opt_rks_tda_pcm_2(self):
         mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
