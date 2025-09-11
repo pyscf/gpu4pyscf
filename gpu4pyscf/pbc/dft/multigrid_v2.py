@@ -73,23 +73,66 @@ def ifft_in_place(x):
     return fft.ifftn(x, axes=(-3, -2, -1), overwrite_x=True)
 
 
+def unique_with_sort(x):
+    # This function does the same thing as cp.unique(x, return_inverse=True).
+    # It's not super optimized, but for whatever reason, cp.unique is very slow, so this one is better.
+    assert type(x) == cp.ndarray and x.dtype == cp.int32 and x.ndim == 1
+    n = x.shape[0]
+    if n <= 1:
+        return x, cp.zeros(n)
+
+    sort_index = cp.argsort(x)
+    inverse_sort = cp.empty(n, dtype = cp.int64)
+    inverse_sort[sort_index] = cp.arange(0, n, dtype = cp.int64)
+    x = x[sort_index]
+
+    mask = cp.empty(n, dtype=cp.bool_)
+    mask[0] = True
+    mask[1:] = (x[1:] != x[:-1])
+
+    x = x[mask]
+    inverse_unique = cp.cumsum(mask, dtype=cp.int64) - 1
+
+    return x, inverse_unique[inverse_sort]
+
+
 def image_pair_to_difference(
-    vectors_to_neighboring_images_cpu,
-    lattice_vectors_cpu,
+    vectors_to_neighboring_images,
+    lattice_vectors,
 ):
-    translation_vectors = np.asarray(
-        np.linalg.solve(lattice_vectors_cpu.T, vectors_to_neighboring_images_cpu.T).T,
+    vectors_to_neighboring_images = cp.asarray(vectors_to_neighboring_images)
+    lattice_vectors = cp.asarray(lattice_vectors)
+
+    translation_vectors = cp.asarray(
+        cp.linalg.solve(lattice_vectors.T, vectors_to_neighboring_images.T).T,
     )
-    translation_vectors = np.asarray(np.round(translation_vectors), dtype = np.int32)
+    translation_vectors = cp.asarray(cp.round(translation_vectors), dtype = cp.int32)
     image_difference_full = (
         # k_j - k_i corresponding to <i|j>
         translation_vectors[None,:,:] - translation_vectors[:,None,:]
     ).reshape(-1, 3)
-    translation_vectors, inverse = np.unique(
-        image_difference_full, axis=0, return_inverse=True
-    )
 
-    difference_images = translation_vectors @ lattice_vectors_cpu
+    max_offset = cp.max(cp.abs(image_difference_full)) + 1
+    assert (max_offset * 2)**3 < np.iinfo(np.int32).max
+    image_difference_3in1 = image_difference_full + max_offset
+    image_difference_3in1 = image_difference_3in1[:, 0] * (max_offset * 2)**2 \
+                          + image_difference_3in1[:, 1] * (max_offset * 2) \
+                          + image_difference_3in1[:, 2]
+
+    image_difference_3in1, inverse = unique_with_sort(image_difference_3in1)
+
+    translation_vectors = cp.empty([image_difference_3in1.shape[0], 3], dtype = cp.int32)
+    translation_vectors[:, 0] = image_difference_3in1 // (max_offset * 2)**2
+    translation_vectors[:, 1] = (image_difference_3in1 % (max_offset * 2)**2) // (max_offset * 2)
+    translation_vectors[:, 2] = image_difference_3in1 % (max_offset * 2)
+    translation_vectors -= max_offset
+
+    # translation_vectors, inverse = np.unique(
+    #     image_difference_full.get(), axis=0, return_inverse=True
+    # )
+    # translation_vectors = cp.asarray(translation_vectors)
+
+    difference_images = translation_vectors @ lattice_vectors
 
     # Given our pair data structure, the difference_images here should be interpretted as R2 - R1,
     # where R1 is associated with the first orbital in a pair, and R2 associated to the second.
@@ -103,7 +146,7 @@ def image_phase_for_kpts(cell, neighboring_images, kpts=None):
     else:
         lattice_vectors = cell.lattice_vectors()
         difference_images, image_pair_difference_index = image_pair_to_difference(
-            neighboring_images.get(),
+            neighboring_images,
             lattice_vectors,
         )
         phase_diff_among_images = cp.exp(
