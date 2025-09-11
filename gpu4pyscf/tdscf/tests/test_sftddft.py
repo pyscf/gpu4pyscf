@@ -22,6 +22,20 @@ try:
 except ImportError:
     mcfun = None
 
+
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    return e_sorted[:nroots], xy_sorted[:, :nroots]
+
+
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -48,10 +62,20 @@ class KnownValues(unittest.TestCase):
         ref = [ 0.46644071, 0.55755649, 1.05310518]
         td = mf.SFTDA().run(extype=0, conv_tol=1e-7)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        a, b = td.get_ab()
+        e = diagonalize_tda(a[0], nroots=3)[0]
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
+        print(td.e)
+        print(e)
 
         ref = [-0.21574567, 0.00270390, 0.03143914]
         td = mf.SFTDA().run(extype=1, conv_tol=1e-7)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        a, b = td.get_ab()
+        e = diagonalize_tda(a[1], nroots=3)[0]
+        print(td.e)
+        print(e)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
 
     @unittest.skipIf(mcfun is None, 'MCfun not available')
     def test_mcol_b3lyp_tda(self):
