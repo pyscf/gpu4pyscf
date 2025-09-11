@@ -524,7 +524,7 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
     n_images = pairs_info["neighboring_images"].shape[0]
     phase_diff_among_images, image_pair_difference_index = img_phase
     n_k_points, n_difference_images = phase_diff_among_images.shape
-    if n_k_points == 1:
+    if n_k_points == 1 and n_difference_images == 1:
         density_matrix_with_translation = dm_slice
     else:
         # The conjugate here change e^{i \vec{k} \cdot (\vec{R}_2 - \vec{R}_1)} to
@@ -773,7 +773,7 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
         if err != 0:
             raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
 
-    if n_k_points > 1:
+    if not (n_k_points == 1 and n_difference_images == 1):
         return cp.einsum(
             "kt, ntij -> nkij", phase_diff_among_images, fock
         )
@@ -913,7 +913,7 @@ def evaluate_xc_gradient_wrapper(
     phase_diff_among_images, image_pair_difference_index = img_phase
     n_k_points, n_difference_images = phase_diff_among_images.shape
 
-    if n_k_points == 1:
+    if n_k_points == 1 and n_difference_images == 1:
         density_matrix_with_translation = dm_slice
     else:
         density_matrix_with_translation = cp.einsum(

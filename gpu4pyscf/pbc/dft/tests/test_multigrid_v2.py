@@ -441,6 +441,119 @@ class KnownValues(unittest.TestCase):
         out = multigrid.MultiGridNumInt(cell).get_rho(dm).get()
         self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
 
+    def test_band_rks_gamma(self):
+        cell = gto.M(
+            verbose = 0,
+            a = np.diag([3.6, 3.2, 4.5]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = """
+                C DZVP-GTH-no-d-one-p-no-first-exp
+                  1
+                  2  0  1  3  2  1
+                        1.2881838513  -0.0292640031   0.0000000000  -0.2775560300
+                        0.4037767149  -0.6882040510   0.0000000000  -0.4712295093
+                        0.1187877657  -0.3964426906   1.0000000000  -0.4058039291
+                    """,
+            pseudo = 'gth-pade',
+            precision = 1e-8,
+        )
+
+        np.random.seed(1)
+        kpts_band = np.random.random((4,3))
+
+        ref_mf = cell.RKS(xc='r2scan')
+        ref_mf.conv_tol = 1e-10
+        ref_energy = ref_mf.kernel()
+        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
+
+        test_mf = cell.RKS(xc='r2scan').to_gpu()
+        test_mf._numint = multigrid.MultiGridNumInt(cell)
+        test_mf.conv_tol = 1e-10
+        test_energy = test_mf.kernel()
+        test_band_e, test_band_c = test_mf.get_bands(kpts_band)
+
+        assert abs(test_energy - ref_energy).max() < 1e-8
+        assert abs(test_band_e.get() - ref_band_e).max() < 1e-7
+        assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
+
+    def test_band_krks_kpts(self):
+        cell = gto.M(
+            verbose = 0,
+            a = np.array([[3.6, 0, 0], [0, 3.2, 0.2], [0, 0, 4.5]]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = """
+                C DZVP-GTH-no-d-one-p-no-first-exp
+                  1
+                  2  0  1  3  2  1
+                        1.2881838513  -0.0292640031   0.0000000000  -0.2775560300
+                        0.4037767149  -0.6882040510   0.0000000000  -0.4712295093
+                        0.1187877657  -0.3964426906   1.0000000000  -0.4058039291
+                    """,
+            pseudo = 'gth-pade',
+            precision = 1e-8,
+        )
+
+        kpts = cell.make_kpts([1,3,1])
+
+        np.random.seed(1)
+        kpts_band = np.random.random((1,3)) # Yes, one non-zero k point, as an edge case
+
+        ref_mf = cell.KRKS(xc='pbe', kpts=kpts)
+        ref_mf.conv_tol = 1e-10
+        ref_energy = ref_mf.kernel()
+        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
+
+        test_mf = cell.KRKS(xc='pbe', kpts=kpts).to_gpu()
+        test_mf._numint = multigrid.MultiGridNumInt(cell)
+        test_mf.conv_tol = 1e-10
+        test_energy = test_mf.kernel()
+        test_band_e, test_band_c = test_mf.get_bands(kpts_band)
+
+        assert abs(test_energy - ref_energy).max() < 1e-8
+        assert abs(test_band_e.get() - ref_band_e).max() < 1e-8
+        assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
+
+    def test_band_kuks_kpts(self):
+        cell = gto.M(
+            verbose = 0,
+            a = np.diag([3.6, 3.2, 4.5]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = """
+                C DZVP-GTH-no-d-one-p-no-first-exp
+                  1
+                  2  0  1  3  2  1
+                        1.2881838513  -0.0292640031   0.0000000000  -0.2775560300
+                        0.4037767149  -0.6882040510   0.0000000000  -0.4712295093
+                        0.1187877657  -0.3964426906   1.0000000000  -0.4058039291
+                    """,
+            pseudo = 'gth-pade',
+            precision = 1e-8,
+        )
+
+        kpts = cell.make_kpts([1,1,3])
+
+        np.random.seed(1)
+        kpts_band = np.random.random((2,3))
+
+        ref_mf = cell.KRKS(xc='lda', kpts=kpts)
+        ref_mf.conv_tol = 1e-10
+        ref_energy = ref_mf.kernel()
+        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
+
+        test_mf = cell.KRKS(xc='lda', kpts=kpts).to_gpu()
+        test_mf._numint = multigrid.MultiGridNumInt(cell)
+        test_mf.conv_tol = 1e-10
+        test_energy = test_mf.kernel()
+        test_band_e, test_band_c = test_mf.get_bands(kpts_band)
+
+        assert abs(test_energy - ref_energy).max() < 1e-8
+        assert abs(test_band_e.get() - ref_band_e).max() < 1e-7
+        assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
+
+
 if __name__ == '__main__':
     print("Full Tests for multigrid")
     unittest.main()
