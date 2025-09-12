@@ -20,12 +20,12 @@ from pyscf import lib
 from pyscf.gto.mole import ANG_OF, PTR_EXP, conc_env
 from pyscf.scf import _vhf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import asarray
+from gpu4pyscf.lib.cupy_helper import asarray, transpose_sum
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     apply_coeff_C_mat_CT, _scale_sp_ctr_coeff, _nearest_power2, SHM_SIZE)
 from gpu4pyscf.gto.mole import basis_seg_contraction
-from gpu4pyscf.df.int3c2e_bdiv_1 import (
+from gpu4pyscf.df.int3c2e_bdiv import (
     Int3c2eEnvVars, _conc_locs, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.scf.j_engine import libvhf_md, _to_primitive_bas
 
@@ -103,7 +103,7 @@ class Int3c2eOpt:
         ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
         # The effective shell pair = ish*nbas+jsh
         shl_pair_idx = []
-        nbas = mol.nbas
+        nbas = prim_mol.nbas
         for i, j in ij_tasks:
             ish0, ish1 = bas_offsets[i], bas_offsets[i+1]
             jsh0, jsh1 = bas_offsets[j], bas_offsets[j+1]
@@ -138,42 +138,42 @@ class Int3c2eOpt:
         _env_cpu = self._env
         sorted_mol = self.sorted_mol
         ao_loc = sorted_mol.ao_loc
-        aux_loc = self.sorted_auxmol.ao_loc
+        aux_loc = self.sorted_auxmol.ao_loc_nr(cart=True)
         naux = aux_loc[-1]
         prim_mol = self.prim_mol
 
-        nsp_lookup = np.empty([L_AUX_MAX+1]*3, dtype=np.int32)
-        idx = np.arange(L_AUX_MAX+1)
-        nf = (idx + 1) * (idx + 2) // 2
+        nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
+        lmax = self.uniq_l_ctr[:,0].max()
+        lmax_aux = self.auxmol._bas[:,ANG_OF].max()
         shm_size = 0
-        for lk in range(L_AUX_MAX+1):
-            for li in range(lk+1):
-                for lj in range(li+1):
-                    nfk = nf[lk]
-                    order = li + lj + lk
-                    nf3ijkl = (order+1)*(order+2)*(order+3) // 6
-                    unit = order+1 + nf3ijkl + nf3ijkl*order//(order+3)
-                    nsp_per_block = (SHM_SIZE - nfk*8) //(unit*8) // 4
-                    nsp_per_block = min(THREADS, _nearest_power2(nsp_per_block))
-                    nsp_lookup[lk,li,lj] = nsp_per_block
-                    shm_size = max(shm_size, nsp_per_block*4 * unit*8 + nfk*8)
-        z, y, x = np.sort(np.meshgrid(idx, idx, idx), axis=0)
-        nsp_lookup = nsp_lookup[x, y, z]
-        nsp_lookup = cp.asarray(nsp_lookup[:,:LMAX+1,:LMAX+1], dtype=np.int32)
+        for lk in range(lmax_aux+1):
+            for li in range(lmax*2+1):
+                order = li + lk
+                nf3k = (lk + 1) * (lk + 2) * (lk + 3) // 6
+                nf3ijkl = (order + 1) * (order + 2) * (order + 3) // 6
+                unit = order+1 + nf3ijkl + nf3ijkl*order//(order+3)
+                nsp_per_block = (SHM_SIZE - nf3k*8) //(unit*8)
+                nsp_per_block = min(THREADS, _nearest_power2(nsp_per_block))
+                nsp_lookup[li,lk] = nsp_per_block
+                shm_size = max(shm_size, nsp_per_block * unit + nf3k)
+        shm_size *= 8 # doubles
+        nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
 
         # Adjust the number of shell-pairs in each group for better balance.
         shl_pair_idx_cpu = np.asarray(self.shl_pair_idx, dtype=np.int32)
         shl_pair_idx = asarray(self.shl_pair_idx, dtype=np.int32)
         pair_ij_offsets = cp.asarray(self.shl_pair_offsets, dtype=np.int32)
         sp_blocks = len(pair_ij_offsets) - 1
-        log.debug1('sp_blocks = %d, ksh_blocks = %d', sp_blocks)
+        log.debug1('sp_blocks = %d, shm_size = %d B', sp_blocks, shm_size)
 
         dm = cp.asarray(dm)
         assert dm.ndim == 2
         n_dm = 1
         dm = apply_coeff_C_mat_CT(dm, self.mol, sorted_mol, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
+        dm = transpose_sum(dm)
         dm_cpu = dm.get()
+        dm = None
         dm_xyz_size = self.pair_loc[-1]
         dm_xyz = np.zeros((n_dm, dm_xyz_size))
         _env = _scale_sp_ctr_coeff(prim_mol)
@@ -200,10 +200,11 @@ class Int3c2eOpt:
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
-            _atm_cpu.ctypes, ctypes.c_int(sorted_mol.natm),
-            _bas_cpu.ctypes, ctypes.c_int(sorted_mol.nbas), _env_cpu.ctypes)
+            _atm_cpu.ctypes, ctypes.c_int(prim_mol.natm),
+            _bas_cpu.ctypes, ctypes.c_int(prim_mol.nbas), _env_cpu.ctypes)
         if err != 0:
             raise RuntimeError('contract_int3c2e_dm kernel failed')
         if log.verbose >= logger.DEBUG1:
             log.timer_debug1('processing contract_int3c2e_dm', *t0)
+        vj_aux = asarray(vj_aux.get().dot(self.aux_coeff))
         return vj_aux
