@@ -18,6 +18,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.tdscf import uhf as tdhf_cpu
 from pyscf import ao2mo
+from pyscf.data import nist
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
@@ -403,7 +404,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     return (a_aa.get(), a_ab.get(), a_bb.get()), (b_aa.get(), b_ab.get(), b_bb.get())
 
 
-def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear_samples=200):
+def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', collinear_samples=200):
     r'''
     From pyscf-forge
     A and B matrices for TDDFT response function.
@@ -485,110 +486,121 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear_samples=
                         'not included in the response function.')
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
 
-        add_hf_(a, b, hyb)
+        if collinear == 'mcol':
+            add_hf_(a, b, hyb)
+            xctype = ni._xc_type(mf.xc)
+            mem_now = lib.current_memory()[0]
+            max_memory = max(2000, mf.max_memory*.8-mem_now)
+            # it should be optimized, which is the disadvantage of mc approach.
+            fxc = cache_xc_kernel_sf(ni0, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
+            p0,p1=0,0 # the two parameters are used for counts the batch of grids.
+            opt = getattr(ni0, 'gdftopt', None)
+            if opt is None:
+                ni0.build(mol, mf.grids.coords)
+                opt = ni0.gdftopt
+            _sorted_mol = opt._sorted_mol
+            orbo_a = opt.sort_orbitals(orbo_a, axis=[0])
+            orbv_a = opt.sort_orbitals(orbv_a, axis=[0])
+            orbo_b = opt.sort_orbitals(orbo_b, axis=[0])
+            orbv_b = opt.sort_orbitals(orbv_b, axis=[0])
+            if xctype == 'LDA':
+                ao_deriv = 0
+                for ao, mask, weight, coords \
+                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                    p0 = p1
+                    p1+= weight.shape[0]
+                    wfxc= fxc[0,0][...,p0:p1] * weight
 
-        xctype = ni._xc_type(mf.xc)
-        mem_now = lib.current_memory()[0]
-        max_memory = max(2000, mf.max_memory*.8-mem_now)
+                    rho_o_a = contract('pr,pi->ri', ao, orbo_a)
+                    rho_v_a = contract('pr,pi->ri', ao, orbv_a)
+                    rho_o_b = contract('pr,pi->ri', ao, orbo_b)
+                    rho_v_b = contract('pr,pi->ri', ao, orbv_b)
+                    rho_ov_b2a = contract('ri,ra->ria', rho_o_b, rho_v_a)
+                    rho_ov_a2b = contract('ri,ra->ria', rho_o_a, rho_v_b)
 
-        # it should be optimized, which is the disadvantage of mc approach.
-        fxc = cache_xc_kernel_sf(ni, mol, mf.grids, mf.xc, mo_coeff, mo_occ,deriv=2,spin=1)[2]
-        p0,p1=0,0 # the two parameters are used for counts the batch of grids.
+                    w_ov = contract('ria,r->ria', rho_ov_b2a, wfxc*2.0)
+                    iajb = contract('ria,rjb->iajb', rho_ov_b2a, w_ov)
+                    a_b2a += iajb
+                    iajb = contract('ria,rjb->iajb', rho_ov_a2b, w_ov)
+                    b_a2b += iajb
 
-        if xctype == 'LDA':
-            ao_deriv = 0
-            for ao, mask, weight, coords \
-                    in ni0.block_loop(mol, mf.grids, nao, ao_deriv, max_memory):
-                p0 = p1
-                p1+= weight.shape[0]
-                wfxc= fxc[0,0][...,p0:p1] * weight
+                    w_ov = contract('ria,r->ria', rho_ov_a2b, wfxc*2.0)
+                    iajb = contract('ria,rjb->iajb', rho_ov_a2b, w_ov)
+                    a_a2b += iajb
+                    iajb = contract('ria,rjb->iajb', rho_ov_b2a, w_ov)
+                    b_b2a += iajb
 
-                rho_o_a = lib.einsum('rp,pi->ri', ao, orbo_a)
-                rho_v_a = lib.einsum('rp,pi->ri', ao, orbv_a)
-                rho_o_b = lib.einsum('rp,pi->ri', ao, orbo_b)
-                rho_v_b = lib.einsum('rp,pi->ri', ao, orbv_b)
-                rho_ov_b2a = cp.einsum('ri,ra->ria', rho_o_b, rho_v_a)
-                rho_ov_a2b = cp.einsum('ri,ra->ria', rho_o_a, rho_v_b)
+            elif xctype == 'GGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                    p0 = p1
+                    p1+= weight.shape[0]
+                    wfxc= fxc[...,p0:p1] * weight
 
-                w_ov = cp.einsum('ria,r->ria', rho_ov_b2a, wfxc*2.0)
-                iajb = lib.einsum('ria,rjb->iajb', rho_ov_b2a, w_ov)
-                a_b2a += iajb
-                iajb = lib.einsum('ria,rjb->iajb', rho_ov_a2b, w_ov)
-                b_a2b += iajb
+                    rho_o_a = contract('xpr,pi->xri', ao, orbo_a)
+                    rho_v_a = contract('xpr,pi->xri', ao, orbv_a)
+                    rho_o_b = contract('xpr,pi->xri', ao, orbo_b)
+                    rho_v_b = contract('xpr,pi->xri', ao, orbv_b)
+                    rho_ov_b2a = contract('xri,ra->xria', rho_o_b, rho_v_a[0])
+                    rho_ov_a2b = contract('xri,ra->xria', rho_o_a, rho_v_b[0])
+                    rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_o_b[0], rho_v_a[1:4])
+                    rho_ov_a2b[1:4] += contract('ri,xra->xria', rho_o_a[0], rho_v_b[1:4])
 
-                w_ov = cp.einsum('ria,r->ria', rho_ov_a2b, wfxc*2.0)
-                iajb = lib.einsum('ria,rjb->iajb', rho_ov_a2b, w_ov)
-                a_a2b += iajb
-                iajb = lib.einsum('ria,rjb->iajb', rho_ov_b2a, w_ov)
-                b_b2a += iajb
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    a_b2a += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    b_b2a += iajb
 
-        elif xctype == 'GGA':
-            ao_deriv = 1
-            for ao, mask, weight, coords \
-                    in ni.block_loop(mol, mf.grids, nao, ao_deriv, max_memory):
-                p0 = p1
-                p1+= weight.shape[0]
-                wfxc= fxc[...,p0:p1] * weight
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    a_a2b += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    b_a2b += iajb
 
-                rho_o_a = lib.einsum('xrp,pi->xri', ao, orbo_a)
-                rho_v_a = lib.einsum('xrp,pi->xri', ao, orbv_a)
-                rho_o_b = lib.einsum('xrp,pi->xri', ao, orbo_b)
-                rho_v_b = lib.einsum('xrp,pi->xri', ao, orbv_b)
-                rho_ov_b2a = cp.einsum('xri,ra->xria', rho_o_b, rho_v_a[0])
-                rho_ov_a2b = cp.einsum('xri,ra->xria', rho_o_a, rho_v_b[0])
-                rho_ov_b2a[1:4] += cp.einsum('ri,xra->xria', rho_o_b[0], rho_v_a[1:4])
-                rho_ov_a2b[1:4] += cp.einsum('ri,xra->xria', rho_o_a[0], rho_v_b[1:4])
+            elif xctype == 'HF':
+                pass
 
-                w_ov = cp.einsum('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_b2a)
-                a_b2a += iajb
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_a2b)
-                b_b2a += iajb
+            elif xctype == 'NLC':
+                raise NotImplementedError('NLC')
 
-                w_ov = cp.einsum('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_a2b)
-                a_a2b += iajb
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_b2a)
-                b_a2b += iajb
+            elif xctype == 'MGGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                    p0 = p1
+                    p1+= weight.shape[0]
+                    wfxc = fxc[...,p0:p1] * weight
 
-        elif xctype == 'HF':
-            pass
+                    rho_oa = contract('xpr,pi->xri', ao, orbo_a)
+                    rho_ob = contract('xpr,pi->xri', ao, orbo_b)
+                    rho_va = contract('xpr,pi->xri', ao, orbv_a)
+                    rho_vb = contract('xpr,pi->xri', ao, orbv_b)
+                    rho_ov_b2a = contract('xri,ra->xria', rho_ob, rho_va[0])
+                    rho_ov_a2b = contract('xri,ra->xria', rho_oa, rho_vb[0])
+                    rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_ob[0], rho_va[1:4])
+                    rho_ov_a2b[1:4] += contract('ri,xra->xria', rho_oa[0], rho_vb[1:4])
+                    tau_ov_b2a = contract('xri,xra->ria', rho_ob[1:4], rho_va[1:4]) * .5
+                    tau_ov_a2b = contract('xri,xra->ria', rho_oa[1:4], rho_vb[1:4]) * .5
+                    rho_ov_b2a = cp.vstack([rho_ov_b2a, tau_ov_b2a[cp.newaxis]])
+                    rho_ov_a2b = cp.vstack([rho_ov_a2b, tau_ov_a2b[cp.newaxis]])
 
-        elif xctype == 'NLC':
-            raise NotImplementedError('NLC')
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    a_b2a += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    b_b2a += iajb
 
-        elif xctype == 'MGGA':
-            ao_deriv = 1
-            for ao, mask, weight, coords \
-                    in ni.block_loop(mol, mf.grids, nao, ao_deriv, max_memory):
-                p0 = p1
-                p1+= weight.shape[0]
-                wfxc = fxc[...,p0:p1] * weight
-
-                rho_oa = lib.einsum('xrp,pi->xri', ao, orbo_a)
-                rho_ob = lib.einsum('xrp,pi->xri', ao, orbo_b)
-                rho_va = lib.einsum('xrp,pi->xri', ao, orbv_a)
-                rho_vb = lib.einsum('xrp,pi->xri', ao, orbv_b)
-                rho_ov_b2a = cp.einsum('xri,ra->xria', rho_ob, rho_va[0])
-                rho_ov_a2b = cp.einsum('xri,ra->xria', rho_oa, rho_vb[0])
-                rho_ov_b2a[1:4] += cp.einsum('ri,xra->xria', rho_ob[0], rho_va[1:4])
-                rho_ov_a2b[1:4] += cp.einsum('ri,xra->xria', rho_oa[0], rho_vb[1:4])
-                tau_ov_b2a = cp.einsum('xri,xra->ria', rho_ob[1:4], rho_va[1:4]) * .5
-                tau_ov_a2b = cp.einsum('xri,xra->ria', rho_oa[1:4], rho_vb[1:4]) * .5
-                rho_ov_b2a = cp.vstack([rho_ov_b2a, tau_ov_b2a[cp.newaxis]])
-                rho_ov_a2b = cp.vstack([rho_ov_a2b, tau_ov_a2b[cp.newaxis]])
-
-                w_ov = cp.einsum('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_b2a)
-                a_b2a += iajb
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_a2b)
-                b_b2a += iajb
-
-                w_ov = cp.einsum('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_a2b)
-                a_a2b += iajb
-                iajb = lib.einsum('xria,xrjb->iajb', w_ov, rho_ov_b2a)
-                b_a2b += iajb
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    a_a2b += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    b_a2b += iajb
+        elif collinear == 'col':
+            add_hf_(a, b, hyb)
+        elif collinear == 'ncol':
+            raise NotImplementedError('Locally collinear approach is not implemented')
     else:
         add_hf_(a, b)
     a = (a[0].get(), a[1].get()) # flip-up flip-down
@@ -924,6 +936,17 @@ class SpinFlipTDA(TDBase):
         assert self.collinear in ('col', 'ncol', 'mcol')
         return self
 
+    def _finalize(self):
+        '''Hook for dumping results and clearing up the object.'''
+        if not all(self.converged):
+            logger.note(self, 'TD-SCF states %s not converged.',
+                        [i for i, x in enumerate(self.converged) if not x])
+        if self.extype == 0:
+            logger.note(self, 'Spin-flip-up Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
+        elif self.extype == 1:
+            logger.note(self, 'Spin-flip-down Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
+        return self
+
     def kernel(self, x0=None, nstates=None):
         '''Spin-flip TDA diagonalization solver
         '''
@@ -940,9 +963,10 @@ class SpinFlipTDA(TDBase):
             mf = self._scf
             ni = mf._numint
             if not ni.libxc.is_hybrid_xc(mf.xc):
-                self.converged = True
-                self.e, xs = self._init_guess()
+                self.converged = [True,]
+                self.e, xs = self._init_guess(self._scf, self.nstates)
                 self.xy = [(x, 0) for x in xs]
+                self._finalize()
                 return self.e, self.xy
 
         x0sym = None
@@ -975,13 +999,15 @@ class SpinFlipTDA(TDBase):
         self._finalize()
         return self.e, self.xy
 
-    def get_ab(self, mf=None, mo_energy=None, mo_coeff=None, mo_occ=None, collinear_samples=None):
+    def get_ab(self, mf=None, mo_energy=None, mo_coeff=None, mo_occ=None, collinear=None, collinear_samples=None):
         if mf is None: mf = self._scf
         if mo_energy is None: mo_energy = mf.mo_energy
         if mo_coeff is None: mo_coeff = mf.mo_coeff
         if mo_occ is None: mo_occ = mf.mo_occ
+        if collinear is None: collinear = self.collinear
         if collinear_samples is None: collinear_samples = self.collinear_samples
-        return get_ab_sf(mf, mo_energy=mo_energy, mo_coeff=mo_coeff, mo_occ=mo_occ, collinear_samples=collinear_samples)
+        return get_ab_sf(mf, mo_energy=mo_energy, mo_coeff=mo_coeff, mo_occ=mo_occ, 
+            collinear=collinear, collinear_samples=collinear_samples)
 
 
 def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
