@@ -20,6 +20,7 @@ from pyscf import lib
 from pyscf.pbc import gto as pgto
 from gpu4pyscf.pbc import dft as pdft
 from gpu4pyscf.pbc.dft import kukspu
+import pytest
 
 def setUpModule():
     global cell
@@ -43,7 +44,8 @@ def tearDownModule():
     del cell
 
 class KnownValues(unittest.TestCase):
-    def test_KUKSpU_high_cost(self):
+    @pytest.mark.slow
+    def test_KUKSpU(self):
         kmesh = [2, 1, 1]
         kpts = cell.make_kpts(kmesh, wrap_around=True)
         U_idx = ["1 C 2p"]

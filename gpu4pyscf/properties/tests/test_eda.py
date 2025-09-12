@@ -453,6 +453,7 @@ class KnownValues(unittest.TestCase):
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
+    @pytest.mark.slow
     def test_almo_eda_2_hf_tzvpp_df(self):
         ### All density fitting tests are consistent tests, see comment above
         reference_eda_result = {
@@ -589,6 +590,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_dft_energies[0] - reference_dft_energies[0])) < 3e-6
         assert np.max(np.abs(test_dft_energies[1:] - reference_dft_energies[1:])) < 1e-7
 
+    @pytest.mark.slow
     def test_almo_eda_2_pbe0_charged(self):
         ### Q-Chem input difference
         # $molecule

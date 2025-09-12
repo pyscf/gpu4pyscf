@@ -19,6 +19,7 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
+import pytest
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -82,6 +83,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
+    @pytest.mark.slow
     def test_nac_pbe_tdaris_singlet_fdiff(self):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
         mf.kernel()
@@ -106,6 +108,7 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ge(nac_ris, (xI, xI*0.0), delta=delta)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
+    @pytest.mark.slow
     def test_nac_pbe0_tdaris_singlet_fdiff(self):
         mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
         mf.kernel()
