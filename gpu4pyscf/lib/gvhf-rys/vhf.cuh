@@ -47,8 +47,8 @@
 
 #pragma once
 typedef struct {
-    uint16_t natm;
-    uint16_t nbas;
+    int natm;
+    int nbas;
     int *atm;
     int *bas;
     double *env;

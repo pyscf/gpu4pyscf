@@ -29,6 +29,8 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
+from gpu4pyscf.scf.jk import libvhf_rys
+from gpu4pyscf.scf.j_engine import libvhf_md
 
 __all__ = [
     'aux_e2',

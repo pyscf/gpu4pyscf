@@ -235,3 +235,24 @@ def test_k_hermi1():
     vk = jk.get_k(mol, dm, hermi=1).get()
     assert abs(vk - ref).max() < 1e-9
     assert abs(lib.fp(vk) - 327.9485135045478) < 1e-9
+
+def test_general_contraction():
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        C   1.      1.    0.
+        ''',
+        basis=('ccpvdz', [[3, [2., 1., .5], [1., .5, 1.]]]),
+        unit='B',)
+
+    np.random.seed(9)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao)
+    dm = dm.dot(dm.T)
+
+    vj, vk = jk.get_jk(mol, dm, hermi=1)
+    vj1 = vj.get()
+    vk1 = vk.get()
+    ref = get_jk(mol, dm, hermi=1)
+    assert abs(vj1 - ref[0]).max() < 1e-9
+    assert abs(vk1 - ref[1]).max() < 1e-9
