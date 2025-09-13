@@ -205,9 +205,11 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
     # mapping between the basis shells of the two types of mol instatnce,
     # ignoring general contraction. Enabling `allow_replica` will produce
     # replicated segment-contracted shells for general contracted shells.
-    allow_replica = sparse_coeff
-    mol, coeff = basis_seg_contraction(
-        mol, allow_replica=allow_replica, sparse_coeff=sparse_coeff)
+    if sparse_coeff:
+        mol, coeff = basis_seg_contraction(
+            mol, allow_replica=True, sparse_coeff=sparse_coeff)
+    else:
+        mol, coeff = basis_seg_contraction(mol, sparse_coeff=sparse_coeff)
 
     # Sort basis according to angular momentum and contraction patterns so
     # as to group the basis functions to blocks in GPU kernel.
@@ -292,7 +294,6 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
             return mol, coeff, uniq_l_ctr, l_ctr_counts
     else:
         n_cartesian = sum([(l+1)*(l+2)//2 for l in mol._bas[:,ANG_OF]])
-        assert n_cartesian < 32768
         l_ctr_offsets = np.cumsum(l_ctr_counts)[:-1]
         if_pad_bas_per_l_ctr = np.split(if_pad_bas, l_ctr_offsets)
         l_ctr_pad_counts = np.array([np.sum(if_pad) for if_pad in if_pad_bas_per_l_ctr])

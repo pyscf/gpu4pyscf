@@ -22,6 +22,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.lib.parameters import ANGULAR
+from pyscf import gto
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -123,11 +124,13 @@ class Int3c2eOpt:
         ao_idx = np.array_split(np.arange(self.mol.nao), ao_loc[1:-1])
         self.ao_idx = np.hstack([ao_idx[i] for i in bas_mapping]).argsort()
 
-        auxmol, coeff, uniq_l_ctr_aux, l_ctr_aux_counts = group_basis(self.auxmol, tile=1)
+        auxmol, aux_idx, l_ctr_aux_pad_counts, uniq_l_ctr_aux, l_ctr_aux_counts = group_basis(
+            self.auxmol, tile=1, sparse_coeff=True)
         self.sorted_auxmol = auxmol
         self.uniq_l_ctr_aux = uniq_l_ctr_aux
         l_ctr_aux_offsets = self.l_ctr_aux_offsets = np.append(0, np.cumsum(l_ctr_aux_counts))
-        self.aux_coeff = coeff.get()
+        self.l_ctr_aux_pad_counts = l_ctr_aux_pad_counts
+        self.aux_idx = aux_idx
 
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
             mol._atm, mol._bas, _scale_sp_ctr_coeff(mol),
@@ -375,7 +378,7 @@ class Int3c2eOpt:
 
         assert auxvec.ndim == 1
         n_dm = 1
-        auxvec = asarray(self.aux_coeff.dot(cp.asnumpy(auxvec)))
+        auxvec = _vector_sph2cart(self.sorted_auxmol, asarray(auxvec[self.aux_idx]))
 
         nsp_lookup = np.empty([L_AUX_MAX+1, LMAX+1, LMAX+1], dtype=np.int32)
         lmax = self.uniq_l_ctr[:,0].max()
@@ -581,6 +584,34 @@ class Int3c2eOpt:
         diag = asarray(np.hstack(diag))
         return rows, cols, diag
 
+    @property
+    def aux_coeff(self):
+        coeff = np.zeros((self.sorted_auxmol.nao, self.auxmol.nao))
+
+        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr_aux])
+        if self.mol.cart:
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+        else:
+            cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
+        i_spherical_offset = 0
+        i_cartesian_offset = 0
+        for i, l in enumerate(self.uniq_l_ctr_aux[:,0]):
+            cart2sph = cart2sph_per_l[l]
+            ncart, nsph = cart2sph.shape
+            l_ctr_count = self.l_ctr_aux_offsets[i + 1] - self.l_ctr_aux_offsets[i]
+            cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
+            sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
+            cart_idx = cart_offs[:,None] + np.arange(ncart)
+            sph_idx = sph_offs[:,None] + np.arange(nsph)
+            coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
+            l_ctr_pad_count = self.l_ctr_aux_pad_counts[i]
+            i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
+            i_spherical_offset += l_ctr_count * nsph
+        out = np.empty_like(coeff)
+        out[:,self.aux_idx] = coeff
+        return out
+
+
 def _conc_locs(ao_loc1, ao_loc2):
     return np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
 
@@ -695,3 +726,20 @@ def group_blocks(offsets, block_size):
         i += next_i - 1
     partitions.append(min(i, nbas))
     return partitions
+
+def _vector_sph2cart(auxmol, auxvec):
+    aux_ls = auxmol._bas[:,ANG_OF]
+    lmax = aux_ls.max()
+    aux_loc_cart = auxmol.ao_loc_nr(cart=True)
+    aux_loc_sph = auxmol.ao_loc_nr(cart=False)[:-1]
+    naux_cart = aux_loc_cart[-1]
+    aux_loc_cart = aux_loc_cart[:-1]
+    out = cp.empty(naux_cart)
+    for l in range(lmax+1):
+        nf = (l + 1) * (l + 2) // 2
+        addrs_for_cart = aux_loc_cart[aux_ls == l]
+        addrs_for_sph = aux_loc_sph[aux_ls == l]
+        subvec = auxvec[addrs_for_sph[:,None] + np.arange(l*2+1)]
+        subvec = subvec.dot(cart2sph_by_l(l).T)
+        out[addrs_for_cart[:,None] + np.arange(nf)] = subvec
+    return out

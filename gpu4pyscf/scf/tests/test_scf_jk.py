@@ -256,3 +256,16 @@ def test_general_contraction():
     ref = get_jk(mol, dm, hermi=1)
     assert abs(vj1 - ref[0]).max() < 1e-9
     assert abs(vk1 - ref[1]).max() < 1e-9
+
+def test_vhfopt_coeff():
+    from gpu4pyscf.gto.mole import group_basis
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        C   1.      1.    0.
+        ''',
+        basis='ccpvtz',
+        unit='B',)
+    vhfopt = jk._VHFOpt(mol).build()
+    ref = group_basis(mol, tile=vhfopt.tile)[1]
+    assert abs(vhfopt.coeff - ref).max() < 1e-12

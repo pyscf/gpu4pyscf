@@ -466,17 +466,18 @@ class _VHFOpt:
             cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
         i_spherical_offset = 0
         i_cartesian_offset = 0
-        for i, (l, _) in enumerate(self.uniq_l_ctr):
+        for i, l in enumerate(self.uniq_l_ctr[:,0]):
             cart2sph = cart2sph_per_l[l]
+            ncart, nsph = cart2sph.shape
             l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
+            cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
+            sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
+            cart_idx = cart_offs[:,None] + np.arange(ncart)
+            sph_idx = sph_offs[:,None] + np.arange(nsph)
+            coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
             l_ctr_pad_count = self.l_ctr_pad_counts[i]
-            for _ in range(l_ctr_count - l_ctr_pad_count):
-                coeff[i_cartesian_offset : i_cartesian_offset + cart2sph.shape[0],
-                      i_spherical_offset : i_spherical_offset + cart2sph.shape[1]] = cart2sph
-                i_cartesian_offset += cart2sph.shape[0]
-                i_spherical_offset += cart2sph.shape[1]
-            for _ in range(l_ctr_pad_count):
-                i_cartesian_offset += cart2sph.shape[0]
+            i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
+            i_spherical_offset += l_ctr_count * nsph
         assert len(self.ao_idx) == self.mol.nao
         coeff = self.unsort_orbitals(coeff, axis = [1])
         return asarray(coeff)

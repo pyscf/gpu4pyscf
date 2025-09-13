@@ -17,17 +17,17 @@ import math
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.gto.mole import ANG_OF, PTR_EXP, conc_env
+from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_EXP, PTR_COORD, conc_env
 from pyscf.scf import _vhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, transpose_sum
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     apply_coeff_C_mat_CT, _scale_sp_ctr_coeff, _nearest_power2, SHM_SIZE)
-from gpu4pyscf.gto.mole import basis_seg_contraction
+from gpu4pyscf.gto.mole import basis_seg_contraction, cart2sph_by_l
 from gpu4pyscf.df.int3c2e_bdiv import (
     Int3c2eEnvVars, _conc_locs, LMAX, L_AUX_MAX, THREADS)
-from gpu4pyscf.scf.j_engine import libvhf_md, _to_primitive_bas
+from gpu4pyscf.scf.j_engine import libvhf_md, _to_primitive_bas, _estimate_q_cond
 
 libvhf_md.MD_int3c2e_init(SHM_SIZE)
 
@@ -59,30 +59,28 @@ class Int3c2eOpt:
         prim_mol, self.prim_to_ctr_mapping = _to_primitive_bas(sorted_mol)
         self.prim_mol = prim_mol
 
-        #q_cond = _estimate_q_cond(prim_mol).get()
         nbas = prim_mol.nbas
         ao_loc = prim_mol.ao_loc
-        q_cond = np.empty((nbas,nbas))
-        intor = prim_mol._add_suffix('int2e')
-        _vhf.libcvhf.CVHFnr_int2e_q_cond(
-            getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
-            q_cond.ctypes, ao_loc.ctypes,
-            prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
-            prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas),
-            prim_mol._env.ctypes)
-        q_cond = np.log(q_cond + 1e-300).astype(np.float32)
+        if 1:
+            q_cond = _estimate_q_cond(prim_mol).get()
+        else:
+            q_cond = np.empty((nbas,nbas))
+            intor = prim_mol._add_suffix('int2e')
+            _vhf.libcvhf.CVHFnr_int2e_q_cond(
+                getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
+                q_cond.ctypes, ao_loc.ctypes,
+                prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
+                prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas),
+                prim_mol._env.ctypes)
+            q_cond = np.log(q_cond + 1e-300).astype(np.float32)
         log.timer('Initialize q_cond', *cput0)
 
-        auxmol, coeff, uniq_l_ctr_aux, l_ctr_aux_counts = group_basis(self.auxmol, tile=1)
-        self.sorted_auxmol = auxmol
-        self.uniq_l_ctr_aux = uniq_l_ctr_aux
-        self.l_ctr_aux_offsets = np.append(0, np.cumsum(l_ctr_aux_counts))
-        self.aux_coeff = coeff.get()
-
+        auxmol = self.auxmol
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
             prim_mol._atm, prim_mol._bas, _scale_sp_ctr_coeff(prim_mol),
             auxmol._atm, auxmol._bas, _scale_sp_ctr_coeff(auxmol))
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
+        _bas_cpu[prim_mol.nbas:,PTR_BAS_COORD] = auxmol._atm[[auxmol._bas[:,ATOM_OF]], PTR_COORD]
         off = _bas_cpu[prim_mol.nbas,PTR_EXP] - auxmol._bas[0,PTR_EXP]
         _bas_cpu[prim_mol.nbas:,PTR_BAS_COORD] += off
         self._atm = _atm_cpu
@@ -92,7 +90,7 @@ class Int3c2eOpt:
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = cp.asarray(_conc_locs(ao_loc, auxmol.ao_loc), dtype=np.int32)
+        ao_loc = cp.asarray(_conc_locs(ao_loc, auxmol.ao_loc_nr(cart=True)), dtype=np.int32)
         log_cutoff = math.log(cutoff)
         self.int3c2e_envs = Int3c2eEnvVars.new(
             prim_mol.natm, prim_mol.nbas, _atm, _bas, _env, ao_loc, log_cutoff)
@@ -138,8 +136,7 @@ class Int3c2eOpt:
         _env_cpu = self._env
         sorted_mol = self.sorted_mol
         ao_loc = sorted_mol.ao_loc
-        aux_loc = self.sorted_auxmol.ao_loc_nr(cart=True)
-        naux = aux_loc[-1]
+        naux = self.auxmol.nao_nr(cart=True)
         prim_mol = self.prim_mol
 
         nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
@@ -195,7 +192,7 @@ class Int3c2eOpt:
             ctypes.c_int(n_dm), ctypes.c_int(naux),
             ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
             ctypes.c_int(sp_blocks),
-            ctypes.c_int(self.sorted_auxmol.nbas),
+            ctypes.c_int(self.auxmol.nbas),
             ctypes.cast(pair_ij_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
@@ -206,5 +203,24 @@ class Int3c2eOpt:
             raise RuntimeError('contract_int3c2e_dm kernel failed')
         if log.verbose >= logger.DEBUG1:
             log.timer_debug1('processing contract_int3c2e_dm', *t0)
-        vj_aux = asarray(vj_aux.get().dot(self.aux_coeff))
+
+        if not self.auxmol.cart:
+            vj_aux = _vector_cart2sph(self.auxmol, vj_aux)
         return vj_aux
+
+def _vector_cart2sph(auxmol, auxvec):
+    aux_ls = auxmol._bas[:,ANG_OF]
+    lmax = aux_ls.max()
+    aux_loc_cart = auxmol.ao_loc_nr(cart=True)[:-1]
+    aux_loc_sph = auxmol.ao_loc_nr(cart=False)
+    naux_sph = aux_loc_sph[-1]
+    aux_loc_sph = aux_loc_sph[:-1]
+    out = cp.empty(naux_sph)
+    for l in range(lmax+1):
+        nf = (l + 1) * (l + 2) // 2
+        addrs_for_cart = aux_loc_cart[aux_ls == l]
+        addrs_for_sph = aux_loc_sph[aux_ls == l]
+        subvec = auxvec[addrs_for_cart[:,None] + np.arange(nf)]
+        subvec = subvec.dot(cart2sph_by_l(l))
+        out[addrs_for_sph[:,None] + np.arange(l*2+1)] = subvec
+    return out
