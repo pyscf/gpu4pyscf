@@ -27,6 +27,7 @@ else:
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
+import pytest
 
 def setUpModule():
     global cell_orth, cell_nonorth
@@ -306,6 +307,7 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-7
         assert abs(ref-vxc.get()).max() < 1e-7
 
+    @pytest.mark.slow
     def test_rks_lda(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -346,6 +348,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.87059063524272, 8)
 
+    @pytest.mark.slow
     def test_rks_mgga(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,

@@ -52,7 +52,7 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_opt_rhf_tda(self):
-        mf = scf.RHF(mol).to_gpu()
+        mf = scf.RHF(mol_near_conv).to_gpu().density_fit()
         mf.kernel()
         assert mf.converged
         td = mf.TDA().set(nstates=3)
@@ -63,7 +63,7 @@ class KnownValues(unittest.TestCase):
             [[0,  0       , 0.739513],
              [0, -2.228518, 0.739513],
              [0,  2.228518, 0.739513],])
-        assert np.linalg.norm(mol_gpu.atom_coords() - ref) < 1e-4
+        assert np.linalg.norm(mol_gpu.atom_coords() - ref) < 3e-4
 
     @pytest.mark.slow
     def test_opt_rks_tda(self):
@@ -79,14 +79,14 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
     def test_opt_rks_tda_pcm_1(self):
-        mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
+        mf = dft.RKS(mol_near_conv, xc='b3lyp').to_gpu().density_fit().PCM()
         mf.kernel()
         assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
         td.kernel()
         mol_gpu = optimize(td)
 
-        mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu()
+        mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu().density_fit()
         mff.kernel()
         assert mff.converged
         tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)

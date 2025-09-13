@@ -44,7 +44,7 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_opt_rks_tda_1(self):
-        mf = dft.RKS(mol, xc='pbe0').to_gpu()
+        mf = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mf.kernel()
         assert mf.converged
         td_ris = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -53,7 +53,7 @@ class KnownValues(unittest.TestCase):
         td_ris.kernel()
         mol_gpu = optimize(td_ris)
 
-        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu()
+        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu().density_fit()
         mff.kernel()
         assert mff.converged
         tdf_ris = ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -66,7 +66,7 @@ class KnownValues(unittest.TestCase):
 
     @pytest.mark.slow
     def test_opt_rks_tda_2(self):
-        mf = dft.RKS(mol, xc='pbe0').to_gpu()
+        mf = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mf.kernel()
         assert mf.converged
         td_ris = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -77,7 +77,7 @@ class KnownValues(unittest.TestCase):
         excited_grad = td_ris.nuc_grad_method().as_scanner(state=1)
         mol_gpu = excited_grad.optimizer().kernel()
 
-        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu()
+        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu().density_fit()
         mff.kernel()
         assert mff.converged
         tdf_ris = ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
