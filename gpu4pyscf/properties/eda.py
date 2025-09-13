@@ -271,7 +271,7 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
                     orbital_gradient_ij.reshape(nocc_count[i_frag] * nocc_count[j_frag])
                 orbital_gradient_ij = None
 
-        if build_orbital_hessian:
+        if nocc_frag_pair_sum < 2 or build_orbital_hessian:
             orbital_hessian = cp.zeros([nocc_frag_pair_sum, nocc_frag_pair_sum])
             for i_frag in range(n_frag):
                 mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]

@@ -25,6 +25,7 @@ from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 __all__ = ['Gradients']
 
@@ -40,6 +41,16 @@ def get_veff(ks_grad, dm=None, kpts=None):
         raise NotImplementedError
 
     ni = mf._numint
+
+    if isinstance(mf._numint, multigrid.MultiGridNumInt):
+        raise NotImplementedError("Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
+                                  "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
+    if isinstance(mf._numint, multigrid_v2.MultiGridNumInt):
+        de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
+        # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
+        de /= 2
+        return de
+
     if ks_grad.grids is not None:
         grids = ks_grad.grids
     else:
