@@ -373,18 +373,20 @@ class Int3c2eOpt:
         nao = ao_loc[-1]
         naux = aux_loc[-1]
 
-        auxvec = cp.asarray(auxvec)
         assert auxvec.ndim == 1
         n_dm = 1
+        auxvec = asarray(self.aux_coeff.dot(cp.asnumpy(auxvec)))
 
-        nsp_lookup = np.empty([L_AUX_MAX+1]*3, dtype=np.int32)
-        idx = np.arange(L_AUX_MAX+1)
-        nf = (idx + 1) * (idx + 2) // 2
+        nsp_lookup = np.empty([L_AUX_MAX+1, LMAX+1, LMAX+1], dtype=np.int32)
+        lmax = self.uniq_l_ctr[:,0].max()
+        lmax_aux = self.uniq_l_ctr_aux[:,0].max()
+        nf = np.arange(L_AUX_MAX+1)
+        nf = (nf + 1) * (nf + 2) // 2
         shm_size = 0
         IJ_WIDTH = 50
-        for lk in range(L_AUX_MAX+1):
-            for li in range(lk+1):
-                for lj in range(li+1):
+        for lk in range(lmax_aux+1):
+            for li in range(lmax+1):
+                for lj in range(lmax+1):
                     nfi = nf[li]
                     nfj = nf[lj]
                     nfk = nf[lk]
@@ -400,9 +402,7 @@ class Int3c2eOpt:
                     nsp_per_block = min(nsp_max, THREADS // gout_stride)
                     nsp_lookup[lk,li,lj] = nsp_per_block
                     shm_size = max(shm_size, nsp_per_block * unit*8 + nfk*8 + (nfi+nfj+nfk)*3*4)
-        z, y, x = np.sort(np.meshgrid(idx, idx, idx), axis=0)
-        nsp_lookup = nsp_lookup[x, y, z]
-        nsp_lookup = cp.asarray(nsp_lookup[:,:LMAX+1,:LMAX+1], dtype=np.int32)
+        nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
 
         # Adjust the number of shell-pairs in each group for better balance.
         shl_pair_idx = cp.hstack(self.shl_pair_idx, dtype=np.int32)
@@ -420,10 +420,11 @@ class Int3c2eOpt:
         pair_ij_offsets = asarray(np.hstack(pair_ij_offsets, dtype=np.int32))
         sp_blocks = len(pair_ij_offsets) - 1
 
-        ksh_offsets = self.l_ctr_aux_offsets + mol.nbas
+        ksh_offsets = self.l_ctr_aux_offsets + sorted_mol.nbas
         ksh_offsets = asarray(ksh_offsets, dtype=np.int32)
         ksh_blocks = len(ksh_offsets) - 1
-        log.debug1('sp_blocks = %d, ksh_blocks = %d', sp_blocks, ksh_blocks)
+        log.debug1('sp_blocks = %d, ksh_blocks = %d, shm_size = %d B',
+                   sp_blocks, ksh_blocks, shm_size)
 
         vj = cp.zeros((nao, nao))
         err = libvhf_rys.contract_int3c2e_auxvec(
@@ -443,7 +444,7 @@ class Int3c2eOpt:
         if log.verbose >= logger.DEBUG1:
             log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
         vj = hermi_triu(vj, inplace=True)
-        vj = apply_coeff_CT_mat_C(vj, mol, sorted_mol, self.uniq_l_ctr,
+        vj = apply_coeff_CT_mat_C(vj, self.mol, sorted_mol, self.uniq_l_ctr,
                                  self.l_ctr_offsets, self.ao_idx)
         return vj
 

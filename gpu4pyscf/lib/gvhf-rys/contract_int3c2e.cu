@@ -27,6 +27,7 @@
 #include "create_tasks.cu"
 
 #define IJ_WIDTH        50
+#define THREADS         256
 
 __global__ static
 void contract_int3c2e_kernel(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bounds)
@@ -95,7 +96,7 @@ void contract_int3c2e_kernel(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bo
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
     }
 
-    for (int pair_ij = shl_pair0 + sp_id; pair_ij < shl_pair1; pair_ij += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bounds.bas_ij_idx[shl_pair0+sp_id];
@@ -148,7 +149,7 @@ void contract_int3c2e_kernel(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bo
                 double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                 __syncthreads();
                 int *ao_loc = envs.ao_loc;
-                int k0 = ao_loc[ksh0] - ao_loc[bounds.aux_sh_offset];
+                int k0 = ao_loc[ksh] - ao_loc[bounds.aux_sh_offset];
                 if (thread_id < nfk) {
                     vj_aux[thread_id] = jk.dm[k0+thread_id];
                 }
@@ -313,7 +314,7 @@ int contract_int3c2e_auxvec(double *vj, double *auxvec, int n_dm, int naux,
 
     double omega = env[PTR_RANGE_OMEGA];
     JKMatrix jmat = {vj, NULL, auxvec, n_dm, 0, omega};
-    int threads = 256;
+    dim3 threads(THREADS);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     contract_int3c2e_kernel<<<blocks, threads, shm_size>>>(*envs, jmat, bounds);
     cudaError_t err = cudaGetLastError();
