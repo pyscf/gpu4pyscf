@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 """
 Fewest Switches Surface Hopping (FSSH) Implementation
 
-This module provides an enhanced implementation of the FSSH algorithm with κTDC
-(kappa Time-Derivative Coupling) for nonadiabatic molecular dynamics simulations.
+This module provides an enhanced implementation of the FSSH algorithm
+for nonadiabatic molecular dynamics simulations.
 
 References:
     1. Molecular dynamics with electronic transitions.
@@ -28,13 +29,6 @@ References:
        Baihua Wu, Xin He, and Jian Liu
        J. Phys. Chem. Lett. 15, 644 (2024)
        DOI: 10.1021/acs.jpclett.3c03385
-
-    3. Nonadiabatic Dynamics Algorithms with Only Potential Energies and Gradients: 
-       Curvature-Driven Coherent Switching with Decay of Mixing and 
-       Curvature-Driven Trajectory Surface Hopping
-       Yinan Shu, Linyao Zhang, Xiye Chen, Shaozeng Sun, Yudong Huang, Donald G. Truhlar
-       J. Chem. Theory Comput. 2022, 18, 3, 1320-1328
-       DOI: 10.1021/acs.jctc.1c01080
 """
 
 import numpy as np
@@ -50,18 +44,16 @@ A2BOHR = 1.889726           # Conversion factor: Angstrom to Bohr radius
 AMU2AU = 1822.8884858012984 # Conversion factor: atomic mass units to atomic units
 
 # Configure logging for debugging and monitoring
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 class FSSH:
     """
-    This class implements the FSSH algorithm with κTDC (kappa Time-Derivative Coupling)
-    for efficient nonadiabatic molecular dynamics simulations.
+    This class implements the FSSH algorithm for nonadiabatic molecular dynamics simulations.
 
     The FSSH method treats nuclear motion classically while quantum mechanically
-    describing electronic transitions between different potential energy surfaces.
-    The κTDC approach provides a computationally efficient alternative to traditional
-    nonadiabatic coupling vector calculations.    
+    describing electronic transitions between different potential energy surfaces.   
     
     Attributes:
         tddft: Time-dependent density functional theory object
@@ -72,6 +64,7 @@ class FSSH:
         dt (float): Time step in atomic units
         nsteps (int): Number of simulation steps
     """
+    
     def __init__(self, 
                  tddft, 
                  states:list[int], 
@@ -88,7 +81,6 @@ class FSSH:
                 - output_dir (str): Directory for output files (default: current)
                 - verbose (bool): Enable verbose output (default: True)
         """
-
         # Validate input parameters
         if not isinstance(states, (list, tuple)) or len(states) < 2:
             raise ValueError("At least two electronic states must be specified")
@@ -99,15 +91,16 @@ class FSSH:
         # Initialize core simulation objects
         self.tddft = tddft
         self.tdgrad = self.tddft.nuc_grad_method().as_scanner()
-
+        self.tdnac = self.tddft.nac_method().as_scanner()
+        
         # Set up electronic state configuration
         self.states = list(states)
         self.Nstates = len(states)
         self.cur_state = states[0]  # Start from the first specified state
-
+        
         # Calculate nuclear masses and convert to atomic units
-        self.mass = self.tddft.mol.atom_mass_list(True).reshape(-1, 1) * AMU2AU  # (Na,1)  Unit: a.u.
-
+        self.mass = self.tddft.mol.atom_mass_list(True).reshape(-1, 1) * AMU2AU # (Na,1)  Unit: a.u.
+        
         # Generate indices for nonadiabatic coupling calculations
         # Only consider unique pairs (i,j) where i < j to avoid redundancy
         self.nac_idx = [(i, j) for i in range(self.Nstates-1) 
@@ -191,22 +184,23 @@ class FSSH:
             nact[i, j] = -kappa_value
 
         return nact
-
-    def calc_electronic(self, position: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    
+    def calc_electronic(self, position: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Calculate electronic energies and nuclear forces for all states.
+        Calculate electronic energies, nuclear forces and nonadiabatic coupling for all states.
         
-        This method computes the potential energies and gradients for all electronic
+        This method computes the potential energies and nonadiabatic coupling for all electronic
         states at the given nuclear configuration. The forces are obtained as the
-        negative gradient of the potential energy surface.
+        negative gradient of the potential energy surface at the current state.
         
         Args:
             position (np.ndarray): Nuclear coordinates in Bohr (Natoms * 3)
         
         Returns:
-            Tuple[np.ndarray, np.ndarray]: 
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: 
                 - energy: Electronic energies for all states (Nstates,) in Hartree
                 - force: Nuclear forces for current state (Natoms * 3) in Ha/Bohr 
+                - Nacv: Nonadiabatic coupling vectors for all states (Nstates, Nstates, Natoms, 3) in 1/bohr
         """
 
         # Set the current state for gradient calculation
@@ -214,16 +208,25 @@ class FSSH:
 
         # Calculate energy and gradient for the current state
         _, grad = self.tdgrad(position,self.cur_state)
-
+            
         ground_energy = self.tdgrad.base._scf.e_tot
         excited_energies = self.tdgrad.e_tot
         if hasattr(excited_energies, 'get'):
             excited_energies = excited_energies.get()
         energy = np.concatenate([[ground_energy], excited_energies])[self.states]  # (Nstates,)  Unit: Ha
         force = -grad  # (Na,D)  Unit: Ha/bohr
-
-        return energy, force
-
+            
+        # calculate nacv
+        Nacv = np.zeros((self.Nstates, self.Nstates, position.shape[0], position.shape[1]))  # (Ns, Ns, Na, D)  Unit: 1/bohr
+        for state_index in self.nac_idx:
+            state = tuple(self.states[i] for i in state_index)
+            self.tdnac.states = state
+            nk = self.tdnac(position, state)[4]
+            Nacv[state_index[0],state_index[1]] = nk
+            Nacv[state_index[1],state_index[0]] = -nk
+            
+        return energy, force, Nacv
+            
     def exp_propagator(self, c: np.ndarray, Veff: np.ndarray, dt: float) -> np.ndarray:
         """
         Propagate quantum coefficients using matrix exponential.
@@ -285,7 +288,7 @@ class FSSH:
         c_new = self.exp_propagator(coeffs, Veff, self.dt)
 
         return c_new
-
+    
     def compute_hopping_probability(self, 
                                     coeffs: np.ndarray, 
                                     nact: np.ndarray) -> np.ndarray:
@@ -317,9 +320,9 @@ class FSSH:
         # Adjust hopping probabilities
         p_ij = np.where(g_ij < 0, 0, g_ij)
         p_ij = np.where(p_ij > 1, 1, p_ij)
-
+        
         return p_ij
-
+    
     def check_hop(self, r: float, p_ij: np.ndarray) -> int:
         """
         Determine if a surface hop occurs.
@@ -349,7 +352,7 @@ class FSSH:
                 return k
             
         return -1
-
+    
     def rescale_velocity(self, 
                          hop_index: int,
                          energy: np.ndarray,
@@ -415,7 +418,7 @@ class FSSH:
             gamma = b / a
             velocity -= gamma * d_vec / self.mass
             return False, velocity
-
+    
     # NOT TESTED YET!!!!
     # def decoherence(self,
     #                 coeffs: np.ndarray,
@@ -503,7 +506,7 @@ class FSSH:
         current_energy = energy[current_idx]
         populations = np.abs(coeffs)**2
             
-        # Format output   
+        # Format output
         logger.info(f"Step {step:4d}: Time {total_time:8.3f} fs, State {self.cur_state:2d}, "
               f"Energy {current_energy:12.8f} Ha, Populations: {populations}")
 
@@ -515,7 +518,7 @@ class FSSH:
         Execute the main FSSH trajectory simulation.
         
         This method implements the complete FSSH algorithm using the velocity Verlet
-        integration scheme with κTDC-based nonadiabatic coupling.
+        integration scheme.
 
         Integration Frame Ref:
             Nonadiabatic Field on Quantum Phase Space: A Century after Ehrenfest
@@ -541,7 +544,7 @@ class FSSH:
         now_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         logger.info(f"Starting FSSH trajectory simulation at {now_str}")
         start_time = time.time()
-
+        
         # Initialize or validate input parameters
         if position is None:
             position = self.tddft.mol.atom_coords()
@@ -552,82 +555,66 @@ class FSSH:
 
         norm = np.linalg.norm(coefficient)
         coefficient /= norm
-
-        # Initialize energy history for κTDC calculation
-        energy_list = [None,None,None]
-
-        energy, force = self.calc_electronic(position)
-        energy_list[0] = energy
-
-        # Perform initial velocity Verlet steps to populate energy history
-        logger.info("Performing initial steps to establish energy history")
-
-        # pure velocity verlet to get energy_p and energy_pp
-        velocity = velocity + 0.5 * self.dt * force / self.mass
-        position = position + self.dt * velocity
-        energy, force = self.calc_electronic(position)
-        energy_list[1] = energy
-        velocity = velocity + 0.5 * self.dt * force / self.mass
+        
+        # Calculate initial electronic structure
+        energy, force, nacv = self.calc_electronic(position)
         
         # Write initial trajectory frame
-        self.write_trajectory(0, position, velocity, energy, coefficient)   
-
+        self.write_trajectory(0, position, velocity, energy, coefficient)
+        
         total_time = 0.0
-
+        
         # Main simulation loop
         logger.info(f"Starting main simulation loop for {self.nsteps} steps")
         
         for i in range(self.nsteps):
             # 1. update nuclear velocity within a half time step
             velocity = velocity + 0.5 * self.dt * force / self.mass
-
+            
             # 2. update the nuclear coordinate within a full-time step
             position = position + self.dt * velocity
-
+            
             # 3. calculte new energy, force, and nacv
-            energy, force = self.calc_electronic(position) 
-
+            energy, force, nacv = self.calc_electronic(position)
+            
             # 4. update the electronic amplitude within a full-time step
-            energy_list[(i+2)%3] = energy
-            nact = self.kTDC(energy_list[(i+2)%3], energy_list[(i+1)%3], energy_list[i%3])
+            nact = np.einsum('ijnd,nd->ij', nacv, velocity)
             coefficient = self.update_coefficient(coefficient, energy, nact)
-
+            
             # 5. evaluate the switching probability
             p_ij = self.compute_hopping_probability(coefficient, nact)
             r = np.random.rand()
             hop_index = self.check_hop(r, p_ij)
 
+            logger.debug(f"Switching probability: {p_ij}, Random number: {r}")
+            
             # 6. adjust nuclear velocity
-            if hop_index != -1 and hop_index != self.states.index(self.cur_state):
-
-                # Calculate gradient difference for velocity rescaling
-                self.tdgrad.state = self.states[hop_index]
-                _, dVh = self.tdgrad(position, self.states[hop_index])
-                dVc = -force
-                d_vec = dVh - dVc
-
+            cur_idx = self.states.index(self.cur_state)
+            if hop_index != -1 and hop_index != cur_idx:
+          
                 # Attempt velocity rescaling
+                d_vec = nacv[cur_idx, hop_index]
                 hop_allowed, velocity = self.rescale_velocity(hop_index, energy, velocity, d_vec)
                 
                 if hop_allowed:
                     old_state = self.cur_state
                     self.cur_state = self.states[hop_index]
-                        
+                    
                     logger.info(f"Hop: {old_state} → {self.cur_state} at step {i + 1}")
 
                 else:
                     logger.debug(f"Hop to state {self.states[hop_index]} rejected "
                                  f"due to insufficient kinetic energy")
-
+            
             # 7. update nuclear velocity within a half time step
             velocity = velocity + 0.5 * self.dt * force / self.mass
-
+            
             # 8. update total time
             total_time += self.dt / FS2AUTIME
 
             # 9. decoherence
             # coefficient = self.decoherence(coefficient, velocity, energy)
-
+            
             self.write_trajectory(i + 1, position, velocity, energy, coefficient)   
             self.print_step_info(i + 1, total_time, energy, coefficient)
         
