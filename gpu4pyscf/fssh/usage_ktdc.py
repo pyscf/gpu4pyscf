@@ -53,7 +53,7 @@ def generate_velocities(masses, temperature=300.0):
 
 vel = generate_velocities(td.mol.atom_mass_list())
 
-fssh = FSSH(td, [0,1])
-fssh.cur_state = 1
+fssh = FSSH(td, [1,2])
+fssh.cur_state = 2
 fssh.nsteps = 200
 fssh.kernel(None,vel,np.array([0.0,1.0]))
