@@ -24,6 +24,99 @@ from pyscf.dft import numint2c, xc_deriv
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.dft.numint import _scale_ao, _tau_dot, eval_rho, eval_rho2
 from gpu4pyscf.lib.cupy_helper import transpose_sum, add_sparse, contract
+from concurrent.futures import ThreadPoolExecutor
+
+
+MAX_GRIDS_PER_TASK = 200
+
+def _prange(start, end, step):
+    '''Partitions range into segments: i0:i1, i1:i2, i2:i3, ...'''
+    if start < end:
+        for i in range(start, end, step):
+            yield i, min(i+step, end)
+
+
+def _make_paxis_samples(spin_samples):
+    '''Samples on principal axis between [0, 1]'''
+    rt, wt = np.polynomial.legendre.leggauss(spin_samples)
+    rt = cp.array(rt)
+    wt = cp.array(wt)
+    rt = rt * .5 + .5
+    wt *= .5  # normalized to 1
+    return rt, wt
+
+
+def eval_xc_eff_sf(func, rho_tmz, deriv=1, collinear_samples=200, workers=1):
+    assert deriv < 5
+    if rho_tmz.dtype != cp.double:
+        raise RuntimeError('rho and mz must be real')
+    ngrids = rho_tmz.shape[-1]
+    grids_per_task = min(ngrids//(workers*3)+1, MAX_GRIDS_PER_TASK)
+
+    if workers == 1:
+        results = []
+        for p0, p1 in _prange(0, ngrids, grids_per_task):
+            r = _eval_xc_sf(func, rho_tmz[...,p0:p1], deriv, collinear_samples)
+            results.append(r)
+    else:
+        print(collinear_samples)
+        executor = ThreadPoolExecutor
+
+        with executor(max_workers=workers) as ex:
+            futures = []
+            for p0, p1 in _prange(0, ngrids, grids_per_task):
+                f = ex.submit(_eval_xc_sf, func, rho_tmz[...,p0:p1], deriv, collinear_samples)
+                futures.append(f)
+            results = [f.result() for f in futures]
+
+    return [None if x[0] is None else cp.concatenate(x, axis=-1) for x in zip(*results)]
+
+def _eval_xc_sf(func, rho_tmz, deriv, collinear_samples):
+    ngrids = rho_tmz.shape[-1]
+    # samples on z=cos(theta) and their weights between [0, 1]
+    sgridz, weights = _make_paxis_samples(collinear_samples)
+    blksize = int(cp.ceil(1e5 / ngrids)) * 8
+
+    if rho_tmz.ndim == 2:
+        nvar = 1
+    else:
+        nvar = rho_tmz.shape[1]
+    # spin-flip part
+    fxc_sf = 0.0
+    for p0, p1 in _prange(0, weights.size, blksize):
+        rho = _project_spin_paxis2(rho_tmz, sgridz[p0:p1])
+        fxc = func(rho, deriv)[2]
+        fxc = fxc.reshape(2, nvar, 2, nvar, ngrids, p1 - p0)
+        fxc_sf += fxc[1,:,1].dot(weights[p0:p1])
+
+    return None,None,fxc_sf
+
+
+def _project_spin_paxis2(rho_tm, sgridz=None):
+    # ToDo: be written into the function _project_spin_paxis().
+    # Because use mz rather than |mz| here
+    '''Projects spins onto the principal axis'''
+    rho = rho_tm[0]
+    mz = rho_tm[1]
+
+    if sgridz is None:
+        rho_ts = cp.stack([rho, mz])
+    else:
+        ngrids = rho.shape[-1]
+        nsg = sgridz.shape[0]
+        if rho_tm.ndim == 2:
+            rho_ts = cp.empty((2, ngrids, nsg))
+            rho_ts[0] = rho[:,cp.newaxis]
+            rho_ts[1] = mz[:,cp.newaxis] * sgridz
+            rho_ts = rho_ts.reshape(2, ngrids * nsg)
+        else:
+            nvar = rho_tm.shape[1]
+            rho_ts = cp.empty((2, nvar, ngrids, nsg))
+            rho_ts[0] = rho[:,:,cp.newaxis]
+            rho_ts[1] = mz[:,:,cp.newaxis] * sgridz
+            rho_ts = rho_ts.reshape(2, nvar, ngrids * nsg)
+    return rho_ts
+
 
 def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0,
                         collinear='mcol', collinear_samples=200):
@@ -86,6 +179,23 @@ def __mcfun_fn_eval_xc(ni, xc_code, xctype, rho, deriv):
             evfk[order] = xc_deriv.ud2ts(evfk[order])
     return evfk
 
+def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
+    t, s = rho
+    if not isinstance(t, cp.ndarray):
+        t = cp.asarray(t)
+    if not isinstance(s, cp.ndarray):
+        s = cp.asarray(s)
+    rho = cp.stack([(t + s) * .5, (t - s) * .5])
+    # if xctype == 'MGGA' and rho.shape[1] == 6:
+    #     rho = np.asarray(rho[:,[0,1,2,3,5],:], order='C')
+    spin = 1
+    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
+    # evfk = list(evfk)
+    # for order in range(1, deriv+1):
+    #     if evfk[order] is not None:
+    #         evfk[order] = xc_deriv.ud2ts(evfk[order])
+    return evfk
+
 # Edited based on pyscf.dft.numint2c.mcfun_eval_xc_adapter
 def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
     '''Wrapper to generate the eval_xc function required by mcfun
@@ -97,16 +207,26 @@ def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
         raise ImportError('This feature requires mcfun library.\n'
                           'Try install mcfun with `pip install mcfun`')
 
-    ni = numint2c.NumInt2C()
-    ni.collinear = 'mcol'
-    ni.collinear_samples = collinear_samples
+    # ni = numint2c.NumInt2C()
+    # ni.collinear = 'mcol'
+    # ni.collinear_samples = collinear_samples
+    # xctype = ni._xc_type(xc_code)
+    # fn_eval_xc = functools.partial(__mcfun_fn_eval_xc, ni, xc_code, xctype)
+    # nproc = lib.num_threads()
+
     xctype = ni._xc_type(xc_code)
-    fn_eval_xc = functools.partial(__mcfun_fn_eval_xc, ni, xc_code, xctype)
+    fn_eval_xc = functools.partial(__mcfun_fn_eval_xc2, ni, xc_code, xctype)
     nproc = lib.num_threads()
 
+    # def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
+    #     res = mcfun.eval_xc_eff_sf(
+    #         fn_eval_xc, rho.get(), deriv,
+    #         collinear_samples=collinear_samples, workers=nproc)
+    #     return [x if x is None else cp.asarray(x) for x in res]
+
     def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
-        res = mcfun.eval_xc_eff_sf(
-            fn_eval_xc, rho.get(), deriv,
+        res = eval_xc_eff_sf(
+            fn_eval_xc, rho, deriv,
             collinear_samples=collinear_samples, workers=nproc)
         return [x if x is None else cp.asarray(x) for x in res]
     return eval_xc_eff
