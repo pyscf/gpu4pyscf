@@ -476,6 +476,7 @@ class KnownValues(unittest.TestCase):
         ref_mf.mo_coeff = test_mf.mo_coeff.get()
         ref_mf.mo_energy = test_mf.mo_energy.get()
         ref_mf.mo_occ = test_mf.mo_occ.get()
+        ref_band_e, ref_band_c = test_mf.to_cpu().get_bands(kpts_band)
         assert abs(test_band_e.get() - ref_band_e).max() < 1e-7
         assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
 
@@ -512,6 +513,7 @@ class KnownValues(unittest.TestCase):
         ref_mf.mo_coeff = test_mf.mo_coeff.get()
         ref_mf.mo_energy = test_mf.mo_energy.get()
         ref_mf.mo_occ = test_mf.mo_occ.get()
+        ref_band_e, ref_band_c = test_mf.to_cpu().get_bands(kpts_band)
         assert abs(test_band_e.get() - ref_band_e).max() < 1e-8
         assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
 
