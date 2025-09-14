@@ -42,6 +42,7 @@ xc = 'b3lyp'
 mf = gpu4pyscf.dft.RKS(mol, xc=xc)
 td = mf.TDA().set(nstates=3)
 
-sh = FSSH(td,[0,1],cur_state=1,nsteps=5)
-velocities = generate_velocities(mol.atom_mass_list(True), temperature=300)
-sh.kernel(td.mol.atom_coords(),velocities,np.array([0.0,1.0]))
+fssh = FSSH(td, [1,2])
+fssh.cur_state = 2
+fssh.nsteps = 200
+fssh.kernel(None,vel,np.array([0.0,1.0]))
