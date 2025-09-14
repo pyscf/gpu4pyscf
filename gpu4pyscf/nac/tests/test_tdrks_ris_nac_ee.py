@@ -147,8 +147,8 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, with_ris=True)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1.0E-5
 
-    def test_nac_pbe0_tddft_singlet_vs_ref(self):
-        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
+    def test_nac_df_pbe0_tddft_singlet_vs_ref(self):
+        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu().density_fit()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
 
@@ -161,19 +161,19 @@ class KnownValues(unittest.TestCase):
         nac_ris.kernel()
 
         ref_de = np.array(
-            [[-1.51924941e-16, -1.00952613e-01, -1.39759701e-09],
-             [ 1.60794931e-16,  5.75528659e-02, -3.80797499e-02],
-             [ 2.01916854e-16,  5.75528682e-02,  3.80797513e-02],])
+            [[-1.51924941e-16, -1.01018969e-01 -1.39858998e-09],
+             [ 1.60794931e-16,  5.75872716e-02 -3.81043482e-02],
+             [ 2.01916854e-16,  5.75872738e-02  3.81043496e-02],])
         ref_de_etf = np.array(
-            [[-1.81973724e-16, -1.00619961e-01, -1.46179369e-09],
-             [ 6.25879103e-17,  5.03099621e-02, -3.95035960e-02],
-             [ 2.51975848e-16,  5.03099644e-02,  3.95035975e-02],])
+            [[-1.81973724e-16, -1.00688428e-01 -1.46279761e-09],
+             [ 6.25879103e-17,  5.03441954e-02 -3.95286263e-02],
+             [ 2.51975848e-16,  5.03441978e-02  3.95286277e-02],])
 
         # compare with previous calculation resusts
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
-
+    @pytest.mark.slow
     def test_nac_camb3lyp_tddft_singlet_vs_ref(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)

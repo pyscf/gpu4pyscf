@@ -490,7 +490,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None or is_zero(kpts)
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -589,7 +589,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None is_zero(kpts)
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -704,7 +704,7 @@ def eval_nucG(cell, mesh):
     return nucG
 
 def get_nuc(ni, kpts=None):
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
     kpts = np.zeros((1, 3))
@@ -812,7 +812,7 @@ def get_pp(ni, kpts=None):
     '''
     from pyscf import gto
     from pyscf.pbc.gto.pseudo import pp_int
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
     kpts = np.zeros((1, 3))

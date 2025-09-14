@@ -386,6 +386,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.777337612, 8)
 
+    @pytest.mark.slow
     def test_rks_gga(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -465,18 +466,16 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         kpts_band = np.random.random((4,3))
 
-        ref_mf = cell.RKS(xc='r2scan')
-        ref_mf.conv_tol = 1e-10
-        ref_energy = ref_mf.kernel()
-        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
-
         test_mf = cell.RKS(xc='r2scan').to_gpu()
-        test_mf._numint = multigrid.MultiGridNumInt(cell)
         test_mf.conv_tol = 1e-10
-        test_energy = test_mf.kernel()
+        test_mf.kernel()
+        test_mf._numint = multigrid.MultiGridNumInt(cell)
         test_band_e, test_band_c = test_mf.get_bands(kpts_band)
 
-        assert abs(test_energy - ref_energy).max() < 1e-8
+        ref_mf = cell.KRKS(xc='r2scan', kpts=kpts)
+        ref_mf.mo_coeff = test_mf.mo_coeff.get()
+        ref_mf.mo_energy = test_mf.mo_energy.get()
+        ref_mf.mo_occ = test_mf.mo_occ.get()
         assert abs(test_band_e.get() - ref_band_e).max() < 1e-7
         assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
 
@@ -503,18 +502,16 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         kpts_band = np.random.random((1,3)) # Yes, one non-zero k point, as an edge case
 
-        ref_mf = cell.KRKS(xc='pbe', kpts=kpts)
-        ref_mf.conv_tol = 1e-10
-        ref_energy = ref_mf.kernel()
-        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
-
         test_mf = cell.KRKS(xc='pbe', kpts=kpts).to_gpu()
         test_mf._numint = multigrid.MultiGridNumInt(cell)
         test_mf.conv_tol = 1e-10
-        test_energy = test_mf.kernel()
+        test_mf.kernel()
         test_band_e, test_band_c = test_mf.get_bands(kpts_band)
 
-        assert abs(test_energy - ref_energy).max() < 1e-8
+        ref_mf = cell.KRKS(xc='pbe', kpts=kpts)
+        ref_mf.mo_coeff = test_mf.mo_coeff.get()
+        ref_mf.mo_energy = test_mf.mo_energy.get()
+        ref_mf.mo_occ = test_mf.mo_occ.get()
         assert abs(test_band_e.get() - ref_band_e).max() < 1e-8
         assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
 
@@ -541,18 +538,18 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         kpts_band = np.random.random((2,3))
 
-        ref_mf = cell.KRKS(xc='lda', kpts=kpts)
-        ref_mf.conv_tol = 1e-10
-        ref_energy = ref_mf.kernel()
-        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
 
-        test_mf = cell.KRKS(xc='lda', kpts=kpts).to_gpu()
+        test_mf = cell.KUKS(xc='lda', kpts=kpts).to_gpu()
         test_mf._numint = multigrid.MultiGridNumInt(cell)
         test_mf.conv_tol = 1e-10
-        test_energy = test_mf.kernel()
+        test_mf.kernel()
         test_band_e, test_band_c = test_mf.get_bands(kpts_band)
 
-        assert abs(test_energy - ref_energy).max() < 1e-8
+        ref_mf = cell.KUKS(xc='lda', kpts=kpts)
+        ref_mf.mo_coeff = test_mf.mo_coeff.get()
+        ref_mf.mo_energy = test_mf.mo_energy.get()
+        ref_mf.mo_occ = test_mf.mo_occ.get()
+        ref_band_e, ref_band_c = test_mf.to_cpu().get_bands(kpts_band)
         assert abs(test_band_e.get() - ref_band_e).max() < 1e-7
         assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
 

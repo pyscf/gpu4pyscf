@@ -79,14 +79,14 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
     def test_opt_rks_tda_pcm_1(self):
-        mf = dft.RKS(mol_near_conv, xc='b3lyp').to_gpu().density_fit().PCM()
+        mf = dft.RKS(mol_near_conv, xc='b3lyp').to_gpu().PCM().density_fit()
         mf.kernel()
         assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
         td.kernel()
         mol_gpu = optimize(td)
 
-        mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu().density_fit()
+        mff = dft.RKS(mol_gpu, xc='b3lyp').to_gpu().PCM().density_fit()
         mff.kernel()
         assert mff.converged
         tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
