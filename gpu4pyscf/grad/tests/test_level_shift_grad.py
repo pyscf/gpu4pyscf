@@ -91,10 +91,10 @@ class KnownValues(unittest.TestCase):
         mf = UKS(mol_open, xc = 'wB97X')
         mf.grids.atom_grid = (99,590)
         mf.nlcgrids.atom_grid = (50,194)
-        mf.conv_tol = 1e-8
+        mf.conv_tol = 1e-9
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
-        mf.level_shift = .2
+        mf.level_shift = .1
         mf.max_cycle = 200
 
         test_energy = mf.kernel()
@@ -137,10 +137,10 @@ class KnownValues(unittest.TestCase):
 
     def test_level_shift_gradient_uhf(self):
         mf = UHF(mol_open)
-        mf.conv_tol = 1e-8
+        mf.conv_tol = 1e-9
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
-        mf.level_shift = .2
+        mf.level_shift = .1
         mf.max_cycle = 200
 
         test_energy = mf.kernel()
@@ -155,8 +155,8 @@ class KnownValues(unittest.TestCase):
             [ 1.47109479e-02,  2.13332766e-02,  8.39433701e-02],
             [-4.37473963e-02, -5.09416180e-02, -4.54662613e-02],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 5e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-6
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
 
     # Lowmem
 
