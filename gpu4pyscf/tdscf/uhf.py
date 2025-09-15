@@ -510,11 +510,15 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
                     p0 = p1
                     p1+= weight.shape[0]
                     wfxc= fxc[0,0][...,p0:p1] * weight
+                    orbo_a_mask = orbo_a[mask]
+                    orbv_a_mask = orbv_a[mask]
+                    orbo_b_mask = orbo_b[mask]
+                    orbv_b_mask = orbv_b[mask]
 
-                    rho_o_a = contract('pr,pi->ri', ao, orbo_a)
-                    rho_v_a = contract('pr,pi->ri', ao, orbv_a)
-                    rho_o_b = contract('pr,pi->ri', ao, orbo_b)
-                    rho_v_b = contract('pr,pi->ri', ao, orbv_b)
+                    rho_o_a = contract('pr,pi->ri', ao, orbo_a_mask)
+                    rho_v_a = contract('pr,pi->ri', ao, orbv_a_mask)
+                    rho_o_b = contract('pr,pi->ri', ao, orbo_b_mask)
+                    rho_v_b = contract('pr,pi->ri', ao, orbv_b_mask)
                     rho_ov_b2a = contract('ri,ra->ria', rho_o_b, rho_v_a)
                     rho_ov_a2b = contract('ri,ra->ria', rho_o_a, rho_v_b)
 
@@ -537,11 +541,15 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
                     p0 = p1
                     p1+= weight.shape[0]
                     wfxc= fxc[...,p0:p1] * weight
+                    orbo_a_mask = orbo_a[mask]
+                    orbv_a_mask = orbv_a[mask]
+                    orbo_b_mask = orbo_b[mask]
+                    orbv_b_mask = orbv_b[mask]
 
-                    rho_o_a = contract('xpr,pi->xri', ao, orbo_a)
-                    rho_v_a = contract('xpr,pi->xri', ao, orbv_a)
-                    rho_o_b = contract('xpr,pi->xri', ao, orbo_b)
-                    rho_v_b = contract('xpr,pi->xri', ao, orbv_b)
+                    rho_o_a = contract('xpr,pi->xri', ao, orbo_a_mask)
+                    rho_v_a = contract('xpr,pi->xri', ao, orbv_a_mask)
+                    rho_o_b = contract('xpr,pi->xri', ao, orbo_b_mask)
+                    rho_v_b = contract('xpr,pi->xri', ao, orbv_b_mask)
                     rho_ov_b2a = contract('xri,ra->xria', rho_o_b, rho_v_a[0])
                     rho_ov_a2b = contract('xri,ra->xria', rho_o_a, rho_v_b[0])
                     rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_o_b[0], rho_v_a[1:4])
@@ -572,11 +580,15 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
                     p0 = p1
                     p1+= weight.shape[0]
                     wfxc = fxc[...,p0:p1] * weight
+                    orbo_a_mask = orbo_a[mask]
+                    orbv_a_mask = orbv_a[mask]
+                    orbo_b_mask = orbo_b[mask]
+                    orbv_b_mask = orbv_b[mask]
 
-                    rho_oa = contract('xpr,pi->xri', ao, orbo_a)
-                    rho_ob = contract('xpr,pi->xri', ao, orbo_b)
-                    rho_va = contract('xpr,pi->xri', ao, orbv_a)
-                    rho_vb = contract('xpr,pi->xri', ao, orbv_b)
+                    rho_oa = contract('xpr,pi->xri', ao, orbo_a_mask)
+                    rho_ob = contract('xpr,pi->xri', ao, orbo_b_mask)
+                    rho_va = contract('xpr,pi->xri', ao, orbv_a_mask)
+                    rho_vb = contract('xpr,pi->xri', ao, orbv_b_mask)
                     rho_ov_b2a = contract('xri,ra->xria', rho_ob, rho_va[0])
                     rho_ov_a2b = contract('xri,ra->xria', rho_oa, rho_vb[0])
                     rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_ob[0], rho_va[1:4])

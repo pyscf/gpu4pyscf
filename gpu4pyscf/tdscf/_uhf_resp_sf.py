@@ -21,6 +21,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.dft import numint2c, xc_deriv
+from gpu4pyscf.dft import xc_deriv as xc_deriv_gpu
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.dft.numint import _scale_ao, _tau_dot, eval_rho, eval_rho2
 from gpu4pyscf.lib.cupy_helper import transpose_sum, add_sparse, contract
@@ -87,6 +88,8 @@ def _eval_xc_sf(func, rho_tmz, deriv, collinear_samples):
         rho = _project_spin_paxis2(rho_tmz, sgridz[p0:p1])
         fxc = func(rho, deriv)[2]
         fxc = fxc.reshape(2, nvar, 2, nvar, ngrids, p1 - p0)
+        if not isinstance(fxc, cp.ndarray):
+            fxc = cp.array(fxc)
         fxc_sf += fxc[1,:,1].dot(weights[p0:p1])
 
     return None,None,fxc_sf
@@ -186,14 +189,12 @@ def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
     if not isinstance(s, cp.ndarray):
         s = cp.asarray(s)
     rho = cp.stack([(t + s) * .5, (t - s) * .5])
-    # if xctype == 'MGGA' and rho.shape[1] == 6:
-    #     rho = np.asarray(rho[:,[0,1,2,3,5],:], order='C')
     spin = 1
     evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
-    # evfk = list(evfk)
-    # for order in range(1, deriv+1):
-    #     if evfk[order] is not None:
-    #         evfk[order] = xc_deriv.ud2ts(evfk[order])
+    evfk = list(evfk)
+    for order in range(1, deriv+1):
+        if evfk[order] is not None:
+            evfk[order] = xc_deriv_gpu.ud2ts(evfk[order])
     return evfk
 
 # Edited based on pyscf.dft.numint2c.mcfun_eval_xc_adapter
@@ -201,28 +202,9 @@ def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
     '''Wrapper to generate the eval_xc function required by mcfun
     '''
 
-    try:
-        import mcfun
-    except ImportError:
-        raise ImportError('This feature requires mcfun library.\n'
-                          'Try install mcfun with `pip install mcfun`')
-
-    # ni = numint2c.NumInt2C()
-    # ni.collinear = 'mcol'
-    # ni.collinear_samples = collinear_samples
-    # xctype = ni._xc_type(xc_code)
-    # fn_eval_xc = functools.partial(__mcfun_fn_eval_xc, ni, xc_code, xctype)
-    # nproc = lib.num_threads()
-
     xctype = ni._xc_type(xc_code)
     fn_eval_xc = functools.partial(__mcfun_fn_eval_xc2, ni, xc_code, xctype)
-    nproc = lib.num_threads()
-
-    # def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
-    #     res = mcfun.eval_xc_eff_sf(
-    #         fn_eval_xc, rho.get(), deriv,
-    #         collinear_samples=collinear_samples, workers=nproc)
-    #     return [x if x is None else cp.asarray(x) for x in res]
+    nproc = 1
 
     def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
         res = eval_xc_eff_sf(

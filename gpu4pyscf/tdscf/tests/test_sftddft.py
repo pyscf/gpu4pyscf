@@ -17,10 +17,6 @@ import numpy as np
 import cupy as cp
 from pyscf import lib, gto, scf
 from gpu4pyscf import tdscf
-try:
-    import mcfun
-except ImportError:
-    mcfun = None
 
 
 def diagonalize_tda(a, nroots=5):
@@ -75,7 +71,6 @@ class KnownValues(unittest.TestCase):
         e = diagonalize_tda(a[1], nroots=3)[0]
         self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
 
-    @unittest.skipIf(mcfun is None, 'MCfun not available')
     def test_mcol_svwn_tda(self):
         mf = self.mflda
         # sftddft not available in pyscf main branch. References are created
@@ -105,7 +100,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
-    @unittest.skipIf(mcfun is None, 'MCfun not available')
     def test_mcol_b3lyp_tda(self):
         mf = self.mfb3lyp
         # sftddft not available in pyscf main branch. References are created
@@ -135,7 +129,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
-    @unittest.skipIf(mcfun is None, 'MCfun not available')
     def test_mcol_tpss_tda(self):
         mf = self.mftpss
         # sftddft not available in pyscf main branch. References are created
