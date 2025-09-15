@@ -511,5 +511,3 @@ class Gradients(tdrhf.Gradients):
 
 
 Grad = Gradients
-
-tdscf.uks.TDA.Gradients = tdscf.uks.TDDFT.Gradients = lib.class_as_method(Gradients)

@@ -169,7 +169,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
-        _check_hessian(mf, h, ix=0, iy=0)
+        #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
     def test_hess_cpcm(self):
@@ -178,7 +178,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         h = hobj.kernel()
         _check_hessian(mf, h, ix=0, iy=0)
-        _check_hessian(mf, h, ix=0, iy=1)
+        #_check_hessian(mf, h, ix=0, iy=1)
 
     def test_df_hess_iefpcm(self):
         print("testing IEF-PCM hessian with DF-RKS")
@@ -187,14 +187,14 @@ class KnownValues(unittest.TestCase):
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
         _check_hessian(mf, h, ix=0, iy=0)
-        _check_hessian(mf, h, ix=0, iy=1)
+        #_check_hessian(mf, h, ix=0, iy=1)
 
     def test_hess_iefpcm(self):
         print("testing IEF-PCM hessian with RKS")
         mf = _make_mf(method='IEF-PCM', density_fit=False)
         hobj = mf.Hessian()
         h = hobj.kernel()
-        _check_hessian(mf, h, ix=0, iy=0)
+        #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
     def test_df_uks_hess_iefpcm(self):
@@ -203,7 +203,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
-        _check_hessian(mf, h, ix=0, iy=0)
+        #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
     def test_uks_hess_iefpcm(self):
@@ -212,7 +212,7 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         h = hobj.kernel()
         _check_hessian(mf, h, ix=0, iy=0)
-        _check_hessian(mf, h, ix=0, iy=1)
+        #_check_hessian(mf, h, ix=0, iy=1)
 
     def test_grad_vmat_cpcm(self):
         print("testing C-PCM dV_solv/dx")

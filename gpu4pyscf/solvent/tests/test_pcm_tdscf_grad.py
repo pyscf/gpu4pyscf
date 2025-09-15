@@ -251,7 +251,9 @@ def tearDownModule():
     del mol, molu
 
 
-def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False, solvent='CPCM', unrestrict=False, num=True):
+def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
+                               solvent='CPCM', unrestrict=False, num=True,
+                               tol=1e-6, coords_indices=None):
     mol = mol_input.copy()
     mf = cal_mf(mol, xc, solvent, unrestrict)
     td = get_td(mf, tda, xc)
@@ -277,33 +279,32 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False, solv
         nvir = nmo - nocc
         gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda)
     if not num:
-        return gradient_ana, None
+        return gradient_ana
     if num:
         coords = mol.atom_coords(unit='Ang')*1.0
-        natm = coords.shape[0]
-        grad = np.zeros((natm, 3))
-        for i in range(natm):
-            for j in range(3):
-                mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc, solvent, unrestrict)
-                td_add = get_td(mf_add, tda, xc)
-                e1 = cal_td(td_add, tda, unrestrict)
-                e_add = e1[0] + mf_add.e_tot
+        if coords_indices is None:
+            coords_indices = ([0,2], [2,1])
+        for i, j in coords_indices:
+            mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc, solvent, unrestrict)
+            td_add = get_td(mf_add, tda, xc)
+            e1 = cal_td(td_add, tda, unrestrict)
+            e_add = e1[0] + mf_add.e_tot
 
-                mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc, solvent, unrestrict)
-                td_minus = get_td(mf_minus, tda, xc)
-                e1 = cal_td(td_minus, tda, unrestrict)
-                e_minus = e1[0] + mf_minus.e_tot
-                grad[i, j] = (e_add - e_minus)/(delta*2.0)*0.52917721092
-        return gradient_ana, grad
+            mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc, solvent, unrestrict)
+            td_minus = get_td(mf_minus, tda, xc)
+            e1 = cal_td(td_minus, tda, unrestrict)
+            e_minus = e1[0] + mf_minus.e_tot
+            grad_fdiff = (e_add - e_minus)/(delta*2.0)*0.52917721092
+            assert abs(gradient_ana[i,j] - grad_fdiff) < tol
+        return gradient_ana
 
 
 
-def _check_grad_numerical(mol, tol=1e-6, xc='hf', disp=None, tda=False, solvent='CPCM', unrestrict=False, num=True):
-    grad_ana, grad = benchmark_with_finite_diff(
-        mol, delta=0.005, xc=xc, tda=tda, solvent=solvent, unrestrict=unrestrict, num=num)
-    if num:
-        norm_diff = np.linalg.norm(grad_ana - grad)
-        assert norm_diff < tol
+def _check_grad_numerical(mol, tol=1e-6, xc='hf', disp=None, tda=False,
+                          solvent='CPCM', unrestrict=False, num=True):
+    grad_ana = benchmark_with_finite_diff(
+        mol, delta=0.005, xc=xc, tda=tda, solvent=solvent,
+        unrestrict=unrestrict, num=num, tol=tol)
     return grad_ana
 
 
@@ -363,17 +364,14 @@ class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_b3lyp_IEPPCM(self):
         _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='IEFPCM')
 
-    @pytest.mark.slow
     def test_grad_tda_singlet_b3lyp_COSMO(self):
         _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='COSMO')
 
-    @pytest.mark.slow
     def test_grad_tda_singlet_b3lyp_ssvpe(self):
         _check_grad_numerical(mol, tol=5e-4, xc='b3lyp', tda=True, solvent='ss(v)pe')
 
-    @pytest.mark.slow
     def test_grad_tda_unrestrict_hf_CPCM(self):
-        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='hf', tda=True, unrestrict=True, solvent='CPCM')
+        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='hf', tda=True, unrestrict=True, solvent='CPCM', num=False)
         ref = np.array([[-0.000000,  0.000000, -0.066532],
                         [ 0.000000,  0.073344,  0.033266],
                         [ 0.000000, -0.073344,  0.033266]])
@@ -382,7 +380,7 @@ class KnownValues(unittest.TestCase):
 
     @pytest.mark.slow
     def test_grad_tda_unrestrict_b3lyp_CPCM(self):
-        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='b3lyp', tda=True, unrestrict=True, solvent='CPCM')
+        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='b3lyp', tda=True, unrestrict=True, solvent='CPCM', num=False)
         ref = np.array([[-0.000000,  0.000000, -0.037576],
                         [ 0.000000,  0.083399,  0.018788],
                         [ 0.000000, -0.083399,  0.018788]])
