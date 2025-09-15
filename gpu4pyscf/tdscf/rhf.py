@@ -406,21 +406,14 @@ class TDBase(lib.StreamObject):
             return x/diagd
         return precond
 
-    def nuc_grad_method(self):
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.grad import tdrhf
-            return tdrhf.Gradients(self)
-        else:
-            from gpu4pyscf.grad import tdrhf
-            return tdrhf.Gradients(self)
+    def Gradients(self):
+        raise NotImplementedError
 
-    def nac_method(self): 
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.nac import tdrhf
-            return tdrhf.NAC(self)
-        else:
-            from gpu4pyscf.nac import tdrhf
-            return tdrhf.NAC(self)
+    def nuc_grad_method(self):
+        return self.Gradients()
+
+    def nac_method(self):
+        raise NotImplementedError
 
     as_scanner = as_scanner
 
@@ -573,6 +566,22 @@ class TDA(TDBase):
         self._finalize()
         return self.e, self.xy
 
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tdrhf
+            return tdrhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrhf
+            return tdrhf.Gradients(self)
+
+    def nac_method(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.nac import tdrhf
+            return tdrhf.NAC(self)
+        else:
+            from gpu4pyscf.nac import tdrhf
+            return tdrhf.NAC(self)
+
 CIS = TDA
 
 
@@ -682,6 +691,9 @@ class TDHF(TDBase):
         log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    Gradients = TDA.Gradients
+    nac_method = TDA.nac_method
 
 TDRHF = TDHF
 

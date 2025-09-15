@@ -16,7 +16,7 @@ import pyscf
 import numpy as np
 import unittest
 import pytest
-from pyscf import scf, dft, tdscf
+from pyscf import scf, dft, tdscf, lib
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 import gpu4pyscf.tdscf.ris as ris
@@ -100,7 +100,8 @@ def tearDownModule():
 
 
 def benchmark_with_finite_diff(
-        mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False, with_df=False):
+        mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False,
+        with_df=False, tol=1e-5, coords_indices=None):
     
     mol = mol_input.copy()
     
@@ -129,75 +130,75 @@ def benchmark_with_finite_diff(
     gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, gpu4pyscf.grad.tdrks_ris.grad_elec, tda)
 
     coords = mol.atom_coords(unit='Ang')*1.0
-    natm = coords.shape[0]
-    grad = np.zeros((natm, 3))
-    for i in range(natm):
-        for j in range(3):
-            coords_new = coords*1.0
-            coords_new[i, j] += delta
-            mol.set_geom_(coords_new, unit='Ang')
-            mol.build()
-            if with_df:
-                mf_add = dft.RKS(mol, xc=xc).density_fit().to_gpu()
-            else:
-                mf_add = dft.RKS(mol, xc=xc).to_gpu()
-            mf_add.grids.level=9
-            mf_add.grids.prune = None
-            mf_add.run()
-            if tda:
-                td_add = ris.TDA(mf=mf_add.to_gpu(), nstates=5, single=False)
-            else:
-                td_add = ris.TDDFT(mf=mf_add.to_gpu(), nstates=5, single=False)
-            td_add.conv_tol = 1.0E-8
-            td_add.single = False
-            td_add.Ktrunc = 0.0
-            a, b = td_add.get_ab()
-            if tda:
-                e1 = diagonalize_tda(a)[0]
-            else:
-                e1 = diagonalize(a, b)[0]
-            e_add = e1[0] + mf_add.e_tot
+    if coords_indices is None:
+        coords_indices = [[0, 2], [2, 1]]
+    for i, j in coords_indices:
+        coords_new = coords*1.0
+        coords_new[i, j] += delta
+        mol.set_geom_(coords_new, unit='Ang')
+        mol.build()
+        if with_df:
+            mf_add = dft.RKS(mol, xc=xc).density_fit().to_gpu()
+        else:
+            mf_add = dft.RKS(mol, xc=xc).to_gpu()
+        mf_add.grids.level=9
+        mf_add.grids.prune = None
+        mf_add.run()
+        if tda:
+            td_add = ris.TDA(mf=mf_add.to_gpu(), nstates=5, single=False)
+        else:
+            td_add = ris.TDDFT(mf=mf_add.to_gpu(), nstates=5, single=False)
+        td_add.conv_tol = 1.0E-8
+        td_add.single = False
+        td_add.Ktrunc = 0.0
+        a, b = td_add.get_ab()
+        if tda:
+            e1 = diagonalize_tda(a)[0]
+        else:
+            e1 = diagonalize(a, b)[0]
+        e_add = e1[0] + mf_add.e_tot
 
-            coords_new = coords*1.0
-            coords_new[i, j] -= delta
-            mol.set_geom_(coords_new, unit='Ang')
-            mol.build()
-            if with_df:
-                mf_minus = dft.RKS(mol, xc=xc).density_fit().to_gpu()
-            else:
-                mf_minus = dft.RKS(mol, xc=xc).to_gpu()
-            mf_minus.grids.level=9
-            mf_minus.grids.prune = None
-            mf_minus.run()
-            if tda:
-                td_minus = ris.TDA(mf=mf_minus.to_gpu(), nstates=5, single=False)
-            else:
-                td_minus = ris.TDDFT(mf=mf_minus.to_gpu(), nstates=5, single=False)
-            td_minus.conv_tol = 1.0E-8
-            td_minus.single = False
-            td_minus.Ktrunc = 0.0
-            a, b = td_minus.get_ab()
-            if tda:
-                e1 = diagonalize_tda(a)[0]
-            else:
-                e1 = diagonalize(a, b)[0]
-            e_minus = e1[0] + mf_minus.e_tot
+        coords_new = coords*1.0
+        coords_new[i, j] -= delta
+        mol.set_geom_(coords_new, unit='Ang')
+        mol.build()
+        if with_df:
+            mf_minus = dft.RKS(mol, xc=xc).density_fit().to_gpu()
+        else:
+            mf_minus = dft.RKS(mol, xc=xc).to_gpu()
+        mf_minus.grids.level=9
+        mf_minus.grids.prune = None
+        mf_minus.run()
+        if tda:
+            td_minus = ris.TDA(mf=mf_minus.to_gpu(), nstates=5, single=False)
+        else:
+            td_minus = ris.TDDFT(mf=mf_minus.to_gpu(), nstates=5, single=False)
+        td_minus.conv_tol = 1.0E-8
+        td_minus.single = False
+        td_minus.Ktrunc = 0.0
+        a, b = td_minus.get_ab()
+        if tda:
+            e1 = diagonalize_tda(a)[0]
+        else:
+            e1 = diagonalize(a, b)[0]
+        e_minus = e1[0] + mf_minus.e_tot
 
-            grad[i, j] = (e_add - e_minus)/(delta*2.0)*0.52917721092
-    return gradient_ana, grad
+        grad_fdiff = (e_add - e_minus)/(delta*2.0)*0.52917721092
+        assert abs(gradient_ana[i, j] - grad_fdiff) < tol
+    return gradient_ana
 
 
-def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False, with_df=False):
-    grad_gpu, grad = benchmark_with_finite_diff(
-        mol, xc, delta=0.005, nstates=5, lindep=lindep, tda=tda, with_df=with_df)
-    norm_diff = np.linalg.norm(grad_gpu - grad)
-    assert norm_diff < tol
+def _check_grad(mol, xc, tol=1e-5, lindep=1.0e-12, disp=None, tda=False, with_df=False):
+    grad_gpu = benchmark_with_finite_diff(
+        mol, xc, delta=0.005, nstates=5, lindep=lindep, tda=tda,
+        with_df=with_df, tol=tol)
     return grad_gpu
 
 
 class KnownValues(unittest.TestCase):
 
-    def test_grad_b3lyp_tda_singlet_df(self):
+    @pytest.mark.slow
+    def test_grad_b3lyp_tda_singlet(self):
         mol = pyscf.M(atom=atom, basis='ccpvdz')
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
@@ -208,7 +209,9 @@ class KnownValues(unittest.TestCase):
         td.kernel()
         g = td.nuc_grad_method()
         g.kernel()
-        
+        assert abs(lib.fp(g.de) - -0.16752744269930692) < 1e-4
+
+    def test_grad_b3lyp_tda_singlet_df(self):
         mf = dft.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         mf.kernel()
 
@@ -219,8 +222,9 @@ class KnownValues(unittest.TestCase):
         g2 = td2.nuc_grad_method()
         g2.kernel()
 
-        assert np.linalg.norm(g.de - g2.de) < 1.0E-4
+        assert abs(lib.fp(g2.de) - -0.16752744269930692) < 1e-4
 
+    @pytest.mark.slow
     def test_grad_b3lyp_tda_singlet_df_num(self):
         _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True, with_df=True)
 

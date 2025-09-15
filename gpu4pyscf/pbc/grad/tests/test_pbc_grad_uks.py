@@ -96,9 +96,9 @@ class KnownValues(unittest.TestCase):
                         [-0.12969543,  0.03094078,  0.25741799]])
         mf = cell.UKS(xc='lda,vwn').to_gpu()
         mf.conv_tol = 1e-10
+        mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell)[1]
+        g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     def test_gga_grad(self):
@@ -116,9 +116,9 @@ class KnownValues(unittest.TestCase):
                         [-0.12891839,  0.03078769,  0.25585186]])
         mf = cell.UKS(xc='pbe,pbe').to_gpu()
         mf.conv_tol = 1e-10
+        mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell)[1]
+        g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     def test_mgga_grad(self):
@@ -138,9 +138,9 @@ class KnownValues(unittest.TestCase):
                         [-0.13367209,  0.03133622,  0.265949  ]])
         mf = cell.UKS(xc='r2scan,r2scan').to_gpu()
         mf.conv_tol = 1e-10
+        mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell)[1]
+        g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skip('gradients for hybrid functional not avaiable')
