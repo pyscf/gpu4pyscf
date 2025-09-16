@@ -214,7 +214,7 @@ def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
     return eval_xc_eff
 
 def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
-                       collinear_samples):
+                       collinear_samples, deriv=2):
     '''Compute the fxc_sf, which can be used in SF-TDDFT/TDA
     '''
     xctype = ni._xc_type(xc_code)
@@ -250,8 +250,12 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
     rho_z = cp.array([rho_ab[0]+rho_ab[1],
                       rho_ab[0]-rho_ab[1]])
     eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples)
-    vxc, fxc = eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)[1:3]
-    return rho_ab, vxc, fxc
+    if deriv == 2:
+        vxc, fxc = eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)[1:3]
+        return rho_ab, vxc, fxc
+    elif deriv == 3:
+        vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
+        return rho_ab, vxc, fxc, kxc
 
 def nr_uks_fxc_sf(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
                   rho0=None, vxc=None, fxc=None):

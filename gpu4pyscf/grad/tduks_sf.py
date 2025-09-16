@@ -89,9 +89,9 @@ def grad_elec(td_grad, x_y, atmlst=None, max_memory=2000, verbose=logger.INFO):
         ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
 
-        # used by mcfun.
-        rho0, vxc, fxc = ni.cache_xc_kernel(mf.mol, mf.grids, mf.xc,
-                                        mo_coeff, mo_occ, spin=1)
+        # # used by mcfun.
+        # rho0, vxc, fxc = ni.cache_xc_kernel(mf.mol, mf.grids, mf.xc,
+        #                                 mo_coeff, mo_occ, spin=1)
 
         f1vo, f1oo, vxc1, k1ao = \
                 _contract_xc_kernel(td_grad, mf.xc, ((dmxpy_ab,dmxpy_ba),(dmxmy_ab,dmxmy_ba)),
@@ -385,12 +385,14 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
         k1ao_xpy = k1ao_xmy = None
 
     # create a mc object to use mcfun.
-    nimc = numint2c.NumInt2C()
-    nimc.collinear = 'mcol'
-    nimc.collinear_samples=td_grad.base.collinear_samples
+    # nimc = numint2c.NumInt2C()
+    # nimc.collinear = 'mcol'
+    # nimc.collinear_samples=td_grad.base.collinear_samples
+    collinear_samples=td_grad.base.collinear_samples
+    ni = mf._numint
 
     # calculate the derivatives.
-    fxc_sf,kxc_sf = cache_xc_kernel_sf(nimc,mol,mf.grids,mf.xc,mo_coeff,mo_occ,deriv=3,spin=1)[2:]
+    fxc_sf,kxc_sf = cache_xc_kernel_sf(ni,mol,mf.grids,mf.xc,mo_coeff,mo_occ,collinear_samples,deriv=3)[2:]
     p0,p1=0,0 # the two parameters are used for counts the batch of grids.
 
     if xctype == 'LDA':
