@@ -737,7 +737,6 @@ class NAC_Scanner(lib.GradScanner):
         mo_occ = cp.asarray(self.base._scf.mo_occ)
         nao, nmo = mo_coeff.shape
         nocc = int((mo_occ > 0).sum())
-        nvir = nmo - nocc
 
         # for the first state
         if states[0] != 0: # excited state
