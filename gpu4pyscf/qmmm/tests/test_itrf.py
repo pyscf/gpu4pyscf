@@ -53,6 +53,9 @@ class KnownValues(unittest.TestCase):
         cpu_energy = cpu_mf.kernel()
         assert cpu_mf.converged
 
+        # Get around with a bug in pyscf<=3.10.0 that get_zetas() return a float instead of a np.ndarray
+        cpu_mf.mm_mol.get_zetas = lambda : cpu_mf.mm_mol.atom_charges() * 0 + 1e16
+
         cpu_gobj = cpu_mf.nuc_grad_method()
         cpu_gradient = cpu_gobj.kernel()
 
@@ -82,6 +85,33 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(gpu_gradient - cpu_gradient)) < 1e-6
         assert np.max(np.abs(gpu_gradient_mm - cpu_gradient_mm)) < 1e-6
         assert np.max(np.abs(gpu_dipole - cpu_dipole)) < 1e-6
+
+    def test_with_ecp(self):
+        # Reference answer from CPU implementation
+        mm_coords = np.array([[-5, 0, 0], [5, 0, 0]])
+        mm_charges = np.array([-1, 1])
+
+        mol_with_ecp = pyscf.M(atom = '''
+            K  1.0 0.0 0.0
+            H -0.2 0.1 0.0
+        ''',
+        basis = 'LANL2DZ',
+        ecp = 'LANL2DZ',
+        verbose = 0)
+
+        mf = cpu_dft.RKS(mol_with_ecp, xc = "r2scan")
+        mf.grids.level = 0
+        mf.conv_tol = 1e-10
+        mf = cpu_qmmm.mm_charge(mf, mm_coords, mm_charges)
+        mf = mf.density_fit()
+        energy = mf.kernel()
+        assert mf.converged
+        assert abs(energy - -28.422481074762427) < 1e-9
+
+        gobj = mf.nuc_grad_method()
+        gradient = gobj.kernel()
+        assert np.max(np.abs(gradient - np.array([[-3.81321503e-01,  3.21138282e-02, 0],
+                                                  [ 3.80450204e-01, -3.21486520e-02, 0]]))) < 1e-7
 
     def test_to_cpu(self):
         mm_coords = np.array([[-5, 0, 0], [5, 0, 0]])
