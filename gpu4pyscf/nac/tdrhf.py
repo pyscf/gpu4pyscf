@@ -68,7 +68,7 @@ def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
     sign_array = cp.ones(s_mo_new.shape[-1])
     for i in range(s_mo_new.shape[-1]):
         if s_mo_new[i,i] < 0.0:
-            mo2_reordered[:,i] *= -1
+            # mo2_reordered[:,i] *= -1
             sign_array[i] = -1
     return mo2_reordered, matching_indices, sign_array
 
@@ -652,6 +652,41 @@ class NAC(lib.StreamObject):
                             (NAC_Scanner, nacv_instance.__class__), name)
 
 
+def check_phase_modified(mol0, mo_coeff0, mo1_reordered, xy0, xy1, nocc, s):
+    nao = mol0.nao
+    nvir = nao - nocc
+    
+    total_s_state = 0.0
+    num_to_consider = 5
+
+    top_indices0_flat = np.argsort(np.abs(xy0).flatten())[-num_to_consider:]
+    top_indices1_flat = np.argsort(np.abs(xy1).flatten())[-num_to_consider:]
+
+    for i in range(num_to_consider):
+        idx_l = top_indices0_flat[i]
+        idx_r = top_indices1_flat[i]
+
+        idxo_l = idx_l // nvir
+        idxv_l = idx_l % nvir
+        idxo_r = idx_r // nvir
+        idxv_r = idx_r % nvir
+
+        mo_coeff0_tmp = mo_coeff0[:, :nocc].copy()
+        mo_coeff1_tmp = mo1_reordered[:, :nocc].copy()
+        
+        mo_coeff0_tmp[:, idxo_l] = mo_coeff0[:, idxv_l + nocc]
+        mo_coeff1_tmp[:, idxo_r] = mo1_reordered[:, idxv_r + nocc]
+        
+        s_mo = mo_coeff0_tmp.T @ s @ mo_coeff1_tmp
+        
+        s_state_contribution = cp.linalg.det(s_mo) \
+            * xy0[idxo_l, idxv_l] * xy1[idxo_r, idxv_r] * 2
+
+        total_s_state += s_state_contribution
+        print(total_s_state)
+
+    return total_s_state
+
 class NAC_Scanner(lib.GradScanner):
 
     _keys = ['sign']
@@ -704,27 +739,17 @@ class NAC_Scanner(lib.GradScanner):
         nocc = int((mo_occ > 0).sum())
         nvir = nmo - nocc
 
-        if states[0] != 0:
-            idx_i = np.argmax(np.abs(xi0))
-            idxo_i = idx_i//nvir 
-            idxv_i = idx_i%nvir
-            mo_occ_idx_i = matching_indices[idxo_i]
-            mo_vir_idx_i = matching_indices[idxv_i+nocc] - nocc
-            sign_mo_occ_idx_i = sign_array[mo_occ_idx_i]
-            sign_mo_vir_idx_i = sign_array[mo_vir_idx_i + nocc]
-            if xi0[idxo_i, idxv_i]/xi1[mo_occ_idx_i, mo_vir_idx_i] < 0:
-                self.sign *= -1.0
-            self.sign *= sign_mo_occ_idx_i*sign_mo_vir_idx_i
-        idx_j = np.argmax(np.abs(xj0))
-        idxo_j = idx_j//nvir
-        idxv_j = idx_j%nvir
-        mo_occ_idx_j = matching_indices[idxo_j]
-        mo_vir_idx_j = matching_indices[idxv_j+nocc] - nocc
-        sign_mo_occ_idx_j = sign_array[mo_occ_idx_j]
-        sign_mo_vir_idx_j = sign_array[mo_vir_idx_j + nocc]
-        if xj0[idxo_j, idxv_j]/xj1[mo_occ_idx_j, mo_vir_idx_j] < 0:
-            self.sign *= -1.0
-        self.sign *= sign_mo_occ_idx_j*sign_mo_vir_idx_j
+        # for the first state
+        if states[0] != 0: # excited state
+            sign = check_phase_modified(mol0, mo_coeff0, mo2_reordered, xi0, xi1, nocc, s)
+            self.sign *= np.sign(sign)
+        else: # ground state
+            s_mo_ground = mo_coeff0[:, :nocc].T @ s @ mo2_reordered[:, :nocc]
+            s_ground = cp.linalg.det(s_mo_ground)
+            self.sign *= np.sign(s_ground)
+        # for the second state
+        sign = check_phase_modified(mol0, mo_coeff0, mo2_reordered, xj0, xj1, nocc, s)
+        self.sign *= np.sign(sign)
         self.sign = float(self.sign)
         e_tot = self.e_tot
         
