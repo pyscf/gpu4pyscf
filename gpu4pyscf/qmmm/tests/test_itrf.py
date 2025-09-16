@@ -135,7 +135,7 @@ class KnownValues(unittest.TestCase):
         mf = gpu_qmmm.mm_charge(mf, mm_coords, mm_charges)
         energy_with_mm = mf.kernel()
         assert mf.converged
-        # assert abs(energy_with_mm - -75.93434480655407) < 1e-10
+        assert abs(energy_with_mm - -75.93434480655407) < 1e-10
 
         mf = mf.undo_qmmm()
         energy_without_mm = mf.kernel()

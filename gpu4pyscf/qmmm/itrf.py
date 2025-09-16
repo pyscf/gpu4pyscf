@@ -19,7 +19,7 @@ QM/MM helper functions that modify the QM methods.
 
 import numpy as np
 import pyscf
-from pyscf import lib
+from pyscf import gto, lib
 from pyscf.qmmm import mm_mole
 
 import gpu4pyscf
@@ -43,20 +43,11 @@ def qmmm_for_scf(method, mm_mol):
     ''' Refer to the comments in the corresponding function in pyscf/qmmm/itrf.py '''
     assert (isinstance(method, gpu4pyscf.scf.hf.SCF))
 
-    if isinstance(method, gpu4pyscf.scf.hf.SCF):
-        # Avoid to initialize QMMM twice
-        if isinstance(method, QMMM):
-            method.mm_mol = mm_mol
-            return method
+    if isinstance(method, QMMM):
+        method.mm_mol = mm_mol
+        return method
 
-        cls = QMMMSCF
-    else:
-        # post-HF methods
-        if isinstance(method.gpu4pyscf._scf, QMMM):
-            method._scf.mm_mol = mm_mol
-            return method
-
-        cls = QMMMPostSCF
+    cls = QMMMSCF
 
     return lib.set_class(cls(method, mm_mol), (cls, method.__class__))
 
