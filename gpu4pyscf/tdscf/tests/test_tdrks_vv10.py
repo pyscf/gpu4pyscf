@@ -62,6 +62,7 @@ def make_mf(mol, restricted = True):
     return mf
 
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_wb97xv_tddft(self):
         ### Q-Chem input
         # $rem
@@ -171,6 +172,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
 
+    import pytest
     def test_wb97xv_tda_triplet(self):
         # Same Q-Chem input as above, Q-Chem computes both TDA and TDDFT in the same run
         reference_ground_state_energy = -151.3641561221

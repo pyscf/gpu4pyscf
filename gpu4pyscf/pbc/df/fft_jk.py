@@ -418,8 +418,10 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
             if dm_kpts.ndim < 3: # RHF dm
                 v_kpts = v_kpts[0]
         else:
-            if kpts is None or kpts.ndim == 1:
+            if kpts is None or kpts.ndim == 1 or (kpts.ndim == 2 and kpts.shape[0] == 1):
                 nkpts = 1
+                if dm_kpts.ndim == 2:
+                    dm_kpts = dm_kpts[None,:,:]
             else:
                 nkpts = len(kpts)
             assert kpts.ndim == 2

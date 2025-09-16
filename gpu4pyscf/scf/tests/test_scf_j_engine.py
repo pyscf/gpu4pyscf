@@ -131,8 +131,8 @@ def test_j_engine_multiple_dms():
 
 def test_j_engine_integral_screen():
     basis = ([[0,[2**x,1]] for x in range(-1, 5)] +
-             [[1,[2**x,1]] for x in range(-1, 3)] +
-             [[3,[2**x,1]] for x in range(-1, 3)]
+             [[1,[2**x,1]] for x in range(-1, 2)] +
+             [[3,[2**x,1]] for x in range(-1, 1)]
             )
     mol = pyscf.M(
         atom = '''

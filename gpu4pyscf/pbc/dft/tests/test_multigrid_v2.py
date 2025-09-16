@@ -27,6 +27,7 @@ else:
     MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
+import pytest
 
 def setUpModule():
     global cell_orth, cell_nonorth
@@ -91,7 +92,6 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(out.shape, ref.shape)
         self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
-    @unittest.skip('kpts not supported')
     def test_get_nuc_kpts_nonorth(self):
         ref = MultiGridNumInt_cpu(cell_nonorth).get_nuc(kpts)
         out = multigrid.MultiGridNumInt(cell_nonorth).get_nuc(kpts).get()
@@ -151,25 +151,31 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
-    @unittest.skip('kpts not supported')
     def test_get_vxc_lda_kpts(self):
         nao = cell_orth.nao
         np.random.seed(2)
         xc = 'lda,'
         nkpts = len(kpts)
-        dm = np.random.random((nkpts,nao,nao)) - .5
-        dm = dm + dm.transpose(0,2,1)
-        dm = np.array([dm+1e-3, dm])
+        dm = np.empty((2,nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((2,nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((2,nkpts,nao,nao)) - .5
+        dm = np.einsum('ukpr,ukqr->ukpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
-        if hasattr(multigrid_cpu, 'nr_uks'):
-            n0, exc0, ref = multigrid_cpu.nr_uks(
-                MultiGridNumInt_cpu(pcell), xc, dm, with_j=True, kpts=kpts)
-        else:
-            n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_uks(
-                pcell, None, xc, dm, kpts=kpts)
-        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(
-            cell_orth, None, xc, dm, with_j=True, kpts=kpts)
+
+        mf = pcell.KUKS(xc=xc)
+        n0, exc0, ref = mf._numint.nr_uks(pcell, mf.grids, xc, dm, kpts=kpts)
+        vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        ref += vj[0] + vj[1]
+
+        ### Henry 20250909: The CPU multigrid reference result for UKS is wrong both in value and in format in pyscf==2.8.0.
+        # if hasattr(multigrid_cpu, 'nr_uks'):
+        #     n0, exc0, ref = multigrid_cpu.nr_uks(
+        #         MultiGridNumInt_cpu(pcell), xc, dm, with_j=True, kpts=kpts)
+        # else:
+        #     n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_uks(
+        #         pcell, None, xc, dm, kpts=kpts)
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True, kpts=kpts)
         assert abs(n0-n1).max() < 1e-8
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
@@ -219,15 +225,15 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
-    @unittest.skip('kpts not supported')
     def test_get_vxc_gga_kpts(self):
         nao = cell_orth.nao
-        np.random.seed(2)
+        np.random.seed(20)
         xc = 'pbe,'
         nkpts = len(kpts)
-        dm = np.random.random((nkpts,nao,nao)) - .5
-        dm = dm + dm.transpose(0,2,1)
-        dm = np.array([dm+1e-3, dm])
+        dm = np.empty((2,nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((2,nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((2,nkpts,nao,nao)) - .5
+        dm = np.einsum('ukpr,ukqr->ukpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
         mf = pcell.KRKS(xc=xc)
@@ -240,15 +246,18 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-8
         assert abs(ref-vxc.get()).max() < 1e-8
 
-    @unittest.skip('kpts not supported')
     def test_get_vxc_gga_kpts_nonorth(self):
         nao = cell_nonorth.nao
         np.random.seed(2)
         xc = 'pbe,'
-        dm = np.random.random((nao,nao)) - .5
-        dm = dm.dot(dm.T)
+        nkpts = len(kpts)
+        dm = np.empty((nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((nkpts,nao,nao)) - .5
+        dm = np.einsum('kpr,kqr->kpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
         pcell = cell_nonorth.copy()
         pcell.precision = 1e-10
+
         if hasattr(multigrid_cpu, 'nr_rks'):
             n0, exc0, ref = multigrid_cpu.nr_rks(
                 MultiGridNumInt_cpu(pcell), xc, dm, with_j=True, kpts=kpts)
@@ -288,6 +297,36 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-7
         assert abs(ref-vxc.get()).max() < 1e-7
 
+    def test_get_vxc_mgga_kpts(self):
+        nao = cell_orth.nao
+        np.random.seed(3)
+        xc = 'r2scan'
+        nkpts = len(kpts)
+        dm = np.empty((nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((nkpts,nao,nao)) - .5
+        dm = np.einsum('kpr,kqr->kpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
+        pcell = cell_orth.copy()
+        pcell.precision = 1e-11
+        mf = pcell.KRKS(xc=xc)
+
+        n0, exc0, ref = mf._numint.nr_rks(pcell, mf.grids, xc, dm, kpts=kpts)
+        # vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        # ref += vj
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=False, kpts=kpts)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
+        dm = np.array([dm, dm])
+        n0, exc0, ref = mf._numint.nr_uks(pcell, mf.grids, xc, dm, kpts=kpts)
+        vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        ref += vj[0] + vj[1]
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True, kpts=kpts)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
     def test_get_vxc_mgga_nonorth(self):
         nao = cell_nonorth.nao
         np.random.seed(2)
@@ -306,6 +345,27 @@ class KnownValues(unittest.TestCase):
         assert abs(exc0-exc1).max() < 1e-7
         assert abs(ref-vxc.get()).max() < 1e-7
 
+    def test_get_vxc_mgga_kpts_nonorth(self):
+        nao = cell_nonorth.nao
+        np.random.seed(4)
+        xc = 'r2scan'
+        nkpts = len(kpts)
+        dm = np.empty((nkpts,nao,nao), dtype = np.complex128)
+        dm.real = np.random.random((nkpts,nao,nao)) - .5
+        dm.imag = np.random.random((nkpts,nao,nao)) - .5
+        dm = np.einsum('kpr,kqr->kpq', dm, dm.conj()) # Make sure dm is Hermitian positive definite, so rho > 0 and tau > 0
+        pcell = cell_nonorth.copy()
+        mf = pcell.KRKS(xc=xc)
+
+        n0, exc0, ref = mf._numint.nr_rks(pcell, mf.grids, xc, dm, kpts=kpts)
+        vj = mf.with_df.get_jk(dm, kpts=kpts, with_k=False)[0]
+        ref += vj
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_nonorth).nr_rks(cell_nonorth, None, xc, dm, with_j=True, kpts=kpts)
+        assert abs(n0-n1).max() < 1e-8
+        assert abs(exc0-exc1).max() < 1e-7
+        assert abs(ref-vxc.get()).max() < 1e-7
+
+    @pytest.mark.slow
     def test_rks_lda(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -326,6 +386,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.777337612, 8)
 
+    @pytest.mark.slow
     def test_rks_gga(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -346,6 +407,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -44.87059063524272, 8)
 
+    @pytest.mark.slow
     def test_rks_mgga(self):
         cell = gto.M(
             a = np.eye(3)*3.5668,
@@ -382,6 +444,117 @@ class KnownValues(unittest.TestCase):
         ref = cell.RKS().get_rho(dm)
         out = multigrid.MultiGridNumInt(cell).get_rho(dm).get()
         self.assertAlmostEqual(abs(ref-out).max(), 0, 7)
+
+    def test_band_rks_gamma(self):
+        cell = gto.M(
+            verbose = 0,
+            a = np.diag([3.6, 3.2, 4.5]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = """
+                C DZVP-GTH-no-d-one-p-no-first-exp
+                  1
+                  2  0  1  3  2  1
+                        1.2881838513  -0.0292640031   0.0000000000  -0.2775560300
+                        0.4037767149  -0.6882040510   0.0000000000  -0.4712295093
+                        0.1187877657  -0.3964426906   1.0000000000  -0.4058039291
+                    """,
+            pseudo = 'gth-pade',
+            precision = 1e-8,
+        )
+
+        np.random.seed(1)
+        kpts_band = np.random.random((4,3))
+
+        test_mf = cell.RKS(xc='r2scan').to_gpu()
+        test_mf.conv_tol = 1e-10
+        test_mf.kernel()
+        test_mf._numint = multigrid.MultiGridNumInt(cell)
+        test_band_e, test_band_c = test_mf.get_bands(kpts_band)
+
+        ref_mf = cell.RKS(xc='r2scan')
+        ref_mf.mo_coeff = test_mf.mo_coeff.get()
+        ref_mf.mo_energy = test_mf.mo_energy.get()
+        ref_mf.mo_occ = test_mf.mo_occ.get()
+        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
+        assert abs(test_band_e.get() - ref_band_e).max() < 1e-7
+        assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
+
+    def test_band_krks_kpts(self):
+        cell = gto.M(
+            verbose = 0,
+            a = np.array([[3.6, 0, 0], [0, 3.2, 0.2], [0, 0, 4.5]]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = """
+                C DZVP-GTH-no-d-one-p-no-first-exp
+                  1
+                  2  0  1  3  2  1
+                        1.2881838513  -0.0292640031   0.0000000000  -0.2775560300
+                        0.4037767149  -0.6882040510   0.0000000000  -0.4712295093
+                        0.1187877657  -0.3964426906   1.0000000000  -0.4058039291
+                    """,
+            pseudo = 'gth-pade',
+            precision = 1e-8,
+        )
+
+        kpts = cell.make_kpts([1,3,1])
+
+        np.random.seed(1)
+        kpts_band = np.random.random((1,3)) # Yes, one non-zero k point, as an edge case
+
+        test_mf = cell.KRKS(xc='pbe', kpts=kpts).to_gpu()
+        test_mf._numint = multigrid.MultiGridNumInt(cell)
+        test_mf.conv_tol = 1e-10
+        test_mf.kernel()
+        test_band_e, test_band_c = test_mf.get_bands(kpts_band)
+
+        ref_mf = cell.KRKS(xc='pbe', kpts=kpts)
+        ref_mf.mo_coeff = test_mf.mo_coeff.get()
+        ref_mf.mo_energy = test_mf.mo_energy.get()
+        ref_mf.mo_occ = test_mf.mo_occ.get()
+        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
+        assert abs(test_band_e.get() - ref_band_e).max() < 1e-8
+        assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
+
+    def test_band_kuks_kpts(self):
+        cell = gto.M(
+            verbose = 0,
+            a = np.diag([3.6, 3.2, 4.5]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = """
+                C DZVP-GTH-no-d-one-p-no-first-exp
+                  1
+                  2  0  1  3  2  1
+                        1.2881838513  -0.0292640031   0.0000000000  -0.2775560300
+                        0.4037767149  -0.6882040510   0.0000000000  -0.4712295093
+                        0.1187877657  -0.3964426906   1.0000000000  -0.4058039291
+                    """,
+            pseudo = 'gth-pade',
+            precision = 1e-8,
+        )
+
+        kpts = cell.make_kpts([1,1,3])
+
+        np.random.seed(1)
+        kpts_band = np.random.random((2,3))
+
+
+        test_mf = cell.KUKS(xc='lda', kpts=kpts).to_gpu()
+        test_mf._numint = multigrid.MultiGridNumInt(cell)
+        test_mf.conv_tol = 1e-10
+        test_mf.kernel()
+        test_band_e, test_band_c = test_mf.get_bands(kpts_band)
+
+        ref_mf = cell.KUKS(xc='lda', kpts=kpts)
+        ref_mf.mo_coeff = test_mf.mo_coeff.get()
+        ref_mf.mo_energy = test_mf.mo_energy.get()
+        ref_mf.mo_occ = test_mf.mo_occ.get()
+        ref_band_e, ref_band_c = ref_mf.get_bands(kpts_band)
+        assert abs(test_band_e.get() - ref_band_e).max() < 1e-7
+        assert abs(abs(test_band_c.get()) - abs(np.array(ref_band_c))).max() < 1e-3
+
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")

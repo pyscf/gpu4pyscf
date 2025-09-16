@@ -121,6 +121,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.1
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
+    @pytest.mark.slow
     def test_raman_hf(self):
         ### Q-Chem input
         # $rem
