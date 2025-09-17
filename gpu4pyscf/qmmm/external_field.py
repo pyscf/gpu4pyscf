@@ -52,7 +52,7 @@ class EXTFSCF(EXTF):
 
         if electric_field is not None:
             electric_field = cp.asarray(electric_field)
-            assert type(electric_field) == cp.ndarray
+            assert type(electric_field) is cp.ndarray
             assert electric_field.shape == (3,)
         self.electric_field = electric_field
 
@@ -60,7 +60,7 @@ class EXTFSCF(EXTF):
             origin = np.zeros(3)
         else:
             origin = cp.asarray(origin).get()
-            assert type(origin) == np.ndarray
+            assert type(origin) is np.ndarray
             assert origin.shape == (3,)
         self.origin = origin
 
@@ -79,7 +79,7 @@ class EXTFSCF(EXTF):
                 logger.debug(self, f'Electric field (in AU) = {self.electric_field}')
                 logger.debug(self, f'Origin (in Bohr) = {self.origin}')
             else:
-                logger.debug(self, f'No electric field is applied')
+                logger.debug(self, 'No electric field is applied')
         return self
 
     def get_hcore(self, mol=None):
@@ -149,7 +149,7 @@ class EXTFGrad:
                 logger.debug(self, f'Electric field (in AU) = {self.base.electric_field}')
                 logger.debug(self, f'Origin (in Bohr) = {self.base.origin}')
             else:
-                logger.debug(self, f'No electric field is applied')
+                logger.debug(self, 'No electric field is applied')
         return self
 
     def get_hcore(self, mol=None, exclude_ecp=False):
