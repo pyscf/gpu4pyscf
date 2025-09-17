@@ -395,9 +395,13 @@ def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             pair_mappings[i,j] = (t_ij[mask][idx], qd_tile_addrs, qd_batch_max)
     return pair_mappings
 
-VJ_IJ_REGISTERS = 9
+VJ_IJ_REGISTERS = 11
+MULTI_VJ_IJ_REGISTERS = 8
+RT_TMP_REGISTERS = 31
 def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
+    vj_ij_registers = VJ_IJ_REGISTERS
     if n_dm > 1:
+        vj_ij_registers = MULTI_VJ_IJ_REGISTERS
         n_dm = 4
 
     li, lj, lk, ll = ls
@@ -406,9 +410,10 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     lkl = lk + ll
     nf3ij = (lij+1)*(lij+2)*(lij+3)//6
     nf3kl = (lkl+1)*(lkl+2)*(lkl+3)//6
-    Rt_size = (order+1)*(order+2)*(2*order+3)//6
-    gout_stride_min = _nearest_power2(
-        int((nf3ij+VJ_IJ_REGISTERS-1) / VJ_IJ_REGISTERS), False)
+    Rt_size = (order+1)*(order+2)*(order+3)//6
+    gout_stride_min = max(
+        _nearest_power2(int((nf3ij+vj_ij_registers-1) / vj_ij_registers), False),
+        _nearest_power2(int((Rt_size+RT_TMP_REGISTERS-1) / RT_TMP_REGISTERS), False))
 
     unit = order+1 + Rt_size
     #counts = shm_size // ((unit+gout_stride_min-1)//gout_stride_min*8)

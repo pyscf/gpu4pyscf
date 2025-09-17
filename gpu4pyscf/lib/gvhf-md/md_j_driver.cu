@@ -23,11 +23,31 @@
 #include "gvhf-md/md_j.cuh"
 
 extern __global__ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                                   int threadsx, int threadsy, int tilex, int tiley);
+                     int threadsx, int threadsy, int tilex, int tiley,
+                     uint16_t *pRt2_ij_kl, uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 extern __global__ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
-                                   int threadsx, int threadsy, int tilex, int tiley, int dm_size);
+                     int threadsx, int threadsy, int tilex, int tiley, int dm_size,
+                     uint16_t *pRt2_ij_kl, uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, double omega);
 int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, double omega, int dm_size);
+
+extern __constant__ int8_t c_Rt2_efg_phase[];
+extern __device__ uint16_t Rt2_kl_ij[];
+extern __device__ uint16_t Rt2_ij_kl[];
+
+#define RT2_MAX 9
+static int _Rt2_idx_offsets[] = {
+0,1,5,15,35,70,126,210,330,
+495,499,515,555,635,775,999,1335,1815,
+2475,2485,2525,2625,2825,3175,3735,4575,5775,
+7425,7445,7525,7725,8125,8825,9945,11625,14025,
+17325,17360,17500,17850,18550,19775,21735,24675,28875,
+34650,34706,34930,35490,36610,38570,41706,46410,53130,
+62370,62454,62790,63630,65310,68250,72954,80010,90090,
+103950,104070,104550,105750,108150,112350,119070,129150,143550,
+163350,163515,164175,165825,169125,174900,184140,198000,217800,
+245025,
+};
 
 static int block_id_for_threads(int threads)
 {
@@ -68,7 +88,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
     float *tile16_qd_ij_max = qd_ij_max[block_id_for_threads(16)];
     float *tile16_qd_kl_max = qd_kl_max[block_id_for_threads(16)];
-    MDBoundsInfo bounds = {li, lj, lk, ll, nf3ij, nf3kl, nf3ijkl,
+    MDBoundsInfo bounds = {li, lj, lk, ll, lij, lkl, order, nf3ij, nf3kl, nf3ijkl,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         pair_ij_loc, pair_kl_loc, tile16_qd_ij_max, tile16_qd_kl_max,
         q_cond, cutoff};
@@ -89,19 +109,35 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
     int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
     dim3 blocks(blocks_ij, blocks_kl);
+    bounds.qd_ij_max = qd_ij_max[block_id_for_threads(threads_ij)];
+    bounds.qd_kl_max = qd_kl_max[block_id_for_threads(threads_kl)];
+    uint16_t *pRt2_ij_kl;// = Rt2_ij_kl + _Rt2_idx_offsets[lij*RT2_MAX+lkl];
+    uint16_t *pRt2_kl_ij;// = Rt2_kl_ij + _Rt2_idx_offsets[lij*RT2_MAX+lkl];
+    int8_t *efg_phase;
+    cudaGetSymbolAddress((void**)&pRt2_ij_kl, Rt2_ij_kl);
+    cudaGetSymbolAddress((void**)&pRt2_kl_ij, Rt2_kl_ij);
+    cudaGetSymbolAddress((void**)&efg_phase, c_Rt2_efg_phase);
+    pRt2_kl_ij += _Rt2_idx_offsets[lij*RT2_MAX+lkl];
+    pRt2_ij_kl += _Rt2_idx_offsets[lij*RT2_MAX+lkl];
+    efg_phase += _Rt2_idx_offsets[lkl];
     if (n_dm == 1) {
         if (!md_j_unrolled(&envs, &jk, &bounds, omega)) {
-            bounds.qd_ij_max = qd_ij_max[block_id_for_threads(threads_ij)];
-            bounds.qd_kl_max = qd_kl_max[block_id_for_threads(threads_kl)];
             md_j_1dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
-                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley);
+                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
+                pRt2_ij_kl, pRt2_kl_ij, efg_phase);
         }
     } else {
         if (!md_j_4dm_unrolled(&envs, &jk, &bounds, omega, dm_size)) {
-            bounds.qd_ij_max = qd_ij_max[block_id_for_threads(threads_ij)];
-            bounds.qd_kl_max = qd_kl_max[block_id_for_threads(threads_kl)];
-            md_j_4dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
-                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size);
+            for (int dm_offset = 0; dm_offset < n_dm; dm_offset+=4) {
+                jk.vj = vj + dm_offset * dm_size;
+                jk.dm = dm + dm_offset * dm_size;
+                jk.n_dm = n_dm - dm_offset;
+                bounds.qd_ij_max = qd_ij_max[block_id_for_threads(threads_ij)];
+                bounds.qd_kl_max = qd_kl_max[block_id_for_threads(threads_kl)];
+                md_j_4dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
+                    envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size,
+                    pRt2_ij_kl, pRt2_kl_ij, efg_phase);
+            }
         }
     }
     cudaError_t err = cudaGetLastError();

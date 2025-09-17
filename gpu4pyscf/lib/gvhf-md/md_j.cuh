@@ -20,6 +20,9 @@ typedef struct {
     int lj;
     int lk;
     int ll;
+    int lij;
+    int lkl;
+    int order;
     int nf3ij;
     int nf3kl;
     int nf3ijkl;
