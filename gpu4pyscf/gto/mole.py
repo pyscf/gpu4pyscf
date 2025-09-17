@@ -293,7 +293,6 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
         else:
             return mol, coeff, uniq_l_ctr, l_ctr_counts
     else:
-        n_cartesian = sum([(l+1)*(l+2)//2 for l in mol._bas[:,ANG_OF]])
         l_ctr_offsets = np.cumsum(l_ctr_counts)[:-1]
         if_pad_bas_per_l_ctr = np.split(if_pad_bas, l_ctr_offsets)
         l_ctr_pad_counts = np.array([np.sum(if_pad) for if_pad in if_pad_bas_per_l_ctr])

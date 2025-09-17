@@ -416,7 +416,7 @@ class Int3c2eOpt:
         preferred_blksizes = nsp_lookup[0,li,lj]
         pair_ij_offsets = []
         for shl_pair0, shl_pair1, blksize in zip(
-            self.shl_pair_offsets[:-1], self.shl_pair_offsets[1:], preferred_blksizes):
+                self.shl_pair_offsets[:-1], self.shl_pair_offsets[1:], preferred_blksizes):
             pair_ij_offsets.append(
                 np.arange(shl_pair0, shl_pair1, blksize, dtype=np.int32))
         pair_ij_offsets.append(self.shl_pair_offsets[-1])
