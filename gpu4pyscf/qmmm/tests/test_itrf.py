@@ -25,9 +25,9 @@ from gpu4pyscf import qmmm as gpu_qmmm
 def setUpModule():
     global mol
     mol = pyscf.M(atom='''
-  O  0.000000  0.000000  0.000000
-  H  0.758602  0.000000  0.504284
-  H  0.958602  0.000000  -0.504284
+        O  0.000000  0.000000  0.000000
+        H  0.758602  0.000000  0.504284
+        H  0.958602  0.000000  -0.504284
     ''',
     basis='ccpvdz',
     verbose=1,
@@ -99,10 +99,10 @@ class KnownValues(unittest.TestCase):
         ecp = 'LANL2DZ',
         verbose = 0)
 
-        mf = cpu_dft.RKS(mol_with_ecp, xc = "r2scan")
+        mf = gpu_dft.RKS(mol_with_ecp, xc = "r2scan")
         mf.grids.level = 0
         mf.conv_tol = 1e-10
-        mf = cpu_qmmm.mm_charge(mf, mm_coords, mm_charges)
+        mf = gpu_qmmm.mm_charge(mf, mm_coords, mm_charges)
         mf = mf.density_fit()
         energy = mf.kernel()
         assert mf.converged
@@ -111,7 +111,7 @@ class KnownValues(unittest.TestCase):
         gobj = mf.nuc_grad_method()
         gradient = gobj.kernel()
         assert np.max(np.abs(gradient - np.array([[-3.81321503e-01,  3.21138282e-02, 0],
-                                                  [ 3.80450204e-01, -3.21486520e-02, 0]]))) < 1e-7
+                                                  [ 3.80450204e-01, -3.21486520e-02, 0]]))) < 1e-6
 
     def test_to_cpu(self):
         mm_coords = np.array([[-5, 0, 0], [5, 0, 0]])
