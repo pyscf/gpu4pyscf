@@ -187,17 +187,17 @@ class KnownValues(unittest.TestCase):
         verbose=0,
         charge=1)
 
-        mf = gpu_dft.RKS(mol, xc = "wB97X-d3bj")
+        mf = gpu_dft.RKS(mol_charged, xc = "wB97X-d3bj")
         mf.conv_tol = 1e-12
         mf = mf.density_fit()
         mf = gpu_qmmm.mm_charge(mf, mm_coords, mm_charges)
         energy = mf.kernel()
         assert mf.converged
-        # assert abs(energy - -76.35266754461368) < 1e-9
+        assert abs(energy - -76.68819909313646) < 1e-9
 
         dm = mf.make_rdm1()
-        dipole = mf.dip_moment(unit='DEBYE', dm=dm, origin=mol.atom_coords().mean(axis=0))
-        assert np.max(np.abs(dipole - np.array([1.93350627e+00, 0, 2.47442325e-01]))) < 1e-6
+        dipole = mf.dip_moment(unit='DEBYE', dm=dm, origin=mol_charged.atom_coords().mean(axis=0))
+        assert np.max(np.abs(dipole - np.array([-1.27710722e-01, 0, 2.23694789e-03]))) < 1e-6
 
 
 if __name__ == "__main__":
