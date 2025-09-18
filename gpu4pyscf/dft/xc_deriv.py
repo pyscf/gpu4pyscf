@@ -359,3 +359,24 @@ def _stack_fggg(fggg, axis=0, rho=None):
     fggg = _stack_fg(fggg, axis=axis+2, rho=rho)
     fggg = _stack_fg(fggg, axis=axis+1, rho=rho)
     return _stack_fg(fggg, axis=axis, rho=rho)
+
+
+def ud2ts(v_ud):
+    v_ts = cupy.asarray(v_ud)
+    order = v_ud.ndim // 2
+            
+    if order == 0 and v_ts.shape[0] != 2:
+        raise ValueError("No spin axis found in the input array.")
+
+    matrix = cupy.array([[0.5, 0.5], 
+                       [0.5, -0.5]])
+    if order == 1:
+        v_ts = contract('ra,axg->rxg', matrix, v_ud)
+    elif order == 2:
+        v_ts = cupy.einsum('ra,tb,axbyg->rxtyg', matrix, matrix, v_ud)
+    elif order == 3:
+        v_ts = cupy.einsum('ra,tb,sc,axbyczg->rxtyszg', matrix, matrix, matrix, v_ud)
+    else:
+        raise NotImplementedError(f"Order {order} not implemented.")
+        
+    return v_ts
