@@ -780,6 +780,9 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
         _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
         cderi_compressed[:,pair0:pair1] = j3c_tmp.get(out=_buf)
         j3c_tmp = None
+    # It's important to synchronize the host and CUDA kernel before releasing
+    # local variables, as the mapped memory may still be in use by the device.
+    multi_gpu.synchronize()
     return cderi_compressed
 
 # The long-range part of the cderi for k points. The 3-index cderi tensor is compressed.
@@ -935,6 +938,7 @@ def _lr_int3c2e_kk(ft_opt, bas_ij_cache, cd_j2c_cache, auxcell, omega, kpts, kpt
                 pair0, pair1 = ao_pair_offsets[i, j]
                 cderi_compressed[kp][:,pair0:pair1] = j3c_tmp.get(out=_buf)
             #t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -1050,6 +1054,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
                 p0, p1 = ao_pair_offsets[li, lj]
                 cderi[:,p0:p1] = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
             j3c_tmp = ish = jsh = c_pair_idx = None
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -1191,6 +1196,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 p0, p1 = ao_pair_offsets[li, lj]
                 cderi[:,p0:p1] = j3c_block.get(out=_buf)
             j3c_tmp = j3c_block = None
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -1344,6 +1350,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                     p0, p1 = ao_pair_offsets[li, lj]
                     cderi[kp][:,p0:p1] = cderi_k.get(out=_buf)
             j3c_tmp = j3c_block = None
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
 
