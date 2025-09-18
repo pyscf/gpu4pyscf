@@ -119,7 +119,7 @@ class CasidaTDDFT(TDDFT):
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
-
+        log.warn("Nested krylov cannot be used for pure functional TDDFT.")
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
             nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,

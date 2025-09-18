@@ -160,6 +160,16 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.5175884245769546, 6)
+
+        td_krylov_precond = mf_b3lyp.TDDFT()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es_precond - ref).max(), 0, 8)
+        td_nested_krylov = mf_b3lyp.TDDFT()
+        td_nested_krylov.precond_method = 'ris'
+        es_nested = td_nested_krylov.kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es_nested - ref).max(), 0, 8)
+
         a, b = td.get_ab()
         ref = diagonalize(a, b, nroots=5)
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
@@ -186,6 +196,15 @@ class KnownValues(unittest.TestCase):
         ref = diagonalize(a, b, nroots=4)
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
 
+        td_krylov_precond = mf.TDDFT()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel(nstates=4)[0]
+        self.assertAlmostEqual(abs(es_precond - ref).max(), 0, 8)
+        td_nested_krylov = mf.TDDFT()
+        td_nested_krylov.precond_method = 'ris'
+        es_nested = td_nested_krylov.kernel(nstates=4)[0]
+        self.assertAlmostEqual(abs(es_nested - ref).max(), 0, 8)
+
     def test_tda_b3lypg(self):
         mol = self.mol
         mf = mol.RKS()
@@ -200,6 +219,15 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.520888995669812, 6)
 
+        td_krylov_precond = mf.TDA()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es_precond - ref).max(), 0, 8)
+        td_nested_krylov = mf.TDA()
+        td_nested_krylov.precond_method = 'ris'
+        es_nested = td_nested_krylov.kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es_nested - ref).max(), 0, 8)
+
     def test_tda_lda(self):
         mf_lda = self.mf_lda
         td = mf_lda.TDA()
@@ -208,6 +236,15 @@ class KnownValues(unittest.TestCase):
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref).max(), 0, 8)
         self.assertAlmostEqual(lib.fp(es), -1.5141057378565799, 6)
+
+        td_krylov_precond = mf_lda.TDA()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es_precond - ref).max(), 0, 8)
+        td_nested_krylov = mf_lda.TDA()
+        td_nested_krylov.precond_method = 'ris'
+        es_nested = td_nested_krylov.kernel(nstates=5)[0]
+        self.assertAlmostEqual(abs(es_nested - ref).max(), 0, 8)
 
     def test_tda_b3lyp_triplet(self):
         mf_b3lyp = self.mf_b3lyp

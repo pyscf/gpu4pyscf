@@ -19,6 +19,7 @@ from pyscf import lib, gto
 from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
+from gpu4pyscf.tdscf import _krylov_tools
 from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
@@ -365,6 +366,7 @@ class TDBase(lib.StreamObject):
     deg_eia_thresh        = tdhf_cpu.TDBase.deg_eia_thresh
     # Avoid computing NLC response in TDDFT
     exclude_nlc = True
+    precond_method = None
 
     _keys = tdhf_cpu.TDBase._keys
 
@@ -551,17 +553,36 @@ class TDA(TDBase):
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
-
-        self.converged, self.e, x1 = lr_eigh(
-            vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
-            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
-            max_memory=self.max_memory, verbose=log)
-
         nocc = mol.nelectron // 2
         nmo = self._scf.mo_occ.size
         nvir = nmo - nocc
+        if self.precond_method is None:
+            self.converged, self.e, x1 = lr_eigh(
+                vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
+                nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
+                max_memory=self.max_memory, verbose=log)
+            self.xy = [(xi.reshape(nocc,nvir) * .5**.5, 0) for xi in x1]
+        elif self.precond_method.lower()[0] == 'p': # preconditioned Krylov method
+            self.converged, self.e, X = _krylov_tools.krylov_solver(matrix_vector_product=vind, hdiag=hdiag, n_states=nstates, problem_type='eigenvalue',
+                                                conv_tol=self.conv_tol, max_iter=self.max_cycle, gram_schmidt=True,
+                                                single=False, verbose=log)
+            self.e = self.e.get()
+            self.xy = [(xi.reshape(nocc,nvir).get() * .5**.5*np.sqrt(0.5), 0) for xi in X]
+        elif self.precond_method.lower()[0] == 'r': # ris
+            from gpu4pyscf.tdscf import ris
+            tda_emp = ris.TDA(mf=self._scf, nstates=self.nstates, spectra=False,
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
+            TDA_MVP = tda_emp.gen_vind()[0]
+            self.converged, self.e, X = _krylov_tools.nested_krylov_solver(matrix_vector_product=vind, hdiag=hdiag, 
+                                                n_states=nstates, problem_type='eigenvalue',
+                                                conv_tol=self.conv_tol, max_iter=self.max_cycle, gram_schmidt=True,
+                                                init_mvp = TDA_MVP, precond_mvp = TDA_MVP,
+                                                single=False, verbose=log)
+            self.e = self.e.get()
+            self.xy = [(xi.reshape(nocc,nvir).get() * .5**.5*np.sqrt(0.5), 0) for xi in X]
+        else:
+            raise ValueError(f'Unknown preconditioner method {self.precond_method}')
         # 1/sqrt(2) because self.x is for alpha excitation and 2(X^+*X) = 1
-        self.xy = [(xi.reshape(nocc,nvir) * .5**.5, 0) for xi in x1]
         log.timer('TDA', *cpu0)
         self._finalize()
         return self.e, self.xy
@@ -585,7 +606,7 @@ class TDA(TDBase):
 CIS = TDA
 
 
-def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
+def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None, precond_method=None):
     '''Generate function to compute
 
     [ A   B ][X]
@@ -626,8 +647,34 @@ def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
         return cp.hstack((v1_top.reshape(nz,nocc*nvir),
                           -v1_bot.reshape(nz,nocc*nvir)))
 
-    hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
-    return vind, hdiag
+    def vind_xy(X, Y):
+        nz = len(X)
+        xs = cp.asarray(X).reshape(nz,nocc,nvir)
+        ys = cp.asarray(Y).reshape(nz,nocc,nvir)
+        # *2 for double occupancy
+        tmp = contract('xov,pv->xpo', xs, orbv*2)
+        dms = contract('xpo,qo->xpq', tmp, orbo.conj())
+        tmp = contract('xov,qv->xoq', ys, orbv.conj()*2)
+        dms+= contract('xoq,po->xpq', tmp, orbo)
+        v1ao = vresp(dms) # = <mb||nj> Xjb + <mj||nb> Yjb
+        v1_top = contract('xpq,qo->xpo', v1ao, orbo)
+        v1_top = contract('xpo,pv->xov', v1_top, orbv)
+        v1_bot = contract('xpq,po->xoq', v1ao, orbo)
+        v1_bot = contract('xoq,qv->xov', v1_bot, orbv)
+        v1_top += xs * e_ia  # AX
+        v1_bot += ys * e_ia  # (A*)Y
+        return ((v1_top.reshape(nz,nocc*nvir),
+                          v1_bot.reshape(nz,nocc*nvir)))
+
+    # hdiag = cp.hstack([hdiag.ravel(), -hdiag.ravel()])
+    if precond_method is None:
+        return vind, cp.hstack([hdiag.ravel(), -hdiag.ravel()])
+    elif precond_method.lower()[0] == 'p': # preconditioned Krylov method
+        return vind_xy, hdiag.ravel()
+    elif precond_method.lower()[0] == 'r': # ris
+        return vind_xy, hdiag.ravel()
+    else:
+        raise ValueError(f'Unknown preconditioner method {precond_method}')
 
 
 class TDHF(TDBase):
@@ -637,7 +684,7 @@ class TDHF(TDBase):
     def gen_vind(self, mf=None):
         if mf is None:
             mf = self._scf
-        return gen_tdhf_operation(self, mf, singlet=self.singlet)
+        return gen_tdhf_operation(self, mf, singlet=self.singlet, precond_method=self.precond_method)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         assert not return_symmetry
@@ -670,23 +717,51 @@ class TDHF(TDBase):
         x0sym = None
         if x0 is None:
             x0 = self.init_guess()
-
-        self.converged, self.e, x1 = real_eig(
-            vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
-            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
-            max_memory=self.max_memory, verbose=log)
-
         nocc = mol.nelectron // 2
         nmo = self._scf.mo_occ.size
         nvir = nmo - nocc
         def norm_xy(z):
-            x, y = z.reshape(2, -1)
+            if isinstance(z, np.ndarray):
+                x, y = z.reshape(2, -1) 
+            else:
+                x, y = z
             norm = lib.norm(x)**2 - lib.norm(y)**2
             if norm < 0:
                 log.warn('TDDFT amplitudes |X| smaller than |Y|')
             norm = abs(.5/norm)**.5  # normalize to 0.5 for alpha spin
             return x.reshape(nocc,nvir)*norm, y.reshape(nocc,nvir)*norm
-        self.xy = [norm_xy(z) for z in x1]
+        if self.precond_method is None:
+            self.converged, self.e, x1 = real_eig(
+                vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
+                nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
+                max_memory=self.max_memory, verbose=log)
+            self.xy = [norm_xy(z) for z in x1]
+        elif self.precond_method.lower()[0] == 'p': # preconditioned Krylov method
+            converged, energies, X, Y = _krylov_tools.ABBA_krylov_solver(matrix_vector_product=vind, hdiag=hdiag, problem_type='eigenvalue',
+                                                    n_states=self.nstates, conv_tol=self.conv_tol,
+                                                    max_iter=self.max_cycle, gram_schmidt=True,
+                                                    single=False, verbose=self.verbose)
+            self.converged = converged
+            self.e = energies.get()
+            self.xy = [norm_xy((x.reshape(nocc,nvir), y.reshape(nocc,nvir))) for x,y in zip(X,Y)]
+        elif self.precond_method.lower()[0] == 'r': # ris
+            if getattr(self._scf, '_numint', None) is None:
+                raise ValueError('RIS preconditioner requires _numint attribute in SCF object')
+
+            from gpu4pyscf.tdscf import ris
+            tda_emp = ris.TDDFT(mf=self._scf, nstates=self.nstates, spectra=False,
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
+            TDDFT_MVP = tda_emp.gen_vind()[0]
+            converged, energies, X, Y = _krylov_tools.nested_ABBA_krylov_solver(matrix_vector_product=vind, hdiag=hdiag,
+                                                    problem_type='eigenvalue', init_mvp=TDDFT_MVP, precond_mvp=TDDFT_MVP,
+                                                    n_states=self.nstates, conv_tol=self.conv_tol,
+                                                    max_iter=self.max_cycle, gram_schmidt=True,
+                                                    single=False, verbose=self.verbose)
+            self.converged = converged
+            self.e = energies.get()
+            self.xy = [norm_xy((x.reshape(nocc,nvir), y.reshape(nocc,nvir))) for x,y in zip(X,Y)]
+        else:
+            raise ValueError(f'Unknown preconditioner method {self.precond_method}')
 
         log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()
