@@ -170,5 +170,5 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
 if __name__ == "__main__":
-    print("Full Tests for spin-flip-TDA and spin-flip-TDDFT")
+    print("Full Tests for spin-flip-TDA and spin-flip-TDDFT using multi-collinear functionals")
     unittest.main()
