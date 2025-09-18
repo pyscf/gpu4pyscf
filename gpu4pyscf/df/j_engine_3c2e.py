@@ -76,11 +76,14 @@ class Int3c2eOpt:
         log.timer('Initialize q_cond', *cput0)
 
         auxmol = self.auxmol
+        auxmol, aux_idx = group_basis(self.auxmol, tile=1, sparse_coeff=True)[:2]
+        self.sorted_auxmol = auxmol
+        self.aux_idx = aux_idx
+
         _atm_cpu, _bas_cpu, _env_cpu = conc_env(
             prim_mol._atm, prim_mol._bas, _scale_sp_ctr_coeff(prim_mol),
             auxmol._atm, auxmol._bas, _scale_sp_ctr_coeff(auxmol))
         #NOTE: PTR_BAS_COORD is not updated in conc_env()
-        _bas_cpu[prim_mol.nbas:,PTR_BAS_COORD] = auxmol._atm[[auxmol._bas[:,ATOM_OF]], PTR_COORD]
         off = _bas_cpu[prim_mol.nbas,PTR_EXP] - auxmol._bas[0,PTR_EXP]
         _bas_cpu[prim_mol.nbas:,PTR_BAS_COORD] += off
         self._atm = _atm_cpu
@@ -136,12 +139,12 @@ class Int3c2eOpt:
         _env_cpu = self._env
         sorted_mol = self.sorted_mol
         ao_loc = sorted_mol.ao_loc
-        naux = self.auxmol.nao_nr(cart=True)
+        naux = self.sorted_auxmol.nao_nr(cart=True)
         prim_mol = self.prim_mol
 
         nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
         lmax = self.uniq_l_ctr[:,0].max()
-        lmax_aux = self.auxmol._bas[:,ANG_OF].max()
+        lmax_aux = self.sorted_auxmol._bas[:,ANG_OF].max()
         shm_size = 0
         for lk in range(lmax_aux+1):
             for li in range(lmax*2+1):
@@ -192,7 +195,7 @@ class Int3c2eOpt:
             ctypes.c_int(n_dm), ctypes.c_int(naux),
             ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
             ctypes.c_int(sp_blocks),
-            ctypes.c_int(self.auxmol.nbas),
+            ctypes.c_int(self.sorted_auxmol.nbas),
             ctypes.cast(pair_ij_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
@@ -205,7 +208,8 @@ class Int3c2eOpt:
             log.timer_debug1('processing contract_int3c2e_dm', *t0)
 
         if not self.auxmol.cart:
-            vj_aux = _vector_cart2sph(self.auxmol, vj_aux)
+            vj_aux = _vector_cart2sph(self.sorted_auxmol, vj_aux)
+        vj_aux[self.aux_idx] = vj_aux
         return vj_aux
 
 def _vector_cart2sph(auxmol, auxvec):

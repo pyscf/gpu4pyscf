@@ -159,7 +159,8 @@ def test_contract_int3c2e():
         H   0.757    4.   -0.4696
         C   1.      1.    0.
         ''',
-        basis='ccpvtz')
+        basis='ccpvtz'
+    )
     auxmol = mol.copy()
     auxmol.basis = ('weigend', [[3, [2, 1, .5], [1, .2, 1]]])
     auxmol.build(0, 0)

@@ -371,7 +371,7 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
     constexpr int nf3k = nfk * (lk + 3) / 3;
     int sp_block_id = gridDim.y - blockIdx.y - 1;
-    int ksh = blockIdx.x + envs.nbas;
+    int ksh = gridDim.x - blockIdx.x - 1 + envs.nbas;
     int thread_id = threadIdx.x;
     int *bas = envs.bas;
     double *env = envs.env;
@@ -541,7 +541,7 @@ __global__ static
 void contract_int3c2e_kernel(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bounds,
                              int *pair_ij_loc)
 {
-    int ksh = blockIdx.x + envs.nbas;
+    int ksh = gridDim.x - blockIdx.x - 1 + envs.nbas;
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
     case 0: unrolled_contract_int3c2e<0>(envs, jk, bounds, pair_ij_loc); break;
