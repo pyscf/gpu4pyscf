@@ -21,6 +21,7 @@
 
 #include "gvhf-rys/vhf.cuh"
 //#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_contract_k.cuh"
 #include "int3c2e.cuh"
 
 #define GOUT_WIDTH      54
@@ -73,14 +74,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     }
     __syncthreads();
     int lij = li + lj;
-    int *idx_ij = c_g_pair_idx + c_g_pair_offsets[li*LMAX1+lj];
-    int *idy_ij = idx_ij + nfij;
-    int *idz_ij = idx_ij + nfij * 2;
-    int lk_offset = lk * (lk + 1) * (lk + 2) / 2;
-    int *idx_k = c_g_cart_idx + lk_offset;
-    int *idy_k = idx_k + nfk;
-    int *idz_k = idx_k + nfk * 2;
-
     int nst_per_block = blockDim.x;
     if (lij + lk > 2) {
         nst_per_block = bounds.nst_lookup[(lk*LMAX1+lj)*LMAX1+li];
@@ -93,14 +86,25 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     if (omega < 0) {
         nroots *= 2;
     }
-    int gx_len = g_size * nst_per_block;
-    extern __shared__ double rw_buffer[];
-    double *rw = rw_buffer + st_id;
-    double *gx = rw_buffer + nst_per_block * nroots*2 + st_id;
-    double *gy = gx + gx_len;
-    double *gz = gy + gx_len;
-    double *Rpq = gz + gx_len;
-    double *rjri = Rpq + nst_per_block * 3;
+    extern __shared__ double shared_memory[];
+    double *rjri = shared_memory + st_id;
+    double *Rpq = shared_memory + nst_per_block * 4 + st_id;
+    double *rw = shared_memory + nst_per_block * 7 + st_id;
+    double *gx = shared_memory + nst_per_block * (nroots*2+7) + st_id;
+    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+7));
+    int *idx_j = idx_i + nfi * 3;
+    int *idx_k = idx_j + nfj * 3;
+    if (thread_id < nfi * 3) {
+        idx_i[thread_id] = lex_xyz_address(li, thread_id) * nst_per_block;
+        idx_i[thread_id] += (thread_id % 3) * nst_per_block * g_size;
+    }
+    if (thread_id < nfj * 3) {
+        idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nst_per_block;
+    }
+    if (thread_id < nfk * 3) {
+        idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nst_per_block;
+    }
+
     double gout[GOUT_WIDTH];
     int naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
@@ -173,7 +177,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                     double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
                     double theta_ij = ai * aj_aij;
                     double Kab = theta_ij * rjri[3*nst_per_block];
-                    gy[0] = fac * exp(-Kab);
+                    gx[g_size*nst_per_block] = fac * exp(-Kab);
                     Rpq[0*nst_per_block] = xpq;
                     Rpq[1*nst_per_block] = ypq;
                     Rpq[2*nst_per_block] = zpq;
@@ -186,7 +190,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (gout_id == 0) {
-                        gz[0] = rw[(irys*2+1)*nst_per_block];
+                        gx[g_size*nst_per_block*2] = rw[(irys*2+1)*nst_per_block];
                     }
                     double rt = rw[ irys*2   *nst_per_block];
                     double rt_aa = rt / (aij + ak);
@@ -278,16 +282,20 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                     }
 
                     __syncthreads();
+                    if (ijk_idx < nst) {
 #pragma unroll
-                    for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        int ijk = gout_start + n*gout_stride+gout_id;
-                        int k  = ijk % nfk;
-                        int ij = ijk / nfk;
-                        if (ij >= nfij) break;
-                        int addrx = (idx_ij[ij] + idx_k[k] * stride_k) * nst_per_block;
-                        int addry = (idy_ij[ij] + idy_k[k] * stride_k) * nst_per_block;
-                        int addrz = (idz_ij[ij] + idz_k[k] * stride_k) * nst_per_block;
-                        gout[n] += gx[addrx] * gy[addry] * gz[addrz];
+                        for (int n = 0; n < GOUT_WIDTH; ++n) {
+                            int ijk = gout_start + n*gout_stride+gout_id;
+                            int ij = ijk / nfk;
+                            if (ij >= nfij) break;
+                            int k = ijk % nfk;
+                            int i = ij % nfi;
+                            int j = ij / nfi;
+                            int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
+                            int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
+                            int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];
+                            gout[n] += gx[addrx] * gx[addry] * gx[addrz];
+                        }
                     }
                 }
             }

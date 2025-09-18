@@ -16,7 +16,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <vhf.cuh>
+#include <gvhf-rys/vhf.cuh>
 
 __constant__ int _c_cartesian_lexical_xyz[] = {
     // s, offset = 0
