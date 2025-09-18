@@ -88,10 +88,10 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     }
     extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
-    double *Rpq = shared_memory + nst_per_block * 3 + st_id;
-    double *rw = shared_memory + nst_per_block * 6 + st_id;
-    double *gx = shared_memory + nst_per_block * (nroots*2+6) + st_id;
-    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+6));
+    double *Rpq = shared_memory + nst_per_block * 4 + st_id;
+    double *rw = shared_memory + nst_per_block * 7 + st_id;
+    double *gx = shared_memory + nst_per_block * (nroots*2+7) + st_id;
+    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+7));
     int *idx_j = idx_i + nfi * 3;
     int *idx_k = idx_j + nfj * 3;
     if (thread_id < nfi * 3) {
@@ -282,18 +282,20 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                     }
 
                     __syncthreads();
+                    if (ijk_idx < nst) {
 #pragma unroll
-                    for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        int ijk = gout_start + n*gout_stride+gout_id;
-                        int ij = ijk / nfk;
-                        if (ij >= nfij) break;
-                        int k = ijk % nfk;
-                        int i = ij % nfi;
-                        int j = ij / nfi;
-                        int addrx = idx_i[i*3+0] + idx_i[j*3+0] + idx_i[k*3+0];
-                        int addry = idx_i[i*3+1] + idx_i[j*3+1] + idx_i[k*3+1];
-                        int addrz = idx_i[i*3+2] + idx_i[j*3+2] + idx_i[k*3+2];
-                        gout[n] += gx[addrx] * gx[addry] * gx[addrz];
+                        for (int n = 0; n < GOUT_WIDTH; ++n) {
+                            int ijk = gout_start + n*gout_stride+gout_id;
+                            int ij = ijk / nfk;
+                            if (ij >= nfij) break;
+                            int k = ijk % nfk;
+                            int i = ij % nfi;
+                            int j = ij / nfi;
+                            int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
+                            int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
+                            int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];
+                            gout[n] += gx[addrx] * gx[addry] * gx[addrz];
+                        }
                     }
                 }
             }
