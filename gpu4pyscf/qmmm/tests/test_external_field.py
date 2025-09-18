@@ -146,7 +146,6 @@ class KnownValues(unittest.TestCase):
         ''',
         basis = 'LANL2DZ',
         ecp = 'LANL2DZ',
-        cart = True,
         charge = 0,
         verbose = 0)
 

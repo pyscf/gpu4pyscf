@@ -172,6 +172,34 @@ class KnownValues(unittest.TestCase):
         assert mf.converged
         assert abs(energy_without_mm - -75.95594732431334) < 1e-10
 
+    def test_dipole_with_charge(self):
+        # Reference answer from CPU implementation
+        mm_coords = np.array([[-5, 0, 0], [5, 0, 0]])
+        mm_charges = np.array([-1, 1])
+
+        mol_charged = pyscf.M(atom='''
+            O      0.199968    0.000000   4.00000
+            H      1.174548   -0.000000   4.00000
+            H     -0.287258    0.844506   4.00000
+            H     -0.287258   -0.844506   4.00000
+        ''',
+        basis='6-31g',
+        verbose=0,
+        charge=1)
+
+        mf = gpu_dft.RKS(mol, xc = "wB97X-d3bj")
+        mf.conv_tol = 1e-12
+        mf = mf.density_fit()
+        mf = gpu_qmmm.mm_charge(mf, mm_coords, mm_charges)
+        energy = mf.kernel()
+        assert mf.converged
+        # assert abs(energy - -76.35266754461368) < 1e-9
+
+        dm = mf.make_rdm1()
+        dipole = mf.dip_moment(unit='DEBYE', dm=dm, origin=mol.atom_coords().mean(axis=0))
+        assert np.max(np.abs(dipole - np.array([1.93350627e+00, 0, 2.47442325e-01]))) < 1e-6
+
+
 if __name__ == "__main__":
     print("Full Tests for QMMM MM charges")
     unittest.main()
