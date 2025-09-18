@@ -36,7 +36,6 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -76,6 +75,9 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+960] = zkl;
             Rq_cache[n+1440] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+480] = 2e5;
+            Rq_cache[n+960] = 2e5;
             Rq_cache[n+1440] = 1.;
         }
     }
@@ -83,7 +85,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 30; ++batch_ij) {
         int task_ij0 = blockIdx.x * 480 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -105,6 +107,9 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -113,8 +118,9 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 1; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[1];
         for (int ij = 0; ij < 1; ++ij) {
@@ -123,10 +129,10 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 30; ++batch_kl) {
             int task_kl0 = blockIdx.y * 480 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -136,20 +142,15 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             if (pair_ij_mapping == pair_kl_mapping) {
                 if (task_ij == task_kl) fac *= .5;
-                if (task_ij < task_kl) fac = 0.;
+                else if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
             double xij = Rp_cache[tx+0];
@@ -174,10 +175,16 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 1; ++n) {
             __syncthreads();
@@ -192,6 +199,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 30; n += 16) {
@@ -233,7 +241,6 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -273,6 +280,9 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+736] = zkl;
             Rq_cache[n+1104] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+368] = 2e5;
+            Rq_cache[n+736] = 2e5;
             Rq_cache[n+1104] = 1.;
         }
     }
@@ -280,7 +290,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -302,6 +312,9 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -310,8 +323,9 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 4; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[4];
         for (int ij = 0; ij < 4; ++ij) {
@@ -320,7 +334,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 23; ++batch_kl) {
             int task_kl0 = blockIdx.y * 368 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -330,17 +344,12 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -370,13 +379,19 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_1_0 * dm_kl0;
             vj_ij[3] += R_0_1_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 4; ++n) {
             __syncthreads();
@@ -391,6 +406,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 23; n += 16) {
@@ -435,7 +451,6 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -475,6 +490,9 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+320] = zkl;
             Rq_cache[n+480] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+160] = 2e5;
+            Rq_cache[n+320] = 2e5;
             Rq_cache[n+480] = 1.;
         }
     }
@@ -482,7 +500,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 10; ++batch_ij) {
         int task_ij0 = blockIdx.x * 160 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -504,6 +522,9 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -512,8 +533,9 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 4; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[4];
         for (int ij = 0; ij < 4; ++ij) {
@@ -522,10 +544,10 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 10; ++batch_kl) {
             int task_kl0 = blockIdx.y * 160 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -535,20 +557,15 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             if (pair_ij_mapping == pair_kl_mapping) {
                 if (task_ij == task_kl) fac *= .5;
-                if (task_ij < task_kl) fac = 0.;
+                else if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
             double xij = Rp_cache[tx+0];
@@ -615,28 +632,34 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+480] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_1_0 * dm_kl0;
             vj_ij[3] += R_0_1_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+1];
+            dm_kl0 = dm[1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_1_1 * dm_kl0;
             vj_ij[3] -= R_0_1_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+2];
+            dm_kl0 = dm[2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_2_0 * dm_kl0;
             vj_ij[3] -= R_0_1_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+3];
+            dm_kl0 = dm[3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_1_0 * dm_kl0;
             vj_ij[3] -= R_0_2_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 4; ++n) {
             __syncthreads();
@@ -651,6 +674,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 40; n += 16) {
@@ -692,7 +716,6 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -732,6 +755,9 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+512] = zkl;
             Rq_cache[n+768] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+256] = 2e5;
+            Rq_cache[n+512] = 2e5;
             Rq_cache[n+768] = 1.;
         }
     }
@@ -739,7 +765,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -761,6 +787,9 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -769,8 +798,9 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 10; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[10];
         for (int ij = 0; ij < 10; ++ij) {
@@ -779,7 +809,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 16; ++batch_kl) {
             int task_kl0 = blockIdx.y * 256 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -789,17 +819,12 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -844,7 +869,10 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -855,8 +883,11 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_0_1 * dm_kl0;
             vj_ij[8] += R_0_1_1_0 * dm_kl0;
             vj_ij[9] += R_0_2_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 10; ++n) {
             __syncthreads();
@@ -871,6 +902,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 16; n += 16) {
@@ -912,7 +944,6 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -952,6 +983,9 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+960] = zkl;
             Rq_cache[n+1440] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+480] = 2e5;
+            Rq_cache[n+960] = 2e5;
             Rq_cache[n+1440] = 1.;
         }
     }
@@ -959,7 +993,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -981,6 +1015,9 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -989,8 +1026,9 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 10; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[10];
         for (int ij = 0; ij < 10; ++ij) {
@@ -999,7 +1037,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 30; ++batch_kl) {
             int task_kl0 = blockIdx.y * 480 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -1009,17 +1047,12 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -1128,7 +1161,10 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+1440] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -1139,7 +1175,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_0_1 * dm_kl0;
             vj_ij[8] += R_0_1_1_0 * dm_kl0;
             vj_ij[9] += R_0_2_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+1];
+            dm_kl0 = dm[1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -1150,7 +1186,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_0_2 * dm_kl0;
             vj_ij[8] -= R_0_1_1_1 * dm_kl0;
             vj_ij[9] -= R_0_2_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+2];
+            dm_kl0 = dm[2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -1161,7 +1197,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_1_1 * dm_kl0;
             vj_ij[8] -= R_0_1_2_0 * dm_kl0;
             vj_ij[9] -= R_0_2_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+3];
+            dm_kl0 = dm[3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -1172,8 +1208,11 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_2_0_1 * dm_kl0;
             vj_ij[8] -= R_0_2_1_0 * dm_kl0;
             vj_ij[9] -= R_0_3_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 10; ++n) {
             __syncthreads();
@@ -1188,6 +1227,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 120; n += 16) {
@@ -1232,7 +1272,6 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -1272,6 +1311,9 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+448] = zkl;
             Rq_cache[n+672] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+224] = 2e5;
+            Rq_cache[n+448] = 2e5;
             Rq_cache[n+672] = 1.;
         }
     }
@@ -1279,7 +1321,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 14; ++batch_ij) {
         int task_ij0 = blockIdx.x * 224 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -1301,6 +1343,9 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -1309,8 +1354,9 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 10; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[10];
         for (int ij = 0; ij < 10; ++ij) {
@@ -1319,10 +1365,10 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 14; ++batch_kl) {
             int task_kl0 = blockIdx.y * 224 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -1332,20 +1378,15 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             if (pair_ij_mapping == pair_kl_mapping) {
                 if (task_ij == task_kl) fac *= .5;
-                if (task_ij < task_kl) fac = 0.;
+                else if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
             double xij = Rp_cache[tx+0];
@@ -1579,7 +1620,10 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+2016] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -1590,7 +1634,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_0_1 * dm_kl0;
             vj_ij[8] += R_0_1_1_0 * dm_kl0;
             vj_ij[9] += R_0_2_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+1];
+            dm_kl0 = dm[1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -1601,7 +1645,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_0_2 * dm_kl0;
             vj_ij[8] -= R_0_1_1_1 * dm_kl0;
             vj_ij[9] -= R_0_2_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+2];
+            dm_kl0 = dm[2];
             vj_ij[0] += R_0_0_0_2 * dm_kl0;
             vj_ij[1] += R_0_0_0_3 * dm_kl0;
             vj_ij[2] += R_0_0_0_4 * dm_kl0;
@@ -1612,7 +1656,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_0_3 * dm_kl0;
             vj_ij[8] += R_0_1_1_2 * dm_kl0;
             vj_ij[9] += R_0_2_0_2 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+3];
+            dm_kl0 = dm[3];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -1623,7 +1667,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_1_1_1 * dm_kl0;
             vj_ij[8] -= R_0_1_2_0 * dm_kl0;
             vj_ij[9] -= R_0_2_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+4];
+            dm_kl0 = dm[4];
             vj_ij[0] += R_0_0_1_1 * dm_kl0;
             vj_ij[1] += R_0_0_1_2 * dm_kl0;
             vj_ij[2] += R_0_0_1_3 * dm_kl0;
@@ -1634,7 +1678,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_1_2 * dm_kl0;
             vj_ij[8] += R_0_1_2_1 * dm_kl0;
             vj_ij[9] += R_0_2_1_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+5];
+            dm_kl0 = dm[5];
             vj_ij[0] += R_0_0_2_0 * dm_kl0;
             vj_ij[1] += R_0_0_2_1 * dm_kl0;
             vj_ij[2] += R_0_0_2_2 * dm_kl0;
@@ -1645,7 +1689,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_1_2_1 * dm_kl0;
             vj_ij[8] += R_0_1_3_0 * dm_kl0;
             vj_ij[9] += R_0_2_2_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+6];
+            dm_kl0 = dm[6];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -1656,7 +1700,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] -= R_0_2_0_1 * dm_kl0;
             vj_ij[8] -= R_0_2_1_0 * dm_kl0;
             vj_ij[9] -= R_0_3_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+7];
+            dm_kl0 = dm[7];
             vj_ij[0] += R_0_1_0_1 * dm_kl0;
             vj_ij[1] += R_0_1_0_2 * dm_kl0;
             vj_ij[2] += R_0_1_0_3 * dm_kl0;
@@ -1667,7 +1711,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_2_0_2 * dm_kl0;
             vj_ij[8] += R_0_2_1_1 * dm_kl0;
             vj_ij[9] += R_0_3_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+8];
+            dm_kl0 = dm[8];
             vj_ij[0] += R_0_1_1_0 * dm_kl0;
             vj_ij[1] += R_0_1_1_1 * dm_kl0;
             vj_ij[2] += R_0_1_1_2 * dm_kl0;
@@ -1678,7 +1722,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_2_1_1 * dm_kl0;
             vj_ij[8] += R_0_2_2_0 * dm_kl0;
             vj_ij[9] += R_0_3_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+9];
+            dm_kl0 = dm[9];
             vj_ij[0] += R_0_2_0_0 * dm_kl0;
             vj_ij[1] += R_0_2_0_1 * dm_kl0;
             vj_ij[2] += R_0_2_0_2 * dm_kl0;
@@ -1689,8 +1733,11 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[7] += R_0_3_0_1 * dm_kl0;
             vj_ij[8] += R_0_3_1_0 * dm_kl0;
             vj_ij[9] += R_0_4_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 10; ++n) {
             __syncthreads();
@@ -1705,6 +1752,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 140; n += 16) {
@@ -1746,7 +1794,6 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -1786,6 +1833,9 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+1472] = zkl;
             Rq_cache[n+2208] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+736] = 2e5;
+            Rq_cache[n+1472] = 2e5;
             Rq_cache[n+2208] = 1.;
         }
     }
@@ -1793,7 +1843,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -1815,6 +1865,9 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -1823,8 +1876,9 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 20; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[20];
         for (int ij = 0; ij < 20; ++ij) {
@@ -1833,7 +1887,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 46; ++batch_kl) {
             int task_kl0 = blockIdx.y * 736 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -1843,17 +1897,12 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -1927,7 +1976,10 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -1948,8 +2000,11 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_0_1 * dm_kl0;
             vj_ij[18] += R_0_2_1_0 * dm_kl0;
             vj_ij[19] += R_0_3_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 20; ++n) {
             __syncthreads();
@@ -1964,6 +2019,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 46; n += 16) {
@@ -2001,7 +2057,6 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -2041,6 +2096,9 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+768] = zkl;
             Rq_cache[n+1152] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+384] = 2e5;
+            Rq_cache[n+768] = 2e5;
             Rq_cache[n+1152] = 1.;
         }
     }
@@ -2048,7 +2106,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -2070,6 +2128,9 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -2078,8 +2139,9 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 20; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[20];
         for (int ij = 0; ij < 20; ++ij) {
@@ -2088,7 +2150,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 24; ++batch_kl) {
             int task_kl0 = blockIdx.y * 384 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -2098,17 +2160,12 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -2291,7 +2348,10 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+1152] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -2312,7 +2372,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_0_1 * dm_kl0;
             vj_ij[18] += R_0_2_1_0 * dm_kl0;
             vj_ij[19] += R_0_3_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+1];
+            dm_kl0 = dm[1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -2333,7 +2393,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_0_2 * dm_kl0;
             vj_ij[18] -= R_0_2_1_1 * dm_kl0;
             vj_ij[19] -= R_0_3_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+2];
+            dm_kl0 = dm[2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -2354,7 +2414,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_1_1 * dm_kl0;
             vj_ij[18] -= R_0_2_2_0 * dm_kl0;
             vj_ij[19] -= R_0_3_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+3];
+            dm_kl0 = dm[3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -2375,8 +2435,11 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_3_0_1 * dm_kl0;
             vj_ij[18] -= R_0_3_1_0 * dm_kl0;
             vj_ij[19] -= R_0_4_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 20; ++n) {
             __syncthreads();
@@ -2391,6 +2454,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 96; n += 16) {
@@ -2428,7 +2492,6 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -2468,6 +2531,9 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+352] = zkl;
             Rq_cache[n+528] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+176] = 2e5;
+            Rq_cache[n+352] = 2e5;
             Rq_cache[n+528] = 1.;
         }
     }
@@ -2475,7 +2541,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -2497,6 +2563,9 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -2505,8 +2574,9 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 20; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[20];
         for (int ij = 0; ij < 20; ++ij) {
@@ -2515,7 +2585,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 11; ++batch_kl) {
             int task_kl0 = blockIdx.y * 176 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -2525,17 +2595,12 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -2923,7 +2988,10 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+1584] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -2944,7 +3012,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_0_1 * dm_kl0;
             vj_ij[18] += R_0_2_1_0 * dm_kl0;
             vj_ij[19] += R_0_3_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+1];
+            dm_kl0 = dm[1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -2965,7 +3033,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_0_2 * dm_kl0;
             vj_ij[18] -= R_0_2_1_1 * dm_kl0;
             vj_ij[19] -= R_0_3_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+2];
+            dm_kl0 = dm[2];
             vj_ij[0] += R_0_0_0_2 * dm_kl0;
             vj_ij[1] += R_0_0_0_3 * dm_kl0;
             vj_ij[2] += R_0_0_0_4 * dm_kl0;
@@ -2986,7 +3054,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_0_3 * dm_kl0;
             vj_ij[18] += R_0_2_1_2 * dm_kl0;
             vj_ij[19] += R_0_3_0_2 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+3];
+            dm_kl0 = dm[3];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -3007,7 +3075,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_2_1_1 * dm_kl0;
             vj_ij[18] -= R_0_2_2_0 * dm_kl0;
             vj_ij[19] -= R_0_3_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+4];
+            dm_kl0 = dm[4];
             vj_ij[0] += R_0_0_1_1 * dm_kl0;
             vj_ij[1] += R_0_0_1_2 * dm_kl0;
             vj_ij[2] += R_0_0_1_3 * dm_kl0;
@@ -3028,7 +3096,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_1_2 * dm_kl0;
             vj_ij[18] += R_0_2_2_1 * dm_kl0;
             vj_ij[19] += R_0_3_1_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+5];
+            dm_kl0 = dm[5];
             vj_ij[0] += R_0_0_2_0 * dm_kl0;
             vj_ij[1] += R_0_0_2_1 * dm_kl0;
             vj_ij[2] += R_0_0_2_2 * dm_kl0;
@@ -3049,7 +3117,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_2_2_1 * dm_kl0;
             vj_ij[18] += R_0_2_3_0 * dm_kl0;
             vj_ij[19] += R_0_3_2_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+6];
+            dm_kl0 = dm[6];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -3070,7 +3138,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] -= R_0_3_0_1 * dm_kl0;
             vj_ij[18] -= R_0_3_1_0 * dm_kl0;
             vj_ij[19] -= R_0_4_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+7];
+            dm_kl0 = dm[7];
             vj_ij[0] += R_0_1_0_1 * dm_kl0;
             vj_ij[1] += R_0_1_0_2 * dm_kl0;
             vj_ij[2] += R_0_1_0_3 * dm_kl0;
@@ -3091,7 +3159,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_3_0_2 * dm_kl0;
             vj_ij[18] += R_0_3_1_1 * dm_kl0;
             vj_ij[19] += R_0_4_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+8];
+            dm_kl0 = dm[8];
             vj_ij[0] += R_0_1_1_0 * dm_kl0;
             vj_ij[1] += R_0_1_1_1 * dm_kl0;
             vj_ij[2] += R_0_1_1_2 * dm_kl0;
@@ -3112,7 +3180,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_3_1_1 * dm_kl0;
             vj_ij[18] += R_0_3_2_0 * dm_kl0;
             vj_ij[19] += R_0_4_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+9];
+            dm_kl0 = dm[9];
             vj_ij[0] += R_0_2_0_0 * dm_kl0;
             vj_ij[1] += R_0_2_0_1 * dm_kl0;
             vj_ij[2] += R_0_2_0_2 * dm_kl0;
@@ -3133,8 +3201,11 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[17] += R_0_4_0_1 * dm_kl0;
             vj_ij[18] += R_0_4_1_0 * dm_kl0;
             vj_ij[19] += R_0_5_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 20; ++n) {
             __syncthreads();
@@ -3149,6 +3220,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 110; n += 16) {
@@ -3186,7 +3258,6 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -3226,6 +3297,9 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+1152] = zkl;
             Rq_cache[n+1728] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+576] = 2e5;
+            Rq_cache[n+1152] = 2e5;
             Rq_cache[n+1728] = 1.;
         }
     }
@@ -3233,7 +3307,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -3255,6 +3329,9 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -3263,8 +3340,9 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 35; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[35];
         for (int ij = 0; ij < 35; ++ij) {
@@ -3273,7 +3351,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 36; ++batch_kl) {
             int task_kl0 = blockIdx.y * 576 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -3283,17 +3361,12 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -3416,7 +3489,10 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -3452,8 +3528,11 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] += R_0_3_0_1 * dm_kl0;
             vj_ij[33] += R_0_3_1_0 * dm_kl0;
             vj_ij[34] += R_0_4_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 35; ++n) {
             __syncthreads();
@@ -3468,6 +3547,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 36; n += 16) {
@@ -3505,7 +3585,6 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -3545,6 +3624,9 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+576] = zkl;
             Rq_cache[n+864] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+288] = 2e5;
+            Rq_cache[n+576] = 2e5;
             Rq_cache[n+864] = 1.;
         }
     }
@@ -3552,7 +3634,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -3574,6 +3656,9 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -3582,8 +3667,9 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 35; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[35];
         for (int ij = 0; ij < 35; ++ij) {
@@ -3592,7 +3678,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 18; ++batch_kl) {
             int task_kl0 = blockIdx.y * 288 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -3602,17 +3688,12 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -3910,7 +3991,10 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 vj_kl0 += __shfl_down_sync(mask, vj_kl0, offset);
             }
             if (tx == 0) { vj_kl_cache[sq_kl+864] += vj_kl0; }
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
             vj_ij[2] += R_0_0_0_2 * dm_kl0;
@@ -3946,7 +4030,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] += R_0_3_0_1 * dm_kl0;
             vj_ij[33] += R_0_3_1_0 * dm_kl0;
             vj_ij[34] += R_0_4_0_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+1];
+            dm_kl0 = dm[1];
             vj_ij[0] -= R_0_0_0_1 * dm_kl0;
             vj_ij[1] -= R_0_0_0_2 * dm_kl0;
             vj_ij[2] -= R_0_0_0_3 * dm_kl0;
@@ -3982,7 +4066,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] -= R_0_3_0_2 * dm_kl0;
             vj_ij[33] -= R_0_3_1_1 * dm_kl0;
             vj_ij[34] -= R_0_4_0_1 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+2];
+            dm_kl0 = dm[2];
             vj_ij[0] -= R_0_0_1_0 * dm_kl0;
             vj_ij[1] -= R_0_0_1_1 * dm_kl0;
             vj_ij[2] -= R_0_0_1_2 * dm_kl0;
@@ -4018,7 +4102,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] -= R_0_3_1_1 * dm_kl0;
             vj_ij[33] -= R_0_3_2_0 * dm_kl0;
             vj_ij[34] -= R_0_4_1_0 * dm_kl0;
-            dm_kl0 = dm[kl_loc0+3];
+            dm_kl0 = dm[3];
             vj_ij[0] -= R_0_1_0_0 * dm_kl0;
             vj_ij[1] -= R_0_1_0_1 * dm_kl0;
             vj_ij[2] -= R_0_1_0_2 * dm_kl0;
@@ -4054,8 +4138,11 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             vj_ij[32] -= R_0_4_0_1 * dm_kl0;
             vj_ij[33] -= R_0_4_1_0 * dm_kl0;
             vj_ij[34] -= R_0_5_0_0 * dm_kl0;
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 35; ++n) {
             __syncthreads();
@@ -4070,6 +4157,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 72; n += 16) {
@@ -4107,7 +4195,6 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     int *pair_kl_loc = bounds.pair_kl_loc;
     int nbas = envs.nbas;
     double *env = envs.env;
-    double *dm = jk.dm;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
     unsigned int lane_id = thread_id % 32;
@@ -4147,6 +4234,9 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             Rq_cache[n+832] = zkl;
             Rq_cache[n+1248] = akl;
         } else {
+            Rq_cache[n+0] = 2e5;
+            Rq_cache[n+416] = 2e5;
+            Rq_cache[n+832] = 2e5;
             Rq_cache[n+1248] = 1.;
         }
     }
@@ -4154,7 +4244,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
     for (int batch_ij = 0; batch_ij < 48; ++batch_ij) {
         int task_ij0 = blockIdx.x * 768 + batch_ij * 16;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         if (thread_id < 16) {
@@ -4176,6 +4266,9 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
                 Rp_cache[thread_id+32] = zij;
                 Rp_cache[thread_id+48] = aij;
             } else {
+                Rp_cache[thread_id+0] = 2e5;
+                Rp_cache[thread_id+16] = 2e5;
+                Rp_cache[thread_id+32] = 2e5;
                 Rp_cache[thread_id+48] = 1.; // aij
             }
         }
@@ -4184,8 +4277,9 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             task_ij = task_ij0;
         }
         int ij_loc0 = pair_ij_loc[task_ij];
+        double *dm = jk.dm + ij_loc0;
         for (int n = ty; n < 56; n += 16) {
-            dm_ij_cache[n*16] = dm[ij_loc0+n];
+            dm_ij_cache[n*16] = dm[n];
         }
         double vj_ij[56];
         for (int ij = 0; ij < 56; ++ij) {
@@ -4194,7 +4288,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
         for (int batch_kl = 0; batch_kl < 26; ++batch_kl) {
             int task_kl0 = blockIdx.y * 416 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -4204,17 +4298,12 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
 
             int sq_kl = ty + batch_kl * 16;
+            int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            int task_ij = task_ij0 + tx;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
-            if (task_kl >= npairs_kl) {
-                task_kl = task_kl0;
-                fac = 0.;
-            }
-            int kl_loc0 = pair_kl_loc[task_kl];
             __syncthreads();
             double xij = Rp_cache[tx+0];
             double yij = Rp_cache[tx+16];
@@ -4415,7 +4504,10 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             }
             if (tx == 0) { vj_kl_cache[sq_kl+0] += vj_kl0; }
             }{
-            dm_kl0 = dm[kl_loc0+0];
+            if (task_kl < npairs_kl) {
+            int kl_loc0 = pair_kl_loc[task_kl];
+            double *dm = jk.dm + kl_loc0;
+            dm_kl0 = dm[0];
             vj_ij[0] += gamma_inc[0*256] * dm_kl0;
             double R_0_0_0_1 = zpq * gamma_inc[1*256];
             vj_ij[1] += R_0_0_0_1 * dm_kl0;
@@ -4593,8 +4685,11 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             double R_0_5_0_0 = xpq * R_1_4_0_0 + 4 * R_1_3_0_0;
             vj_ij[55] += R_0_5_0_0 * dm_kl0;
             }
+            }
         }
+        {
         double *vj_cache = Rp_cache;
+        int task_ij = task_ij0 + tx;
 #pragma unroll
         for (int n = 0; n < 56; ++n) {
             __syncthreads();
@@ -4609,6 +4704,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds)
             if (ty == 0 && task_ij < npairs_ij) {
                 atomicAdd(vj+ij_loc0+n, vj_cache[thread_id]);
             }
+        }
         }
     }
     for (int n = tx; n < 26; n += 16) {

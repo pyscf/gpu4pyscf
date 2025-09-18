@@ -214,10 +214,10 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
         for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
             int task_kl0 = (blockIdx.y * tiley + batch_kl) * threadsy;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -230,7 +230,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
             if (pair_ij_mapping == pair_kl_mapping) {
@@ -469,9 +469,9 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     }
 
     for (int batch_ij = 0; batch_ij < tilex; ++batch_ij) {
-        int task_ij0 = blockIdx.x * bsizex + batch_ij * threadsx;
+        int task_ij0 = (blockIdx.x * tilex + batch_ij) * threadsx;
         if (task_ij0 >= npairs_ij) {
-            continue;
+            break;
         }
         __syncthreads();
         for (int n = t_id; n < threadsx; n += threads) {
@@ -517,12 +517,13 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             vj_ij[n] = 0.;
         }
         for (int batch_kl = 0; batch_kl < tiley; ++batch_kl) {
-            int task_kl0 = blockIdx.y * bsizey + batch_kl * threadsy;
+            int task_kl0 = (blockIdx.y * tiley + batch_kl) * threadsy;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
+            int task_ij0 = (blockIdx.x * tilex + batch_ij) * threadsx;
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -535,12 +536,12 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             int task_ij = task_ij0 + tx;
             int task_kl = task_kl0 + ty;
             double fac = PI_FAC;
-            if (task_ij >= npairs_ij) {
+            if (task_ij >= npairs_ij || task_kl >= npairs_kl) {
                 fac = 0.;
             }
             if (pair_ij_mapping == pair_kl_mapping) {
                 if (task_ij == task_kl) fac *= .5;
-                if (task_ij < task_kl) fac = 0.;
+                else if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
             int bsizey = threadsy * tiley;

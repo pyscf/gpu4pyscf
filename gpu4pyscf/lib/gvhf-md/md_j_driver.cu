@@ -86,6 +86,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int nf3ij = (lij+1)*(lij+2)*(lij+3)/6;
     int nf3kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
     int nf3ijkl = (order+1)*(order+2)*(order+3)/6;
+    // 16x16 threads are applied to all unrolled code
     float *tile16_qd_ij_max = qd_ij_max[block_id_for_threads(16)];
     float *tile16_qd_kl_max = qd_kl_max[block_id_for_threads(16)];
     MDBoundsInfo bounds = {li, lj, lk, ll, lij, lkl, order, nf3ij, nf3kl, nf3ijkl,
@@ -109,8 +110,6 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     int blocks_ij = (npairs_ij + bsizex - 1) / bsizex;
     int blocks_kl = (npairs_kl + bsizey - 1) / bsizey;
     dim3 blocks(blocks_ij, blocks_kl);
-    bounds.qd_ij_max = qd_ij_max[block_id_for_threads(threads_ij)];
-    bounds.qd_kl_max = qd_kl_max[block_id_for_threads(threads_kl)];
     uint16_t *pRt2_ij_kl;// = Rt2_ij_kl + _Rt2_idx_offsets[lij*RT2_MAX+lkl];
     uint16_t *pRt2_kl_ij;// = Rt2_kl_ij + _Rt2_idx_offsets[lij*RT2_MAX+lkl];
     int8_t *efg_phase;
@@ -122,12 +121,16 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     efg_phase += _Rt2_idx_offsets[lkl];
     if (n_dm == 1) {
         if (!md_j_unrolled(&envs, &jk, &bounds, omega)) {
+            bounds.qd_ij_max = qd_ij_max[block_id_for_threads(threads_ij)];
+            bounds.qd_kl_max = qd_kl_max[block_id_for_threads(threads_kl)];
             md_j_1dm_kernel<<<blocks, threads, buflen*sizeof(double)>>>(
                 envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
                 pRt2_ij_kl, pRt2_kl_ij, efg_phase);
         }
     } else {
         if (!md_j_4dm_unrolled(&envs, &jk, &bounds, omega, dm_size)) {
+            bounds.qd_ij_max = qd_ij_max[block_id_for_threads(threads_ij)];
+            bounds.qd_kl_max = qd_kl_max[block_id_for_threads(threads_kl)];
             for (int dm_offset = 0; dm_offset < n_dm; dm_offset+=4) {
                 jk.vj = vj + dm_offset * dm_size;
                 jk.dm = dm + dm_offset * dm_size;
