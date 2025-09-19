@@ -211,8 +211,8 @@ size_new    |------------------------------------------------|
     '''
 
 
-    V_current = V_holder[:size_new,:]
-    W_new = W_holder[size_old:size_new, :]
+    V_current = cp.asarray(V_holder[:size_new,:])
+    W_new = cp.asarray(W_holder[size_old:size_new, :])
 
     sub_A_holder[:size_new, size_old:size_new] = cp.dot(V_current, W_new.T)
 
@@ -220,7 +220,7 @@ size_new    |------------------------------------------------|
         # pass
         sub_A_holder[size_old:size_new, :size_old] = sub_A_holder[:size_old, size_old:size_new].T
     else:
-        sub_A_holder[size_old:size_new, :size_old] = cp.dot(V_holder[size_old:size_new,:], W_holder[:size_old,:].T)
+        sub_A_holder[size_old:size_new, :size_old] = cp.dot(cp.asarray(V_holder[size_old:size_new,:]), cp.asarray(W_holder[:size_old,:]).T)
 
     return sub_A_holder
 
@@ -300,13 +300,17 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
     nvec = cp.shape(vecs)[0]
     for j in range(nvec):
         vec = vecs[j, :].reshape(1,-1)
-        vec = Gram_Schmidt_bvec(V[:count, :], vec)   #single orthonormalize
+        V_vecs = cp.asarray(V[:count, :])
+        vec = Gram_Schmidt_bvec(V_vecs, vec)   #single orthonormalize
         if double:
-            vec = Gram_Schmidt_bvec(V[:count, :], vec)   #double orthonormalize
+            vec = Gram_Schmidt_bvec(V_vecs, vec)   #double orthonormalize
         norm = cp.linalg.norm(vec)
         if  norm > 1e-14:
             vec = vec/norm
-            V[count,:] = vec[0,:]
+            if isinstance(V, cp.ndarray):
+                V[count,:] = vec[0,:]
+            else:
+                V[count,:] = vec[0,:].get()
             count += 1
     new_count = count
     return V, new_count
@@ -825,8 +829,8 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
                 |---------------|-----------------｜-----------------｜
     '''
 
-    V_current = V_holder[:,:size_new]
-    W_new = W_holder[:,size_old:size_new]
+    V_current = cp.asarray(V_holder[:,:size_new])
+    W_new = cp.asarray(W_holder[:,size_old:size_new])
     sub_A_holder[:size_new,size_old:size_new] = cp.dot(V_current.T, W_new)
 
     if symmetry:
@@ -837,8 +841,8 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
             also explicitly compute the lower triangle,
             either equal upper triangle.T or recompute
             '''
-            V_new = V_holder[:,size_old:size_new]
-            W_old = W_holder[:,:size_old]
+            V_new = cp.asarray(V_holder[:,size_old:size_new])
+            W_old = cp.asarray(W_holder[:,:size_old])
             sub_A_holder[size_old:size_new,:size_old] = cp.dot(V_new.T, W_old)
         elif up_triangle:
             '''

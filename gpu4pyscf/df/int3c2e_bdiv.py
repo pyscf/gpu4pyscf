@@ -589,8 +589,8 @@ class Int3c2eOpt:
             nfj = nf[j]
             if i == j: # the diagonal blocks
                 ish, jsh = divmod(bas_ij_idx, nbas)
-                idx = cp.where(ish == jsh)[0].get()
-                addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
+                idx = np.where(ish == jsh)[0]
+                addr = offset + (idx[:,None] * (nfi*nfi)).get() + np.arange(nfi*nfi)
                 diag.append(addr.ravel())
             offset += bas_ij_idx.size * nfi * nfj
         diag = asarray(np.hstack(diag))
