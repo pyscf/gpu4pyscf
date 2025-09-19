@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import cupy as cp
+import numpy as np
 import sys
 import scipy.linalg
 import inspect
@@ -188,7 +189,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   initguess_fn=None, precond_fn=None, rhs=None, 
                   omega_shift=None, n_states=20,conv_tol=1e-5, 
                   max_iter=35, extra_init=8, gram_schmidt=True, 
-                  single=False, verbose=logger.NOTE):
+                  single=False, in_ram=False, verbose=logger.NOTE):
     '''
         This solver is used to solve the following problems:
         (1) Eigenvalue problem, return Ω and X 
@@ -322,11 +323,15 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     max_N_mv = size_new + max_iter * n_states 
 
     holder_mem = 2*max_N_mv*A_size*hdiag.itemsize/(1024**2)
-    log.info(f'  V and W holder use {holder_mem:.2f} MB memory, with {hdiag.dtype}')
+    log.info(f'  V and W holder use {holder_mem:.0f} MB memory, with {hdiag.dtype}')
 
     # Initialize arrays
-    V_holder = cp.empty((max_N_mv, A_size), dtype=hdiag.dtype)
-    W_holder = cp.empty_like(V_holder, dtype=hdiag.dtype)
+    xp = np if in_ram else cp
+    log.info(f'xp {xp}')
+    V_holder = xp.empty((max_N_mv, A_size), dtype=hdiag.dtype)
+    W_holder = xp.empty_like(V_holder)
+    log.info(f'type(V_holder) {type(V_holder)}')
+
     sub_A_holder = cp.empty((max_N_mv, max_N_mv), dtype=hdiag.dtype)
 
     if problem_type in ['linear','shifted_linear']:
@@ -396,10 +401,13 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         ''' Matrix-vector product '''
         t0 = log.init_timer()
-        if 'out' in inspect.signature(matrix_vector_product).parameters:
-            matrix_vector_product(V_holder[size_old:size_new, :], out=W_holder[size_old:size_new, :])
+        if in_ram:
+            W_holder[size_old:size_new, :] = matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :])).get()
         else:
-            W_holder[size_old:size_new, :] = matrix_vector_product(V_holder[size_old:size_new, :])
+            if 'out' in inspect.signature(matrix_vector_product).parameters:
+                matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :]), out=W_holder[size_old:size_new, :])
+            else:
+                W_holder[size_old:size_new, :] = matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :]))
 
         _time_add(log, t_mvp, t0)
 
@@ -471,10 +479,10 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         ''' compute the residual
             full_X is current guess solution 
             AX is A.dot(full_X)'''
-        AX = cp.dot(x.T, W_holder[:size_new, :])
+        AX = cp.dot(x.T, cp.asarray(W_holder[:size_new, :]))
         if problem_type == 'eigenvalue':
             ''' r = AX - XΩ '''
-            full_X = cp.dot(x.T, V_holder[:size_new, :])
+            full_X = cp.dot(x.T, cp.asarray(V_holder[:size_new, :]))
             residual = AX - omega.reshape(-1, 1) * full_X
 
         elif problem_type == 'linear':
@@ -483,7 +491,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         elif problem_type == 'shifted_linear':
             ''' r = AX - X omega_shift - rhs '''
-            full_X = cp.dot(x.T, V_holder[:size_new, :])
+            full_X = cp.dot(x.T, cp.asarray(V_holder[:size_new, :]))
             residual = AX - omega_shift.reshape(-1, 1) * full_X - rhs
 
         _time_add(log, t_sub2full, t0)
@@ -535,7 +543,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     # linear problem didn't yet explicitly construct full_X
     if problem_type == 'linear':
-        full_X = cp.dot(x.T, V_holder[:size_new, :])
+        full_X = cp.dot(x.T, cp.asarray(V_holder[:size_new, :]))
     
     if problem_type in['linear', 'shifted_linear']:
         full_X = full_X * rhs_norm
@@ -905,19 +913,19 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     log.info(f'  V W U1 U2 holder use {holder_mem:.2f} MB memory')
 
     V_holder = cp.zeros((max_N_mv, A_size), dtype=hdiag.dtype)
-    W_holder = cp.zeros_like(V_holder, dtype=hdiag.dtype)
+    W_holder = cp.zeros_like(V_holder)
 
-    U1_holder = cp.empty_like(V_holder, dtype=hdiag.dtype)
-    U2_holder = cp.empty_like(V_holder, dtype=hdiag.dtype)
+    U1_holder = cp.empty_like(V_holder)
+    U2_holder = cp.empty_like(V_holder)
 
     VU1_holder = cp.empty((max_N_mv,max_N_mv), dtype=hdiag.dtype)
-    VU2_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
-    WU1_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
-    WU2_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
+    VU2_holder = cp.empty_like(VU1_holder)
+    WU1_holder = cp.empty_like(VU1_holder)
+    WU2_holder = cp.empty_like(VU1_holder)
 
-    VV_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
-    VW_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
-    WW_holder = cp.empty_like(VU1_holder, dtype=hdiag.dtype)
+    VV_holder = cp.empty_like(VU1_holder)
+    VW_holder = cp.empty_like(VU1_holder)
+    WW_holder = cp.empty_like(VU1_holder)
 
     '''
     set up initial guess, V= TDA initial guess, W=0
