@@ -15,7 +15,7 @@
 import ctypes
 import numpy as np
 import cupy as cp
-from pyscf.gto import ATOM_OF, PTR_COORD
+from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc import tools as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
@@ -64,7 +64,7 @@ def _check_opt(cell, kpts, bvk_kmesh, opt):
     if opt is None:
         opt = _Int1eOpt(cell, kpts, bvk_kmesh)
     else:
-        assert kpts is opt.kpts
+        assert kpts is None or kpts is opt.kpts
     return opt
 
 class _Int1eOpt:
@@ -79,24 +79,34 @@ class _Int1eOpt:
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_counts = l_ctr_counts
 
-        if bvk_kmesh is None:
-            if kpts is None:
-                bvk_kmesh = np.ones(3, dtype=np.int32)
+        if isinstance(cell, Mole):
+            # The CUDA code for PBC integrals can be made to support Mole
+            # instances. A Mole system can be mimicked by a Gamma point Cell
+            # without lattice sum.
+            kpts = np.zeros(3)
+            bvk_kmesh = np.ones(3, dtype=np.int32)
+            bvk_ncells = 1
+            bvkcell = sorted_cell
+            Ls = cp.zeros((1, 3))
+        else:
+            if bvk_kmesh is None:
+                if kpts is None:
+                    bvk_kmesh = np.ones(3, dtype=np.int32)
+                else:
+                    bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1, 3))
+            bvk_ncells = np.prod(bvk_kmesh)
+            if bvk_ncells == 1:
+                bvkcell = sorted_cell
             else:
-                bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1, 3))
+                bvkcell = pbctools.super_cell(sorted_cell, bvk_kmesh, wrap_around=True)
+                # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
+                bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
+            Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
+            Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+
         self.kpts = kpts
         self.bvk_kmesh = bvk_kmesh
-        bvk_ncells = np.prod(bvk_kmesh)
-        if bvk_ncells == 1:
-            bvkcell = sorted_cell
-        else:
-            bvkcell = pbctools.super_cell(sorted_cell, bvk_kmesh, wrap_around=True)
-            # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
-            bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
-
-        Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
-        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
 
         _atm = cp.array(bvkcell._atm, dtype=np.int32)

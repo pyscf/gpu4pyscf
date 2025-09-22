@@ -197,6 +197,7 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -237,7 +238,7 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -312,6 +313,7 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -354,7 +356,7 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -431,6 +433,7 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -469,7 +472,7 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -585,6 +588,7 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -624,7 +628,7 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -746,6 +750,7 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
@@ -787,7 +792,7 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;

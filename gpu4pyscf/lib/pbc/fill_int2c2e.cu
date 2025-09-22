@@ -23,7 +23,7 @@
 #include "pbc.cuh"
 #include "int3c2e.cuh"
 
-#define GOUT_WIDTH      43
+#define GOUT_WIDTH      50
 
 __global__
 void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)

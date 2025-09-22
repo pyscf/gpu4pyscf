@@ -585,8 +585,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * akl / (aij + akl);
                 if (gout_id == 0) {
-                    double omega = env[PTR_RANGE_OMEGA];
-                    boys_fn(gamma_inc, theta, rr, omega, fac/(aij*akl*sqrt(aij+akl)),
+                    boys_fn(gamma_inc, theta, rr, jk.omega, fac/(aij*akl*sqrt(aij+akl)),
                             order, sq_id, nsq_per_block);
                     Rt[0] = gamma_inc[sq_id+order*nsq_per_block];
                 }
