@@ -15,7 +15,7 @@ permissions:
 jobs:
   single-gpu:
     runs-on: [self-hosted, Linux, X64, v100]
-    timeout-minutes: 360
+    timeout-minutes: 180
     strategy:
       fail-fast: false
     steps:
@@ -28,7 +28,7 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
-          -it \
+          -i \
           --rm \
           -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
@@ -39,7 +39,7 @@ jobs:
 
   multi-gpu:
     runs-on: [self-hosted, Linux, X64, 2T4]
-    timeout-minutes: 360
+    timeout-minutes: 180
     strategy:
       fail-fast: false
     steps:
@@ -52,7 +52,7 @@ jobs:
     - name: Test with pytest
       run: |
         docker run --gpus all \
-          -it \
+          -i \
           --rm \
           -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
