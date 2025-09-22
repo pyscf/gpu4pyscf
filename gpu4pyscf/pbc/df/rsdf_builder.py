@@ -1335,7 +1335,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
                 j3c_block[:,k0:k1] = j3c_tmp
 
-            print(idx.min(), idx.max(), len(idx))
+            if with_long_range:
+                print(idx.min(), idx.max(), len(idx))
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = _cd_j2c_cache[j2c_idx] # at -(kj-ki)
                 cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
