@@ -165,6 +165,7 @@ H -0.360 0.000 0.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_OP(self):
         atom = '''
 P 0.000 0.000 0.000
@@ -176,6 +177,7 @@ H 0.368 0.000 0.933
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_OC(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -186,6 +188,7 @@ H -0.603 -0.928 0.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_F(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -197,6 +200,7 @@ H -0.520 0.000 1.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Si(self):
         atom = '''
 Si 0.000 0.000 0.000
@@ -208,6 +212,7 @@ H -0.875 0.875 -0.875
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_S(self):
         atom = '''
 S 0.000 0.000 0.000
@@ -217,6 +222,7 @@ H -0.962 0.280 0.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Cl(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -228,6 +234,7 @@ H -0.595 -0.476 -0.824
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Br(self):
         atom = '''
 C 0.000 0.000 0.000

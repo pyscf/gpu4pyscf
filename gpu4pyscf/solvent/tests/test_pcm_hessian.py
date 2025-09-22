@@ -172,6 +172,7 @@ class KnownValues(unittest.TestCase):
         #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    @pytest.mark.slow
     def test_hess_cpcm(self):
         print('testing C-PCM Hessian with RKS')
         mf = _make_mf(method='C-PCM', density_fit=False)
@@ -189,6 +190,7 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=0)
         #_check_hessian(mf, h, ix=0, iy=1)
 
+    @pytest.mark.slow
     def test_hess_iefpcm(self):
         print("testing IEF-PCM hessian with RKS")
         mf = _make_mf(method='IEF-PCM', density_fit=False)
@@ -206,6 +208,7 @@ class KnownValues(unittest.TestCase):
         #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    @pytest.mark.slow
     def test_uks_hess_iefpcm(self):
         print("testing IEF-PCM hessian with UHF")
         mf = _make_mf(method='IEF-PCM', restricted=False, density_fit=False)

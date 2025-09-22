@@ -251,6 +251,7 @@ class KnownValues(unittest.TestCase):
         print('pyscf - qchem ', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
 
+    @pytest.mark.slow
     def test_uhf_d3bj(self):
         mf = scf.UHF(mol)
         mf.disp = 'd3bj'
@@ -272,6 +273,9 @@ class KnownValues(unittest.TestCase):
     '''
 
     def test_chkfile(self):
+        mol = mol1.copy()
+        mol.basis = 'ccpvdz'
+        mol.build(False, False)
         ftmp = tempfile.NamedTemporaryFile(dir = pyscf.lib.param.TMPDIR)
         mf = scf.UHF(mol)
         mf.chkfile = ftmp.name
