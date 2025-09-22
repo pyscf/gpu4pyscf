@@ -19,6 +19,7 @@ import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
+import pytest
 
 mol = pyscf.M(
     atom='''

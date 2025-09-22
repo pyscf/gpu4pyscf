@@ -124,7 +124,7 @@ class KnownValues(unittest.TestCase):
         $end
         """
 
-        mf = mol.RHF().PCM().to_gpu()
+        mf = self.mol.RHF().PCM().to_gpu()
         mf.with_solvent.method = 'C-PCM'
         mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf.with_solvent.eps = 78
@@ -149,7 +149,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_b3lyp_CPCM(self):
-        mf_b3lyp_nodf = mol.RKS().PCM().to_gpu()
+        mf_b3lyp_nodf = self.mol.RKS().PCM().to_gpu()
         mf_b3lyp_nodf.xc = 'b3lyp'
         mf_b3lyp_nodf.grids.atom_grid = (99,590)
         mf_b3lyp_nodf.with_solvent.method = 'C-PCM'
@@ -177,7 +177,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_b3lyp_IEFPCM(self):
-        mf_b3lyp_nodf_iefpcm = mol.RKS().PCM().to_gpu()
+        mf_b3lyp_nodf_iefpcm = self.mol.RKS().PCM().to_gpu()
         mf_b3lyp_nodf_iefpcm.xc = 'b3lyp'
         mf_b3lyp_nodf_iefpcm.grids.atom_grid = (99,590)
         mf_b3lyp_nodf_iefpcm.with_solvent.method = 'IEF-PCM'
@@ -205,7 +205,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_unrestricted_hf_CPCM(self):
-        mfu = mol.UHF().PCM().to_gpu()
+        mfu = self.mol.UHF().PCM().to_gpu()
         mfu.with_solvent.method = 'C-PCM'
         mfu.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mfu.with_solvent.eps = 78
@@ -221,7 +221,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_unrestricted_b3lyp_CPCM(self):
-        mf_b3lyp_nodf_u = mol.UKS().PCM().to_gpu()
+        mf_b3lyp_nodf_u = self.mol.UKS().PCM().to_gpu()
         mf_b3lyp_nodf_u.xc = 'b3lyp'
         mf_b3lyp_nodf_u.grids.atom_grid = (99,590)
         mf_b3lyp_nodf_u.with_solvent.method = 'C-PCM'
