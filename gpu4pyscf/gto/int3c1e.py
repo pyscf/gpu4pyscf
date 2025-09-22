@@ -230,6 +230,8 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     for p0, p1 in lib.prange(0, ngrids, ngrids_per_split):
         int3c_grid_slice = cp.zeros([p1-p0, nao, nao], order='C')
@@ -313,6 +315,8 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     grids = cp.concatenate([grids, charges], axis=1)
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     int1e_charge_contracted = cp.zeros([mol.nao, mol.nao], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
@@ -430,6 +434,8 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     int3c_density_contracted = cp.zeros(ngrids)
 

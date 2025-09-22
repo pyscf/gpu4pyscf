@@ -50,6 +50,8 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     for p0, p1 in lib.prange(0, ngrids, ngrids_per_split):
         int3c_grid_slice = cp.zeros([6, p1-p0, nao, nao], order='C')
@@ -129,6 +131,8 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -205,6 +209,8 @@ def get_int3c1e_ip1_density_contracted(mol, grids, charge_exponents, dm, intopt)
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     dm = cp.asarray(dm)
     assert dm.ndim == 2
@@ -266,6 +272,8 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     dm = cp.asarray(dm)
     assert dm.ndim == 2
@@ -357,6 +365,8 @@ def get_int3c1e_ip2_charge_contracted(mol, grids, charge_exponents, charges, gri
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)

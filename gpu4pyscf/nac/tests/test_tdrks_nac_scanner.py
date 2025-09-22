@@ -50,7 +50,7 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_nac_scanner_ge(self):
-        mf = dft.RKS(mol, xc="b3lyp").to_gpu()
+        mf = dft.RKS(mol, xc="b3lyp").to_gpu().density_fit()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
@@ -68,7 +68,7 @@ class KnownValues(unittest.TestCase):
         assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
 
     def test_nac_scanner_ee(self):
-        mf = dft.RKS(mol, xc="b3lyp").to_gpu()
+        mf = dft.RKS(mol, xc="b3lyp").to_gpu().density_fit()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()

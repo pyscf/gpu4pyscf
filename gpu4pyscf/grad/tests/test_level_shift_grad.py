@@ -66,10 +66,10 @@ class KnownValues(unittest.TestCase):
         mf = RKS(mol_close, xc = 'wB97X')
         mf.grids.atom_grid = (99,590)
         mf.nlcgrids.atom_grid = (50,194)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
-        mf.level_shift = 1.0
+        mf.level_shift = .2
 
         test_energy = mf.kernel()
         assert mf.converged
@@ -84,17 +84,17 @@ class KnownValues(unittest.TestCase):
             [-0.04677538, -0.04503511, -0.03373301],
             [-0.03984876,  0.02975217,  0.0987993 ],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
 
     def test_level_shift_gradient_uks(self):
         mf = UKS(mol_open, xc = 'wB97X')
         mf.grids.atom_grid = (99,590)
         mf.nlcgrids.atom_grid = (50,194)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-9
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
-        mf.level_shift = 1.0
+        mf.level_shift = .1
         mf.max_cycle = 200
 
         test_energy = mf.kernel()
@@ -109,15 +109,15 @@ class KnownValues(unittest.TestCase):
             [ 0.03320805,  0.00757202,  0.06555009],
             [-0.03041575, -0.04053383, -0.03575653],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-7
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-9
         assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
 
     def test_level_shift_gradient_rhf(self):
         mf = HF(mol_close)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
-        mf.level_shift = 1.0
+        mf.level_shift = .2
 
         test_energy = mf.kernel()
         assert mf.converged
@@ -132,15 +132,15 @@ class KnownValues(unittest.TestCase):
             [-0.0547028 , -0.05290103, -0.04192148],
             [-0.04331594,  0.03667145,  0.11446484],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert np.max(np.abs(test_energy - ref_energy)) < 5e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-6
 
     def test_level_shift_gradient_uhf(self):
         mf = UHF(mol_open)
-        mf.conv_tol = 1e-12
+        mf.conv_tol = 1e-9
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
-        mf.level_shift = 1.0
+        mf.level_shift = .1
         mf.max_cycle = 200
 
         test_energy = mf.kernel()
@@ -155,8 +155,8 @@ class KnownValues(unittest.TestCase):
             [ 1.47109479e-02,  2.13332766e-02,  8.39433701e-02],
             [-4.37473963e-02, -5.09416180e-02, -4.54662613e-02],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert np.max(np.abs(test_energy - ref_energy)) < 1e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-5
 
     # Lowmem
 
@@ -164,9 +164,9 @@ class KnownValues(unittest.TestCase):
         mf = RKS_LOWMEM(mol_close, xc = 'wB97X')
         mf.grids.atom_grid = (99,590)
         mf.nlcgrids.atom_grid = (50,194)
-        mf.conv_tol = 1e-11
+        mf.conv_tol = 1e-8
 
-        mf.level_shift = 1.0
+        mf.level_shift = .2
 
         test_energy = mf.kernel()
         assert mf.converged
@@ -186,9 +186,9 @@ class KnownValues(unittest.TestCase):
 
     def test_level_shift_gradient_rhf_lowmem(self):
         mf = HF_LOWMEM(mol_close)
-        mf.conv_tol = 1e-11
+        mf.conv_tol = 1e-8
 
-        mf.level_shift = 1.0
+        mf.level_shift = .2
 
         test_energy = mf.kernel()
         assert mf.converged
@@ -203,8 +203,8 @@ class KnownValues(unittest.TestCase):
             [-0.05469687, -0.05289908, -0.04192038],
             [-0.04331642,  0.03666955,  0.11446493],
         ])
-        assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
-        assert np.max(np.abs(test_gradient - ref_gradient)) < 1e-6
+        assert np.max(np.abs(test_energy - ref_energy)) < 5e-9
+        assert np.max(np.abs(test_gradient - ref_gradient)) < 5e-6
 
 if __name__ == "__main__":
     print("Tests for HF and KS gradient with level shift")

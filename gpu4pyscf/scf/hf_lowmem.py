@@ -232,6 +232,8 @@ class RHF(hf.RHF):
 
     def get_hcore(self, mol=None):
         '''The lower triangular part of Hcore'''
+        if mol is None:
+            mol = self.mol
         hcore = hf.get_hcore(mol)
         return pack_tril(hcore).get()
 

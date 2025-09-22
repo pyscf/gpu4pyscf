@@ -261,6 +261,14 @@ class KnownValues(unittest.TestCase):
         dat = cupy_helper.block_diag(arrs)
         assert cupy.array_equal(ref, dat)
 
+    def test_condense(self):
+        a = cupy.random.rand(120*6, 80*5)
+        loc_x = numpy.append(numpy.arange(0, a.shape[0], 6), a.shape[0])
+        loc_y = numpy.append(numpy.arange(0, a.shape[1], 5), a.shape[1])
+        dat = cupy_helper.condense('sum', a, loc_x, loc_y)
+        ref = a.reshape(120,6,80,5).transpose(0,2,1,3).sum(axis=(2,3))
+        assert abs(dat - ref).max() < 1e-12
+
 if __name__ == "__main__":
     print("Full tests for cupy helper module")
     unittest.main()

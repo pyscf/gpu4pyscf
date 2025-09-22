@@ -113,19 +113,19 @@ def level_shift(s, d, f, factor):
     return f + dm_vir * factor
 
 def get_hcore(mol):
+    from gpu4pyscf.pbc.gto.int1e import int1e_kin
     if mol._pseudo:
         # Although mol._pseudo for GTH PP is only available in Cell, GTH PP
         # may exist if mol is converted from cell object.
         from pyscf.gto import pp_int
-        h = mol.intor_symmetric('int1e_kin')
-        h += pp_int.get_gth_pp(mol)
-        h = asarray(h)
+        h = asarray(pp_int.get_gth_pp(mol))
     else:
         assert not mol.nucmod
-        from gpu4pyscf.gto.int3c1e import int1e_grids
+        from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec
+        nucmol = gto.mole.fakemol_for_charges(mol.atom_coords())
         #:h = mol.intor_symmetric('int1e_nuc')
-        h = int1e_grids(mol, mol.atom_coords(), charges=-mol.atom_charges())
-        h += asarray(mol.intor_symmetric('int1e_kin'))
+        h = contract_int3c2e_auxvec(mol, nucmol, -mol.atom_charges())
+    h += int1e_kin(mol)
     if len(mol._ecpbas) > 0:
         h += get_ecp(mol)
     return h
@@ -622,7 +622,6 @@ class SCF(pyscf_lib.StreamObject):
     build                    = hf_cpu.SCF.build
     opt                      = NotImplemented
     dump_flags               = hf_cpu.SCF.dump_flags
-    get_ovlp                 = return_cupy_array(hf_cpu.SCF.get_ovlp)
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
@@ -676,6 +675,11 @@ class SCF(pyscf_lib.StreamObject):
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
         return get_hcore(mol)
+
+    def get_ovlp(self, mol=None):
+        if mol is None: mol = self.mol
+        from gpu4pyscf.pbc.gto.int1e import int1e_ovlp
+        return int1e_ovlp(mol)
 
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_occ is None: mo_occ = self.mo_occ
