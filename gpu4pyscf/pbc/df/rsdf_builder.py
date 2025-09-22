@@ -1340,6 +1340,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = _cd_j2c_cache[j2c_idx] # at -(kj-ki)
                 cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
+                print('cderi_k.shape', kp, cderi_k.shape, buf.shape)
                 _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
                 if with_long_range:
                     _buf = cderi_k.get(out=_buf)
