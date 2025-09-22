@@ -943,7 +943,8 @@ extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *b
 extern "C" {
 int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int atom_offset,
                      RysIntEnvVars envs, int *scheme, int *shls_slice,
-                     int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
+                     int npairs_ij, int npairs_kl,
+                     uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                      float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
                      int *pool, int *atm, int natm, int *bas, int nbas, double *env)
 {
@@ -1017,7 +1018,8 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
 int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
-                        int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
+                        int npairs_ij, int npairs_kl,
+                        uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                         float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
                         int *pool, double *dd_pool,
                         int *atm, int natm, int *bas, int nbas, double *env)
