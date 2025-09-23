@@ -45,7 +45,7 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
             return self.base.to_gpu().PCM().Gradients()
         pcm_grad.WithSolventGrad.to_gpu = _pcm_grad_to_gpu
 
-    from pyscf.solvent.hessian import pcm_hess
+    from pyscf.solvent.hessian import pcm as pcm_hess
     if hasattr(pcm_hess, 'WithSolventHess'):
         def _pcm_hessian_to_gpu(self):
             from pyscf.tdscf.rhf import TDBase
