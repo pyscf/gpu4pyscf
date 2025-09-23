@@ -186,6 +186,17 @@ class KnownValues(unittest.TestCase):
         nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
         nac1.states=(1,2)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(1,2)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(1,2)
+        nac3.kernel()
+
         ref_etf_scaled_qchem = np.array([[-0.000000,  2.391220, -0.000000],
                                          [ 0.000000, -1.195610,  0.896297],
                                          [ 0.000000, -1.195610, -0.896297]])
@@ -216,6 +227,9 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_bdf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_bdf)).max() < 1e-4
 
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
+
     def test_nac_tda_singlet_qchem(self):
         """
         Comapre with qchem
@@ -244,6 +258,17 @@ class KnownValues(unittest.TestCase):
         nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
         nac1.states=(1,3)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(1,3)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(1,3)
+        nac3.kernel()
+
         ref_etf_scaled_qchem = np.array([[-0.785926,  0.000000,  0.000000],
                                          [ 0.392963, -0.000000, -0.000000],
                                          [ 0.392963,  0.000000, -0.000000]])
@@ -258,9 +283,23 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_qchem)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_qchem)).max() < 1e-4
 
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
+
         nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
         nac1.states=(2,3)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(2,3)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(2,3)
+        nac3.kernel()
+
         ref_etf_scaled_qchem = np.array([[-0.000000,  0.000000,  0.000000],
                                          [ 0.021695, -0.000000, -0.000000],
                                          [-0.021695,  0.000000, -0.000000]])
@@ -274,6 +313,9 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref_qchem)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_qchem)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_qchem)).max() < 1e-4
+
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
 
     @pytest.mark.slow
     def test_nac_tda_singlet_fdiff(self):

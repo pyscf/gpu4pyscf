@@ -72,6 +72,16 @@ class KnownValues(unittest.TestCase):
         nac_ris.states=(1,2)
         nac_ris.kernel()
 
+        nac_ris2 = td_ris.nac_method()
+        nac_ris2.precond_method = 'p'
+        nac_ris2.states=(1,2)
+        nac_ris2.kernel()
+
+        nac_ris3 = td_ris.nac_method()
+        nac_ris3.precond_method = 'r'
+        nac_ris3.states=(1,2)
+        nac_ris3.kernel()
+
         ref_de = np.array(
             [[-7.46173726e-16,  9.35902790e-02, -2.89341627e-14],
              [-5.56902476e-17, -5.37437170e-02,  3.50026779e-02],
@@ -84,6 +94,9 @@ class KnownValues(unittest.TestCase):
         # compare with previous calculation resusts
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+        assert abs(np.abs(np.abs(nac_ris2.de) - np.abs(nac_ris.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac_ris3.de) - np.abs(nac_ris.de))).max() < 1e-5
 
     @pytest.mark.slow
     def test_nac_pbe_tda_singlet_fdiff(self):

@@ -27,7 +27,7 @@ H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
+# pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
 
@@ -216,6 +216,26 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_tda_singlet_numerical(self):
         _check_grad(mol, tol=1e-4, tda=True, method="numerical")
+
+    def test_grad_tda_singlet_nested_krylov(self):
+        mf = scf.RHF(mol).to_gpu().run()
+        mf.kernel()
+        td = mf.TDA()
+        td.kernel()
+
+        g0 = td.nuc_grad_method()
+        g0.kernel()
+
+        g1 = td.nuc_grad_method()
+        g1.base.precond_method = 'p'
+        g1.kernel()
+
+        g2 = td.nuc_grad_method()
+        g2.base.precond_method = 'r'
+        g2.kernel()
+
+        assert abs(g0.de - g1.de).max() < 1e-5
+        assert abs(g0.de - g2.de).max() < 1e-5
 
     def test_grad_tdhf_singlet_cpu(self):
         grad_gpu = _check_grad(mol, tol=1e-10, lindep=1.0E-6, tda=False, method="cpu")

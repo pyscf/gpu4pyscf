@@ -114,6 +114,17 @@ class KnownValues(unittest.TestCase):
         nac1 = gpu4pyscf.nac.tdrks.NAC(td)
         nac1.states=(1,2)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(1,2)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(1,2)
+        nac3.kernel()
+
         ref_scaled = np.array([[-0.000000,  1.581396,  0.000000],
                                [ 0.000000, -0.898277,  0.592227],
                                [ 0.000000, -0.898277, -0.592227]])
@@ -128,8 +139,22 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
+
+        nac1 = gpu4pyscf.nac.tdrks.NAC(td)
         nac1.states=(2,4)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(2,4)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(2,4)
+        nac3.kernel()
         ref_scaled = np.array([[-0.898200, -0.000000, -0.000000],
                                [ 0.428663, -0.000000, -0.000000],
                                [ 0.428663,  0.000000,  0.000000]])
@@ -143,6 +168,9 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
 
     @pytest.mark.slow
     def test_nac_pbe_tda_singlet_fdiff(self):

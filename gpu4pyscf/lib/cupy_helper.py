@@ -638,6 +638,8 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
 def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
            lindep=DSOLVE_LINDEP, callback=None, hermi=False,
            verbose=logger.WARN):
+    import time
+    t0 = time.time()
     r'''Krylov subspace method to solve  (1+a) x = b.  Ref:
     J. A. Pople et al, Int. J.  Quantum. Chem.  Symp. 13, 225 (1979).
     Args:
@@ -761,6 +763,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
 
     if x0 is not None:
         x += x0
+    print(f"krylov solver in CPHF converges in {time.time() - t0} seconds")
     return x
 
 def _qr(xs, dot, lindep=1e-14):

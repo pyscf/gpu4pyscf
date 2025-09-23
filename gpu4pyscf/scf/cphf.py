@@ -59,8 +59,11 @@ def solve_nos1(fvind, mo_energy, mo_occ, h1,
     e_ai = 1 / (e_a[:,None] + level_shift - e_i)
     mo1base = h1 * -e_ai
     nvir, nocc = e_ai.shape
-
+    itime = 0
     def vind_vo(mo1):
+        nonlocal itime
+        itime += 1
+        print(f"original krylov {itime}-th iteration")
         v = fvind(mo1.reshape(-1,nvir,nocc)).reshape(-1,nvir,nocc)
         if level_shift != 0:
             v -= mo1 * level_shift

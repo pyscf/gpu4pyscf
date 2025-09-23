@@ -567,11 +567,15 @@ class TDA(TDBase):
                                                 conv_tol=self.conv_tol, max_iter=self.max_cycle, gram_schmidt=True,
                                                 single=False, verbose=log)
             self.e = self.e.get()
-            self.xy = [(xi.reshape(nocc,nvir).get() * .5**.5*np.sqrt(0.5), 0) for xi in X]
+            self.xy = [(xi.reshape(nocc,nvir).get() * .5**.5, 0) for xi in X]
         elif self.precond_method.lower()[0] == 'r': # ris
             from gpu4pyscf.tdscf import ris
-            tda_emp = ris.TDA(mf=self._scf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
+            if getattr(self._scf, '_numint', None) is None: # TDHF
+                tda_emp = ris.TDA(mf=self._scf, nstates=self.nstates, spectra=False, a_x = 1.0,
+                          Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
+            else: # TDDFT
+                tda_emp = ris.TDA(mf=self._scf, nstates=self.nstates, spectra=False,
+                          Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
             TDA_MVP = tda_emp.gen_vind()[0]
             self.converged, self.e, X = _krylov_tools.nested_krylov_solver(matrix_vector_product=vind, hdiag=hdiag, 
                                                 n_states=nstates, problem_type='eigenvalue',
@@ -579,7 +583,7 @@ class TDA(TDBase):
                                                 init_mvp = TDA_MVP, precond_mvp = TDA_MVP,
                                                 single=False, verbose=log)
             self.e = self.e.get()
-            self.xy = [(xi.reshape(nocc,nvir).get() * .5**.5*np.sqrt(0.5), 0) for xi in X]
+            self.xy = [(xi.reshape(nocc,nvir).get() * .5**.5, 0) for xi in X]
         else:
             raise ValueError(f'Unknown preconditioner method {self.precond_method}')
         # 1/sqrt(2) because self.x is for alpha excitation and 2(X^+*X) = 1

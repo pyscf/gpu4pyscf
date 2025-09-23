@@ -227,6 +227,26 @@ class KnownValues(unittest.TestCase):
                          [-2.7234194947580e-17, -7.4263977957215e-02, -5.8799691736946e-02]]),
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    def test_grad_b3lyp_tda_singlet_nested_krylov(self):
+        mf = dft.RKS(mol, xc="b3lyp").to_gpu().run()
+        mf.kernel()
+        td = mf.TDA()
+        td.kernel()
+        
+        g0 = td.nuc_grad_method()
+        g0.kernel()
+
+        g1 = td.nuc_grad_method()
+        g1.base.precond_method = 'p'
+        g1.kernel()
+
+        g2 = td.nuc_grad_method()
+        g2.base.precond_method = 'r'
+        g2.kernel()
+
+        assert abs(g0.de - g1.de).max() < 1e-5
+        assert abs(g0.de - g2.de).max() < 1e-5
+
     # def test_grad_b3lyp_tda_singlet_numerical(self):
     #     _check_grad(mol, xc="b3lyp", tol=1e-4, tda=True, method="numerical")
 
