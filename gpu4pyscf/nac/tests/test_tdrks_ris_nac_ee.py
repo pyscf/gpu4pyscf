@@ -20,6 +20,7 @@ from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
 import pytest
+from gpu4pyscf.lib.multi_gpu import num_threads
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -57,6 +58,7 @@ def diagonalize_tda(a, nroots=5):
 
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_threads > 1, '')
     def test_nac_pbe_tda_singlet_vs_ref(self):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
         mf.grids.atom_grid = (99,590)

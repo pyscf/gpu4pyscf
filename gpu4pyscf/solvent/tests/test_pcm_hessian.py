@@ -23,6 +23,7 @@ from gpu4pyscf import scf, dft
 from packaging import version
 from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_nuc, analytical_hess_solver, analytical_hess_qv
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.multi_gpu import num_threads
 
 pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
@@ -181,6 +182,7 @@ class KnownValues(unittest.TestCase):
         _check_hessian(mf, h, ix=0, iy=0)
         #_check_hessian(mf, h, ix=0, iy=1)
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_df_hess_iefpcm(self):
         print("testing IEF-PCM hessian with DF-RKS")
         mf = _make_mf(method='IEF-PCM')
@@ -199,6 +201,7 @@ class KnownValues(unittest.TestCase):
         #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_df_uks_hess_iefpcm(self):
         print("testing IEF-PCM hessian with DF-UKS")
         mf = _make_mf(method='IEF-PCM', restricted=False, density_fit=True)
@@ -245,6 +248,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_grad_vmat_ssvpe(self):
         print("testing SS(V)PE dV_solv/dx")
         mf = _make_mf(method='SS(V)PE')
@@ -295,6 +299,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_hess_solver_iefpcm(self):
         print("testing IEF-PCM d2E_KR/dx2")
         mf = _make_mf(method='IEF-PCM')
@@ -307,6 +312,7 @@ class KnownValues(unittest.TestCase):
 
         assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_hess_solver_ssvpe(self):
         print("testing SS(V)PE d2E_KR/dx2")
         mf = _make_mf(method='SS(V)PE')

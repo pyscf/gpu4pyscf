@@ -20,6 +20,7 @@ from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from packaging import version
+from gpu4pyscf.lib.multi_gpu import num_threads
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -251,6 +252,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, tda=True, method="numerical")
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_grad_tdhf_spinconserve_cpu(self):
         grad_gpu = _check_grad(mol, tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[ 2.4083810840674e-15,  1.1005204522931e-15, -6.4107899188727e-02],

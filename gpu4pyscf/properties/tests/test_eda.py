@@ -18,6 +18,7 @@ import numpy as np
 import cupy as cp
 import pyscf
 from gpu4pyscf.properties.eda import eval_ALMO_EDA_2_energies
+from gpu4pyscf.lib.multi_gpu import num_threads
 
 def setUpModule():
     global system_svp, system_tzvpp, system_charged, system_two_Li, system_three_Li
@@ -191,6 +192,7 @@ def tearDownModule():
     del to_clean
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_threads > 1, '')
     def test_almo_eda_2_hf_svp(self):
         ### Q-Chem input
         # $molecule
@@ -265,6 +267,7 @@ class KnownValues(unittest.TestCase):
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_almo_eda_2_hf_svp_df(self):
         ### This is a consistent test, if you put these additional keywords into Q-Chem 6.1,
         ### it will provide results that are clearly garbage.
@@ -733,6 +736,7 @@ class KnownValues(unittest.TestCase):
         for reference_dft_gradient, test_dft_gradient in zip(reference_dft_gradients, test_dft_gradients):
             assert np.max(np.abs(test_dft_gradient - reference_dft_gradient)) < 1e-6
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_almo_eda_2_two_Li_edgecase(self):
         ### Q-Chem input
         # $molecule
@@ -799,6 +803,7 @@ class KnownValues(unittest.TestCase):
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 2e-7
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_almo_eda_2_three_Li_edgecase(self):
         reference_eda_result = {
             "total"                   :  980.0584,

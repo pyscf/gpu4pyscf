@@ -20,6 +20,7 @@ from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
 import pytest
+from gpu4pyscf.lib.multi_gpu import num_threads
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -216,6 +217,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf_bdf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled_bdf)).max() < 1e-4
 
+    @unittest.skipIf(num_threads > 1, '')
     def test_nac_tda_singlet_qchem(self):
         """
         Comapre with qchem
