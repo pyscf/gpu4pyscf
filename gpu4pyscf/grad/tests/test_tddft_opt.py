@@ -21,7 +21,7 @@ from pyscf.geomopt.geometric_solver import optimize
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from packaging import version
-from gpu4pyscf.lib.multi_gpu import num_threads
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -52,7 +52,7 @@ def tearDownModule():
     del mol, mol_near_conv
 
 class KnownValues(unittest.TestCase):
-    @unittest.skipIf(num_threads > 1, '')
+    @unittest.skipIf(num_devices > 1, '')
     def test_opt_rhf_tda(self):
         mf = scf.RHF(mol_near_conv).to_gpu().density_fit()
         mf.kernel()
@@ -80,7 +80,7 @@ class KnownValues(unittest.TestCase):
         mol_cpu = optimize(td_cpu)
         assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
-    @unittest.skipIf(num_threads > 1, '')
+    @unittest.skipIf(num_devices > 1, '')
     def test_opt_df_rks_tda_pcm_1(self):
         mf = dft.RKS(mol_near_conv, xc='b3lyp').to_gpu().density_fit().PCM()
         mf.kernel()

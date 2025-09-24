@@ -20,7 +20,7 @@ from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from packaging import version
-from gpu4pyscf.lib.multi_gpu import num_threads
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -205,7 +205,7 @@ def _check_grad(mol, xc, tol=1e-5, lindep=1.0e-12, disp=None, tda=False, method=
 
 
 class KnownValues(unittest.TestCase):
-    @unittest.skipIf(num_threads > 1, '')
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_svwn_tda_singlet_cpu(self):
         grad_gpu = _check_grad(mol, xc="svwn", tol=5e-10, tda=True, method="cpu")
         ref = np.array([[-1.6539940690236e-15, -8.3356410695342e-15, 1.3308690852288e-01],
@@ -222,7 +222,7 @@ class KnownValues(unittest.TestCase):
     # def test_grad_svwn_tddft_singlet_numerical(self):
     #     _check_grad(mol, xc="svwn", tol=1e-4, tda=False, method="numerical")
 
-    @unittest.skipIf(num_threads > 1, '')
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_b3lyp_tda_singlet_cpu(self):
         grad_gpu = _check_grad(mol, xc="b3lyp", tol=5e-10, tda=True, method="cpu")
         ref =  np.array([[-5.1102017791844e-16,  1.6869738570478e-14, 1.1759402451268e-01],
@@ -262,7 +262,7 @@ class KnownValues(unittest.TestCase):
     # def test_grad_tpss_tda_singlet_numerical(self):
     #     _check_grad(mol, xc="tpss", tol=1e-4, tda=True, method="numerical")
 
-    @unittest.skipIf(num_threads > 1, '')
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_tpss_tddft_singlet_cpu(self):
         grad_gpu = _check_grad(mol, xc="tpss", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[ 9.0982715347518e-16, -8.2522481347782e-15, 1.2438623581337e-01],

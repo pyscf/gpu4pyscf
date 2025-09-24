@@ -19,7 +19,7 @@ from pyscf import dft
 from gpu4pyscf import tdscf
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.nac.mecp import MECPScanner, ConicalIntersectionOptimizer
-from gpu4pyscf.lib.multi_gpu import num_threads
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
  H   0.451616   0.760462   1.270585
@@ -65,7 +65,7 @@ def calc_energy(mol):
 
 
 class KnownValues(unittest.TestCase):
-    @unittest.skipIf(num_threads > 1, '')
+    @unittest.skipIf(num_devices > 1, '')
     def test_mecp_pbe0_tda_singlet(self):
         mf = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mf.kernel()

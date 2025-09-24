@@ -19,7 +19,7 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
-from gpu4pyscf.lib.multi_gpu import num_threads
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -68,7 +68,7 @@ class KnownValues(unittest.TestCase):
         new_nac = nac_scanner(mol1)
         assert (new_nac[1]*nac_benchmark_de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac_benchmark_de) > 0.99
 
-    @unittest.skipIf(num_threads > 1, '')
+    @unittest.skipIf(num_devices > 1, '')
     def test_nac_scanner_ee(self):
         mf = dft.RKS(mol, xc="b3lyp").to_gpu().density_fit()
         mf.kernel()
