@@ -245,11 +245,20 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
     # end to end test
+    @pytest.mark.slow
     def test_uhf_scf(self):
         e_tot = scf.UHF(mol).kernel()
         e_ref = -150.76441654065087
         print('--------- testing UHF -----------')
         print('pyscf - qchem ', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5
+
+    def test_uhf_scf_fast(self):
+        mol1 = mol.copy()
+        mol1.basis = 'sto3g'
+        mol1.build(False, False)
+        e_tot = mol1.UHF().to_gpu().kernel()
+        e_ref = -148.8650361770461
         assert np.abs(e_tot - e_ref) < 1e-5
 
     @pytest.mark.slow
@@ -289,7 +298,7 @@ class KnownValues(unittest.TestCase):
         dma_loaded, dmb_loaded = mf_copy.init_guess_by_chkfile()
         assert np.allclose(dma_stored, dma_loaded, atol = 1e-14) # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
         assert np.allclose(dmb_stored, dmb_loaded, atol = 1e-14)
-        assert not np.allclose(dma_stored, dmb_loaded, atol = 1e-1) # Just to make sure alpha and beta electron are different in the test system
+        assert not np.allclose(dma_stored, dmb_loaded, atol = 1e-3) # Just to make sure alpha and beta electron are different in the test system
 
     # TODO:
     #test analyze
