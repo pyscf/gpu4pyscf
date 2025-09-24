@@ -21,7 +21,6 @@ import warnings
 import math
 import numpy as np
 import cupy as cp
-import scipy.linalg
 from collections import Counter
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
@@ -1060,6 +1059,7 @@ def _make_j_engine_pair_locs(mol):
     return np.asarray(pair_loc, dtype=np.int32)
 
 def quartets_scheme(mol, l_ctr_pattern, with_j, with_k, shm_size=SHM_SIZE):
+    # deprecated
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
     order = li + lj + lk + ll

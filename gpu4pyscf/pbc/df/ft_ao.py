@@ -204,7 +204,7 @@ class FTOpt:
         cell = self.sorted_cell
         rcut = cell.rcut
         vol = cell.vol
-        cell_exp, _, cell_l = most_diffused_pgto(cell)
+        cell_exp, _, cell_l = most_diffuse_pgto(cell)
         lsum = cell_l * 2 + 1
         rad = vol**(-1./3) * rcut + 1
         surface = 4*np.pi * rad**2
@@ -234,7 +234,7 @@ class FTOpt:
         cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
 
-        exps, cs = extract_pgto_params(cell, 'diffused')
+        exps, cs = extract_pgto_params(cell, 'diffuse')
         exps = cp.asarray(exps, dtype=np.float32)
         log_coeff = cp.log(abs(cp.asarray(cs, dtype=np.float32)))
 
@@ -461,12 +461,13 @@ class FTOpt:
                                f'Required: {out_size*1.2e-9:.2f} GB')
         return ft_kernel
 
-def most_diffused_pgto(cell):
-    exps, cs = extract_pgto_params(cell, 'diffused')
+def most_diffuse_pgto(cell):
+    exps, cs = extract_pgto_params(cell, 'diffuse')
     ls = cell._bas[:,ANG_OF]
     r2 = np.log(cs**2 / cell.precision * 10**ls + 1e-200) / exps
     idx = r2.argmax()
     return exps[idx], cs[idx], ls[idx]
+most_diffused_pgto = most_diffuse_pgto # for backward compatibility
 
 class PBCIntEnvVars(ctypes.Structure):
     _fields_ = [

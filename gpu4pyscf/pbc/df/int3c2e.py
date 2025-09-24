@@ -35,7 +35,7 @@ from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
                                 extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import (
-    libpbc, init_constant, most_diffused_pgto, PBCIntEnvVars)
+    libpbc, init_constant, most_diffuse_pgto, PBCIntEnvVars)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -182,7 +182,7 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
         bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
 
     precision = cell.precision * 1e-3
-    ak, ck, lk = most_diffused_pgto(sorted_cell)
+    ak, ck, lk = most_diffuse_pgto(sorted_cell)
     theta = 1./(omega**-2 + 2./ak)
     norm_ang = (2*lk+1)/(4*np.pi)
     c1 = ck**2 * norm_ang
@@ -355,15 +355,15 @@ def to_primitive_bas(cell):
                 nctr = shell[NCTR_OF]
                 pexp = shell[PTR_EXP]
                 es = prim_env[pexp:pexp+nprim]
-                diffused_idx = np.where(es < 2.)[0]
-                n_diffused = len(diffuse_idx)
+                diffuse_idx = np.where(es < 2.)[0]
+                n_diffuse = len(diffuse_idx)
                 for ic in range(nctr):
                     pcoeff = shell[PTR_COEFF] + ic * nprim
                     bs = shell.copy()
                     bs[NCTR_OF] = 1
                     bs[PTR_COEFF] = pcoeff
                     bs[PTR_BAS_COORD] = ptr_coord
-                    if nprim == 1 or n_diffused == 0:
+                    if nprim == 1 or n_diffuse == 0:
                         bas_of_ia.append(bs)
                         local_shell_mapping.append(off+ic)
                         continue
@@ -374,7 +374,7 @@ def to_primitive_bas(cell):
                     idx = np.hstack(compact_idx, diffuse_idx)
                     prim_env[pexp:pexp+nprim] = es[idx]
                     prim_env[pcoeff:pcoeff+n_compact] = cs[compact_idx]
-                    prim_env[pcoeff+n_compact:pcoeff+nprim] = cs[diffused_idx]
+                    prim_env[pcoeff+n_compact:pcoeff+nprim] = cs[diffuse_idx]
                     if n_compact > 0:
                         # put compact pGTOs in one shell
                         bs[NPRIM_OF] = n_compact
@@ -382,9 +382,9 @@ def to_primitive_bas(cell):
                         local_shell_mapping.append(off+ic)
                         pexp += n_compact
                         pcoeff += n_compact
-                    # each diffused pGTO as one shell
+                    # each diffuse pGTO as one shell
                     bs[NPRIM_OF] = 1
-                    for m in range(n_diffused):
+                    for m in range(n_diffuse):
                         bs[PTR_EXP] = pexp + m
                         bs[PTR_COEFF] = pexp + m
                         bas_of_ia.append(bs.copy())
@@ -528,8 +528,8 @@ class SRInt3c2eOpt:
         auxcell = self.sorted_auxcell
         vol = self.bvkcell.vol
         omega = self.omega
-        aux_exp, _, aux_l = most_diffused_pgto(auxcell)
-        cell_exp, _, cell_l = most_diffused_pgto(pcell)
+        aux_exp, _, aux_l = most_diffuse_pgto(auxcell)
+        cell_exp, _, cell_l = most_diffuse_pgto(pcell)
         if omega == 0:
             theta = 1./(1./cell_exp*2 + 1./aux_exp)
         else:
@@ -552,12 +552,12 @@ class SRInt3c2eOpt:
         bvk_ncells = np.prod(self.bvk_kmesh)
         p_nbas = pcell.nbas
 
-        exps, cs = extract_pgto_params(pcell, 'diffused')
+        exps, cs = extract_pgto_params(pcell, 'diffuse')
         exps = asarray(exps, dtype=np.float32)
         log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
 
-        # Search the most diffused functions on each atom
-        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
+        # Search the most diffuse functions on each atom
+        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffuse')
         aux_ls = auxcell._bas[:,ANG_OF]
         r2_aux = np.log(aux_cs**2 / pcell.precision * 10**aux_ls + 1e-200) / aux_exps
         atoms = auxcell._bas[:,ATOM_OF]
@@ -847,12 +847,12 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         bvk_ncells = np.prod(self.bvk_kmesh)
         p_nbas = pcell.nbas
 
-        exps, cs = extract_pgto_params(pcell, 'diffused')
+        exps, cs = extract_pgto_params(pcell, 'diffuse')
         exps = asarray(exps, dtype=np.float32)
         log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
 
-        # Search the most diffused functions on each atom
-        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffused')
+        # Search the most diffuse functions on each atom
+        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffuse')
         aux_ls = auxcell._bas[:,ANG_OF]
         r2_aux = np.log(aux_cs**2 / pcell.precision * 10**aux_ls + 1e-200) / aux_exps
         atoms = auxcell._bas[:,ATOM_OF]
@@ -1122,10 +1122,10 @@ def estimate_rcut(cell, auxcell, omega):
         return np.zeros(1)
 
     precision = cell.precision
-    ak, ck, lk = most_diffused_pgto(auxcell)
+    ak, ck, lk = most_diffuse_pgto(auxcell)
 
-    # the most diffused orbital basis
-    cell_exps, cs = extract_pgto_params(cell, 'diffused')
+    # the most diffuse orbital basis
+    cell_exps, cs = extract_pgto_params(cell, 'diffuse')
     ls = cell._bas[:,ANG_OF]
     r2_cell = np.log(cs**2 / precision * 10**ls + 1e-200) / cell_exps
     ai_idx = r2_cell.argmax()
@@ -1163,7 +1163,7 @@ def _estimate_shl_pairs_per_block(li, lj, nshl_pair):
 
 def minimal_enclosing_sphere(cell):
     '''Find a sphere that covers all basis functions'''
-    exps, cs = extract_pgto_params(cell, 'diffused')
+    exps, cs = extract_pgto_params(cell, 'diffuse')
     ls = cell._bas[:,ANG_OF]
     r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
     r2 = [r2[sh0:sh1].max() for sh0, sh1 in cell.aoslice_by_atom()[:,:2]]

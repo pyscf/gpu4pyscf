@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import builtins
 from concurrent.futures import ThreadPoolExecutor
 import functools
 import cupy as cp
@@ -157,6 +158,36 @@ def array_reduce(array_list, inplace=False):
                         dst[p0:p1] += p2p_transfer(buf[:p1-p0], src[p0:p1])
         step *= 2
     return array_list[0].reshape(out_shape)
+
+def property(cache=None)
+    '''@property decorator that automatically transfers cupy arrays to side
+    devices.
+
+    When cache is specified, data for each device will be cached in the
+    attribute defined by the specified name
+    '''
+    assert isinstance(cache, str)
+
+    def new_decorator(method):
+        def attr_method(obj):
+            device_id = cp.cuda.device.get_device_id()
+            if cache is None or getattr(obj, cache, None) is None:
+                out = method(obj)
+                if device_id != out.device:
+                    out = out.copy()
+                return out
+
+            _cache = getattr(obj, cache) # _cache must be a dict
+            if device_id in _cache:
+                out = _cache[device_id]
+            else:
+                out = method(obj)
+                if device_id != out.device:
+                    out = out.copy()
+                    _cache[device_id] = out
+            return out
+        return builtins.property(attr_method)
+    return new_decorator
 
 def lru_cache(size):
     '''LRU cache for multiple devices'''
