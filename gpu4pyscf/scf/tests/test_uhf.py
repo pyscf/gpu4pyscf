@@ -245,11 +245,20 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
     # end to end test
+    @pytest.mark.slow
     def test_uhf_scf(self):
         e_tot = scf.UHF(mol).kernel()
         e_ref = -150.76441654065087
         print('--------- testing UHF -----------')
         print('pyscf - qchem ', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5
+
+    def test_uhf_scf_fast(self):
+        mol1 = mol.copy()
+        mol1.basis = 'sto3g'
+        mol1.build(False, False)
+        e_tot = mol1.UHF().to_gpu().kernel()
+        e_ref = -148.8650361770461
         assert np.abs(e_tot - e_ref) < 1e-5
 
     @pytest.mark.slow
