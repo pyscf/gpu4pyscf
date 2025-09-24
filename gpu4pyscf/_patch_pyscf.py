@@ -39,7 +39,8 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
     if hasattr(pcm_grad, 'WithSolventGrad'):
         def _pcm_grad_to_gpu(self):
             from pyscf.tdscf.rhf import TDBase
-            assert isinstance(self.base.with_solvent, pcm_grad.PCM)
+            from pyscf.solvent.pcm import PCM
+            assert isinstance(self.base.with_solvent, PCM)
             if isinstance(self, TDBase):
                 raise NotImplementedError('.to_gpu() for PCM-TDDFT')
             return self.base.to_gpu().PCM().Gradients()
