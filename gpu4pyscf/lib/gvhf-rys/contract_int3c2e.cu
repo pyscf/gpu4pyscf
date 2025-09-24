@@ -99,7 +99,7 @@ void contract_int3c2e_kernel(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bo
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         int bas_ij;
         if (pair_ij < shl_pair1) {
-            bas_ij = bounds.bas_ij_idx[shl_pair0+sp_id];
+            bas_ij = bounds.bas_ij_idx[pair_ij];
         } else {
             bas_ij = bas_ij0;
         }
