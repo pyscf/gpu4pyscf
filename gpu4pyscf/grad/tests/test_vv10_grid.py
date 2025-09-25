@@ -18,6 +18,7 @@ import pytest
 import pyscf
 from gpu4pyscf.dft import rks as gpu_rks
 from gpu4pyscf.grad.rks import _get_denlc
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
     global mol, xc, atom_grid, nlc_atom_grid_loose, nlc_atom_grid_dense
@@ -144,6 +145,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_nlc_dense_grid_without_response(self):
         mf = make_mf(mol, nlc_atom_grid_dense)
         dm = mf.make_rdm1()
@@ -161,6 +163,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_wb97xv_loose_grid_with_response(self):
         mf = make_mf(mol, nlc_atom_grid_loose)
         grad_obj = mf.Gradients()

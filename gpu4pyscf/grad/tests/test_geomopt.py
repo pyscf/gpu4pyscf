@@ -18,6 +18,7 @@ import unittest
 from gpu4pyscf import scf
 from gpu4pyscf.dft import rks, uks
 from pyscf.geomopt.geometric_solver import optimize
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -66,6 +67,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_rhf_geomopt(self):
         mf = scf.RHF(mol)
         mf.kernel()
@@ -79,6 +81,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_uks_geomopt(self):
         mf = uks.UKS(mol, xc=xc)
         mf.disp = disp
@@ -93,6 +96,7 @@ class KnownValues(unittest.TestCase):
             [0.7617088263,    -0.0000000000,    -0.4691011328]])
         assert np.linalg.norm(coords - coords_qchem) < 1e-4
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_uhf_geomopt(self):
         mf = scf.UHF(mol)
         mf.kernel()

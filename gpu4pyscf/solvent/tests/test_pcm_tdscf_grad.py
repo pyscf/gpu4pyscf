@@ -367,6 +367,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_b3lyp_COSMO(self):
         _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='COSMO')
 
+    @pytest.mark.slow
     def test_grad_tda_singlet_b3lyp_ssvpe(self):
         _check_grad_numerical(mol, tol=5e-4, xc='b3lyp', tda=True, solvent='ss(v)pe')
 

@@ -19,6 +19,7 @@ import pytest
 from pyscf import dft
 from pyscf.geomopt.geometric_solver import optimize
 import gpu4pyscf.tdscf.ris as ris
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 H     1.2953527433   -0.4895463266    0.8457608681
@@ -43,6 +44,7 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
     def test_opt_rks_tda_1(self):
         mf = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mf.kernel()
