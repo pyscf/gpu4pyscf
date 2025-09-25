@@ -1,9 +1,25 @@
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from functools import reduce
 
 import cupy
 import scipy
 from pyscf import __config__, lib
+from pyscf.pbc.tools import print_mo_energy_occ
 
+from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 
 SMEARING_METHOD = getattr(__config__, "pbc_scf_addons_smearing_method", "fermi")
@@ -123,8 +139,6 @@ class _SmearingSCF:
 
     def get_occ(self, mo_energy=None, mo_coeff=None):
         """Label the occupancies for each orbital"""
-        from pyscf import scf
-        from pyscf.pbc.tools import print_mo_energy_occ
 
         if (self.sigma == 0) or (not self.sigma) or (not self.smearing_method):
             mo_occ = super().get_occ(mo_energy, mo_coeff)
@@ -193,7 +207,7 @@ class _SmearingSCF:
                 self.entropy,
             )
             if self.verbose >= logger.DEBUG:
-                print_mo_energy_occ(self, mo_energy, mo_occs, True)
+                print_mo_energy_occ(self, mo_energy.get(), mo_occs.get(), True)
         else:  # all orbitals treated with the same fermi level
             nelectron = self.mol.nelectron
             if is_uhf:
