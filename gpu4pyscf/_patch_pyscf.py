@@ -35,6 +35,26 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
     from pyscf.pbc.df.df import GDF
     GDF.to_gpu = _gdf_to_gpu
 
+    from pyscf.solvent.grad import pcm as pcm_grad
+    if hasattr(pcm_grad, 'WithSolventGrad'):
+        def _pcm_grad_to_gpu(self):
+            from pyscf.tdscf.rhf import TDBase
+            from pyscf.solvent.pcm import PCM
+            assert isinstance(self.base.with_solvent, PCM)
+            if isinstance(self, TDBase):
+                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
+            return self.base.to_gpu().PCM().Gradients()
+        pcm_grad.WithSolventGrad.to_gpu = _pcm_grad_to_gpu
+
+    from pyscf.solvent.hessian import pcm as pcm_hess
+    if hasattr(pcm_hess, 'WithSolventHess'):
+        def _pcm_hessian_to_gpu(self):
+            from pyscf.tdscf.rhf import TDBase
+            if isinstance(self, TDBase):
+                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
+            return self.base.to_gpu().PCM().Hessian()
+        pcm_hess.WithSolventHess.to_gpu = _pcm_hessian_to_gpu
+
     # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.10
     from pyscf import lib
     from pyscf.lib import logger
