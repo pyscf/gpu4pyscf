@@ -46,9 +46,6 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    def test(self):
-        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.01)
-        gpu_energy = gpu_mf.kernel()
 
     def test_energy(self):
         gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.01)
