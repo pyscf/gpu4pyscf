@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,42 +12,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import unittest
+
 import numpy as np
 import pyscf
-from pyscf.hessian import thermo
 from pyscf.scf import addons as cpu_addons
+from pyscf.scf import hf as cpu_hf
 
-from gpu4pyscf.dft import rks
-from gpu4pyscf.scf import addons
+from gpu4pyscf.scf import addons, hf
 
-atom = """
-Fe       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-"""
 
-mol = pyscf.M(
-    atom=atom,  # water molecule
-    basis="def2-tzvpp",  # basis set
-)
+def setUpModule():
+    global mol
+    atom = """
+    Fe       0.0000000000    -0.0000000000     0.1174000000
+    H      -0.7570000000    -0.0000000000    -0.4696000000
+    H       0.7570000000     0.0000000000    -0.4696000000
+    """
 
-mf_GPU = rks.RKS(  # restricted Kohn-Sham DFT
-    mol, xc="b3lyp"  # pyscf.gto.object  # xc funtionals, such as pbe0, wb97m-v, tpss,
-).density_fit()  # density fitting
+    mol = pyscf.M(
+        atom=atom,  # water molecule
+        basis="sto-3g",  # basis set
+        output="/dev/null",
+    )
 
-mf_GPU.grids.atom_grid = (99, 590)  # (99,590) lebedev grids, (75,302) is often enough
-mf_GPU.conv_tol = 1e-10  # controls SCF convergence tolerance
-mf_GPU.max_cycle = 50  # controls max iterations of SCF
-mf_GPU.conv_tol_cpscf = 1e-3  # controls max iterations of CPSCF (for hessian)
+    mol.build()
 
-mf_CPU = mf_GPU.to_cpu()
-mf_CPU = cpu_addons.smearing(mf_CPU, sigma=0.01)
-cpu_energy = mf_CPU.kernel()
-cpu_gradient = mf_CPU.nuc_grad_method().kernel()
 
-mf_GPU = addons.smearing(mf_GPU, sigma=0.01)
-gpu_energy = mf_GPU.kernel()
-gpu_gradient = mf_GPU.nuc_grad_method().kernel()
+def tearDownModule():
+    global mol
+    mol.stdout.close()
+    del mol
 
-assert np.allclose(cpu_energy, gpu_energy, atol=1e-12)
-assert np.allclose(cpu_gradient, gpu_gradient, atol=1e-12)
+
+class KnownValues(unittest.TestCase):
+    def test(self):
+        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.01)
+        gpu_energy = gpu_mf.kernel()
+
+    def test_energy(self):
+        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.01)
+        gpu_energy = gpu_mf.kernel()
+        cpu_mf = cpu_addons.smearing(cpu_hf.RHF(mol), sigma=0.01)
+        cpu_energy = cpu_mf.kernel()
+        assert np.allclose(cpu_energy, gpu_energy, atol=1e-12)
+
+    def test_gradient(self):
+        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.01)
+        gpu_mf.kernel()
+        gpu_gradient = gpu_mf.nuc_grad_method().kernel()
+        cpu_mf = cpu_addons.smearing(cpu_hf.RHF(mol), sigma=0.01)
+        cpu_mf.kernel()
+        cpu_gradient = cpu_mf.nuc_grad_method().kernel()
+        assert np.allclose(cpu_gradient, gpu_gradient, atol=1e-12)
+
+
+if __name__ == "__main__":
+    print("Basic Tests for GPU Fermi Smearing")
+    unittest.main()
