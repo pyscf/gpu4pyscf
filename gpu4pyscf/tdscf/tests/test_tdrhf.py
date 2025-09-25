@@ -49,6 +49,11 @@ class KnownValues(unittest.TestCase):
         dip = td.transition_dipole()
         self.assertAlmostEqual(lib.fp(np.linalg.norm(dip, axis=1)), -0.65616659, 5)
 
+        td_krylov_precond = mf.TDA()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel()[0]
+        self.assertAlmostEqual(abs(es_precond * 27.2114 - ref).max(), 0, 4)
+
         df_mf = self.df_mf
         td = df_mf.TDA().set(nstates=nstates)
         e = td.kernel()[0]
@@ -56,6 +61,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e[:len(ref)] - ref).max(), 0, 7)
         dip = td.transition_dipole()
         self.assertAlmostEqual(lib.fp(np.linalg.norm(dip, axis=1)), -0.65618093, 5)
+
+        td_krylov_precond = df_mf.TDA()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel()[0]
+        self.assertAlmostEqual(abs(es_precond - ref).max(), 0, 4)
 
     def test_tda_triplet(self):
         mf = self.mf
@@ -89,6 +99,11 @@ class KnownValues(unittest.TestCase):
         dip = td.transition_dipole()
         self.assertAlmostEqual(lib.fp(np.linalg.norm(dip, axis=1)), -0.64009191, 5)
 
+        td_krylov_precond = mf.TDHF()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel()[0]
+        self.assertAlmostEqual(abs(es_precond * 27.2114 - ref).max(), 0, 4)
+
         df_mf = self.df_mf
         td = df_mf.TDHF().set(nstates=nstates)
         e = td.kernel()[0]
@@ -96,6 +111,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(e[:len(ref)] - ref).max(), 0, 7)
         dip = td.transition_dipole()
         self.assertAlmostEqual(lib.fp(np.linalg.norm(dip, axis=1)), -0.64011895, 5)
+
+        td_krylov_precond = df_mf.TDHF()
+        td_krylov_precond.precond_method = 'precond'
+        es_precond = td_krylov_precond.kernel()[0]
+        self.assertAlmostEqual(abs(es_precond - ref).max(), 0, 4)
 
     def test_tdhf_triplet(self):
         mf = self.mf

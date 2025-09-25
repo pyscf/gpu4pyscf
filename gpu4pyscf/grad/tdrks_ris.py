@@ -168,14 +168,69 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         v1ao = vresp(dm + dm.T)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
-    z1 = cphf.solve(
-        fvind,
-        mo_energy,
-        mo_occ,
-        wvo,
-        max_cycle=td_grad.cphf_max_cycle,
-        tol=td_grad.cphf_conv_tol)[0]
-    z1 = z1.reshape(nvir, nocc)
+    if td_grad.precond_method is None:
+        z1 = cphf.solve(
+            fvind,
+            mo_energy,
+            mo_occ,
+            wvo,
+            max_cycle=td_grad.cphf_max_cycle,
+            tol=td_grad.cphf_conv_tol)[0]
+        z1 = z1.reshape(nvir, nocc)
+    elif td_grad.precond_method.lower()[0] == 'p':
+        e_a = mo_energy[mo_occ==0]
+        e_i = mo_energy[mo_occ>0]
+        hdiag = e_a[:,None] - e_i
+        def vind_vo(mo1):
+            v = fvind(mo1.reshape(nvir,nocc)).reshape(nvir,nocc)
+            v += mo1.reshape(nvir,nocc) * hdiag.reshape(nvir,nocc)
+            return v.reshape(nvir*nocc)
+        converged, solution_vectors = tdscf._krylov_tools.krylov_solver(
+                            matrix_vector_product=vind_vo, hdiag=hdiag.reshape(nvir*nocc),
+                            problem_type='linear', rhs=-wvo.reshape(1,nvir*nocc), # for krylov solver, rhs is -wvo
+                            conv_tol=td_grad.cphf_conv_tol, max_iter=td_grad.cphf_max_cycle,
+                            gram_schmidt=True, verbose=5, single=False)
+        z1 = solution_vectors.reshape(nvir, nocc)
+    elif td_grad.precond_method.lower()[0] == 'r':
+        e_a = mo_energy[mo_occ==0]
+        e_i = mo_energy[mo_occ>0]
+        hdiag = e_a[:,None] - e_i
+        def vind_vo(mo1):
+            v = fvind(mo1.reshape(nvir,nocc)).reshape(nvir,nocc)
+            v += mo1.reshape(nvir,nocc) * hdiag.reshape(nvir,nocc)
+            return v.reshape(nvir*nocc)
+        from gpu4pyscf.tdscf import ris
+        auxmol_J = ris.get_auxmol(mol=mol, theta=0.2, fitting_basis='sp')
+        auxmol_K = ris.get_auxmol(mol=mol, theta=0.2, fitting_basis='s')
+        mf_J = rks.RKS(mol).density_fit()
+        mf_J.with_df.auxmol = auxmol_J
+        mf_K = rks.RKS(mol).density_fit()
+        mf_K.with_df.auxmol = auxmol_K
+        def ris_xpy(x):
+            x = x.reshape(nvir, nocc)
+            dm = reduce(cp.dot, (orbv, x * 2, orbo.T))
+            v1ao = mf_J.get_j(mol, dm + dm.T, hermi=0)*2
+            v1ao -= mf_K.get_j(mol, dm + dm.T, hermi=0)
+            v1ao = reduce(cp.dot, (orbv.T, v1ao, orbo))
+            v1ao += x*hdiag
+            return v1ao.reshape(nvir*nocc)
+        
+        # ris_tmp = ris.StaticPolarizability(mf, single=False, a_x=1.0)
+        # ris_tmp.build()
+        # TDA_MVP = ris_tmp.get_ApB_hybrid_MVP()[0]
+        # def TDA_MVP_transpose(X):
+        #     X = X.reshape(1, nvir, nocc)
+        #     X = X.transpose(0,2,1)
+        #     X = X.reshape(1, nvir*nocc)
+        #     return TDA_MVP(X)
+
+        converged, solution_vectors = tdscf._krylov_tools.nested_krylov_solver(
+                            matrix_vector_product=vind_vo, hdiag=hdiag.reshape(nvir*nocc),
+                            init_mvp=ris_xpy, precond_mvp=ris_xpy, 
+                            problem_type='linear', rhs=-wvo.reshape(1,nvir*nocc), # for krylov solver, rhs is -wvo
+                            conv_tol=td_grad.cphf_conv_tol, max_iter=td_grad.cphf_max_cycle,
+                            gram_schmidt=True, verbose=5, single=False)
+        z1 = solution_vectors.reshape(nvir, nocc)
     time1 = log.timer('Z-vector using CPHF solver', *time0)
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
@@ -317,6 +372,10 @@ def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omeg
 
 
 class Gradients(tdrhf.Gradients):
+    
+    _keys = {'precond_method'}
+    precond_method = None
+
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
         Args:

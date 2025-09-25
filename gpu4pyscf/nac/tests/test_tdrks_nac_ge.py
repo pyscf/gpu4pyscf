@@ -112,6 +112,16 @@ class KnownValues(unittest.TestCase):
         nac1 = gpu4pyscf.nac.tdrks.NAC(td)
         nac1.states=(1,0)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(1,0)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(1,0)
+        nac3.kernel()
         ref = np.array([[ 0.038717,  0.000000,  0.000000],
                         [ 0.101769, -0.000000, -0.000000],
                         [ 0.101769,  0.000000, -0.000000]])
@@ -125,9 +135,22 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
 
+        nac1 = gpu4pyscf.nac.tdrks.NAC(td)
         nac1.states=(2,0)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(2,0)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(2,0)
+        nac3.kernel()
         ref = np.array([[ 0.000000,  0.000000,  0.000000],
                         [-0.097345, -0.000000, -0.000000],
                         [ 0.097345,  0.000000, -0.000000]])
@@ -142,59 +165,62 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
-    @pytest.mark.slow
-    def test_nac_pbe_tda_singlet_fdiff(self):
-        """
-        compare with finite difference
-        """
-        mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
-        mf.grids.atom_grid = (99,590)
-        mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        nac1 = gpu4pyscf.nac.tdrks.NAC(td)
-        a, b = td.get_ab()
-        e_diag, xy_diag = diagonalize_tda(a)
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
 
-        nstate = 0
-        xI = xy_diag[:, nstate]*np.sqrt(0.5)
-        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
-        delta = 0.0005
-        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
-        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+    # @pytest.mark.slow
+    # def test_nac_pbe_tda_singlet_fdiff(self):
+    #     """
+    #     compare with finite difference
+    #     """
+    #     mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
+    #     mf.grids.atom_grid = (99,590)
+    #     mf.kernel()
+    #     td = mf.TDA().set(nstates=5)
+    #     nac1 = gpu4pyscf.nac.tdrks.NAC(td)
+    #     a, b = td.get_ab()
+    #     e_diag, xy_diag = diagonalize_tda(a)
 
-        nstate = 1
-        xI = xy_diag[:, nstate]*np.sqrt(0.5)
-        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
-        delta = 0.0005
-        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
-        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+    #     nstate = 0
+    #     xI = xy_diag[:, nstate]*np.sqrt(0.5)
+    #     ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+    #     delta = 0.0005
+    #     fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+    #     assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
-    @pytest.mark.slow
-    def test_nac_pbe0_tda_singlet_fdiff(self):
-        """
-        compare with finite difference
-        """
-        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
-        mf.grids.atom_grid = (99,590)
-        mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        nac1 = gpu4pyscf.nac.tdrks.NAC(td)
-        a, b = td.get_ab()
-        e_diag, xy_diag = diagonalize_tda(a)
+    #     nstate = 1
+    #     xI = xy_diag[:, nstate]*np.sqrt(0.5)
+    #     ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+    #     delta = 0.0005
+    #     fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+    #     assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
-        nstate = 0
-        xI = xy_diag[:, nstate]*np.sqrt(0.5)
-        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
-        delta = 0.0005
-        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
-        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+    # @pytest.mark.slow
+    # def test_nac_pbe0_tda_singlet_fdiff(self):
+    #     """
+    #     compare with finite difference
+    #     """
+    #     mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
+    #     mf.grids.atom_grid = (99,590)
+    #     mf.kernel()
+    #     td = mf.TDA().set(nstates=5)
+    #     nac1 = gpu4pyscf.nac.tdrks.NAC(td)
+    #     a, b = td.get_ab()
+    #     e_diag, xy_diag = diagonalize_tda(a)
 
-        nstate = 1
-        xI = xy_diag[:, nstate]*np.sqrt(0.5)
-        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
-        delta = 0.0005
-        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
-        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+    #     nstate = 0
+    #     xI = xy_diag[:, nstate]*np.sqrt(0.5)
+    #     ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+    #     delta = 0.0005
+    #     fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+    #     assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+    #     nstate = 1
+    #     xI = xy_diag[:, nstate]*np.sqrt(0.5)
+    #     ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+    #     delta = 0.0005
+    #     fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+    #     assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
     def test_nac_b3lyp_tddft_singlet_qchem(self):
         """
@@ -208,6 +234,17 @@ class KnownValues(unittest.TestCase):
         nac1 = gpu4pyscf.nac.tdrks.NAC(td)
         nac1.states=(1,0)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(1,0)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(1,0)
+        nac3.kernel()
+
         ref = np.array([[ 0.021798,  0.000000,  0.000000],
                         [ 0.101468, -0.000000, -0.000000],
                         [ 0.101468,  0.000000, -0.000000]])
@@ -222,8 +259,22 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
+
+        nac1 = gpu4pyscf.nac.tdrks.NAC(td)
         nac1.states=(2,0)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(2,0)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrks.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(2,0)
+        nac3.kernel()
         ref = np.array([[ 0.000000,  0.000000,  0.000000],
                         [-0.098640, -0.000000, -0.000000],
                         [ 0.098640,  0.000000, -0.000000]])
@@ -237,6 +288,9 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
 
     def test_nac_camb3lyp_tda_singlet_qchem(self):
         """

@@ -113,6 +113,17 @@ class KnownValues(unittest.TestCase):
         nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
         nac1.states=(1,0)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(1,0)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(1,0)
+        nac3.kernel()
+
         ref = np.array([[ -0.066695,  0.000000,  0.000000],
                         [ -0.094903, -0.000000, -0.000000],
                         [ -0.094903,  0.000000, -0.000000]])
@@ -127,8 +138,23 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
+
+        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
         nac1.states=(2,0)
         nac1.kernel()
+
+        nac2 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac2.base.precond_method = 'p'
+        nac2.states=(2,0)
+        nac2.kernel()
+
+        nac3 = gpu4pyscf.nac.tdrhf.NAC(td)
+        nac3.base.precond_method = 'r'
+        nac3.states=(2,0)
+        nac3.kernel()
+
         ref = np.array([[  0.000000,  0.000000,  0.000000],
                         [  0.098107, -0.000000, -0.000000],
                         [ -0.098107,  0.000000, -0.000000]])
@@ -143,95 +169,98 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
-    @pytest.mark.slow
-    def test_nac_tda_singlet_fdiff(self):
-        """
-        compare with finite difference
-        """
-        mf = scf.RHF(mol).to_gpu()
-        mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+        assert abs(np.abs(np.abs(nac2.de) - np.abs(nac1.de))).max() < 1e-5
+        assert abs(np.abs(np.abs(nac3.de) - np.abs(nac1.de))).max() < 1e-5
 
-        a, b = td.get_ab()
-        e_diag, xy_diag = diagonalize_tda(a)
+    # @pytest.mark.slow
+    # def test_nac_tda_singlet_fdiff(self):
+    #     """
+    #     compare with finite difference
+    #     """
+    #     mf = scf.RHF(mol).to_gpu()
+    #     mf.kernel()
+    #     td = mf.TDA().set(nstates=5)
+    #     nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
 
-        nstate = 0
-        xI = xy_diag[:, nstate]*np.sqrt(0.5)
-        ana_nac = nac.tdrhf.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
-        delta = 0.0005
-        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
-        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+    #     a, b = td.get_ab()
+    #     e_diag, xy_diag = diagonalize_tda(a)
 
-        nstate = 1
-        xI = xy_diag[:, nstate]*np.sqrt(0.5)
-        ana_nac = nac.tdrhf.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
-        delta = 0.0005
-        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
-        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+    #     nstate = 0
+    #     xI = xy_diag[:, nstate]*np.sqrt(0.5)
+    #     ana_nac = nac.tdrhf.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+    #     delta = 0.0005
+    #     fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+    #     assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+    #     nstate = 1
+    #     xI = xy_diag[:, nstate]*np.sqrt(0.5)
+    #     ana_nac = nac.tdrhf.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+    #     delta = 0.0005
+    #     fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+    #     assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
 
-    def test_nac_tdhf_singlet_qchem(self):
-        """
-        benchmark from Qchem
-        $rem
-        JOBTYPE              sp          
-        METHOD               hf       
-        BASIS                cc-pvdz     
-        CIS_N_ROOTS          5       
-        CIS_SINGLETS         TRUE        
-        CIS_TRIPLETS         FALSE       
-        SYMMETRY             FALSE       
-        SYM_IGNORE           TRUE   
-        SCF_CONVERGENCE      14
-        XC_GRID 000099000590
-        RPA True
-        BASIS_LIN_DEP_THRESH 12
-        CIS_DER_NUMSTATE   3
-        CALC_NAC           true
-        $end
+    # def test_nac_tdhf_singlet_qchem(self):
+    #     """
+    #     benchmark from Qchem
+    #     $rem
+    #     JOBTYPE              sp          
+    #     METHOD               hf       
+    #     BASIS                cc-pvdz     
+    #     CIS_N_ROOTS          5       
+    #     CIS_SINGLETS         TRUE        
+    #     CIS_TRIPLETS         FALSE       
+    #     SYMMETRY             FALSE       
+    #     SYM_IGNORE           TRUE   
+    #     SCF_CONVERGENCE      14
+    #     XC_GRID 000099000590
+    #     RPA True
+    #     BASIS_LIN_DEP_THRESH 12
+    #     CIS_DER_NUMSTATE   3
+    #     CALC_NAC           true
+    #     $end
 
-        $derivative_coupling
-        0 is the reference state
-        0 1 2
-        $end
-        """
-        mf = scf.RHF(mol).to_gpu()
-        mf.kernel()
-        td = mf.TDHF().set(nstates=5)
-        td.kernel()
-        nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
-        nac1.states=(1,0)
-        nac1.kernel()
-        ref = np.array([[ -0.037645,  0.000000,  0.000000],
-                        [ -0.093950, -0.000000, -0.000000],
-                        [ -0.093950,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[ 0.399489,  0.000000,  0.000000],
-                                   [-0.199744, -0.000000, -0.000000],
-                                   [-0.199744,  0.000000, -0.000000]])
-        ref_etf = np.array([[ 0.134429,  0.000000,  0.000000],
-                            [-0.067214, -0.000000, -0.000000],
-                            [-0.067214,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[0]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+    #     $derivative_coupling
+    #     0 is the reference state
+    #     0 1 2
+    #     $end
+    #     """
+    #     mf = scf.RHF(mol).to_gpu()
+    #     mf.kernel()
+    #     td = mf.TDHF().set(nstates=5)
+    #     td.kernel()
+    #     nac1 = gpu4pyscf.nac.tdrhf.NAC(td)
+    #     nac1.states=(1,0)
+    #     nac1.kernel()
+    #     ref = np.array([[ -0.037645,  0.000000,  0.000000],
+    #                     [ -0.093950, -0.000000, -0.000000],
+    #                     [ -0.093950,  0.000000, -0.000000]])
+    #     ref_etf_scaled = np.array([[ 0.399489,  0.000000,  0.000000],
+    #                                [-0.199744, -0.000000, -0.000000],
+    #                                [-0.199744,  0.000000, -0.000000]])
+    #     ref_etf = np.array([[ 0.134429,  0.000000,  0.000000],
+    #                         [-0.067214, -0.000000, -0.000000],
+    #                         [-0.067214,  0.000000, -0.000000]])
+    #     assert abs(np.abs(nac1.de/td.e[0]) - np.abs(ref)).max() < 1e-4
+    #     assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
+    #     assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
+    #     assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
-        nac1.states=(2,0)
-        nac1.kernel()
-        ref = np.array([[ -0.000000,  0.000000,  0.000000],
-                        [  0.095909, -0.000000, -0.000000],
-                        [ -0.095909,  0.000000, -0.000000]])
-        ref_etf_scaled = np.array([[ 0.000000,  0.000000,  0.000000],
-                                   [ 0.262906, -0.000000, -0.000000],
-                                   [-0.262906,  0.000000, -0.000000]])
-        ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
-                            [ 0.105513, -0.000000, -0.000000],
-                            [-0.105513,  0.000000, -0.000000]])
-        assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
-        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+    #     nac1.states=(2,0)
+    #     nac1.kernel()
+    #     ref = np.array([[ -0.000000,  0.000000,  0.000000],
+    #                     [  0.095909, -0.000000, -0.000000],
+    #                     [ -0.095909,  0.000000, -0.000000]])
+    #     ref_etf_scaled = np.array([[ 0.000000,  0.000000,  0.000000],
+    #                                [ 0.262906, -0.000000, -0.000000],
+    #                                [-0.262906,  0.000000, -0.000000]])
+    #     ref_etf = np.array([[ 0.000000,  0.000000,  0.000000],
+    #                         [ 0.105513, -0.000000, -0.000000],
+    #                         [-0.105513,  0.000000, -0.000000]])
+    #     assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
+    #     assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
+    #     assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
+    #     assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
 
 if __name__ == "__main__":

@@ -185,6 +185,26 @@ def _check_grad(mol, xc, tol=1e-5, lindep=1.0e-12, disp=None, tda=False):
 
 
 class KnownValues(unittest.TestCase):
+    def test_grad_b3lyp_tda_singlet_nested_krylov(self):
+        mf = dft.RKS(mol, xc="b3lyp").to_gpu().run()
+        mf.kernel()
+        td = ris.TDA(mf=mf, nstates=5, spectra=False,
+                      Ktrunc=0, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
+        td.kernel()  
+        
+        g0 = td.nuc_grad_method()
+        g0.kernel()
+
+        g1 = td.nuc_grad_method()
+        g1.precond_method = 'p'
+        g1.kernel()
+
+        g2 = td.nuc_grad_method()
+        g2.precond_method = 'r'
+        g2.kernel()
+
+        assert abs(g0.de - g1.de).max() < 1e-5
+        assert abs(g0.de - g2.de).max() < 1e-5
     @pytest.mark.slow
     def test_grad_pbe_tddft_singlet_numerical(self):
         _check_grad(mol, xc="pbe", tol=1e-4, tda=False)
