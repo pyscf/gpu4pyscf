@@ -33,6 +33,7 @@ References:
 
 import numpy as np
 import time
+import sys
 
 import logging
 from typing import Tuple, Optional, List
@@ -110,6 +111,7 @@ class FSSH:
         self.dt = 0.5 * FS2AUTIME  # Default: 0.5 fs in atomic units
         self.nsteps = 1
         self.output_dir = Path('.')
+        self.filename = 'trajectory.xyz'
         
         # Override defaults with user-provided parameters
         for key, value in kwargs.items():
@@ -124,6 +126,10 @@ class FSSH:
             elif key == 'output_dir':
                 self.output_dir = Path(value)
                 self.output_dir.mkdir(parents=True, exist_ok=True)
+            elif key == 'filename':
+                self.filename = value
+                if not self.filename.endswith('.xyz'):
+                    self.filename = self.filename + '.xyz'
             else:
                 setattr(self, key, value)
         
@@ -450,7 +456,7 @@ class FSSH:
                          velocity: np.ndarray,
                          energy: np.ndarray, 
                          coeffs: np.ndarray, 
-                         filename: str = 'trajectory.xyz') -> None:
+                         ) -> None:
         """
         Write current trajectory frame to XYZ file with comprehensive metadata.
         
@@ -462,7 +468,7 @@ class FSSH:
             coeffs (np.ndarray): Quantum coefficients
             filename (str): Output filename
         """
-        filepath = self.output_dir / filename
+        filepath = self.output_dir / self.filename
         mode = 'w' if step == 0 else 'a'
         
         with open(filepath, mode) as f:
@@ -482,8 +488,50 @@ class FSSH:
             for i, coord in enumerate(position):
                 symbol = self.tddft.mol.atom_pure_symbol(i)
                 x, y, z = coord / A2BOHR  # Convert to Angstrom
-                f.write(f'{symbol:4.2s} {x:12.6f} {y:12.6f} {z:12.6f}\n')
+                f.write(f'{symbol:4s} {x:12.6f} {y:12.6f} {z:12.6f}\n')
     
+    def write_restart(self,
+                         step: int,
+                         position: np.ndarray,
+                         velocity: np.ndarray,
+                         energy: np.ndarray,
+                         coeffs: np.ndarray,
+                         ) -> None:
+        """
+        Write current simulation state to a restart file.
+
+        The restart file stores coordinates, velocities, and quantum coefficients.
+        The file is overwritten at each step to save space.
+
+        Args:
+            step (int): Current simulation step
+            position (np.ndarray): Nuclear coordinates in Bohr
+            velocity (np.ndarray): Nuclear velocities in atomic units
+            energy (np.ndarray): Electronic energies in Hartree
+            coeffs (np.ndarray): Quantum coefficients
+        """
+        filepath = self.output_dir / self.filename.replace('.xyz', '.rst')
+        # Always overwrite the restart file
+        with open(filepath, 'w') as f:
+            # Write number of atoms
+            f.write(f'{self.tddft.mol.natm}\n')
+
+            # Write comment line with simulation data
+            time_fs = step * self.dt / FS2AUTIME
+            current_energy = energy[self.states.index(self.cur_state)]
+
+            comment = (f'Step {step}, Time {time_fs:.3f} fs, '
+                       f'State {self.cur_state}, Energy {current_energy:.8f} Ha, '
+                       f'Coefficient {coeffs}')
+            f.write(comment + '\n')
+
+            # Write atomic coordinates and velocities
+            for i, (coord, vel) in enumerate(zip(position, velocity)):
+                symbol = self.tddft.mol.atom_pure_symbol(i)
+                x, y, z = coord / A2BOHR  # Convert to Angstrom
+                vx, vy, vz = vel # atomic units
+                f.write(f'{symbol:4s} {x:12.6f} {y:12.6f} {z:12.6f} {vx:12.6f} {vy:12.6f} {vz:12.6f}\n')
+
     def print_step_info(self, 
                         step: int, 
                         total_time: float, 
@@ -561,6 +609,7 @@ class FSSH:
         
         # Write initial trajectory frame
         self.write_trajectory(0, position, velocity, energy, coefficient)
+        self.write_restart(0, position, velocity, energy, coefficient)
         
         total_time = 0.0
         
@@ -603,8 +652,12 @@ class FSSH:
                     logger.info(f"Hop: {old_state} → {self.cur_state} at step {i + 1}")
 
                 else:
+                    ke = (0.5 * self.mass * velocity ** 2).sum()
                     logger.debug(f"Hop to state {self.states[hop_index]} rejected "
-                                 f"due to insufficient kinetic energy")
+                                 f"due to insufficient kinetic energy, "
+                                 f"current kinetic energy: {ke:.8f} Ha"
+                                 f"energy difference: {energy[cur_idx] - energy[hop_index]:.8f} Ha")
+                    
             
             # 7. update nuclear velocity within a half time step
             velocity = velocity + 0.5 * self.dt * force / self.mass
@@ -616,6 +669,8 @@ class FSSH:
             # coefficient = self.decoherence(coefficient, velocity, energy)
             
             self.write_trajectory(i + 1, position, velocity, energy, coefficient)   
+            self.write_restart(i + 1, position, velocity, energy, coefficient)
+
             self.print_step_info(i + 1, total_time, energy, coefficient)
         
         # Simulation completed successfully
