@@ -16,13 +16,33 @@ from functools import reduce
 
 import cupy
 import scipy
-from pyscf import __config__, lib
-from pyscf.pbc.tools import print_mo_energy_occ
 
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
+from pyscf import __config__, lib
 
 SMEARING_METHOD = getattr(__config__, "pbc_scf_addons_smearing_method", "fermi")
+
+
+def print_mo_energy_occ(mf, mo_energy, mo_occ, is_uhf):
+
+    if is_uhf:
+        nocc = len(mo_energy[0])
+        cupy.set_printoptions(precision=6, threshold=nocc, suppress=True)
+        logger.debug(mf, "  alpha mo_energy/mo_occ")
+        logger.debug(mf, "  %s", mo_energy[0])
+        logger.debug(mf, "  %s", mo_occ[0])
+        logger.debug(mf, "  beta  mo_energy/mo_occ")
+        logger.debug(mf, "  %s", mo_energy[1])
+        logger.debug(mf, "  %s", mo_occ[1])
+        cupy.set_printoptions()
+    else:
+        nocc = len(mo_energy)
+        cupy.set_printoptions(precision=6, threshold=nocc, suppress=True)
+        logger.debug(mf, "  mo_energy/mo_occ")
+        logger.debug(mf, "  %s", mo_energy)
+        logger.debug(mf, "  %s", mo_occ)
+        cupy.set_printoptions()
 
 
 def _fermi_smearing_occ(mu, mo_energy, sigma):
