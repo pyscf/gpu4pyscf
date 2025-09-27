@@ -119,35 +119,31 @@ void cache_fac(double *fx, double *ri){
 __device__
 void block_reduce(double val, double *d_out) {
     __shared__ double sdata[THREADS];
-    unsigned int tid = threadIdx.x;
+    const unsigned int tid = threadIdx.x;
 
     sdata[tid] = val;
     __syncthreads();
 
     // Perform reduction in shared memory.
     // Reduce the data until 32 threads remain.
-    for (unsigned int s = THREADS / 2; s > 32; s >>= 1) {
+    for (unsigned int s = THREADS / 2; s >= 32; s >>= 1) {
         if (tid < s) {
             sdata[tid] += sdata[tid + s];
         }
         __syncthreads();
     }
 
-    // Unroll the final warp (32 threads) without __syncthreads().
     if (tid < 32) {
-        // Use a volatile pointer to ensure memory loads/stores are not optimized away.
-        volatile double *vsmem = sdata;
-        vsmem[tid] += vsmem[tid + 32];
-        vsmem[tid] += vsmem[tid + 16];
-        vsmem[tid] += vsmem[tid + 8];
-        vsmem[tid] += vsmem[tid + 4];
-        vsmem[tid] += vsmem[tid + 2];
-        vsmem[tid] += vsmem[tid + 1];
-    }
-
-    // The first thread writes the block's final result to global memory.
-    if (tid == 0) {
-        d_out[0] += sdata[0];
+        double value = sdata[tid]; // load to register
+        unsigned int mask = __activemask(); // all lanes in warp 0 are active
+        value += __shfl_down_sync(mask, value, 16);
+        value += __shfl_down_sync(mask, value, 8);
+        value += __shfl_down_sync(mask, value, 4);
+        value += __shfl_down_sync(mask, value, 2);
+        value += __shfl_down_sync(mask, value, 1);
+        if (tid == 0) {
+            d_out[0] += value;
+        }
     }
     __syncthreads();
 }
