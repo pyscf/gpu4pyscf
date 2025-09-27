@@ -1,5 +1,5 @@
 import numpy as np
-from fssh import FSSH
+from fssh_scan import FSSH
 import pyscf
 import gpu4pyscf
 
