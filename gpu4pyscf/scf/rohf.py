@@ -120,7 +120,15 @@ class ROHF(hf.RHF):
         return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
     def eig(self, fock, s):
-        e, c = self._eigh(fock, s)
+        x = None
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            x = cupy.asarray(self.overlap_canonical_decomposed_x)
+        if x is None:
+            e, c = self._eigh(fock, s)
+        else:
+            e, c = cupy.linalg.eigh(x.T @ fock @ x)
+            c = x @ c
+
         if getattr(fock, 'focka', None) is not None:
             mo_ea = contract('pi,pi->i', c.conj(), fock.focka.dot(c)).real
             mo_eb = contract('pi,pi->i', c.conj(), fock.fockb.dot(c)).real
@@ -168,6 +176,10 @@ class ROHF(hf.RHF):
         if cycle < 0 and diis is None:  # Not inside the SCF iteration
             return f
 
+        overlap_x = None
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            overlap_x = cupy.asarray(self.overlap_canonical_decomposed_x)
+
         if diis_start_cycle is None:
             diis_start_cycle = self.diis_start_cycle
         if level_shift_factor is None:
@@ -179,7 +191,7 @@ class ROHF(hf.RHF):
         if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4 and fock_last is not None:
             raise NotImplementedError('ROHF Fock-damping')
         if diis and cycle >= diis_start_cycle:
-            f = diis.update(s1e, dm_tot, f, self, h1e, vhf, f_prev=fock_last)
+            f = diis.update(s1e, dm_tot, f, overlap_x)
         if abs(level_shift_factor) > 1e-4:
             f = hf.level_shift(s1e, dm_tot*.5, f, level_shift_factor)
         f = tag_array(f, focka=focka, fockb=fockb)
