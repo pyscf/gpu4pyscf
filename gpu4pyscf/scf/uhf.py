@@ -74,6 +74,10 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if dm is None: dm = mf.make_rdm1()
     s1e = cupy.asarray(s1e)
     dm = cupy.asarray(dm)
+
+    overlap_x = None
+    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
+        overlap_x = cupy.asarray(mf.overlap_canonical_decomposed_x)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -94,7 +98,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = (damping(s1e, dm[0], f[0], dampa),
              damping(s1e, dm[1], f[1], dampb))
     if diis and cycle >= diis_start_cycle:
-        f = diis.update(s1e, dm, f, mf, h1e, vhf)
+        f = diis.update(s1e, dm, f, overlap_x)
     if abs(shifta)+abs(shiftb) > 1e-4:
         f = (level_shift(s1e, dm[0], f[0], shifta),
              level_shift(s1e, dm[1], f[1], shiftb))
@@ -246,8 +250,17 @@ class UHF(hf.SCF):
         return make_rdm1(mo_coeff, mo_occ, **kwargs)
 
     def eig(self, fock, s):
-        e_a, c_a = self._eigh(fock[0], s)
-        e_b, c_b = self._eigh(fock[1], s)
+        x = None
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            x = cupy.asarray(self.overlap_canonical_decomposed_x)
+        if x is None:
+            e_a, c_a = self._eigh(fock[0], s)
+            e_b, c_b = self._eigh(fock[1], s)
+        else:
+            e_a, c_a = cupy.linalg.eigh(x.T @ fock[0] @ x)
+            c_a = x @ c_a
+            e_b, c_b = cupy.linalg.eigh(x.T @ fock[1] @ x)
+            c_b = x @ c_b
         return cupy.stack((e_a,e_b)), cupy.stack((c_a,c_b))
 
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):

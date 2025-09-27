@@ -78,6 +78,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
             s1e = mf.get_ovlp(mol)
             fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
             mf.mo_energy, mf.mo_coeff = mf.eig(fock, s1e)
+            fock = s1e = None
             mf.mo_occ = mf.get_occ(mf.mo_energy, mf.mo_coeff)
             mf.converged = scf_conv
         return e_tot
@@ -92,7 +93,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         # the input matrices. The input can be overwritten so as to reduce GPU
         # memory footprint.
         s1e = asarray(mf.get_ovlp(mol))
-        c = eigh(unpack_tril(asarray(h1e)), s1e, overwrite=True)[1]
+        c = mf.eig(unpack_tril(asarray(h1e)), s1e)[1]
         mf_diis.Corth = c.get()
         s1e = c = None
     else:
@@ -201,8 +202,8 @@ class RHFWfn(WaveFunction):
         return dm
 
 class CDIIS(diis.CDIIS):
-    def update(self, s, d, f, *args, **kwargs):
-        out = super().update(s, d, f, *args, **kwargs)
+    def update(self, s, d, f, x, *args, **kwargs):
+        out = super().update(s, d, f, x, *args, **kwargs)
         if isinstance(self.Corth, cp.ndarray):
             # Store Corth on host to reduce GPU memory pressure
             self.Corth = self.Corth.get()
@@ -228,7 +229,10 @@ class RHF(hf.RHF):
         if mol.spin != 0:
             raise RuntimeError(
                 f'Invalid number of electrons {mol.nelectron} for RHF method.')
-        return self
+        return_value = super(type(self), self).check_sanity()
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            self.overlap_canonical_decomposed_x = self.overlap_canonical_decomposed_x.get()
+        return return_value
 
     def get_hcore(self, mol=None):
         '''The lower triangular part of Hcore'''
@@ -327,6 +331,10 @@ class RHF(hf.RHF):
         if s1e.shape[-1] != f.shape[-1]:
             s1e = unpack_tril(s1e)
 
+        overlap_x = None
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            overlap_x = asarray(self.overlap_canonical_decomposed_x)
+
         if diis_start_cycle is None:
             diis_start_cycle = self.diis_start_cycle
         if level_shift_factor is None:
@@ -337,7 +345,7 @@ class RHF(hf.RHF):
         if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4:
             f = hf.damping(s1e, dm*.5, f, damp_factor)
         if diis is not None and cycle >= diis_start_cycle:
-            f = diis.update(s1e, dm, f)
+            f = diis.update(s1e, dm, f, overlap_x)
             cp.get_default_memory_pool().free_all_blocks()
 
         if abs(level_shift_factor) > 1e-4:
@@ -378,14 +386,26 @@ class RHF(hf.RHF):
         return e_tot, e_coul
 
     def _eigh(self, h, s):
-        # In DIIS, fock and overlap matrices are temporarily constructed and
-        # discarded, they can be overwritten in the eigh solver.
-        e, c = eigh(h, s, overwrite=True)
-        # eigh allocates a large memory buffer "work". Immediately free the cupy
-        # memory after the eigh function to avoid this buffer being trapped by
-        # small-sized arrays.
+        x = None
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            x = asarray(self.overlap_canonical_decomposed_x)
+        if x is None:
+            # In DIIS, fock and overlap matrices are temporarily constructed and
+            # discarded, they can be overwritten in the eigh solver.
+            e, c = eigh(h, s, overwrite=True)
+            # eigh allocates a large memory buffer "work". Immediately free the cupy
+            # memory after the eigh function to avoid this buffer being trapped by
+            # small-sized arrays.
+        else:
+            h_no_lindep = x.T @ h @ x
+            e, c = cp.linalg.eigh(h_no_lindep)
+            h_no_lindep = None
+            c = x @ c
+            x = None
         cp.get_default_memory_pool().free_all_blocks()
         return e, c
+
+    eig = _eigh
 
     def to_cpu(self):
         raise NotImplementedError
