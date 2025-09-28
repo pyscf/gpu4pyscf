@@ -229,7 +229,9 @@ class RHF(hf.RHF):
         if mol.spin != 0:
             raise RuntimeError(
                 f'Invalid number of electrons {mol.nelectron} for RHF method.')
-        return_value = super(type(self), self).check_sanity()
+        # If you wonder why I need to explicitly pass in parameters for super() function,
+        # it's because in dft.rks_lowmem.RKS, this method is copied, rather than inheriented.
+        return_value = super(hf.RHF, self).check_sanity()
         if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
             self.overlap_canonical_decomposed_x = self.overlap_canonical_decomposed_x.get()
         return return_value
