@@ -202,8 +202,8 @@ class RHFWfn(WaveFunction):
         return dm
 
 class CDIIS(diis.CDIIS):
-    def update(self, s, d, f, x, *args, **kwargs):
-        out = super().update(s, d, f, x, *args, **kwargs)
+    def update(self, s, d, f, *args, x = None, **kwargs):
+        out = super().update(s, d, f, *args, x = x, **kwargs)
         if isinstance(self.Corth, cp.ndarray):
             # Store Corth on host to reduce GPU memory pressure
             self.Corth = self.Corth.get()
@@ -345,7 +345,7 @@ class RHF(hf.RHF):
         if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4:
             f = hf.damping(s1e, dm*.5, f, damp_factor)
         if diis is not None and cycle >= diis_start_cycle:
-            f = diis.update(s1e, dm, f, overlap_x)
+            f = diis.update(s1e, dm, f, x = overlap_x)
             cp.get_default_memory_pool().free_all_blocks()
 
         if abs(level_shift_factor) > 1e-4:

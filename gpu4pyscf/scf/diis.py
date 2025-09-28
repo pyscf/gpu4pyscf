@@ -47,7 +47,7 @@ class CDIIS(lib.diis.DIIS):
         self.Corth = None
         self.space = 8
 
-    def update(self, s, d, f, x=None, *args, **kwargs):
+    def update(self, s, d, f, *args, x=None, **kwargs):
         errvec = self._sdf_err_vec(s, d, f, x)
         if self.incore is None:
             mem_avail = get_avail_mem()

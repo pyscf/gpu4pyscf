@@ -98,7 +98,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = (damping(s1e, dm[0], f[0], dampa),
              damping(s1e, dm[1], f[1], dampb))
     if diis and cycle >= diis_start_cycle:
-        f = diis.update(s1e, dm, f, overlap_x)
+        f = diis.update(s1e, dm, f, x = overlap_x)
     if abs(shifta)+abs(shiftb) > 1e-4:
         f = (level_shift(s1e, dm[0], f[0], shifta),
              level_shift(s1e, dm[1], f[1], shiftb))

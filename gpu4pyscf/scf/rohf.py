@@ -191,7 +191,7 @@ class ROHF(hf.RHF):
         if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4 and fock_last is not None:
             raise NotImplementedError('ROHF Fock-damping')
         if diis and cycle >= diis_start_cycle:
-            f = diis.update(s1e, dm_tot, f, overlap_x)
+            f = diis.update(s1e, dm_tot, f, x = overlap_x)
         if abs(level_shift_factor) > 1e-4:
             f = hf.level_shift(s1e, dm_tot*.5, f, level_shift_factor)
         f = tag_array(f, focka=focka, fockb=fockb)
