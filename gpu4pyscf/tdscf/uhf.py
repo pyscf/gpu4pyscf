@@ -975,7 +975,7 @@ class SpinFlipTDA(TDBase):
             mf = self._scf
             ni = mf._numint
             if not ni.libxc.is_hybrid_xc(mf.xc):
-                self.converged = [True,]
+                self.converged = [True for _ in range(self.nstates)]
                 self.e, xs = self._init_guess(self._scf, self.nstates)
                 self.xy = [(x, 0) for x in xs]
                 self._finalize()

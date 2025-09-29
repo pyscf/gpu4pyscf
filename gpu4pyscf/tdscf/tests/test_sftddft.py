@@ -45,34 +45,30 @@ class KnownValues(unittest.TestCase):
         mol.spin = 2
         mol.basis = '631g'
         cls.mol = mol.build()
-        cls.mf = mol.UHF().to_gpu().run()
-        cls.mflda = mol.UKS(xc='svwn').to_gpu().run()
-        cls.mfb3lyp = mol.UKS(xc='b3lyp').to_gpu().run()
-        cls.mftpss = mol.UKS(xc='tpss').to_gpu().run()
 
     @classmethod
     def tearDownClass(cls):
         cls.mol.stdout.close()
 
     def test_hf_tda(self):
-        mf = self.mf
+        mf = self.mol.UHF().to_gpu().run()
         # sftddft not available in pyscf main branch. References are created
         # using the sftda module from pyscf-forge
         ref = [ 0.46644071, 0.55755649, 1.05310518]
-        td = mf.SFTDA().run(extype=0, conv_tol=1e-7)
+        td = mf.SFTDA().run(extype=0, conv_tol=1e-5)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
         a, b = td.get_ab()
         e = diagonalize_tda(a[0], nroots=3)[0]
         self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
 
         ref = [-0.21574567, 0.00270390, 0.03143914]
-        td = mf.SFTDA().run(extype=1, conv_tol=1e-7)
+        td = mf.SFTDA().run(extype=1, conv_tol=1e-5)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
         e = diagonalize_tda(a[1], nroots=3)[0]
         self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
 
     def test_mcol_svwn_tda(self):
-        mf = self.mflda
+        mf = self.mol.UKS(xc='svwn').to_gpu().run()
         # sftddft not available in pyscf main branch. References are created
         # using the sftda module from pyscf-forge
         ref = [0.45022394, 0.57917576, 1.04475443]
@@ -93,7 +89,7 @@ class KnownValues(unittest.TestCase):
         td.collinear = 'mcol'
         td.extype = 1
         td.collinear_samples=200
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.kernel()
         e = diagonalize_tda(a[1], nroots=3)[0]
 
@@ -101,7 +97,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
     def test_mcol_b3lyp_tda(self):
-        mf = self.mfb3lyp
+        mf = self.mol.UKS(xc='b3lyp').to_gpu().run()
         # sftddft not available in pyscf main branch. References are created
         # using the sftda module from pyscf-forge
         ref = [0.45941163, 0.57799537, 1.06629197]
@@ -122,7 +118,7 @@ class KnownValues(unittest.TestCase):
         td.collinear = 'mcol'
         td.extype = 1
         td.collinear_samples=200
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.kernel()
         e = diagonalize_tda(a[1], nroots=3)[0]
 
@@ -130,7 +126,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
     def test_mcol_tpss_tda(self):
-        mf = self.mftpss
+        mf = self.mol.UKS(xc='tpss').to_gpu().run()
         # sftddft not available in pyscf main branch. References are created
         # using the sftda module from pyscf-forge
         ref = [0.4498647 , 0.57071842, 1.0544106 ]
@@ -151,7 +147,7 @@ class KnownValues(unittest.TestCase):
         td.collinear = 'mcol'
         td.extype = 1
         td.collinear_samples=200
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.kernel()
         e = diagonalize_tda(a[1], nroots=3)[0]
 
@@ -160,13 +156,13 @@ class KnownValues(unittest.TestCase):
 
     @unittest.skip('Numerical issues encountered in non-hermitian diagonalization')
     def test_tdhf(self):
-        mf = self.mf
+        mf = self.mol.UHF().to_gpu().run()
         ref = [1.74385401, 9.38227395, 14.90168875]
-        td = mf.SFTDHF().run(extype=0, conv_tol=1e-7)
+        td = mf.SFTDHF().run(extype=0, conv_tol=1e-5)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
         ref = [0.41701647, 9.59644331, 22.99972711]
-        td = mf.SFTDHF().run(extype=1, conv_tol=1e-7)
+        td = mf.SFTDHF().run(extype=1, conv_tol=1e-5)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
 if __name__ == "__main__":

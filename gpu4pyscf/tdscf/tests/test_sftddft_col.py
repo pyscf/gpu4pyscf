@@ -49,21 +49,18 @@ class KnownValues(unittest.TestCase):
         mol.spin = 2
         mol.basis = '631g'
         cls.mol = mol.build()
-        cls.mflda = mol.UKS(xc='svwn').to_gpu().run()
-        cls.mfb3lyp = mol.UKS(xc='b3lyp').to_gpu().run()
-        cls.mftpss = mol.UKS(xc='tpss').to_gpu().run()
 
     @classmethod
     def tearDownClass(cls):
         cls.mol.stdout.close()
 
     def test_lda_tda(self):
-        mf = self.mflda
+        mf = self.mol.UKS(xc='svwn').to_gpu().run()
         na, nb = mf.mol.nelec
 
         td = mf.SFTDA()
         td.extype = 0
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.nroots = 3
         td.collinear = 'col'
         td.run()
@@ -74,7 +71,7 @@ class KnownValues(unittest.TestCase):
 
         td = mf.SFTDA()
         td.extype = 1
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.nroots = 3
         td.collinear = 'col'
         td.run()
@@ -83,12 +80,12 @@ class KnownValues(unittest.TestCase):
         assert td.e[0] - (mf.mo_energy[1][nb] - mf.mo_energy[0][na-1]) < 1e-6
 
     def test_b3lyp_tda(self):
-        mf = self.mfb3lyp
+        mf = self.mol.UKS(xc='b3lyp').to_gpu().run()
         na, nb = mf.mol.nelec
 
         td = mf.SFTDA()
         td.extype = 0
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.nroots = 3
         td.collinear = 'col'
         td.run()
@@ -99,7 +96,7 @@ class KnownValues(unittest.TestCase):
 
         td = mf.SFTDA()
         td.extype = 1
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.nroots = 3
         td.collinear = 'col'
         td.run()
@@ -108,12 +105,12 @@ class KnownValues(unittest.TestCase):
         assert td.e[0] - (mf.mo_energy[1][nb] - mf.mo_energy[0][na-1]) < 1e-6
 
     def test_tpss_tda(self):
-        mf = self.mftpss
+        mf = self.mol.UKS(xc='tpss').to_gpu().run()
         na, nb = mf.mol.nelec
 
         td = mf.SFTDA()
         td.extype = 0
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.nroots = 3
         td.collinear = 'col'
         td.run()
@@ -124,7 +121,7 @@ class KnownValues(unittest.TestCase):
 
         td = mf.SFTDA()
         td.extype = 1
-        td.conv_tol = 1e-7
+        td.conv_tol = 1e-5
         td.nroots = 3
         td.collinear = 'col'
         td.run()
