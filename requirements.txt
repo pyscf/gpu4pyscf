@@ -1,5 +1,5 @@
 cutensor-cu12==2.2.0
-gpu4pyscf-libxc-cuda12x==0.5.0
+gpu4pyscf-libxc-cuda12x==0.7.0
 cupy-cuda12x==13.4.1
 pyscf==2.8.0
 basis-set-exchange==0.11
