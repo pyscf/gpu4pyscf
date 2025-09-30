@@ -438,7 +438,7 @@ class Grids(lib.StreamObject):
     alignment    = ALIGNMENT_UNIT
     cutoff       = CUTOFF
     _keys        = gen_grid_cpu.Grids._keys.union({
-        'grid_sorting_index', 'atm_idx', 'padding'
+        'grid_sorting_index', 'atm_idx', 'padding', 'quadrature_weights'
     })
 
     __init__   = gen_grid_cpu.Grids.__init__
