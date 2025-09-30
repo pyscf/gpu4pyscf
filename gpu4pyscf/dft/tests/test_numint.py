@@ -270,19 +270,19 @@ H   1.7   -2.0   0.4''',
                     assert all(np.array_equal(r, x) for r, x in zip(ref[1:], dat[i][1:]))
 
     def test_scale_ao(self):
-        ao = cupy.random.rand((1, 3, 256))
-        wv = cupy.random.rand((1, 256))
-        out = cupy.ones(3 * 256)
+        ao = cupy.random.rand(1, 3, 256)
+        wv = cupy.random.rand(1, 256)
+        out = cupy.ones(6 * 256)
         ref = cupy.einsum('nip,np->ip', ao, wv)
         assert abs(ref - numint._scale_ao(ao, wv)).max() < 1e-12
         assert abs(ref - numint._scale_ao(ao, wv, out=out)).max() < 1e-12
+        assert abs(ref - numint._scale_ao(ao+0j, wv, out=out)).max() < 1e-12
+        assert abs(ref - numint._scale_ao(ao[0]+0j, wv[0], out=out)).max() < 1e-12
 
         ao = ao.transpose(1, 0, 2).copy(order='C').transpose(1, 0, 2)
-        assert abs(ref - numint._scale_ao(ao, wv, out)).max() < 1e-12
-        assert abs(ref - numint._scale_ao(ao+0j, wv, out)).max() < 1e-12
+        assert abs(ref - numint._scale_ao(ao, wv)).max() < 1e-12
 
         assert abs(ref - numint._scale_ao(ao[0], wv[0])).max() < 1e-12
-        assert abs(ref - numint._scale_ao(ao[0]+0j, wv[0])).max() < 1e-12
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

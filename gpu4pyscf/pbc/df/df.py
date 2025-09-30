@@ -189,12 +189,12 @@ class GDF(lib.StreamObject):
             kk_conserv = k2gamma.double_translation_indices(self.kmesh)
             out_buf = ndarray(blksize*nkpts*nao**2, np.complex128, buffer=out)
 
-        cderi_buf = ndarray(blksize*nkpts*npairs, np.complex128, buffer=out)
+        cderi_buf = ndarray(blksize*npairs, np.complex128, buffer=out)
         for k_aux, p0, p1 in aux_iter:
             tmp = self._cderi[k_aux][p0:p1,:]
             if tmp.size == 0:
                 return
-            out = cp.ndarray(tmp.shape, dtype=tmp.dtype, memptr=cderi_buf.data)
+            out = ndarray(tmp.shape, dtype=tmp.dtype, buffer=cderi_buf)
             out.set(tmp)
             if unpack:
                 out = rsdf_builder.unpack_cderi(
