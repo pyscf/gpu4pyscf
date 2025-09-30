@@ -22,7 +22,7 @@ from gpu4pyscf.dft import Grids
 from gpu4pyscf.dft import numint
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
-from gpu4pyscf.dft import numint, gen_grid
+from gpu4pyscf.dft import gen_grid
 
 def setUpModule():
     global mol, grids_cpu, grids_gpu, dm, dm0, dm1, mo_occ, mo_coeff
