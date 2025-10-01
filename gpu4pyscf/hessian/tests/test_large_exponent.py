@@ -1,0 +1,201 @@
+# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import unittest
+import numpy as np
+import cupy as cp
+import pyscf
+from gpu4pyscf import scf, dft
+
+def setUpModule():
+    global mol_minimal_one_atom, mol_minimal_two_atom, mol_real
+    mol_minimal_one_atom = pyscf.M(
+        atom = """
+        He 100 200 300
+        """,
+        basis = """
+        H    S
+            100000.0 1.0
+        """,
+        verbose = 0,
+        output='/dev/null',
+    )
+    mol_minimal_two_atom = pyscf.M(
+        atom = """
+        H 0   0.2 0
+        H 1.0 0.1 0
+        """,
+        basis = """
+        H    S
+            100000.0 1.0
+        """,
+        verbose = 0,
+        output='/dev/null',
+    )
+    mol_real = pyscf.M(
+        atom = """
+            C      0.000000    0.000000    0.000000
+            Br     0.000000    0.000000    1.940000
+            H      1.027662    0.000000   -0.363333
+            H     -0.513831    0.889981   -0.363333
+            H     -0.513831   -0.889981   -0.363333
+        """,
+        basis = "def2-svp",
+        verbose = 4,
+        output='/dev/null',
+    )
+
+def tearDownModule():
+    global mol_minimal_one_atom, mol_minimal_two_atom, mol_real
+    mol_minimal_one_atom.stdout.close()
+    del mol_minimal_one_atom
+    mol_minimal_two_atom.stdout.close()
+    del mol_minimal_two_atom
+    mol_real.stdout.close()
+    del mol_real
+
+class KnownValues(unittest.TestCase):
+    def test_hessian_large_exp_one_atom_rhf(self):
+        mf = scf.HF(mol_minimal_one_atom)
+        mf.conv_tol = 1e-10
+
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        hessian = hobj.kernel()
+
+        natm = mf.mol.natm
+        hessian = hessian.transpose(0,2,1,3)
+        hessian = hessian.reshape((natm * 3, natm * 3))
+        translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+        # Zero hessian for only one atom
+        assert np.max(np.abs(hessian)) < 1e-4
+        assert np.max(np.abs(translation_invariance)) < 1e-4
+
+    def test_hessian_large_exp_two_atom_rhf(self):
+        mf = scf.HF(mol_minimal_two_atom)
+        mf.conv_tol = 1e-10
+
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        hessian = hobj.kernel()
+
+        natm = mf.mol.natm
+        hessian = hessian.transpose(0,2,1,3)
+        hessian = hessian.reshape((natm * 3, natm * 3))
+        translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+        assert np.max(np.abs(translation_invariance)) < 1e-4
+
+    # def test_hessian_large_exp_one_atom_rhf_density_fit(self):
+    #     mf = scf.HF(mol_minimal_one_atom)
+    #     mf.conv_tol = 1e-10
+    #     mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+
+    #     mf.kernel()
+    #     assert mf.converged
+
+    #     hobj = mf.Hessian()
+    #     hessian = hobj.kernel()
+
+    #     natm = mf.mol.natm
+    #     hessian = hessian.transpose(0,2,1,3)
+    #     hessian = hessian.reshape((natm * 3, natm * 3))
+    #     translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+    #     # Zero hessian for only one atom
+    #     assert np.max(np.abs(translation_invariance)) < 1e-4
+
+    # def test_hessian_large_exp_two_atom_rhf_density_fit(self):
+    #     mf = scf.HF(mol_minimal_two_atom)
+    #     mf.conv_tol = 1e-10
+    #     mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+
+    #     mf.kernel()
+    #     assert mf.converged
+
+    #     hobj = mf.Hessian()
+    #     hessian = hobj.kernel()
+
+    #     natm = mf.mol.natm
+    #     hessian = hessian.transpose(0,2,1,3)
+    #     hessian = hessian.reshape((natm * 3, natm * 3))
+    #     translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+    #     assert np.max(np.abs(translation_invariance)) < 1e-3
+
+    # def test_hessian_large_exp_one_atom_rks(self):
+    #     mf = dft.RKS(mol_minimal_one_atom, xc = "LDA")
+    #     mf.grids.atom_grid = (200,194)
+    #     mf.conv_tol = 1e-10
+
+    #     mf.kernel()
+    #     assert mf.converged
+
+    #     hobj = mf.Hessian()
+    #     hessian = hobj.kernel()
+
+    #     natm = mf.mol.natm
+    #     hessian = hessian.transpose(0,2,1,3)
+    #     hessian = hessian.reshape((natm * 3, natm * 3))
+    #     translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+    #     # Zero hessian for only one atom
+    #     assert np.max(np.abs(hessian)) < 1e-3
+    #     assert np.max(np.abs(translation_invariance)) < 1e-3
+
+    # def test_hessian_large_exp_two_atom_rks(self):
+    #     mf = dft.RKS(mol_minimal_two_atom, xc = "LDA")
+    #     mf.grids.atom_grid = (200,194)
+    #     mf.conv_tol = 1e-10
+
+    #     mf.kernel()
+    #     assert mf.converged
+
+    #     hobj = mf.Hessian()
+    #     hessian = hobj.kernel()
+
+    #     natm = mf.mol.natm
+    #     hessian = hessian.transpose(0,2,1,3)
+    #     hessian = hessian.reshape((natm * 3, natm * 3))
+    #     translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+    #     assert np.max(np.abs(translation_invariance)) < 1e-3
+
+    # def test_hessian_large_exp_methylbromide_rks(self):
+    #     mf = dft.RKS(mol_real, xc = "wB97X")
+    #     mf.grids.atom_grid = (99,590)
+    #     mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+    #     mf.conv_tol = 1e-10
+
+    #     mf.kernel()
+    #     assert mf.converged
+
+    #     hobj = mf.Hessian()
+    #     hessian = hobj.kernel()
+
+    #     natm = mf.mol.natm
+    #     hessian = hessian.transpose(0,2,1,3)
+    #     hessian = hessian.reshape((natm * 3, natm * 3))
+    #     translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+    #     assert np.max(np.abs(translation_invariance)) < 1e-10
+
+if __name__ == "__main__":
+    print("Edge Case Tests for Hessian Calculation with Large Exponent in Atomic Orbitals")
+    unittest.main()
