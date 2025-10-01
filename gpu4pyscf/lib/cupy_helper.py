@@ -20,7 +20,7 @@ import numpy as np
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cutensor import contract
+from gpu4pyscf.lib.cutensor import contract, contract_trinary
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib.multi_gpu import lru_cache

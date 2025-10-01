@@ -15,7 +15,7 @@
 import unittest
 import numpy
 import cupy
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, contract_trinary
 
 class KnownValues(unittest.TestCase):
     def test_contract(self):
@@ -55,6 +55,56 @@ class KnownValues(unittest.TestCase):
         c = contract('ijkl,jl->ik', a, b)
         c_einsum = cupy.einsum('ijkl,jl->ik', a, b)
         assert cupy.linalg.norm(c - c_einsum) < 1e-10
+
+    def test_trinary_contraction(self):
+        a = cupy.random.rand(48,11)
+        b = cupy.random.rand(48,13)
+        c = cupy.random.rand(48,4)
+        ref = numpy.einsum('pi,pj,pk->kij', a.get(), b.get(), c.get(), optimize=True)
+        out = contract_trinary('pi,pj,pk->kij', a, b, c)
+        assert abs(out.get() - ref).max() < 1e-10
+
+        a = cupy.random.rand(48,11)
+        b = cupy.random.rand(48,13)
+        c = cupy.random.rand(48,4)
+        ref = numpy.einsum('pi,pj,pk->ikj', a.get(), b.get(), c.get(), optimize=True)
+        out = contract_trinary('pi,pj,pk->ikj', a, b, c)
+        assert abs(out.get() - ref).max() < 1e-10
+
+        a = cupy.random.rand(48,11)
+        b = cupy.random.rand(48,13)
+        c = cupy.random.rand(48,4)
+        ref = numpy.einsum('pi,pj,pk->ij', a.get(), b.get(), c.get(), optimize=True)
+        out = contract_trinary('pi,pj,pk->ij', a, b, c)
+        assert abs(out.get() - ref).max() < 1e-10
+
+        a = cupy.random.rand(48,11)
+        b = cupy.random.rand(3,48,13)
+        c = cupy.random.rand(48,4)
+        ref = numpy.einsum('pi,xpj,pk->xkij', a.get(), b.get(), c.get(), optimize=True)
+        out = contract_trinary('pi,xpj,pk->xkij', a, b, c)
+        assert abs(out.get() - ref).max() < 1e-10
+
+        a = cupy.random.rand(48,11)
+        b = cupy.random.rand(3,48,13)
+        c = cupy.random.rand(48,4)
+        ref = numpy.einsum('xpj,pi,pk->xkij', b.get(), a.get(), c.get(), optimize=True)
+        out = contract_trinary('xpj,pi,pk->xkij', b, a, c)
+        assert abs(out.get() - ref).max() < 1e-10
+
+        a = cupy.random.rand(4,48,11)
+        b = cupy.random.rand(48,13)
+        c = cupy.random.rand(4,48)
+        ref = numpy.einsum('xpi,pj,xp->ij', a.get(), b.get(), c.get(), optimize=True)
+        out = contract_trinary('xpi,pj,xp->ij', a, b, c)
+        assert abs(out.get() - ref).max() < 1e-10
+
+        a = cupy.random.rand(4,48,11)
+        b = cupy.random.rand(48,13)
+        c = cupy.random.rand(4,48)
+        ref = numpy.einsum('xpi,xp,pj->ij', a.get(), c.get(), b.get(), optimize=True)
+        out = contract_trinary('xpi,xp,pj->ij', a, c, b)
+        assert abs(out.get() - ref).max() < 1e-10
 
 if __name__ == "__main__":
     print("Full tests for cutensor module")
