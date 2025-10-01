@@ -187,9 +187,9 @@ class GDF(lib.StreamObject):
             expLk = fft_matrix(self.kmesh)
             nao = cell.nao
             kk_conserv = k2gamma.double_translation_indices(self.kmesh)
-            out_buf = ndarray(blksize*nkpts*nao**2, np.complex128, buffer=out)
+            out_buf = out
 
-        cderi_buf = ndarray(blksize*npairs, np.complex128, buffer=out)
+        cderi_buf = out
         for k_aux, p0, p1 in aux_iter:
             tmp = self._cderi[k_aux][p0:p1,:]
             if tmp.size == 0:
@@ -197,8 +197,12 @@ class GDF(lib.StreamObject):
             out = ndarray(tmp.shape, dtype=tmp.dtype, buffer=cderi_buf)
             out.set(tmp)
             if unpack:
+                # cderi_compressed and out_buf share the same memory. However,
+                # cderi_compressed in rsdf_builder will be copied to a temporary
+                # array. Its content can be overwritten in the output.
+                cderi_compressed = out
                 out = rsdf_builder.unpack_cderi(
-                    out, cderi_idx, k_aux, kk_conserv, expLk, nao,
+                    cderi_compressed, cderi_idx, k_aux, kk_conserv, expLk, nao,
                     buf=buf, out=out_buf)
             yield k_aux, out, 1
             if p0 == 0 and cell.dimension == 2 and k_aux in self._cderip:

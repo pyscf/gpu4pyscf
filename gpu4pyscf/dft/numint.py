@@ -2251,13 +2251,13 @@ def _scale_ao(ao, wv, out=None):
         nao, ngrids = ao.shape
         assert wv.size == ngrids
         out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
-        if ao.flags.f_contiguous or ao.dtype != np.float64:
+        if not ao.flags.c_contiguous or ao.dtype != np.float64:
             return cupy.multiply(ao, wv, out=out)
     else:
         nvar, nao, ngrids = ao.shape
         assert wv.shape == (nvar, ngrids)
         out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
-        if ao[0].flags.f_contiguous or ao.dtype != np.float64:
+        if not ao[0].flags.c_contiguous or ao.dtype != np.float64:
             return contract('nip,np->ip', ao, wv, out=out)
 
     wv = cupy.asarray(wv, order='C')
