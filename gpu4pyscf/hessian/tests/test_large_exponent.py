@@ -19,7 +19,7 @@ import pyscf
 from gpu4pyscf import scf, dft
 
 def setUpModule():
-    global mol_minimal_one_atom, mol_minimal_two_atom, mol_real
+    global mol_minimal_one_atom, mol_minimal_two_atom, auxbasis_minimal_good, auxbasis_minimal_bad, mol_real
     mol_minimal_one_atom = pyscf.M(
         atom = """
         He 100 200 300
@@ -43,18 +43,27 @@ def setUpModule():
         verbose = 0,
         output='/dev/null',
     )
-    mol_real = pyscf.M(
-        atom = """
-            C      0.000000    0.000000    0.000000
-            Br     0.000000    0.000000    1.940000
-            H      1.027662    0.000000   -0.363333
-            H     -0.513831    0.889981   -0.363333
-            H     -0.513831   -0.889981   -0.363333
-        """,
-        basis = "def2-svp",
-        verbose = 4,
-        output='/dev/null',
-    )
+    auxbasis_minimal_good = """
+        H    S
+            200000.0 1.0
+    """
+    auxbasis_minimal_bad = """
+        H    S
+            2.0 1.0
+    """
+
+    # mol_real = pyscf.M(
+    #     atom = """
+    #         C      0.000000    0.000000    0.000000
+    #         Br     0.000000    0.000000    1.940000
+    #         H      1.027662    0.000000   -0.363333
+    #         H     -0.513831    0.889981   -0.363333
+    #         H     -0.513831   -0.889981   -0.363333
+    #     """,
+    #     basis = "def2-svp",
+    #     verbose = 4,
+    #     output='/dev/null',
+    # )
 
 def tearDownModule():
     global mol_minimal_one_atom, mol_minimal_two_atom, mol_real
@@ -102,42 +111,66 @@ class KnownValues(unittest.TestCase):
 
         assert np.max(np.abs(translation_invariance)) < 1e-4
 
-    # def test_hessian_large_exp_one_atom_rhf_density_fit(self):
-    #     mf = scf.HF(mol_minimal_one_atom)
-    #     mf.conv_tol = 1e-10
-    #     mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+    def test_hessian_large_exp_one_atom_rhf_density_fit(self):
+        mf = scf.HF(mol_minimal_one_atom)
+        mf.conv_tol = 1e-10
+        mf = mf.density_fit(auxbasis = auxbasis_minimal_good)
 
-    #     mf.kernel()
-    #     assert mf.converged
+        mf.kernel()
+        assert mf.converged
 
-    #     hobj = mf.Hessian()
-    #     hessian = hobj.kernel()
+        hobj = mf.Hessian()
+        hobj.auxbasis_response = 2
+        hessian = hobj.kernel()
 
-    #     natm = mf.mol.natm
-    #     hessian = hessian.transpose(0,2,1,3)
-    #     hessian = hessian.reshape((natm * 3, natm * 3))
-    #     translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+        natm = mf.mol.natm
+        hessian = hessian.transpose(0,2,1,3)
+        hessian = hessian.reshape((natm * 3, natm * 3))
+        translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
 
-    #     # Zero hessian for only one atom
-    #     assert np.max(np.abs(translation_invariance)) < 1e-4
+        # Zero hessian for only one atom
+        assert np.max(np.abs(hessian)) < 1e-4
+        assert np.max(np.abs(translation_invariance)) < 1e-4
 
-    # def test_hessian_large_exp_two_atom_rhf_density_fit(self):
-    #     mf = scf.HF(mol_minimal_two_atom)
-    #     mf.conv_tol = 1e-10
-    #     mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+    def test_hessian_large_exp_two_atom_rhf_density_fit(self):
+        mf = scf.HF(mol_minimal_two_atom)
+        mf.conv_tol = 1e-10
+        mf = mf.density_fit(auxbasis = auxbasis_minimal_good)
 
-    #     mf.kernel()
-    #     assert mf.converged
+        mf.kernel()
+        assert mf.converged
 
-    #     hobj = mf.Hessian()
-    #     hessian = hobj.kernel()
+        hobj = mf.Hessian()
+        hobj.auxbasis_response = 2
+        hessian = hobj.kernel()
 
-    #     natm = mf.mol.natm
-    #     hessian = hessian.transpose(0,2,1,3)
-    #     hessian = hessian.reshape((natm * 3, natm * 3))
-    #     translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+        natm = mf.mol.natm
+        hessian = hessian.transpose(0,2,1,3)
+        hessian = hessian.reshape((natm * 3, natm * 3))
+        translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
 
-    #     assert np.max(np.abs(translation_invariance)) < 1e-3
+        assert np.max(np.abs(translation_invariance)) < 1e-4
+
+    def test_hessian_large_exp_two_atom_rhf_density_fit_bad_auxbasis(self):
+        mf = scf.HF(mol_minimal_two_atom)
+        mf.conv_tol = 1e-10
+        mf = mf.density_fit(auxbasis = auxbasis_minimal_bad)
+
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        hobj.auxbasis_response = 2
+        hessian = hobj.kernel()
+
+        natm = mf.mol.natm
+        hessian = hessian.transpose(0,2,1,3)
+        hessian = hessian.reshape((natm * 3, natm * 3))
+        translation_invariance = np.sum(hessian, axis = 0).reshape(natm, 3)
+
+        assert np.max(np.abs(translation_invariance)) < 1e-4
+
+    # TODO: Fix DFT Hessian
 
     # def test_hessian_large_exp_one_atom_rks(self):
     #     mf = dft.RKS(mol_minimal_one_atom, xc = "LDA")
