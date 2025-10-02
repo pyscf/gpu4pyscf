@@ -193,7 +193,9 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
         sparse_coeff (bool):
             One-to-one mapping between the sorted_mol and mol is assumed.
             The array of mapping indices instead of a single transformation
-            matrix is returned if this option is specified.
+            matrix is returned if this option is specified. The mapping indices
+            can transform the AOs from mol to sorted_mol:
+            sorted_mol.ao_labels() == mol.ao_labels()[idx]
     '''
     from gpu4pyscf.lib import logger
     original_mol = mol
