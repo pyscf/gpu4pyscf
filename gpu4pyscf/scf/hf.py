@@ -145,9 +145,6 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if dm is None: dm = mf.make_rdm1()
     s1e = cupy.asarray(s1e)
     dm = cupy.asarray(dm)
-    overlap_x = None
-    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-        overlap_x = cupy.asarray(mf.overlap_canonical_decomposed_x)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -158,7 +155,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4:
         f = damping(s1e, dm*.5, f, damp_factor)
     if diis is not None and cycle >= diis_start_cycle:
-        f = diis.update(s1e, dm, f, x = overlap_x)
+        f = diis.update(s1e, dm, f)
 
     if abs(level_shift_factor) > 1e-4:
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
@@ -229,6 +226,9 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
+        # CDIIS just require a C that's orthonormal (C.T@S@C==I), and X satisfies that.
+        if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
+            mf_diis.Corth = cupy.asarray(mf.overlap_canonical_decomposed_x)
     else:
         mf_diis = None
 

@@ -47,8 +47,8 @@ class CDIIS(lib.diis.DIIS):
         self.Corth = None
         self.space = 8
 
-    def update(self, s, d, f, *args, x=None, **kwargs):
-        errvec = self._sdf_err_vec(s, d, f, x)
+    def update(self, s, d, f, *args, **kwargs):
+        errvec = self._sdf_err_vec(s, d, f)
         if self.incore is None:
             mem_avail = get_avail_mem()
             self.incore = errvec.nbytes*2 * (20+self.space) < mem_avail
@@ -56,7 +56,7 @@ class CDIIS(lib.diis.DIIS):
                 logger.debug(self, 'Large system detected. DIIS intermediates '
                              'are saved in the host memory')
         if self.Corth.ndim == 3:
-            nao, nmo = self.Corth.shape[1:3]
+            nao, nmo = self.Corth.shape[-2:]
         else:
             assert self.Corth.ndim == 2
             nao, nmo = self.Corth.shape
@@ -73,17 +73,13 @@ class CDIIS(lib.diis.DIIS):
         else:
             return len(self._bookkeep)
 
-    def _sdf_err_vec(self, s, d, f, x=None):
+    def _sdf_err_vec(self, s, d, f):
         '''error vector = SDF - FDS'''
         if f.ndim == s.ndim+1: # UHF
             assert len(f) == 2
             if s.ndim == 2: # molecular SCF or single k-point
                 if self.Corth is None:
-                    if x is None:
-                        self.Corth = eigh(f[0], s)[1]
-                    else:
-                        assert x.ndim == 2 and x.shape[0] == s.shape[0]
-                        self.Corth = x @ cp.linalg.eigh(x.T @ f[0] @ x)[1]
+                    self.Corth = eigh(f[0], s)[1]
                 sdf = cp.empty_like(f)
                 s.dot(d[0]).dot(f[0], out=sdf[0])
                 s.dot(d[1]).dot(f[1], out=sdf[1])
@@ -93,12 +89,7 @@ class CDIIS(lib.diis.DIIS):
                 if self.Corth is None:
                     self.Corth = cp.empty_like(s)
                     for k, (fk, sk) in enumerate(zip(f[0], s)):
-                        if x is None:
-                            self.Corth[k] = eigh(fk, sk)[1]
-                        else:
-                            assert x.ndim == 3 and x.shape[0] == s.shape[0] and x.shape[1] == s.shape[1]
-                            raise NotImplementedError("diis + decomposed overlap + k point not tested")
-                            self.Corth[k] = x[k] @ cp.linalg.eigh(x[k].T @ fk @ x[k])[1]
+                        self.Corth[k] = eigh(fk, sk)[1]
                 Corth = asarray(self.Corth)
                 sdf = cp.empty_like(f)
                 tmp = None
@@ -116,11 +107,7 @@ class CDIIS(lib.diis.DIIS):
             assert f.ndim == s.ndim
             if f.ndim == 2: # molecular SCF or single k-point
                 if self.Corth is None:
-                    if x is None:
-                        self.Corth = eigh(f, s)[1]
-                    else:
-                        assert x.ndim == 2 and x.shape[0] == s.shape[0]
-                        self.Corth = x @ cp.linalg.eigh(x.T @ f @ x)[1]
+                    self.Corth = eigh(f, s)[1]
                 sdf = s.dot(d).dot(f)
                 sdf = sandwich_dot(sdf, self.Corth)
                 errvec = sdf - sdf.conj().T
@@ -128,12 +115,7 @@ class CDIIS(lib.diis.DIIS):
                 if self.Corth is None:
                     self.Corth = cp.empty_like(s)
                     for k, (fk, sk) in enumerate(zip(f, s)):
-                        if x is None:
-                            self.Corth[k] = eigh(fk, sk)[1]
-                        else:
-                            assert x.ndim == 3 and x.shape[0] == s.shape[0] and x.shape[1] == s.shape[1]
-                            raise NotImplementedError("diis + decomposed overlap + k point not tested")
-                            self.Corth[k] = x[k] @ cp.linalg.eigh(x[k].T @ fk @ x[k])[1]
+                        self.Corth[k] = eigh(fk, sk)[1]
                 sd = contract('Kij,Kjk->Kik', s, d)
                 sdf = contract('Kij,Kjk->Kik', sd, f)
                 Corth = asarray(self.Corth)

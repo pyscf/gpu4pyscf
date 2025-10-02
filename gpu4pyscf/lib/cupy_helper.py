@@ -1149,15 +1149,3 @@ def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
             return cuda_malloc(size)
         return default_mempool_malloc(size)
     cupy.cuda.set_allocator(malloc)
-
-# def safe_eigh(h, s, lindep=1e-6):
-#     e, v = cupy.linalg.eigh(s)
-#     x = v[:,e>lindep] / cupy.sqrt(e[e>lindep])
-#     xhx = x.T @ h @ x
-#     e, c = cupy.linalg.eigh(xhx)
-#     c = cupy.dot(x, c)
-
-#     nao, nmo = x.shape
-#     c = cupy.concatenate([c, cupy.zeros([nao, nao-nmo])], axis = 1)
-#     e = cupy.concatenate([e, cupy.zeros(nao-nmo) + 1000000])
-#     return e, c

@@ -75,9 +75,6 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     s1e = cupy.asarray(s1e)
     dm = cupy.asarray(dm)
 
-    overlap_x = None
-    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-        overlap_x = cupy.asarray(mf.overlap_canonical_decomposed_x)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if level_shift_factor is None:
@@ -98,7 +95,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = (damping(s1e, dm[0], f[0], dampa),
              damping(s1e, dm[1], f[1], dampb))
     if diis and cycle >= diis_start_cycle:
-        f = diis.update(s1e, dm, f, x = overlap_x)
+        f = diis.update(s1e, dm, f)
     if abs(shifta)+abs(shiftb) > 1e-4:
         f = (level_shift(s1e, dm[0], f[0], shifta),
              level_shift(s1e, dm[1], f[1], shiftb))
