@@ -19,7 +19,7 @@ import pyscf
 from gpu4pyscf import scf, dft
 
 def setUpModule():
-    global mol_minimal_one_atom, mol_minimal_two_atom, auxbasis_minimal_good, auxbasis_minimal_bad, mol_real
+    global mol_minimal_one_atom, mol_minimal_two_atom, auxbasis_minimal_good, auxbasis_minimal_bad #, mol_real
     mol_minimal_one_atom = pyscf.M(
         atom = """
         He 100 200 300
@@ -66,13 +66,13 @@ def setUpModule():
     # )
 
 def tearDownModule():
-    global mol_minimal_one_atom, mol_minimal_two_atom, mol_real
+    global mol_minimal_one_atom, mol_minimal_two_atom #, mol_real
     mol_minimal_one_atom.stdout.close()
     del mol_minimal_one_atom
     mol_minimal_two_atom.stdout.close()
     del mol_minimal_two_atom
-    mol_real.stdout.close()
-    del mol_real
+    # mol_real.stdout.close()
+    # del mol_real
 
 class KnownValues(unittest.TestCase):
     def test_hessian_large_exp_one_atom_rhf(self):
