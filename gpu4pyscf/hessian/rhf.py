@@ -721,51 +721,43 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
 
 def hess_nuc_elec(mol, dm):
     '''
-    Calculate hessian contribution due to (nuc, elec) pair, w/o ECP
+    H1e hessian nuclear repulsion contribution that originates from differentiating nuclear position
+    (both first derivative d2I_dAdC and second derivative d2I_dC2)
+    w/o ECP
     '''
-    from gpu4pyscf.df import int3c2e
     coords = mol.atom_coords()
     charges = cupy.asarray(mol.atom_charges(), dtype=np.float64)
 
-    fakemol = gto.fakemol_for_charges(coords)
-    fakemol.output = mol.output
-    fakemol.verbose = mol.verbose
-    fakemol.stdout = mol.stdout
-    intopt = int3c2e.VHFOpt(mol, fakemol, 'int2e')
-    intopt.build(1e-14, diag_block_with_triu=True, aosym=False,
-                 group_size=int3c2e.BLKSIZE, group_size_aux=int3c2e.BLKSIZE)
-    dm = intopt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
+    aoslice = mol.aoslice_by_atom()
+    aoslice = numpy.array(aoslice)
 
-    natm = mol.natm
-    nao = mol.nao
-    hcore_diag = cupy.zeros([9,natm])
-    hcore_aa = cupy.zeros([9,natm,nao])
-    for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ipip1'):
-        haa = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
-        hcore_aa[:,k0:k1,i0:i1] += haa
-        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+    from gpu4pyscf.gto import int3c1e
+    from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ip1ip2, int1e_grids_ipip2
+    intopt_derivative = int3c1e.VHFOpt(mol)
+    intopt_derivative.build(cutoff = 1e-14, aosym = False)
 
-    hcore_ab = cupy.zeros([9,natm,nao])
-    for i0,i1,j0,j1,k0,k1,int3c_blk in int3c2e.loop_int3c2e_general(intopt, ip_type='ipvip1'):
-        hab = contract('xpji,ij->xpi', int3c_blk, dm[i0:i1,j0:j1])
-        hcore_ab[:,k0:k1,i0:i1] += hab
-        hcore_diag[:,k0:k1] -= contract('xpji,ij->xp', int3c_blk, dm[i0:i1,j0:j1])
+    d2e = cupy.zeros([3, 3, mol.natm, mol.natm])
 
-    hcore_diag = contract('xp,p->xp', hcore_diag, charges)
-    hcore_aa = contract('xpj,p->xpj', hcore_aa, charges)
-    hcore_ab = contract('xpj,p->xpj', hcore_ab, charges)
+    for j_atom in range(mol.natm):
+        # TODO: It is computing one charge at a time, and it's likely slow
+        g0,g1 = j_atom,j_atom+1
+        d2I_dAdC = int1e_grids_ip1ip2(mol, coords[g0:g1, :], charges = charges[g0:g1], intopt = intopt_derivative)
 
-    aoslices = mol.aoslice_by_atom()
-    ao2atom = int3c2e.get_ao2atom(intopt, aoslices)
+        for i_atom in range(mol.natm):
+            p0,p1 = aoslice[i_atom, 2:]
+            d2e[:, :, i_atom, j_atom] += contract('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :])
+            d2e[:, :, i_atom, j_atom] += contract('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(0,1,3,2))
 
-    hcore_aa = contract('xpj,jq->xpq', hcore_aa, ao2atom).reshape([3,3,natm,natm])
-    hcore_ab = contract('xpj,jq->xpq', hcore_ab, ao2atom).reshape([3,3,natm,natm])
-    hcore = hcore_aa + hcore_aa.transpose([1,0,3,2])
-    hcore+= hcore_ab.transpose([1,0,2,3]) + hcore_ab.transpose([0,1,3,2])
-    hcore_diag = hcore_diag.reshape([3,3,natm])
-    idx = np.arange(natm)
-    hcore[:,:,idx,idx] += hcore_diag
-    return hcore * 2.0
+            d2e[:, :, j_atom, i_atom] += contract('ij,dDij->dD', dm[p0:p1, :], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,2,3))
+            d2e[:, :, j_atom, i_atom] += contract('ij,dDij->dD', dm[:, p0:p1], d2I_dAdC[:, :, p0:p1, :].transpose(1,0,3,2))
+    d2I_dAdC = None
+
+    d2I_dC2 = int1e_grids_ipip2(mol, coords, dm = dm, intopt = intopt_derivative)
+    for i_atom in range(mol.natm):
+        d2e[:, :, i_atom, i_atom] += d2I_dC2[:, :, i_atom] * charges[i_atom]
+    d2I_dC2 = None
+
+    return -d2e
 
 def hess_nuc_elec_ecp(mol, dm):
     '''
