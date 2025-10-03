@@ -15,7 +15,7 @@ permissions:
 jobs:
   single-gpu:
     runs-on: [self-hosted, Linux, X64, v100]
-    timeout-minutes: 360
+    timeout-minutes: 180
     steps:
     - uses: actions/checkout@v3
 
@@ -36,7 +36,7 @@ jobs:
 
   multi-gpu:
     runs-on: [self-hosted, Linux, X64, 2T4]
-    timeout-minutes: 360
+    timeout-minutes: 180
     steps:
     - uses: actions/checkout@v3
 
