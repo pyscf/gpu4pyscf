@@ -163,7 +163,7 @@ def _create_contraction_trinary(desc_a, mode_a, op_a, desc_b, mode_b, op_b,
         _contraction_operators[key] = _OperationDescriptor(op_desc_ptr.value)
     return _contraction_operators[key]
 
-def contract_trinary(pattern, a, b, c, alpha=1., beta=0., out=None):
+def _contract_trinary(pattern, a, b, c, alpha=1., beta=0., out=None):
     '''Three-tensor contraction
     out = alpha * A * B * C + beta * out
     '''
@@ -294,3 +294,5 @@ else:
     if cutensor_backend.get_version() < 20300:
         def contract_trinary(pattern, a, b, c, alpha=1., beta=0., out=None):
             raise RuntimeError('cutensor 2.3 or newer is required')
+    else:
+        contract_trinary = _contract_trinary
