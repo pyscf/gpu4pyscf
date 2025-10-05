@@ -159,7 +159,7 @@ def array_reduce(array_list, inplace=False):
         step *= 2
     return array_list[0].reshape(out_shape)
 
-def property(cache=None)
+def property(cache=None):
     '''@property decorator that automatically transfers cupy arrays to side
     devices.
 

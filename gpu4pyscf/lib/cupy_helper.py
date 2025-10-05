@@ -353,6 +353,7 @@ def add_sparse(a, b, indices):
     return a
 
 def dist_matrix(x, y, out=None):
+    '''np.linalg.norm(x[:,None,:] - y[None,:,:], axis=2)'''
     x = cupy.asarray(x, dtype=np.float64)
     y = cupy.asarray(y, dtype=np.float64)
     assert x.flags.c_contiguous
@@ -521,6 +522,7 @@ def transpose_sum(a, stream=None):
     '''
     return a + a.transpose(0,2,1)
     '''
+    assert a.dtype == np.float64
     assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
     assert a.ndim in (2, 3)
