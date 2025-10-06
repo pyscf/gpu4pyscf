@@ -1255,6 +1255,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         t1 = log.timer_debug2('generating bas_ij indices', *t1)
         cderi = _lr_int3c2e_kk(ft_opt, bas_ij_cache, cd_j2c_cache,
                                int3c2e_opt.sorted_auxcell, omega, kpts, kpt_iters)
+        print([x.sum() for x in cderi.values()])
         # LR int3c2e would generate more nao_pairs than the SR int3c2e!
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
@@ -1334,11 +1335,14 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
                 j3c_block[:,k0:k1] = j3c_tmp
 
+            if with_long_range:
+                print(idx.min(), idx.max(), len(idx))
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = _cd_j2c_cache[j2c_idx] # at -(kj-ki)
                 cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
                 _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
                 if with_long_range:
+                    print(kp, cderi[kp].shape, _buf.shape)
                     _buf = cderi_k.get(out=_buf)
                     nao_pairs = cderi[kp].shape[1] * 2 # *2 to view complex as doubles
                     libpbc.take2d_add( # this copy back operation is very slow
