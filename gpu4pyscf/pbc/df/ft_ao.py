@@ -502,6 +502,10 @@ class PBCIntEnvVars(ctypes.Structure):
             self.cell0_natm, self.cell0_nbas, self.bvk_ncells, self.nimgs,
             atm, bas, env, ao_loc, Ls)
 
+    @property
+    def device(self):
+        return self._device
+
 def init_constant(cell):
     err = libpbc.init_constant(ctypes.c_int(SHM_SIZE))
     if err != 0:

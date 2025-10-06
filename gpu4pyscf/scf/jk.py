@@ -979,7 +979,6 @@ class RysIntEnvVars(ctypes.Structure):
                             env.data.ptr, ao_loc.data.ptr)
         # Keep a reference to these arrays, prevent releasing them upon returning
         obj._env_ref_holder = (atm, bas, env, ao_loc)
-        obj._device = cp.cuda.device.get_device_id()
         return obj
 
     def copy(self):
@@ -989,6 +988,10 @@ class RysIntEnvVars(ctypes.Structure):
         env = cp.asarray(env)
         ao_loc = cp.asarray(ao_loc)
         return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
+
+    @property
+    def device(self):
+        return self._env_ref_holder[0].device
 
 def _scale_sp_ctr_coeff(mol):
     # Match normalization factors of s, p functions in libcint

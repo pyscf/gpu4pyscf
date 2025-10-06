@@ -531,9 +531,9 @@ class SRInt3c2eOpt:
         aux_exp, _, aux_l = most_diffuse_pgto(auxcell)
         cell_exp, _, cell_l = most_diffuse_pgto(pcell)
         if omega == 0:
-            theta = 1./(1./cell_exp*2 + 1./aux_exp)
+            theta = 1./(1./(cell_exp*2) + 1./aux_exp)
         else:
-            theta = 1./(1./cell_exp*2 + 1./aux_exp + omega**-2)
+            theta = 1./(1./(cell_exp*2) + 1./aux_exp + omega**-2)
         lsum = cell_l * 2 + aux_l + 1
         rad = vol**(-1./3) * self.rcut + 1
         surface = 4*np.pi * rad**2

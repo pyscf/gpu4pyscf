@@ -23,25 +23,28 @@ import cupy as cp
 from collections import Counter
 from pyscf import lib, gto
 from pyscf.scf import _vhf
+from pyscf.pbc.tools import pbc as pbctools
+from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, dist_matrix, contract, asarray)
-from gpu4pyscf.gto.mole import group_basis, groupby
+from gpu4pyscf.gto.mole import group_basis, groupby, extract_pgto_params
 from gpu4pyscf.scf.jk import (
-    RysIntEnvVars, _scale_sp_ctr_coeff,
+    libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff,
     _nearest_power2, apply_coeff_C_mat_CT, apply_coeff_CT_mat_C,
     LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
-from gpu4pyscf.pbc.df.ft_ao import libpbc
+from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
+from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 
 __all__ = [
     'get_k',
 ]
 
-libvhf_rys.PBC_build_k.restype = ctypes.c_int
-libvhf_rys.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
+libpbc.PBC_build_k.restype = ctypes.c_int
+libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 
 def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None, verbose=None):
     '''Compute K matrix
@@ -54,6 +57,8 @@ def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None, verbose=None):
 class PBCJKmatrixOpt:
     def __init__(self, cell, omega=None):
         self.cell = cell
+        if omega is None: # TODO: dynamically determine omega based on rcut?
+            omega = 0.3
         self.omega = omega
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
@@ -77,16 +82,12 @@ class PBCJKmatrixOpt:
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
         omega = self.omega
-        if omega is None: # TODO: dynamically determine omega based on rcut?
-            omega = 0.3
         # FIXME: should the supmol be regrouped based on l?
         supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
         lmax = uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
-        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
-        l_slices = np.append(0, np.cumsum(nbas_by_l))
 
         # TODO: approx with overlap mask
         nbas = supmol.nbas
@@ -102,12 +103,14 @@ class PBCJKmatrixOpt:
         self.q_cond_cpu = q_cond
 
         # CVHFnr_sr_int2e_q_cond in pyscf is inaccurate for upper bound estimation.
-        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(cell, 'diffuse')
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
         s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
         # FIXME: To avoid changing the CUDA kernel function signature,
         # temporarily attach the extra information to the s_estimator array and
         # pass it along with s_estimator.
         # This is a workaround and should be addressed in the future.
+        diffuse_exps = diffuse_exps.astype(np.float32)
+        diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
         s_estimator[nbas] = diffuse_exps
         s_estimator[nbas+1] = diffuse_ctr_coef
         libvhf_rys.sr_eri_s_estimator_v2(
@@ -143,22 +146,18 @@ class PBCJKmatrixOpt:
         return RysIntEnvVars.new(supmol.natm, supmol.nbas, atm, bas, env, ao_loc)
 
     def estimate_cutoff_with_penalty(self):
-        pcell = self.prim_cell
-        auxcell = self.sorted_auxcell
-        vol = self.bvkcell.vol
+        cell = self.cell
+        vol = cell.vol
+        rcut = cell.rcut
         omega = self.omega
-        aux_exp, _, aux_l = most_diffuse_pgto(auxcell)
-        cell_exp, _, cell_l = most_diffuse_pgto(pcell)
-        if omega == 0:
-            theta = 1./(1./cell_exp*2 + 1./aux_exp)
-        else:
-            theta = 1./(1./cell_exp*2 + 1./aux_exp + omega**-2)
-        lsum = cell_l * 2 + aux_l + 1
-        rad = vol**(-1./3) * self.rcut + 1
+        cell_exp, _, cell_l = most_diffuse_pgto(cell)
+        theta = 1./(1./cell_exp + omega**-2)
+        lsum = cell_l * 4 + 1
+        rad = vol**(-1./3) * rcut + 1
         surface = 4*np.pi * rad**2
-        lattice_sum_factor = 2*np.pi*self.rcut*lsum/(vol*theta) + surface
-        cutoff = pcell.precision / lattice_sum_factor
-        logger.debug1(pcell, 'int3c_kernel integral omega=%g theta=%g cutoff=%g',
+        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*theta) + surface
+        cutoff = cell.precision / lattice_sum_factor
+        logger.debug1(cell, 'int3c_kernel integral omega=%g theta=%g cutoff=%g',
                       omega, theta, cutoff)
         return cutoff
 
@@ -173,8 +172,8 @@ class PBCJKmatrixOpt:
         '''
         cell = self.cell
         sorted_cell = self.sorted_cell
-        nao_orig = cell.nao_orig
-        nao_sorted = sorted_cell.nao
+        nao_orig = cell.nao
+        nao = sorted_cell.nao
         supmol = self.supmol
 
         dm = asarray(dm, order='C')
@@ -194,7 +193,7 @@ class PBCJKmatrixOpt:
             expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
             n_Ts, nkpts = expLk.shape
 
-        dms = dms.reshape(-1, nkpts, nao_sorted, nao_sorted)
+        dms = dms.reshape(-1, nkpts, nao, nao)
         n_dm = len(dms)
         dms = contract('skpq,Lk->sLpq', dms, expLk)
         if 1:
@@ -210,7 +209,13 @@ class PBCJKmatrixOpt:
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
         assert hermi == 1
-        dm_cond = _compressed_dm_cond(supmol, dms)
+        if is_gamma_point:
+            dm_cond = condense('absmax', dms.reshape(n_dm, nao, nao),
+                               ao_loc[:sorted_cell.nbas+1])
+            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
+            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
+        else:
+            dm_cond = _compressed_dm_cond(supmol, dms)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
@@ -227,7 +232,7 @@ class PBCJKmatrixOpt:
             t0 = log.init_timer()
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
-            vk = cp.zeros(n_dm, n_Ts, nao_sorted, nao_sorted)
+            vk = cp.zeros((n_dm, n_Ts, nao, nao))
 
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
@@ -297,14 +302,15 @@ class PBCJKmatrixOpt:
                     timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
 
+            cp.cuda.get_current_stream().synchronize()
             if is_gamma_point:
-                vk = vk.sum(axis=1)
-                vk = transpose_sum(vk)
+                vk = transpose_sum(vk[:,0])
             else:
                 expLkz = expLk.view(np.float64).reshape(n_Ts, nkpts, 2)
                 vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = vk.view(np.complex128)[:,:,:,:,0]
-                vk = transpose_sum(vk) FIXME
+                vk = transpose_sum(vk.reshape(n_dm*nkpts,nao,nao))
+                vk = vk.reshape(n_dm, nkpts, nao, nao)
             return vk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
@@ -317,13 +323,14 @@ class PBCJKmatrixOpt:
             timing_collection += t_counter
             vk_dist.append(vk)
 
+        log = logger.new_logger(cell, verbose)
         if log.verbose >= logger.DEBUG1:
             log.debug1('kernel launches %d', kern_counts)
             for llll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', llll, t)
 
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
-        vk = vk.reshape(-1,nao_sorted,nao_sorted)
+        vk = vk.reshape(-1,nao,nao)
         vk = apply_coeff_C_mat_CT(vk, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
         vk = vk.reshape(dm.shape)
@@ -370,13 +377,13 @@ class ExtendedMole(gto.Mole):
         supmol.Ls = Ls
         supmol.precision = cell.precision
         supmol._env[gto.PTR_EXPCUTOFF] = -np.log(cell.precision*1e-4)
-        supmol.omega = -abs(omega) # supmol handles short range integrals only
+        supmol.omega = -abs(omega) # Use supmol to handle SR integrals only
 
-        rcut_for_atoms = groupby(cell._bas[:,gto.ATOM_OF], rcut, 'max')
+        rcut_for_atoms = asarray(groupby(cell._bas[:,gto.ATOM_OF], rcut, 'max'))
         # Search the shortest distance to the reference cell for each atom in the supercell.
         atom_coords = supmol.atom_coords()
         d = dist_matrix(atom_coords, cell.atom_coords())
-        mask = np.any(d < rcut_for_atoms, axis=1)
+        mask = cp.any(d < rcut_for_atoms, axis=1).get()
         bas_mask = mask[supmol._bas[:,gto.ATOM_OF]]
         bas_mask[:cell.nbas] = True # Ensure shells in the first image are all included
         bas_mask_idx = np.where(bas_mask)[0]
@@ -384,14 +391,15 @@ class ExtendedMole(gto.Mole):
         ao_loc = supmol.ao_loc
         nao = ao_loc[-1]
         ao_idx_frags = np.split(np.arange(nao), ao_loc[1:-1])
-        ao_mapping = np.hstack(ao_idx_frags[i] for i in bas_mask_idx])
+        ao_mapping = np.hstack([ao_idx_frags[i] for i in bas_mask_idx])
         supmol.bas_mask_idx = np.asarray(bas_mask_idx, dtype=np.int32)
         supmol.ao_mapping = np.asarray(ao_mapping, dtype=np.int32)
         supmol._bas = supmol._bas[bas_mask_idx]
         logger.debug1(supmol, 'trim supmol %d shells -> %d shells, %d AOs -> %d AOs',
                       nimgs*cell.nbas, supmol.nbas, nao, len(ao_mapping))
 
-        translation_vectors = cp.asarray(np.linalg.solve(cell.lattice_vectors().T, Ls.T).T)
+        translation_vectors = asarray(np.linalg.solve(cell.lattice_vectors().T, Ls.T).T)
+        translation_vectors = cp.asarray(translation_vectors.round(), dtype=np.int32)
         supmol.double_latsum_Ts, inverse = _unique_image_pair(translation_vectors)
         supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32)
         return supmol
@@ -406,7 +414,7 @@ def estimate_rcut(cell, omega, precision=None):
     if precision is None:
         precision = cell.precision * 1e-1
 
-    exps, cs = pbcgto.cell._extract_pgto_params(cell, 'diffuse')
+    exps, cs = extract_pgto_params(cell, 'diffuse')
     ls = cell._bas[:,gto.ANG_OF]
 
     # The most diffuse shell
@@ -439,11 +447,11 @@ def estimate_rcut(cell, omega, precision=None):
     sfac = omega**2*aj*al/(aj*al + (aj+al)*omega**2) / theta
     fl = 2
     fac = 2**(li+lk)*np.pi**2.5*c1 * theta**(l4-.5)
-    fac *= 2*np.pi/rs_cell.vol/theta
+    fac *= 2*np.pi/cell.vol/theta
     fac /= aij**(li+1.5) * akl**(lk+1.5) * aj**lj * al**ll
     fac *= fl / precision
 
-    r0 = rs_cell.rcut
+    r0 = cell.rcut
     r0 = (np.log(fac * r0 * (sfac*r0)**(l4-1) + 1.) / (sfac*theta))**.5
     r0 = (np.log(fac * r0 * (sfac*r0)**(l4-1) + 1.) / (sfac*theta))**.5
     rcut = r0
@@ -456,9 +464,13 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
     # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
     # The same pattern can be applied to the remaining images within the supmol.
     # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
-    bas_mask = supmol.bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = np.empty((nimgs, nbas_cell0), dtype=np.int32)
-    raw_bas_idx[bas_mask] = np.arange(supmol.nbas, dtype=np.int32)
+    bas_mask = np.zeros(nimgs*nbas_cell0, dtype=bool)
+    bas_mask[supmol.bas_mask_idx] = True
+    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
+    raw_bas_idx = np.empty(nimgs*nbas_cell0, dtype=np.int32)
+    raw_bas_idx[supmol.bas_mask_idx] = np.arange(supmol.nbas, dtype=np.int32)
+    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
+    n_groups = len(l_ctr_bas_loc) - 1
     bas_idx_lookup = []
     for i in range(n_groups):
         ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
@@ -470,7 +482,6 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
 
     nbas = q_cond.shape[0]
     q_cond = q_cond.ravel()
-    n_groups = len(l_ctr_bas_loc) - 1
     pair_mappings = {}
     for i in range(n_groups):
         for j in range(i+1):
@@ -482,7 +493,7 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
             else:
                 pair_ij = pair_ij[(ish >= 0) & (jsh >= 0)]
             pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
-            pair_mappings[i,j] = cp.asarray(pair_ij, dtype=np.int32)
+            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
     return pair_mappings
 
 def _compressed_dm_cond(supmol, dms):
@@ -490,14 +501,13 @@ def _compressed_dm_cond(supmol, dms):
     are the abstract arrays that are compressed over the double-lattice-sum
     '''
     cell = supmol.cell
-    ao_loc = cp.asarray(cell.ao_loc)
+    ao_loc = asarray(cell.ao_loc)
     n_dm, n_Ts, nao = dms.shape[:3]
     i_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
     i_loc = cp.append(i_loc.ravel(), np.int32(n_Ts*nao))
     dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), i_loc, ao_loc)
 
     bas_mask_idx = supmol.bas_mask_idx
-    nimgs = len(bas_mask_idx)
     img_idx, ish_cell0 = divmod(bas_mask_idx, cell.nbas)
     T_in_pair = supmol.Ts_ji_lookup[img_idx[:,None] * n_Ts + img_idx]
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
