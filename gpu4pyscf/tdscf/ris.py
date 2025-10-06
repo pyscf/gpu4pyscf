@@ -1391,14 +1391,18 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, log, single):
         # Get free memory and dynamically calculate chunk size
         available_gpu_memory = get_avail_mem()
 
-        batch_size = 16
+        batch_size = 24
+        log.info(f'flops uvP,ua->avP: {nao_orig*n_vir*nao_orig*batch_size}')
+        log.info(f'flops uvP,ui->ivP: {nao_orig*n_occ*nao_orig*batch_size}')
+
+    
         for p0 in range(0, nauxao, batch_size):
             p1 = min(p0+batch_size, nauxao)
             log.info(f'p0, p1 {p0,p1}')
 
-            cpu = log.init_timer()
+            cpu0 = log.init_timer()
             eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, p1-p0), dtype=cp_int3c_dtype, order='F')
-            log.timer(' eri3c_unzip_batch', *cpu)
+            log.timer(' eri3c_unzip_batch', *cpu0)
             cpu = log.init_timer()
 
             eri3c_batch = cp.asarray(eri3c[:, p0:p1])
@@ -1406,15 +1410,16 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, log, single):
             cpu = log.init_timer()
 
             eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
-            log.timer(' eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch', *cpu)
-            cpu = log.init_timer()
+            # log.timer(' eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch', *cpu)
+            # cpu = log.init_timer()
 
             eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
-            log.timer(' eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch', *cpu)
+            # log.timer(' eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch', *cpu)
             cpu = log.init_timer()
             eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, p1-p0)
             # print('eri3c_unzip_batch.shape C_q.shape', eri3c_unzip_batch.shape, C_q.shape)
             T_ab = contract('uvP,ua->avP', eri3c_unzip_batch, C_q)
+            
             log.timer(' uvP,ua->avP', *cpu)
             cpu = log.init_timer()
 
@@ -1424,6 +1429,8 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, log, single):
 
             # print('T_ab.shape V.shape', T_ab.shape, V.shape)
             T_ab_V = contract('Pab,mjb->mPja', T_ab, V)
+            # del T_ab
+            # release_memory()
             log.timer(' Pab,mjb->mPja', *cpu)
             cpu = log.init_timer()
 
@@ -1440,152 +1447,197 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, log, single):
             cpu = log.init_timer()  
             release_memory()
 
+            log.timer(f' p0, p1 {p0,p1}', *cpu0)
+
         return out
 
     log.info(get_memory_info('after generate ijab_MVP'))    
     return ijab_MVP
 
+# def gen_ijab_MVP_eri3c_wired_path(eri3c, int3c2e_opt, C_p, C_q, log, single):
+#     '''
+#     (ij|ab)V = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
+#              = Σ_P [T_ij^P Σ_jb(T_ab^P V_jb^m)]
+#     V in shape (m, n_occ * n_vir)
+#     '''
 
-def gen_ijab_MVP_eri3c_bad(eri3c, int3c2e_opt, C_p, C_q, log, single):
-    '''
-    (ij|ab)V = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
-             = Σ_P [T_ij^P Σ_jb(T_ab^P V_jb^m)]
-    V in shape (m, n_occ * n_vir)
-    '''
+#     # def ijab_MVP(V):
+#     #     T_ab_V = contract("Pab,mjb->Pamj", T_ab, V)
+#     #     ijab_V = contract("Pij,Pamj->mia", T_ij, T_ab_V)
+#     #     return ijab_V
+#     nao, nao_orig = int3c2e_opt.coeff.shape
 
-    # def ijab_MVP(V):
-    #     T_ab_V = contract("Pab,mjb->Pamj", T_ab, V)
-    #     ijab_V = contract("Pij,Pamj->mia", T_ij, T_ab_V)
-    #     return ijab_V
-    nao, nao_orig = int3c2e_opt.coeff.shape
+#     C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+#     C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+#     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
-    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
-    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
-    cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
+#     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+#     rows, cols = divmod(ao_pair_mapping, nao_orig)
 
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=False)
-    rows, cols = divmod(ao_pair_mapping, nao_orig)
+#     def ijab_MVP(V, a_x, out=None):
+#         '''
+#         Optimized calculation of (ij|ab) = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
+#         Parameters:
+#             V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
 
-    def ijab_MVP(V, a_x, out=None):
-        '''
-        Optimized calculation of (ij|ab) = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
-        using vectorized sparse AO pair indexing from orbital_pair_nonzero_indices,
-        leveraging UV symmetry and GPU parallelism. Uses pair_rows == pair_cols for diagonal pairs.
-
-        Parameters:
-            V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
-
-        Returns:
-            ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
-        '''
-        n_state, n_occ, n_vir = V.shape
-        if out is None: 
-            out = cp.zeros_like(V)
-        nauxao = int3c2e_opt.aux_coeff.shape[0]
-        nao_orig = int3c2e_opt.coeff.shape[1]  # Assuming coeff.shape = (naux, nao)
+#         Returns:
+#             ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
+#         '''
+#         n_state, n_occ, n_vir = V.shape
+#         if out is None: 
+#             out = cp.zeros_like(V)
+#         nauxao = int3c2e_opt.aux_coeff.shape[0]
         
-        # Get sparse pair indices
-        pair_rows, pair_cols, pair_diag = int3c2e_opt.orbital_pair_nonzero_indices()
-        n_pairs = len(pair_rows)
-        pair_rows = cp.asarray(pair_rows)  # (n_pairs,)
-        pair_cols = cp.asarray(pair_cols)  # (n_pairs,)
-        pair_diag = cp.asarray(pair_diag)  # Indices of diagonal pairs (u == v)
+#         # Get free memory and dynamically calculate chunk size
+#         available_gpu_memory = get_avail_mem()
+
+#         batch_size = 16
+#         for p0 in range(0, nauxao, batch_size):
+#             p1 = min(p0+batch_size, nauxao)
+#             log.info(f'p0, p1 {p0,p1}')
+
+#             cpu = log.init_timer()
+#             eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, p1-p0), dtype=cp_int3c_dtype, order='F')
+#             log.timer(' eri3c_unzip_batch', *cpu)
+#             cpu = log.init_timer()
+
+#             eri3c_batch = cp.asarray(eri3c[:, p0:p1])
+#             log.timer(' cp.asarray(eri3c[:, p0:p1])', *cpu)
+#             cpu = log.init_timer()
+
+#             eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
+#             log.timer(' eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch', *cpu)
+#             cpu = log.init_timer()
+
+#             eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
+#             log.timer(' eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch', *cpu)
+#             cpu = log.init_timer()
+#             eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, p1-p0)
+#             # print('eri3c_unzip_batch.shape C_q.shape', eri3c_unzip_batch.shape, C_q.shape)
+#             # T_ab = contract('uvP,ua->avP', eri3c_unzip_batch, C_q)
+#             T_iv = contract('uvT,ui->Tiv', eri3c_unzip_batch, C_p)
+#             log.timer(' uvT,ui->Tiv', *cpu)
+#             cpu = log.init_timer()
+
+#             T_ij = contract('Tiv,vj->Tij', T_iv, C_p)
+#             log.timer(' Tiv,vj->Tij', *cpu)
+#             cpu = log.init_timer()
+
+#             # print('T_ab.shape V.shape', T_ab.shape, V.shape)
+#             T_ib = contract('Tij,mjb->mTib', T_ij, V)
+#             log.timer(' Pab,mjb->mPja', *cpu)
+#             cpu = log.init_timer()
+
+#             # T_ib
+#             # T_ij = contract('uvP,ui->ivP', eri3c_unzip_batch, C_p)
+#             # log.timer(' uvP,ui->ivP', *cpu)
+#             # cpu = log.init_timer()
+
+#             T_il = contract('mTib,lb->mTil', T_ib, C_q)
+#             log.timer(' mTib,lb->mTil', *cpu)
+#             cpu = log.init_timer()          
+
+#             out += -a_x*contract('Pij,mPja->mia', T_ij, T_ab_V)
+#             log.timer(' Pij,mPja->mia', *cpu)
+#             cpu = log.init_timer()  
+#             release_memory()
+
+#         return out
+
+#     log.info(get_memory_info('after generate ijab_MVP'))    
+#     return ijab_MVP
+
+
+# def eri3c_to_Tij(eri3c, ao_pair_mapping, nao_orig, rows, cols, C_p, log):
+#     ''' eri3c.shape == (ao_pair_mapping, nauxao) '''
+#     npairs, nauxao = eri3c.shape
+#     nao, nmo = C_p.shape
+    
+#     batch_size = 100000
+#     T_ij = cp.zeros((nauxao, nmo, nmo))
+#     for p0 in range(0, npairs, batch_size):
+#         p1 = min(p0 + batch_size, npairs)
+#         log.info(f'eri3c_to_Tij p0, p1: {p0, p1}')
+
+#         C_rows = C_p[rows,:][p0:p1,:]
+#         C_cols = C_p[cols,:][p0:p1,:]
+
+#         eri3c_batch = eri3c[p0:p1,:]
+#         T_ij += cp.einsum('nP,ni,nj->Pij', eri3c_batch, C_rows, C_cols, optimize=True)
+#         T_ij += cp.einsum('nP,ni,nj->Pij', eri3c_batch, C_cols, C_rows, optimize=True)
+#     # eri3c_unzip = cp.zeros((nao_orig*nao_orig, nauxao))
+#     # eri3c_unzip[ao_pair_mapping,   :] = eri3c
+#     # eri3c_unzip[cols*nao_orig+rows,:] = eri3c
+#     # eri3c_unzip = eri3c_unzip.reshape(nao_orig, nao_orig, nauxao)
+#     # T_iv = contract('uvP,ui->Piv', eri3c_unzip, C_p)
+#     # T_ij = contract('Piv,vj->Pij', T_iv, C_p)
+
+#     return T_ij
+
+# def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, log, single):
+#     '''
+#     (ij|ab)V = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
+#              = Σ_P [T_ij^P Σ_jb(T_ab^P V_jb^m)]
+#     V in shape (m, n_occ * n_vir)
+#     '''
+
+#     # def ijab_MVP(V):
+#     #     T_ab_V = contract("Pab,mjb->Pamj", T_ab, V)
+#     #     ijab_V = contract("Pij,Pamj->mia", T_ij, T_ab_V)
+#     #     return ijab_V
+#     nao, nao_orig = int3c2e_opt.coeff.shape
+
+#     C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+#     C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+#     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
+
+#     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+#     pair_rows, pair_cols, pair_diag = int3c2e_opt.orbital_pair_nonzero_indices()
+
+#     rows, cols = divmod(ao_pair_mapping, nao_orig)
+#     diag_mask = (rows == cols)
+#     def ijab_MVP(V, a_x, out=None):
+#         '''
+#         Optimized calculation of (ij|ab) = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
+#         using vectorized sparse AO pair indexing from orbital_pair_nonzero_indices,
+#         leveraging UV symmetry and GPU parallelism. Uses pair_rows == pair_cols for diagonal pairs.
+
+#         Parameters:
+#             V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
+
+#         Returns:
+#             ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
+#         '''
+#         n_state, n_occ, n_vir = V.shape
+#         if out is None: 
+#             out = cp.zeros_like(V)
+#         nauxao = int3c2e_opt.aux_coeff.shape[1]
+#         nao_orig = int3c2e_opt.coeff.shape[1]  # Assuming coeff.shape = (naux, nao)
         
-        # Debug: Check pair_diag
-        log.info(f'n_pairs: {n_pairs}, nao_orig: {nao_orig}, n_vir: {n_vir}, n_occ: {n_occ}, n_diag: {len(pair_diag)}')
-        if len(pair_diag) > 0:
-            diag_rows = pair_rows[pair_diag].get()
-            diag_cols = pair_cols[pair_diag].get()
-            log.info(f'pair_diag sample: rows={diag_rows[:5]}, cols={diag_cols[:5]}')
-            # Check which indices violate u == v
-            violations = cp.where(pair_rows[pair_diag] != pair_cols[pair_diag])[0].get()
-            if len(violations) > 0:
-                log.info(f'Violations (u != v) at pair_diag indices: {violations[:5]}')
-                log.info(f'Example violations: rows={diag_rows[violations[:5]]}, cols={diag_cols[violations[:5]]}')
+#         # Get sparse pair indices
+#         # pair_rows, pair_cols, pair_diag = int3c2e_opt.orbital_pair_nonzero_indices()
+#         # n_pairs = len(pair_rows)
+
+#         log.info(f'n_pairs: {len(ao_pair_mapping)}, nao_orig: {nao_orig}, n_vir: {n_vir}, n_occ: {n_occ}, n_diag: {len(pair_diag)}')
         
-        # Compute diagonal indices independently
-        diag_mask = pair_rows == pair_cols  # Boolean mask for u == v
-        n_diag = cp.sum(diag_mask)
-        log.info(f'Computed n_diag (u == v): {n_diag}')
-        
-        batch_size = 16
-        pair_batch_size = 10000  # Adjust based on GPU memory
-        
-        for p0 in range(0, nauxao, batch_size):
-            p1 = min(p0 + batch_size, nauxao)
-            log.info(f'p0, p1: {p0, p1}')
+#         batch_size = 16
+#         for p0 in range(0, nauxao, batch_size):
+#             p1 = min(p0 + batch_size, nauxao)
+#             log.info(f'p0, p1: {p0, p1}')
+#             eri3c_batch = eri3c[:,p0:p1] 
+#             eri3c_batch[pair_diag,:] *= 0.5
+#             T_ab = eri3c_to_Tij(eri3c_batch, ao_pair_mapping, nao_orig, rows, cols, C_q, log)
+#             T_ab_V = contract('Pab,mjb->mPja', T_ab, V)
 
-            # Sparse eri3c_batch: (n_pairs, batch_size)
-            eri3c_batch = cp.asarray(eri3c[:, p0:p1], dtype=cp_int3c_dtype)
-            log.info(f'eri3c_batch norm: {cp.linalg.norm(eri3c_batch)}')
+#             T_ij = eri3c_to_Tij(eri3c_batch, ao_pair_mapping, nao_orig, rows, cols, C_p, log)
+#             out += -a_x*contract('Pij,mPja->mia', T_ij, T_ab_V)
 
-            # Initialize temporary dense tensors
-            T_avP = cp.zeros((n_vir, nao_orig, p1 - p0), dtype=cp_int3c_dtype)
-            T_ivP = cp.zeros((n_occ, nao_orig, p1 - p0), dtype=cp_int3c_dtype)
+#         # Debug: Check final output norm
+#         log.info(f'out norm: {cp.linalg.norm(out)}')
+#         return out
 
-            # Process pairs in blocks
-            for pair_start in range(0, n_pairs, pair_batch_size):
-                pair_end = min(pair_start + pair_batch_size, n_pairs)
-                n_pairs_block = pair_end - pair_start
-                rows_batch = pair_rows[pair_start:pair_end]  # (n_pairs_block,)
-                cols_batch = pair_cols[pair_start:pair_end]  # (n_pairs_block,)
-                diag_batch = diag_mask[pair_start:pair_end]  # (n_pairs_block,) boolean
-                eri_batch = eri3c_batch[pair_start:pair_end, :]  # (n_pairs_block, batch_size)
-
-                # Extract coefficients
-                C_q_rows = C_q[rows_batch, :]  # (n_pairs_block, n_vir)
-                C_q_cols = C_q[cols_batch, :]  # (n_pairs_block, n_vir)
-                C_p_rows = C_p[rows_batch, :]  # (n_pairs_block, n_occ)
-                C_p_cols = C_p[cols_batch, :]  # (n_pairs_block, n_occ)
-
-                # Compute contributions for T_avP: T_avP[a, v, P] += C_q[u, a] * eri[u,v,P] (v = cols_batch[x])
-                contrib_avP = cp.einsum('xa,xp->ap', C_q_rows, eri_batch)  # (n_vir, batch_size)
-                for p in range(p1 - p0):
-                    T_avP[:, cols_batch, p] += contrib_avP[:, p][:, cp.newaxis]
- 
-                # Symmetric contribution for non-diagonal pairs: T_avP[a, u, P] += C_q[v, a] * eri[v,u,P]
-                non_diag = ~diag_batch
-                if cp.any(non_diag):
-                    contrib_avP_sym = cp.einsum('xa,xp->ap', C_q_cols[non_diag], eri_batch[non_diag])
-                    for p in range(p1 - p0):
-                        T_avP[:, rows_batch[non_diag], p] += contrib_avP_sym[:, p][:, cp.newaxis]
-
-                # Compute contributions for T_ivP: T_ivP[i, v, P] += C_p[u, i] * eri[u,v,P]
-                contrib_ivP = cp.einsum('xi,xp->ip', C_p_rows, eri_batch)
-                for p in range(p1 - p0):
-                    T_ivP[:, cols_batch, p] += contrib_ivP[:, p][:, cp.newaxis]
-
-                # Symmetric contribution for non-diagonal pairs
-                if cp.any(non_diag):
-                    contrib_ivP_sym = cp.einsum('xi,xp->ip', C_p_cols[non_diag], eri_batch[non_diag])
-                    for p in range(p1 - p0):
-                        T_ivP[:, rows_batch[non_diag], p] += contrib_ivP_sym[:, p][:, cp.newaxis]
-
-            # Debug: Check non-zero elements and norms
-            log.info(f'T_avP non-zeros: {cp.count_nonzero(T_avP)}, T_ivP non-zeros: {cp.count_nonzero(T_ivP)}')
-            log.info(f'T_avP norm: {cp.linalg.norm(T_avP)}, T_ivP norm: {cp.linalg.norm(T_ivP)}')
-
-            # Contract to get T_ab (P,a,b) and T_ij (P,i,j)
-            T_ab = contract('avP,vb->Pab', T_avP, C_q)
-            T_ij = contract('ivP,vj->Pij', T_ivP, C_p)
-
-            # Debug: Check shapes and norms
-            log.info(f'T_ab shape: {T_ab.shape}, T_ij shape: {T_ij.shape}')
-            log.info(f'T_ab norm: {cp.linalg.norm(T_ab)}, T_ij norm: {cp.linalg.norm(T_ij)}')
-
-            # Rest unchanged
-            T_ab_V = contract('Pab,mjb->mPja', T_ab, V)
-            out += -a_x * contract('Pij,mPja->mia', T_ij, T_ab_V)
-
-            # Release memory
-            del T_avP, T_ivP, T_ab, T_ij, T_ab_V
-            release_memory()
-
-        # Debug: Check final output norm
-        log.info(f'out norm: {cp.linalg.norm(out)}')
-        return out
-    log.info(get_memory_info('after generate ijab_MVP'))    
-    return ijab_MVP
+#     log.info(get_memory_info('after generate ijab_MVP'))    
+#     return ijab_MVP
 
 def gen_ibja_MVP(T_ia):
     '''
@@ -2527,7 +2579,7 @@ class TDDFT(RisBase):
         log.info(get_memory_info('before T_ia_J'))
 
         T_ia_J = self.get_T_J()
-        
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
         log.timer('T_ia_J', *cpu0)
 
         hdiag_sqrt_MVP = gen_hdiag_MVP(hdiag=self.hdiag**0.5, n_occ=self.n_occ, n_vir=self.n_vir)
