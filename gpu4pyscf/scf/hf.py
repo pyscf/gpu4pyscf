@@ -29,6 +29,7 @@ from gpu4pyscf.lib.cupy_helper import (
     block_diag, sandwich_dot)
 from gpu4pyscf.scf import diis, jk, j_engine
 from gpu4pyscf.lib import logger
+from gpu4pyscf import __config__
 
 __all__ = [
     'get_jk', 'get_occ', 'get_grad', 'damping', 'level_shift', 'get_fock',
@@ -154,7 +155,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4:
         f = damping(s1e, dm*.5, f, damp_factor)
     if diis is not None and cycle >= diis_start_cycle:
-        f = diis.update(s1e, dm, f, mf, h1e, vhf)
+        f = diis.update(s1e, dm, f)
 
     if abs(level_shift_factor) > 1e-4:
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
@@ -225,6 +226,9 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
+        # CDIIS just require a C that's orthonormal (C.T@S@C==I), and X satisfies that.
+        if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
+            mf_diis.Corth = cupy.asarray(mf.overlap_canonical_decomposed_x)
     else:
         mf_diis = None
 
@@ -578,6 +582,7 @@ class SCF(pyscf_lib.StreamObject):
     conv_check          = hf_cpu.SCF.conv_check
     callback            = hf_cpu.SCF.callback
     _keys               = hf_cpu.SCF._keys
+    overlap_canonical_decomposed_x = None
 
     # methods
     def __init__(self, mol):
@@ -609,17 +614,51 @@ class SCF(pyscf_lib.StreamObject):
 
     def check_sanity(self):
         s1e = self.get_ovlp()
-        if isinstance(s1e, cupy.ndarray) and s1e.ndim == 2:
+        assert isinstance(s1e, cupy.ndarray)
+        if s1e.ndim == 2:
             c = cond(s1e, sympos=True)
         else:
             c = cupy.asarray([cond(xi, sympos=True) for xi in s1e])
         logger.debug(self, 'cond(S) = %s', c)
-        if cupy.max(c)*1e-17 > self.conv_tol:
+        if cupy.max(c)*1e-17 > self.conv_tol or cupy.max(c) > 1e10:
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
                         'SCF may be inaccurate and hard to converge.', cupy.max(c))
+
+            remove_overlap_zero_eigenvalue = getattr(__config__, 'scf_hf_remove_overlap_zero_eigenvalue', False)
+            overlap_zero_eigenvalue_threshold = getattr(__config__, 'scf_hf_overlap_zero_eigenvalue_threshold', 1e-8)
+
+            if remove_overlap_zero_eigenvalue:
+                e, v = cupy.linalg.eigh(s1e)
+                mask = e > overlap_zero_eigenvalue_threshold
+                x = v[:,mask] / cupy.sqrt(e[mask])
+
+                nao, nmo = x.shape
+                if nmo < nao:
+                    self.overlap_canonical_decomposed_x = x
+                    logger.warn(self, f"{nao - nmo} small eigenvector of overlap matrix removed "
+                                       "because of linear dependency between AOs.\n"
+                                       "The support for low-rank overlap matrix is not fully tested. "
+                                       "Please report any bug you encountered to the developers.")
+
         return super().check_sanity()
 
-    build                    = hf_cpu.SCF.build
+    def build(self, mol=None):
+        if mol is None: mol = self.mol
+        self.check_sanity()
+        return self
+
+    def eig(self, fock, s):
+        x = None
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            x = cupy.asarray(self.overlap_canonical_decomposed_x)
+        if x is None:
+            mo_energy, mo_coeff = eigh(fock, s)
+            return mo_energy, mo_coeff
+        else:
+            mo_energy, C = cupy.linalg.eigh(x.T @ fock @ x)
+            mo_coeff = x @ C
+            return mo_energy, mo_coeff
+
     opt                      = NotImplemented
     dump_flags               = hf_cpu.SCF.dump_flags
     get_fock                 = get_fock
@@ -638,7 +677,6 @@ class SCF(pyscf_lib.StreamObject):
     energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
     _eigh                    = staticmethod(eigh)
-    eig                      = hf_cpu.SCF.eig
     do_disp                  = hf_cpu.SCF.do_disp
     get_dispersion           = hf_cpu.SCF.get_dispersion
     kernel = scf             = scf
@@ -711,6 +749,7 @@ class SCF(pyscf_lib.StreamObject):
         self._opt_gpu = {None: None}
         self._opt_jengine = {None: None}
         self.scf_summary = {}
+        self.overlap_canonical_decomposed_x = None
         return self
 
     def dump_chk(self, envs):
