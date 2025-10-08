@@ -21,13 +21,12 @@ import numpy as np
 from pyscf import lib
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.solvent import smd
+from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
 from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
 
 def get_cds(smdobj):
     mol = smdobj.mol.copy()
-    solvent = smdobj.solvent
     smdobj_tmp = smdobj.copy()
     def smd_grad_scanner(mol):
         smdobj_tmp.reset(mol)
