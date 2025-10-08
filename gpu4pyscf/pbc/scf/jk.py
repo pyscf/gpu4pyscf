@@ -35,7 +35,7 @@ from gpu4pyscf.gto.mole import group_basis, groupby, extract_pgto_params
 from gpu4pyscf.scf.jk import (
     libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff,
     _nearest_power2, apply_coeff_C_mat_CT, apply_coeff_CT_mat_C,
-    LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
+    PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 
@@ -81,7 +81,6 @@ class PBCJKmatrixOpt:
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
-        omega = self.omega
         # FIXME: should the supmol be regrouped based on l?
         supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
@@ -141,7 +140,7 @@ class PBCJKmatrixOpt:
         supmol = self.supmol
         atm = asarray(supmol._atm)
         bas = asarray(supmol._bas)
-        env = asarray(supmol._env)
+        env = asarray(_scale_sp_ctr_coeff(supmol))
         ao_loc = asarray(supmol.ao_loc)
         return RysIntEnvVars.new(supmol.natm, supmol.nbas, atm, bas, env, ao_loc)
 
@@ -170,6 +169,7 @@ class PBCJKmatrixOpt:
         matrix is still evaluated as the k-point sampling case. The "nkpts"
         dimension is set to 1
         '''
+        assert hermi == 1
         cell = self.cell
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
@@ -182,40 +182,38 @@ class PBCJKmatrixOpt:
         dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
                                    self.l_ctr_offsets, self.ao_idx)
 
-        double_latsum_Ts = supmol.double_latsum_Ts
         is_gamma_point = kpts is None or is_zero(kpts)
         if is_gamma_point:
-            expLk = cp.ones((1, 1))
-            n_Ts, nkpts = expLk.shape
+            assert dms.dtype == np.float64
+            nimgs = len(supmol.Ls)
+            nkpts = 1
+            dms = dms.reshape(-1, nao, nao)
+            n_dm = len(dms)
+            ish_cell0 = supmol.ao_mapping % nao
+            dms = dms[:,:,ish_cell0]
         else:
-            scaled_kpts = cell.lattice_vectors().dot(kpts.T)
-            Ts = cp.asarray(double_latsum_Ts, dtype=np.float64)
-            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
-            n_Ts, nkpts = expLk.shape
+            expLk = cp.exp(1j * asarray(supmol.Ls).dot(asarray(kpts).T))
+            nimgs, nkpts = expLk.shape
+            dms = dms.reshape(-1, nkpts, nao, nao)
+            dms = contract('skpq,Lk->spLq', dms, expLk)
+            expLk = None
+            n_dm = len(dms)
+            if 1:
+                #FIXME: the imaginary part?
+                dms = dms.real
+            dms = dms.reshape(n_dm, nao, nimgs*nao)[:,:,supmol.ao_mapping]
+        dms = cp.asarray(dms, order='C')
 
-        dms = dms.reshape(-1, nkpts, nao, nao)
-        n_dm = len(dms)
-        dms = contract('skpq,Lk->sLpq', dms, expLk)
-        if 1:
-            #FIXME: the imaginary part?
-            dms = cp.asarray(dms.real, order='C')
-
-        ao_loc = asarray(supmol.ao_loc)
-        nao_supmol = len(supmol.ao_mapping)
+        ao_loc_cpu = supmol.ao_loc
+        ao_loc = asarray(ao_loc_cpu)
+        nao_supmol = ao_loc_cpu[-1]
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = self.l_ctr_offsets
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
-        assert hermi == 1
-        if is_gamma_point:
-            dm_cond = condense('absmax', dms.reshape(n_dm, nao, nao),
-                               ao_loc[:sorted_cell.nbas+1])
-            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
-            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
-        else:
-            dm_cond = _compressed_dm_cond(supmol, dms)
+        dm_cond = condense('absmax', dms, ao_loc[:sorted_cell.nbas+1], ao_loc)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
@@ -232,25 +230,20 @@ class PBCJKmatrixOpt:
             t0 = log.init_timer()
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
-            vk = cp.zeros((n_dm, n_Ts, nao, nao))
 
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
-            pair_kl_mappings = _make_tril_pair_mappings(
+            pair_ij_mappings, pair_kl_mappings = _make_tril_pair_mappings(
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
-            pair_ij_mappings = {}
-            for (i, j), pair_ij_mapping in pair_kl_mappings.items():
-                if i == j:
-                    pair_ij_mapping = pair_ij_mapping[pair_ij_mapping < sorted_cell.nbas*supmol.nbas]
-                pair_ij_mappings[i, j] = pair_ij_mapping
-
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
-            if is_gamma_point:
-                Ts_ji_lookup = cp.ones_like(supmol.Ts_ji_lookup)
-            else:
-                Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
             nimgs = len(supmol.Ls)
             nimgs_uniq_pair = len(supmol.double_latsum_Ts)
+            if is_gamma_point:
+                Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
+                vk = cp.zeros((n_dm, nao, nao))
+            else:
+                Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
+                vk = cp.zeros((n_dm, nimgs_uniq_pair, nao, nao))
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
@@ -281,16 +274,16 @@ class PBCJKmatrixOpt:
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nimgs),
-                    ctypes.c_int(nimgs_uniq_pair),
+                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
                     ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
                     ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-                    sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-                    sorted_cell._env.ctypes)
+                    ctypes.c_int(sorted_cell.nbas),
+                    supmol._atm.ctypes, ctypes.c_int(supmol.natm),
+                    supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
+                    supmol._env.ctypes)
                 if err != 0:
                     llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
@@ -303,13 +296,13 @@ class PBCJKmatrixOpt:
                     kern_counts += 1
 
             cp.cuda.get_current_stream().synchronize()
-            if is_gamma_point:
-                vk = transpose_sum(vk[:,0])
-            else:
-                expLkz = expLk.view(np.float64).reshape(n_Ts, nkpts, 2)
+            if not is_gamma_point:
+                scaled_kpts = cell.lattice_vectors().dot(kpts.T)
+                Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
+                expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
+                expLkz = expLk.view(np.float64).reshape(nimgs, nkpts, 2)
                 vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = vk.view(np.complex128)[:,:,:,:,0]
-                vk = transpose_sum(vk.reshape(n_dm*nkpts,nao,nao))
                 vk = vk.reshape(n_dm, nkpts, nao, nao)
             return vk, kern_counts, timing_counter
 
@@ -335,6 +328,152 @@ class PBCJKmatrixOpt:
                                   self.l_ctr_offsets, self.ao_idx)
         vk = vk.reshape(dm.shape)
         return vk
+
+    def get_ek_ip1(self, dm, hermi, kpts, kpts_band=None, verbose=None):
+        cell = self.cell
+        sorted_cell = self.sorted_cell
+        nao_orig = cell.nao
+        nao = sorted_cell.nao
+        supmol = self.supmol
+
+        dm = asarray(dm, order='C')
+        dms = dm.reshape(-1,nao_orig,nao_orig)
+        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
+        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
+                                   self.l_ctr_offsets, self.ao_idx)
+
+        double_latsum_Ts = supmol.double_latsum_Ts
+        is_gamma_point = kpts is None or is_zero(kpts)
+        if is_gamma_point:
+            expLk = cp.ones((1, 1))
+            n_Ts, nkpts = expLk.shape
+        else:
+            scaled_kpts = cell.lattice_vectors().dot(kpts.T)
+            Ts = cp.asarray(double_latsum_Ts, dtype=np.float64)
+            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
+            n_Ts, nkpts = expLk.shape
+        dms = dms.reshape(-1, nkpts, nao, nao)
+        n_dm = len(dms)
+        dms = contract('skpq,Lk->spLq', dms, expLk)
+        expLk = None
+        dms = dms.real
+        dms = cp.asarray(dms, order='C')
+
+        ao_loc_cpu = supmol.ao_loc
+        ao_loc = asarray(ao_loc_cpu)
+        nao_supmol = ao_loc_cpu[-1]
+        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l = uniq_l_ctr[:,0]
+        l_ctr_bas_loc = self.l_ctr_offsets
+        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+        n_groups = np.count_nonzero(uniq_l <= LMAX)
+
+        assert hermi == 1
+        if is_gamma_point:
+            dm_cond = condense('absmax', dms.reshape(n_dm, nao, nao),
+                               ao_loc[:sorted_cell.nbas+1])
+            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
+            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
+        else:
+            dm_cond = _compressed_dm_cond(supmol, dms)
+        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
+        log_max_dm = float(dm_cond.max().get())
+        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+
+        tasks = ((i,j,k,l)
+                 for i in range(n_groups)
+                 for j in range(i+1)
+                 for k in range(i+1)
+                 for l in range(k+1))
+
+        def proc(dms, dm_cond):
+            device_id = cp.cuda.device.get_device_id()
+            log = logger.new_logger(cell, verbose)
+            t0 = log.init_timer()
+            dms = cp.asarray(dms)
+            dm_cond = cp.asarray(dm_cond)
+
+            q_cond = cp.asarray(self.q_cond)
+            s_estimator = cp.asarray(self.s_estimator)
+            pair_ij_mappings, pair_kl_mappings = _make_tril_pair_mappings(
+                supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+            bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
+            nimgs = len(supmol.Ls)
+            nimgs_uniq_pair = len(supmol.double_latsum_Ts)
+            if is_gamma_point:
+                Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
+            else:
+                Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
+            ek = cp.zeros((cell.natm, 3))
+
+            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
+            workers = gpu_specs['multiProcessorCount']
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+
+            timing_counter = Counter()
+            kern_counts = 0
+            kern = libpbc.PBC_build_k_ip1
+            rys_envs = self.rys_envs
+
+            for task in tasks:
+                i, j, k, l = task
+                shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
+                pair_ij_mapping = pair_ij_mappings[i,j]
+                pair_kl_mapping = pair_kl_mappings[k,l]
+                npairs_ij = pair_ij_mapping.size
+                npairs_kl = pair_kl_mapping.size
+                if npairs_ij == 0 or npairs_kl == 0:
+                    continue
+                err = kern(
+                    ctypes.cast(ek.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao_supmol),
+                    rys_envs, (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(SHM_SIZE),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
+                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(sorted_cell.nbas),
+                    supmol._atm.ctypes, ctypes.c_int(supmol.natm),
+                    supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
+                    supmol._env.ctypes)
+                if err != 0:
+                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                if log.verbose >= logger.DEBUG1:
+                    ntasks = npairs_ij * npairs_kl
+                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                    msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
+                    t1, t1p = log.timer_debug1(msg, *t1), t1
+                    timing_counter[llll] += t1[1] - t1p[1]
+                    kern_counts += 1
+            return ek, kern_counts, timing_counter
+
+        results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
+
+        kern_counts = 0
+        timing_collection = Counter()
+        ek_dist = []
+        for ek, counts, t_counter in results:
+            kern_counts += counts
+            timing_collection += t_counter
+            ek_dist.append(ek)
+
+        log = logger.new_logger(cell, verbose)
+        if log.verbose >= logger.DEBUG1:
+            log.debug1('kernel launches %d', kern_counts)
+            for llll, t in timing_collection.items():
+                log.debug1('%s wall time %.2f', llll, t)
+        return ek
+
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''
@@ -395,6 +534,7 @@ class ExtendedMole(gto.Mole):
         supmol.bas_mask_idx = np.asarray(bas_mask_idx, dtype=np.int32)
         supmol.ao_mapping = np.asarray(ao_mapping, dtype=np.int32)
         supmol._bas = supmol._bas[bas_mask_idx]
+        supmol._bas[:,PTR_BAS_COORD] = supmol._atm[supmol._bas[:,gto.ATOM_OF],gto.PTR_COORD]
         logger.debug1(supmol, 'trim supmol %d shells -> %d shells, %d AOs -> %d AOs',
                       nimgs*cell.nbas, supmol.nbas, nao, len(ao_mapping))
 
@@ -482,19 +622,24 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
 
     nbas = q_cond.shape[0]
     q_cond = q_cond.ravel()
-    pair_mappings = {}
+    pair_kl_mappings = {}
+    pair_ij_mappings = {}
     for i in range(n_groups):
         for j in range(i+1):
             ish = bas_idx_lookup[i][:,None,:,None]
             jsh = bas_idx_lookup[j][None,:,None,:]
-            pair_ij = ish * nbas + jsh
-            if i == j:
-                pair_ij = pair_ij[(ish >= jsh) & (ish >= 0) & (jsh >= 0)]
-            else:
-                pair_ij = pair_ij[(ish >= 0) & (jsh >= 0)]
+            pair_kl = ish * nbas + jsh
+            mask = (ish >= 0) & (jsh >= 0)
+            pair_ij = pair_kl[mask & (ish < nbas_cell0)]
             pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
-            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
-    return pair_mappings
+            if i == j:
+                pair_kl = pair_kl[mask & (ish >= jsh)]
+            else:
+                pair_kl = pair_kl[mask]
+            pair_kl = pair_kl[q_cond[pair_kl] > cutoff]
+            pair_ij_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
+            pair_kl_mappings[i,j] = asarray(pair_kl, dtype=np.int32)
+    return pair_ij_mappings, pair_kl_mappings
 
 def _compressed_dm_cond(supmol, dms):
     '''Largest density matrix elements for each shell-pair. The input and output

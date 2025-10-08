@@ -80,24 +80,16 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
         }
 
         int bas_kl = pair_kl_mapping[pair_kl];
-        int q_kl = q_cond[bas_kl];
+        float q_kl = q_cond[bas_kl];
         if (q_kl < kl_cutoff) {
-            continue;
-        }
-        if (bas_ij < bas_kl) {
             continue;
         }
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         float d_cutoff = kl_cutoff - q_kl;
         float dm_ik = dm_cond[ish*nbas+ksh];
-        float dm_jk = dm_cond[jsh*nbas+ksh];
         float dm_il = dm_cond[ish*nbas+lsh];
-        float dm_jl = dm_cond[jsh*nbas+lsh];
-        if ((dm_ik > d_cutoff ||
-             dm_jk > d_cutoff ||
-             dm_il > d_cutoff ||
-             dm_jl > d_cutoff)) {
+        if (dm_ik > d_cutoff || dm_il > d_cutoff) {
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
             float ak = diffuse_exps[ksh];
@@ -129,10 +121,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
             if (d_cutoff > 0) {
                 continue;
             }
-            if ((dm_ik > d_cutoff ||
-                 dm_jk > d_cutoff ||
-                 dm_il > d_cutoff ||
-                 dm_jl > d_cutoff)) {
+            if (dm_ik > d_cutoff || dm_il > d_cutoff) {
                 int off = atomicAdd(&ntasks, 1);
                 bas_kl_idx[off] = bas_kl;
             }
@@ -145,4 +134,5 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
     if (threadIdx.y == 0) {
         bas_kl_idx[ntasks+thread_id] = pair_kl_mapping[0];
     }
+    __syncthreads();
 }
