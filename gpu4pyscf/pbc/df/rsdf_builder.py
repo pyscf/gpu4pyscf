@@ -938,10 +938,11 @@ def _lr_int3c2e_kk(ft_opt, bas_ij_cache, cd_j2c_cache, auxcell, omega, kpts, kpt
                 pair0, pair1 = ao_pair_offsets[i, j]
                 cderi_compressed[kp][:,pair0:pair1] = j3c_tmp.get(out=_buf)
             #t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
+        # It's important to synchronize the host and CUDA kernel before releasing
+        # local variables, as the mapped memory may still be in use by the device.
         cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
-
     return cderi_compressed
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
@@ -1255,7 +1256,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         t1 = log.timer_debug2('generating bas_ij indices', *t1)
         cderi = _lr_int3c2e_kk(ft_opt, bas_ij_cache, cd_j2c_cache,
                                int3c2e_opt.sorted_auxcell, omega, kpts, kpt_iters)
-        print([x.sum() for x in cderi.values()])
         # LR int3c2e would generate more nao_pairs than the SR int3c2e!
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
