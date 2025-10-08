@@ -1024,7 +1024,6 @@ class WithSolventHess:
         return pcm.make_hess_object(hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-        dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
