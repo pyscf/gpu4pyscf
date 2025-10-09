@@ -106,6 +106,8 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
+    if hessobj.grid_response:
+        de2 += _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory)
 
     if mf.do_nlc():
         de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
@@ -618,6 +620,56 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
         t0 = log.timer_debug1(f'vxc_deriv2 on Device {device_id}', *t0)
 
     return vmat_dm
+
+def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Attention: Numerical xc energy 2nd derivative includes grid response.
+    """
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = numpy.dot(mocc, mocc.T) * 2
+
+    de2 = cupy.empty([mol.natm, mol.natm, 3, 3])
+
+    def get_xc_de(grad_obj, dm):
+        assert grad_obj.grid_response
+        from gpu4pyscf.grad.rks import get_exc_full_response
+        mol = grad_obj.mol
+        ni = mf._numint
+        mf.grids.build()
+        exc_grid, exc_orbital = get_exc_full_response(ni, mol, mf.grids, mf.xc, dm)
+
+        aoslices = mol.aoslice_by_atom()
+        exc_orbital = [exc_orbital[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+        exc_orbital = cupy.asarray(exc_orbital)
+        de = 2 * exc_orbital + exc_grid
+        return de
+
+    dx = 1e-5
+    mol_copy = mol.copy()
+    grad_obj = mf.Gradients()
+    grad_obj.grid_response = True
+
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            grad_obj.reset(mol_copy)
+            de_p = get_xc_de(grad_obj, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            grad_obj.reset(mol_copy)
+            de_m = get_xc_de(grad_obj, dm0)
+
+            de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
+    grad_obj.reset(mol)
+
+    return de2
 
 def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     '''Partially contracted vxc*dm'''
@@ -1446,7 +1498,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
                 available_gpu_memory = get_avail_mem()
                 available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-                ao_nbytes_per_grid = ((4) * mol.nao + (3) * mol.natm + 2) * 8 # TODO: count this after optimization
+                ao_nbytes_per_grid = ((4) * mol.nao + (3) * mol.natm + 16 + 4) * 8 # TODO: count this after optimization
                 ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
                 if ngrids_per_batch < 16:
                     raise MemoryError(f"Out of GPU memory for LDA Fock first derivative, available gpu memory = {get_avail_mem()}"
@@ -1504,10 +1556,10 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
                 available_gpu_memory = get_avail_mem()
                 available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-                ao_nbytes_per_grid = ((10 + 9) * mol.nao + (3) * mol.natm + 2) * 8 # TODO: count this after optimization
+                ao_nbytes_per_grid = ((10 + 9) * mol.nao + (3) * mol.natm + 25 + 5) * 8 # TODO: count this after optimization
                 ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
                 if ngrids_per_batch < 16:
-                    raise MemoryError(f"Out of GPU memory for LDA Fock first derivative, available gpu memory = {get_avail_mem()}"
+                    raise MemoryError(f"Out of GPU memory for GGA Fock first derivative, available gpu memory = {get_avail_mem()}"
                                       f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (one GPU) = {grid_end - grid_start}, device_id = {device_id}")
                 ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
                 ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
@@ -1596,7 +1648,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 ao_nbytes_per_grid = ((10 + 9) * mol.nao + (3) * mol.natm + 2) * 8 # TODO: count this after optimization
                 ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
                 if ngrids_per_batch < 16:
-                    raise MemoryError(f"Out of GPU memory for LDA Fock first derivative, available gpu memory = {get_avail_mem()}"
+                    raise MemoryError(f"Out of GPU memory for mGGA Fock first derivative, available gpu memory = {get_avail_mem()}"
                                       f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (one GPU) = {grid_end - grid_start}, device_id = {device_id}")
                 ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
                 ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
@@ -2463,6 +2515,233 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 dF_ao = None
 
     return vmat_mo
+
+def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        xc energy 2nd derivative grid response contribution
+    """
+
+    mol = hessobj.mol
+    mf = hessobj.base
+    ni = mf._numint
+    xctype = ni._xc_type(mf.xc)
+
+    if hessobj.grids is not None:
+        grids = hessobj.grids
+    else:
+        grids = mf.grids
+    if grids.coords is None:
+        grids.build()
+    ngrids = grids.coords.shape[0]
+
+    natm = mol.natm
+    aoslices = mol.aoslice_by_atom()
+
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+
+    d2e = cupy.zeros([mol.natm, mol.natm, 3, 3])
+
+    if xctype == 'LDA':
+        available_gpu_memory = get_avail_mem()
+        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+        ao_nbytes_per_grid = ((10) * mol.nao + (9*2) * mol.natm * mol.natm + (3*4) * mol.natm + 2) * 8 # TODO: count this after optimization
+        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+        if ngrids_per_batch < 16:
+            raise MemoryError(f"Out of GPU memory for LDA energy second derivative, available gpu memory = {get_avail_mem()}"
+                                f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
+        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+
+        for g0 in range(0, ngrids, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, ngrids)
+            split_grids_coords = grids.coords[g0:g1, :]
+            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
+
+            mu = split_ao[0]
+            dmu_dr = split_ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(split_ao)
+
+            rho = numint.eval_rho2(mol, mu, mo_coeff, mo_occ, xctype=xctype)
+            exc, vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[0:3]
+
+            epsilon = exc[:, 0] * rho # Just of shape (ngrids,)
+            depsilon_drho = vxc[0] # Just of shape (ngrids,)
+            d2epsilon_drho2 = fxc[0,0] # Just of shape (ngrids,)
+
+            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
+            d2e += cupy.einsum("ABdDg,g->ABdD", d2w_dAdB, epsilon)
+            d2w_dAdB = None
+
+            drho_dA_orbital_response = cupy.zeros([natm, 3, g1-g0])
+            for i_atom in range(natm):
+                p0, p1 = aoslices[i_atom][2:]
+                mu_nu_dot_dm = (dm0[p0:p1, :] + dm0[:, p0:p1].T) @ mu
+                drho_dA_orbital_response[i_atom, :, :] += contract('dig,ig->dg', -dmu_dr[:, p0:p1, :], mu_nu_dot_dm)
+                mu_nu_dot_dm = None
+
+            grid_to_atom_index_map = grids.atm_idx[g0:g1]
+            atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
+
+            drho_dA_grid_response = cupy.zeros([natm, 3, g1-g0])
+            for i_atom in range(natm):
+                associated_grid_index = atom_to_grid_index_map[i_atom]
+                if len(associated_grid_index) == 0:
+                    continue
+                dm_dot_mu_and_nu = (dm0 + dm0.T) @ mu[:, associated_grid_index]
+                rho_response = contract('dig,ig->dg', dmu_dr[:, :, associated_grid_index], dm_dot_mu_and_nu)
+                drho_dA_grid_response[i_atom][:, associated_grid_index] = rho_response
+                dm_dot_mu_and_nu = None
+                rho_response = None
+
+            drho_dA_full = drho_dA_orbital_response + drho_dA_grid_response
+
+            # if True:
+            #     dx = 1e-5
+            #     mol_copy = mol.copy()
+            #     drho_dA_numerical = cupy.zeros_like(drho_dA_full)
+
+            #     def value(mol, grids):
+            #         split_grids_coords = grids.coords[g0:g1, :]
+            #         split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 0, gdftopt = None, transpose = False)
+            #         rho = numint.eval_rho2(mol, split_ao, mo_coeff, mo_occ, xctype=xctype)
+            #         return rho
+
+            #     for i_atom in range(mol.natm):
+            #         for i_xyz in range(3):
+            #             xyz_p = mol.atom_coords()
+            #             xyz_p[i_atom, i_xyz] += dx
+            #             mol_copy.set_geom_(xyz_p, unit='Bohr')
+            #             mf.reset(mol = mol_copy)
+            #             mf.grids.build(mol = mol_copy)
+            #             rho_p = value(mol_copy, mf.grids)
+
+            #             xyz_m = mol.atom_coords()
+            #             xyz_m[i_atom, i_xyz] -= dx
+            #             mol_copy.set_geom_(xyz_m, unit='Bohr')
+            #             mf.reset(mol = mol_copy)
+            #             mf.grids.build(mol = mol_copy)
+            #             rho_m = value(mol_copy, mf.grids)
+
+            #             drho_dA_numerical[i_atom, i_xyz, :] = (rho_p - rho_m) / (2 * dx)
+            #     print(cupy.max(cupy.abs(drho_dA_numerical - drho_dA_full)))
+            #     exit()
+
+            dw_dA = get_dweight_dA(mol, grids, (g0,g1))
+            d2e += cupy.einsum("Adg,g,BDg->ABdD", dw_dA, depsilon_drho, drho_dA_full)
+            d2e += cupy.einsum("Adg,g,BDg->BADd", dw_dA, depsilon_drho, drho_dA_full)
+            dw_dA = None
+            drho_dA_full = None
+
+            weight = grids.weights[g0:g1]
+            d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho2, drho_dA_orbital_response, drho_dA_grid_response)
+            d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho2, drho_dA_grid_response, drho_dA_orbital_response)
+            d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho2, drho_dA_grid_response, drho_dA_grid_response)
+            drho_dA_orbital_response = None
+            drho_dA_grid_response = None
+
+            # d2rho_dAdB_orbital_response = cupy.zeros([natm, natm, 3, 3, g1-g0])
+            d2rho_dAdB_grid_response = cupy.zeros([natm, natm, 3, 3, g1-g0])
+            for i_atom in range(natm):
+                pi0, pi1 = aoslices[i_atom][2:]
+                # # d2mu/dr2 * nu, A orbital, B orbital
+                # d2rho_dAdB_orbital_response[i_atom, i_atom, :, :, :] += cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, pi0:pi1, :], mu, dm0[pi0:pi1, :])
+                # d2rho_dAdB_orbital_response[i_atom, i_atom, :, :, :] += cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, pi0:pi1, :], mu, dm0[:, pi0:pi1].T)
+
+                g_i_with_response = atom_to_grid_index_map[i_atom]
+                if len(g_i_with_response) > 0:
+                    # d2mu/dr2 * nu, A grid, B grid
+                    d2rho_dAdB_grid_response[i_atom, i_atom][:, :, g_i_with_response] += cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, :, g_i_with_response], mu[:, g_i_with_response], dm0)
+                    d2rho_dAdB_grid_response[i_atom, i_atom][:, :, g_i_with_response] += cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, :, g_i_with_response], mu[:, g_i_with_response], dm0.T)
+                    # dmu/dr * dnu/dr, A grid, B grid
+                    d2rho_dAdB_grid_response[i_atom, i_atom][:, :, g_i_with_response] += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, :, g_i_with_response], dmu_dr[:, :, g_i_with_response], dm0)
+                    d2rho_dAdB_grid_response[i_atom, i_atom][:, :, g_i_with_response] += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, :, g_i_with_response], dmu_dr[:, :, g_i_with_response], dm0.T)
+
+                for j_atom in range(natm):
+                    pj0, pj1 = aoslices[j_atom][2:]
+                    # # dmu/dr * dnu/dr, A orbital, B orbital
+                    # d2rho_dAdB_orbital_response[i_atom, j_atom, :, :, :] += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, pi0:pi1, :], dmu_dr[:, pj0:pj1, :], dm0[pi0:pi1, pj0:pj1])
+                    # d2rho_dAdB_orbital_response[i_atom, j_atom, :, :, :] += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, pi0:pi1, :], dmu_dr[:, pj0:pj1, :], dm0[pj0:pj1, pi0:pi1].T)
+
+                    if len(g_i_with_response) > 0:
+                        # d2mu/dr2 * nu, A orbital, B grid
+                        d2rho_dAdB_grid_response[i_atom, j_atom][:, :, g_i_with_response] -= cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, pj0:pj1, g_i_with_response], mu[:, g_i_with_response], dm0[pj0:pj1, :]).transpose(1,0,2)
+                        d2rho_dAdB_grid_response[i_atom, j_atom][:, :, g_i_with_response] -= cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, pj0:pj1, g_i_with_response], mu[:, g_i_with_response], dm0[:, pj0:pj1].T).transpose(1,0,2)
+                        d2rho_dAdB_grid_response[j_atom, i_atom][:, :, g_i_with_response] -= cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, pj0:pj1, g_i_with_response], mu[:, g_i_with_response], dm0[pj0:pj1, :])
+                        d2rho_dAdB_grid_response[j_atom, i_atom][:, :, g_i_with_response] -= cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, pj0:pj1, g_i_with_response], mu[:, g_i_with_response], dm0[:, pj0:pj1].T)
+
+                        # dmu/dr * dnu/dr, A orbital, B grid
+                        d2rho_dAdB_grid_response[i_atom, j_atom][:, :, g_i_with_response] -= cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, pj0:pj1, g_i_with_response], dmu_dr[:, :, g_i_with_response], dm0[pj0:pj1, :]).transpose(1,0,2)
+                        d2rho_dAdB_grid_response[i_atom, j_atom][:, :, g_i_with_response] -= cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, pj0:pj1, g_i_with_response], dmu_dr[:, :, g_i_with_response], dm0[:, pj0:pj1].T).transpose(1,0,2)
+                        d2rho_dAdB_grid_response[j_atom, i_atom][:, :, g_i_with_response] -= cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, pj0:pj1, g_i_with_response], dmu_dr[:, :, g_i_with_response], dm0[pj0:pj1, :])
+                        d2rho_dAdB_grid_response[j_atom, i_atom][:, :, g_i_with_response] -= cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, pj0:pj1, g_i_with_response], dmu_dr[:, :, g_i_with_response], dm0[:, pj0:pj1].T)
+
+            # d2rho_dAdB_full = d2rho_dAdB_orbital_response + d2rho_dAdB_grid_response
+            # if True:
+            #     dx = 1e-5
+            #     mol_copy = mol.copy()
+            #     d2rho_dAdB_numerical = cupy.zeros_like(d2rho_dAdB_full)
+
+            #     def value(mol, grids):
+            #         split_grids_coords = grids.coords[g0:g1, :]
+            #         split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 0, gdftopt = None, transpose = False)
+            #         rho = numint.eval_rho2(mol, split_ao, mo_coeff, mo_occ, xctype=xctype)
+            #         return rho
+
+            #     for i_atom in range(mol.natm):
+            #         for i_xyz in range(3):
+            #             for j_atom in range(mol.natm):
+            #                 for j_xyz in range(3):
+            #                     xyz_pp = mol.atom_coords()
+            #                     xyz_pp[i_atom, i_xyz] += dx
+            #                     xyz_pp[j_atom, j_xyz] += dx
+            #                     mol_copy.set_geom_(xyz_pp, unit='Bohr')
+            #                     mf.reset(mol = mol_copy)
+            #                     mf.grids.build(mol = mol_copy)
+            #                     rho_pp = value(mol_copy, mf.grids)
+
+            #                     xyz_pm = mol.atom_coords()
+            #                     xyz_pm[i_atom, i_xyz] += dx
+            #                     xyz_pm[j_atom, j_xyz] -= dx
+            #                     mol_copy.set_geom_(xyz_pm, unit='Bohr')
+            #                     mf.reset(mol = mol_copy)
+            #                     mf.grids.build(mol = mol_copy)
+            #                     rho_pm = value(mol_copy, mf.grids)
+
+            #                     xyz_mp = mol.atom_coords()
+            #                     xyz_mp[i_atom, i_xyz] -= dx
+            #                     xyz_mp[j_atom, j_xyz] += dx
+            #                     mol_copy.set_geom_(xyz_mp, unit='Bohr')
+            #                     mf.reset(mol = mol_copy)
+            #                     mf.grids.build(mol = mol_copy)
+            #                     rho_mp = value(mol_copy, mf.grids)
+
+            #                     xyz_mm = mol.atom_coords()
+            #                     xyz_mm[i_atom, i_xyz] -= dx
+            #                     xyz_mm[j_atom, j_xyz] -= dx
+            #                     mol_copy.set_geom_(xyz_mm, unit='Bohr')
+            #                     mf.reset(mol = mol_copy)
+            #                     mf.grids.build(mol = mol_copy)
+            #                     rho_mm = value(mol_copy, mf.grids)
+
+            #                     d2rho_dAdB_numerical[i_atom, j_atom, i_xyz, j_xyz, :] = (rho_pp - rho_pm - rho_mp + rho_mm) / ((2 * dx)**2)
+            #     print(cupy.max(cupy.abs(d2rho_dAdB_numerical - d2rho_dAdB_full)))
+            #     # print(cupy.where(cupy.abs(d2rho_dAdB_numerical - d2rho_dAdB_full) > 0.06))
+
+            #     # d2rho_dAdB_grid_response = d2rho_dAdB_numerical - d2rho_dAdB_orbital_response
+            #     raise
+
+            d2e += cupy.einsum("g,g,ABdDg->ABdD", weight, depsilon_drho, d2rho_dAdB_grid_response)
+
+
+    elif xctype == 'GGA':
+        raise NotImplementedError(f"xctype = {xctype} not supported")
+    elif xctype == 'MGGA':
+        raise NotImplementedError(f"xctype = {xctype} not supported")
+    else:
+        raise NotImplementedError(f"xctype = {xctype} not supported")
+
+    return d2e
 
 def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
                         verbose=None, hermi=1, device_id=0):
