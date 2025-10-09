@@ -34,7 +34,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
           /bin/bash -c "cd /workspace && \
           echo '--- Force uninstalling pre-installed package ---' && \
-          pip uninstall -y gpu4pyscf-cuda12x || true && \
+          sudo pip3 uninstall -y gpu4pyscf-cuda12x || true && \
           echo '--- Checking setup.py content ---' && \
           cat setup.py | grep libxc && \
           echo '--- Checking build.sh content ---' && \
@@ -62,7 +62,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
           /bin/bash -c "cd /workspace  && \
           echo '--- Force uninstalling pre-installed package ---' && \
-          pip uninstall -y gpu4pyscf-cuda12x || true && \
+          sudo pip3 uninstall -y gpu4pyscf-cuda12x || true && \
           echo '--- Checking setup.py content ---' && \
           cat setup.py | grep libxc && \
           echo '--- Checking build.sh content ---' && \
