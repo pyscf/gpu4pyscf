@@ -35,8 +35,6 @@ jobs:
           /bin/bash -c "cd /workspace && \
           echo '--- Force uninstalling pre-installed package ---' && \
           pip uninstall -y gpu4pyscf-cuda12x || true && \
-          echo '--- Cleaning old artifacts ---' && \
-          rm -rf /tmp/deps .cupy_cache .pytest_cache build dist *.egg-info && \
           echo '--- Checking setup.py content ---' && \
           cat setup.py | grep libxc && \
           echo '--- Checking build.sh content ---' && \
