@@ -114,9 +114,9 @@ class WithSolventHess:
         self.de = self.de_solute + self.de_solvent + self.de_cds
         return self.de
 
-    make_h1 = pcm_hess.make_h1
+    make_h1 = pcm_hess.WithSolventHess.make_h1
 
-    get_veff_resp_mo = pcm_hess.get_veff_resp_mo
+    get_veff_resp_mo = pcm_hess.WithSolventHess.get_veff_resp_mo
 
     def _finalize(self):
         # disable _finalize. It is called in grad_method.kernel method
