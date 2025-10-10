@@ -52,11 +52,11 @@ def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None, verbose=None):
     '''Compute K matrix
     '''
     if vhfopt is None:
-        vhfopt = PBCJKmatrixOpt(cell, omega).build()
+        vhfopt = PBCShortRangeJKmatrixOpt(cell, omega).build()
     vk = vhfopt.get_k(dm, hermi, kpts, verbose)
     return vk
 
-class PBCJKmatrixOpt:
+class PBCShortRangeJKmatrixOpt:
     def __init__(self, cell, omega=None):
         self.cell = cell
         if omega is None: # TODO: dynamically determine omega based on rcut?
@@ -230,8 +230,8 @@ class PBCJKmatrixOpt:
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
-                 for j in range(i+1)
-                 for k in range(i+1)
+                 for j in range(n_groups)
+                 for k in range(n_groups)
                  for l in range(k+1))
 
         def proc(dms, dm_cond):
@@ -306,6 +306,8 @@ class PBCJKmatrixOpt:
                     kern_counts += 1
 
             cp.cuda.get_current_stream().synchronize()
+            if kpts_band is not None:
+                raise NotImplementedError
             if not is_gamma_point:
                 scaled_kpts = cell.lattice_vectors().dot(kpts.T)
                 Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
@@ -313,7 +315,6 @@ class PBCJKmatrixOpt:
                 expLkz = expLk.view(np.float64).reshape(nimgs, nkpts, 2)
                 vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = vk.view(np.complex128)[:,:,:,:,0]
-                vk = vk.reshape(n_dm, nkpts, nao, nao)
             return vk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
@@ -334,12 +335,16 @@ class PBCJKmatrixOpt:
 
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
         vk = vk.reshape(-1,nao,nao)
-        vk = apply_coeff_C_mat_CT(vk, cell, sorted_cell, self.uniq_l_ctr,
+        vk = apply_coeff_CT_mat_C(vk, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
-        vk = vk.reshape(dm.shape)
+        if kpts_band is None:
+            vk = vk.reshape(dm.shape)
+        else:
+            raise NotImplementedError
         return vk
 
-    def get_ek_ip1(self, dm, hermi, kpts, kpts_band=None, verbose=None):
+    def get_ek_ip1(self, dm, hermi, kpts, verbose=None):
+        raise NotImplementedError
         cell = self.cell
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
@@ -392,8 +397,8 @@ class PBCJKmatrixOpt:
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
-                 for j in range(i+1)
-                 for k in range(i+1)
+                 for j in range(n_groups)
+                 for k in range(n_groups)
                  for l in range(k+1))
 
         def proc(dms, dm_cond):
@@ -635,7 +640,7 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
     pair_kl_mappings = {}
     pair_ij_mappings = {}
     for i in range(n_groups):
-        for j in range(i+1):
+        for j in range(n_groups):
             ish = bas_idx_lookup[i][:,None,:,None]
             jsh = bas_idx_lookup[j][None,:,None,:]
             pair_kl = ish * nbas + jsh
