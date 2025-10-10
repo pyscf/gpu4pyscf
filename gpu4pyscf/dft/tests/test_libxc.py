@@ -71,10 +71,20 @@ class KnownValues(unittest.TestCase):
 
         print(f"{xc} {spin} exc", _diff(exc_gpu[:,0].get(), exc_cpu).max())
         print(f"{xc} {spin} vxc", _diff(vxc_gpu.get(), vxc_cpu).max())
+        print(f"{xc} {spin} exc gpu", exc_gpu[:,0].get())
+        print(f"{xc} {spin} exc cpu", exc_cpu)
+        print(f"{xc} {spin} vxc gpu", vxc_gpu.get())
+        print(f"{xc} {spin} vxc cpu", vxc_cpu)
+    
+
         if fxc_gpu is not None:
             print(f"{xc} {spin} fxc", _diff(fxc_gpu.get(), fxc_cpu).max())
+            print(f"{xc} {spin} fxc gpu", fxc_gpu.get())
+            print(f"{xc} {spin} fxc cpu", fxc_cpu)
         if kxc_gpu is not None:
             print(f"{xc} {spin} kxc", _diff(kxc_gpu.get(), kxc_cpu).max())
+            print(f"{xc} {spin} kxc gpu", kxc_gpu.get())
+            print(f"{xc} {spin} kxc cpu", kxc_cpu)
 
         assert _diff(exc_gpu[:,0].get(), exc_cpu).max() < 1e-10
         assert _diff(vxc_gpu.get(), vxc_cpu).max() < 1e-10
