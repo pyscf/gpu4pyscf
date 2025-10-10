@@ -161,7 +161,6 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
     spherical_matrix_ndim = spherical_matrix.ndim
     if spherical_matrix_ndim == 2:
         spherical_matrix = spherical_matrix[None]
-    counts = spherical_matrix.shape[0]
     n_spherical = mol.nao
     assert spherical_matrix.shape[1] == n_spherical
     assert spherical_matrix.shape[2] == n_spherical
@@ -175,6 +174,7 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
         output_complex = True
     else:
         assert spherical_matrix.dtype == np.float64
+    counts = spherical_matrix.shape[0]
 
     l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
     l_ctr_l = np.asarray(uniq_l_ctr[:,0], dtype=np.int32, order='C')
@@ -220,7 +220,6 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
     cartesian_matrix_ndim = cartesian_matrix.ndim
     if cartesian_matrix_ndim == 2:
         cartesian_matrix = cartesian_matrix[None]
-    counts = cartesian_matrix.shape[0]
     n_cartesian = sorted_mol.nao
     assert cartesian_matrix.shape[1] == n_cartesian
     assert cartesian_matrix.shape[2] == n_cartesian
@@ -234,6 +233,7 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
         output_complex = True
     else:
         assert cartesian_matrix.dtype == np.float64
+    counts = cartesian_matrix.shape[0]
 
     l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
     l_ctr_l = np.asarray(uniq_l_ctr[:,0], dtype=np.int32, order='C')

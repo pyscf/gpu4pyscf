@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
+import pytest
 import numpy as np
 import numpy as cp
 import pyscf
 from pyscf import lib, gto
+from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.pbc.scf import rsjk
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 
@@ -35,16 +36,18 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
 
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nao, nao)
+    dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
     vk = rsjk.get_k(cell, dm, hermi=1).get()
     omega = rsjk.OMEGA
+    cell.precision = 1e-10
+    cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=np.zeros((1,3)), with_j=False)
-    print( abs(vk - ref).max() )
+    assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi1_kpts_vs_cpu():
     from gpu4pyscf.scf.jk import get_k as mol_k
@@ -63,19 +66,20 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
     nkpts = len(kpts)
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao) + np.random.rand(nkpts, nao, nao) * .5j
+    dm = np.random.rand(nkpts, nao, nao)*.2 + np.random.rand(nkpts, nao, nao) * .1j
     dm = dm + dm.transpose(0, 2, 1).conj()
     vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts).get()
     omega = rsjk.OMEGA
+    cell.precision = 1e-10
+    cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=kpts, with_j=False)
-    print( abs(vk - ref).max() )
+    assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi1_gamma_point_vs_fft():
-    from gpu4pyscf.pbc.df import fft
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -90,7 +94,7 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     )
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nao, nao)
+    dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
     vk = rsjk.get_k(cell, dm, hermi=1).get()
 
@@ -101,13 +105,95 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     w = cell.get_Gv_weights()[2]
     coulG0_SR = np.pi / omega**2
     ref += s.dot(dm).dot(s) * (w*coulG0_SR)
-    print( abs(vk - ref).max() )
+    assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi1_kpts_vs_fft():
-    pass
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        H   1.757    0.    0.4696
+        H   0.757    0.    0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+    )
+    kpts = cell.make_kpts([3,2,1])
+    nkpts = len(kpts)
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(nkpts, nao, nao)*.2 + np.random.rand(nkpts, nao, nao) * .1j
+    dm = dm + dm.transpose(0, 2, 1).conj()
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts).get()
+
+    omega = cell.omega = -rsjk.OMEGA
+    ref = fft.FFTDF(cell).get_jk(dm, with_j=False, kpts=kpts)[1].get()
+
+    s = cell.pbc_intor('int1e_ovlp', kpts=kpts)
+    w = cell.get_Gv_weights()[2]
+    coulG0_SR = np.pi / omega**2
+    for k in range(nkpts):
+        ref[k] += s[k].dot(dm[k]).dot(s[k]) * (w*coulG0_SR)
+    assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi0_gamma_point_vs_fft():
-    pass
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        H   1.757    0.    0.4696
+        H   0.757    0.    0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+    )
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(nao, nao)*.2
+    vk = rsjk.get_k(cell, dm, hermi=0).get()
+
+    omega = cell.omega = -rsjk.OMEGA
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
+
+    s = cell.pbc_intor('int1e_ovlp')
+    w = cell.get_Gv_weights()[2]
+    coulG0_SR = np.pi / omega**2
+    ref += s.dot(dm).dot(s) * (w*coulG0_SR)
+    assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi0_kpts_vs_fft():
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        H   1.757    0.    0.4696
+        H   0.757    0.    0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+    )
+    kpts = cell.make_kpts([3,2,1])
+    nkpts = len(kpts)
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(nkpts, nao, nao)*.2 + np.random.rand(nkpts, nao, nao) * .1j
+    vk = rsjk.get_k(cell, dm, hermi=0, kpts=kpts).get()
+
+    omega = cell.omega = -rsjk.OMEGA
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+
+    s = cell.pbc_intor('int1e_ovlp', kpts=kpts)
+    w = cell.get_Gv_weights()[2]
+    coulG0_SR = np.pi / omega**2
+    for k in range(nkpts):
+        ref[k] += s[k].dot(dm[k]).dot(s[k]) * (w*coulG0_SR)
+    assert abs(vk - ref).max() < 1e-8
+
+def test_vk_kpts_band_vs_fft():
     pass

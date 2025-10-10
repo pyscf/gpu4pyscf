@@ -103,8 +103,16 @@ class PBCShortRangeJKmatrixOpt:
         q_cond = np.log(q_cond + 1e-300).astype(np.float32)
         self.q_cond_cpu = q_cond
 
-        # CVHFnr_sr_int2e_q_cond in pyscf is inaccurate for upper bound estimation.
-        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
+        diffuse_exps, _ = extract_pgto_params(supmol, 'diffuse')
+        # The most diffuse pGTO in each shell is used to estimate the
+        # asymptotic value of SR integrals. In a contracted shell, the
+        # diffuse_ctr_coef for the diffuse_exps may only represent a portion
+        # of the AO basis. Using this ctr_coef can introduce errors in the SR
+        # integral estimation. The diffuse pGTO is normalized to approximate the
+        # entire shell.
+        l = supmol._bas[:,gto.ANG_OF]
+        diffuse_ctr_coef = gto.gto_norm(l, diffuse_exps)
+
         s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
         # FIXME: To avoid changing the CUDA kernel function signature,
         # temporarily attach the extra information to the s_estimator array and
@@ -114,6 +122,8 @@ class PBCShortRangeJKmatrixOpt:
         diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
         s_estimator[nbas] = diffuse_exps
         s_estimator[nbas+1] = diffuse_ctr_coef
+        # CVHFnr_sr_int2e_q_cond in pyscf seems not accurate enough for upper
+        # bound estimation. Using the implementation in libvhf_rys instead.
         libvhf_rys.sr_eri_s_estimator_v2(
             s_estimator.ctypes, ctypes.c_float(supmol.omega),
             diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
@@ -159,8 +169,6 @@ class PBCShortRangeJKmatrixOpt:
         surface = 4*np.pi * rad**2
         lattice_sum_factor = 2*np.pi*(rcut+lat_unit)*lsum/(vol*theta) + surface
         cutoff = cell.precision / lattice_sum_factor
-        logger.debug1(cell, 'int3c_kernel integral omega=%g theta=%g cutoff=%g',
-                      omega, theta, cutoff)
         # When exp_min is small, the lattice sum over j and k in (ij|kl) would
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
@@ -168,7 +176,11 @@ class PBCShortRangeJKmatrixOpt:
         double_lat_sum_penalty = 1
         if theta * lat_unit < 2:
             double_lat_sum_penalty = max(1, (25.13/(exp_min*lat_unit**2))**3)
-        return cutoff / double_lat_sum_penalty
+        cutoff /= double_lat_sum_penalty
+        logger.debug1(cell, 'int3c_kernel integral theta=%g cutoff=%g '
+                      'lattice_sum_factor=%g double_lat_sum_penalty=%g',
+                      theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
+        return cutoff
 
     def get_k(self, dm, hermi, kpts, kpts_band=None, verbose=None):
         '''
@@ -309,10 +321,10 @@ class PBCShortRangeJKmatrixOpt:
             if kpts_band is not None:
                 raise NotImplementedError
             if not is_gamma_point:
-                scaled_kpts = cell.lattice_vectors().dot(kpts.T)
+                scaled_kpts = kpts.dot(cell.lattice_vectors().T)
                 Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
                 expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
-                expLkz = expLk.view(np.float64).reshape(nimgs, nkpts, 2)
+                expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
                 vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = vk.view(np.complex128)[:,:,:,:,0]
             return vk, kern_counts, timing_counter

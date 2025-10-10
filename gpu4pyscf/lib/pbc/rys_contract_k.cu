@@ -542,6 +542,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
         nsq_per_block = nsq_per_block // 8 * 8
     buflen = nsq_per_block * unit*8 + cart_idx_size*4
 */
+    int ijprim = bounds.iprim * bounds.jprim;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
@@ -554,9 +555,9 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
     int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
-    int root_g_cache_size = nroots*2 + g_size*3 + 14;
+    int root_g_cache_size = nroots*2 + g_size*3 + 9;
     int unit = max(root_g_cache_size, dm_cache_size);
-    int counts = (shm_size - cart_idx_size*4) / (unit*8);
+    int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
     int THREADS = 256;
     int gout_stride = min(n_tiles, gout_stride_max);
@@ -566,7 +567,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     }
     threads.x = nsq_per_block;
     threads.y = gout_stride;
-    int buflen = nsq_per_block * unit*8 + cart_idx_size*4;
+    int buflen = nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
     return buflen;
 }
 
