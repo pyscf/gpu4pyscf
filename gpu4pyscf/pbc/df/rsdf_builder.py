@@ -418,7 +418,7 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     log_cutoff = math.log(cutoff)
 
     Ls = cp.asarray(pcell.get_lattice_Ls())
-    Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+    Ls = Ls[cp.linalg.norm(Ls-.1, axis=1).argsort()]
     nimgs = len(Ls)
 
     _atm = cp.array(pcell._atm)

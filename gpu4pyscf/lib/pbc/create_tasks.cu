@@ -118,9 +118,6 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
             float theta_rr = logf(rr + 1.f) + theta * rr;
             float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
-            if (d_cutoff > 0) {
-                continue;
-            }
             if (dm_ik > d_cutoff || dm_il > d_cutoff) {
                 int off = atomicAdd(&ntasks, 1);
                 bas_kl_idx[off] = bas_kl;

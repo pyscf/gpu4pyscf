@@ -46,6 +46,8 @@ __all__ = [
 libpbc.PBC_build_k.restype = ctypes.c_int
 libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 
+OMEGA = 0.3
+
 def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None, verbose=None):
     '''Compute K matrix
     '''
@@ -58,7 +60,7 @@ class PBCJKmatrixOpt:
     def __init__(self, cell, omega=None):
         self.cell = cell
         if omega is None: # TODO: dynamically determine omega based on rcut?
-            omega = 0.3
+            omega = OMEGA
         self.omega = omega
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
@@ -149,16 +151,24 @@ class PBCJKmatrixOpt:
         vol = cell.vol
         rcut = cell.rcut
         omega = self.omega
-        cell_exp, _, cell_l = most_diffuse_pgto(cell)
-        theta = 1./(1./cell_exp + omega**-2)
-        lsum = cell_l * 4 + 1
-        rad = vol**(-1./3) * rcut + 1
+        exp_min, _, l = most_diffuse_pgto(cell)
+        theta = 1./(1./exp_min + omega**-2)
+        lsum = l * 4 + 1
+        lat_unit = vol**(1./3)
+        rad = rcut / lat_unit + 1
         surface = 4*np.pi * rad**2
-        lattice_sum_factor = 2*np.pi*rcut*lsum/(vol*theta) + surface
+        lattice_sum_factor = 2*np.pi*(rcut+lat_unit)*lsum/(vol*theta) + surface
         cutoff = cell.precision / lattice_sum_factor
         logger.debug1(cell, 'int3c_kernel integral omega=%g theta=%g cutoff=%g',
                       omega, theta, cutoff)
-        return cutoff
+        # When exp_min is small, the lattice sum over j and k in (ij|kl) would
+        # contribute to the kl-pair near the cutoff edges. Accurate estimation
+        # for their contributions is hard to derive. Numerical tests show that
+        # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
+        double_lat_sum_penalty = 1
+        if theta * lat_unit < 2:
+            double_lat_sum_penalty = max(1, (25.13/(exp_min*lat_unit**2))**3)
+        return cutoff / double_lat_sum_penalty
 
     def get_k(self, dm, hermi, kpts, kpts_band=None, verbose=None):
         '''
@@ -505,7 +515,7 @@ class ExtendedMole(gto.Mole):
 
         rcut = estimate_rcut(cell, omega)
         Ls = cell.get_lattice_Ls(rcut=rcut.max())
-        Ls = Ls[np.linalg.norm(Ls, axis=1).argsort()]
+        Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
         nimgs = len(Ls)
         log.debug1('Generate supmol with rcut = %g nimgs = %d', rcut, nimgs)
 

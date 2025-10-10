@@ -147,7 +147,7 @@ while (1) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
         if (ntasks == 0) {
-            return;
+            continue;
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
