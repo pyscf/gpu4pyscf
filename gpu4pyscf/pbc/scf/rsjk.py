@@ -25,6 +25,7 @@ from pyscf import lib, gto
 from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
 from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -38,6 +39,7 @@ from gpu4pyscf.scf.jk import (
     PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
+from gpu4pyscf.pbc.gto import int1e
 
 __all__ = [
     'get_k',
@@ -62,6 +64,7 @@ class PBCShortRangeJKmatrixOpt:
         if omega is None: # TODO: dynamically determine omega based on rcut?
             omega = OMEGA
         self.omega = omega
+        self.mesh = None
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
         self.h_shls = None
@@ -82,6 +85,9 @@ class PBCShortRangeJKmatrixOpt:
         self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
+        self.mesh = cell.cutoff_to_mesh(ke_cutoff)
 
         # FIXME: should the supmol be regrouped based on l?
         supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
@@ -182,7 +188,7 @@ class PBCShortRangeJKmatrixOpt:
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
         return cutoff
 
-    def get_k(self, dm, hermi, kpts, kpts_band=None, verbose=None):
+    def _get_k_sr(self, dm, hermi, kpts, kpts_band=None, verbose=None):
         '''
         Build K for the sorted_mol over the sampled k-points.
         Return a (*, nkpts, nao, nao) array.
@@ -193,6 +199,7 @@ class PBCShortRangeJKmatrixOpt:
         '''
         assert hermi == 1
         cell = self.cell
+        assert cell.dimension == 3
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
         nao = sorted_cell.nao
@@ -204,28 +211,6 @@ class PBCShortRangeJKmatrixOpt:
         dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
                                    self.l_ctr_offsets, self.ao_idx)
 
-        is_gamma_point = kpts is None or is_zero(kpts)
-        if is_gamma_point:
-            assert dms.dtype == np.float64
-            nimgs = len(supmol.Ls)
-            nkpts = 1
-            dms = dms.reshape(-1, nao, nao)
-            n_dm = len(dms)
-            ish_cell0 = supmol.ao_mapping % nao
-            dms = dms[:,:,ish_cell0]
-        else:
-            expLk = cp.exp(1j * asarray(supmol.Ls).dot(asarray(kpts).T))
-            nimgs, nkpts = expLk.shape
-            dms = dms.reshape(-1, nkpts, nao, nao)
-            dms = contract('skpq,Lk->spLq', dms, expLk)
-            expLk = None
-            n_dm = len(dms)
-            if 1:
-                #FIXME: the imaginary part?
-                dms = dms.real
-            dms = dms.reshape(n_dm, nao, nimgs*nao)[:,:,supmol.ao_mapping]
-        dms = cp.asarray(dms, order='C')
-
         ao_loc_cpu = supmol.ao_loc
         ao_loc = asarray(ao_loc_cpu)
         nao_supmol = ao_loc_cpu[-1]
@@ -235,7 +220,28 @@ class PBCShortRangeJKmatrixOpt:
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
-        dm_cond = condense('absmax', dms, ao_loc[:sorted_cell.nbas+1], ao_loc)
+        is_gamma_point = kpts is None or is_zero(kpts)
+        if is_gamma_point:
+            assert dms.dtype == np.float64
+            nkpts = 1
+            dms = cp.asarray(dms, order='C')
+            dm_cond = condense('absmax', dms, ao_loc[:sorted_cell.nbas+1])
+            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
+            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
+        else:
+            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+            Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
+            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
+            nkpts = expLk.shape[1]
+            dms = dms.reshape(-1, nkpts, nao, nao)
+            dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # Are dms always real for super-mol?
+            assert abs(dms.imag).max() < 1e-6
+            expLk = None
+            dms = dms.real
+            dms = cp.asarray(dms, order='C')
+            dm_cond = _compressed_dm_cond(supmol, dms)
+        n_dm = len(dms)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
@@ -255,17 +261,18 @@ class PBCShortRangeJKmatrixOpt:
 
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
-            pair_ij_mappings, pair_kl_mappings = _make_tril_pair_mappings(
+            pair_ij_mappings = _make_pair_ij_mappings(
+                supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+            pair_kl_mappings = _make_tril_pair_mappings(
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
             nimgs = len(supmol.Ls)
             nimgs_uniq_pair = len(supmol.double_latsum_Ts)
             if is_gamma_point:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
-                vk = cp.zeros((n_dm, nao, nao))
             else:
                 Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
-                vk = cp.zeros((n_dm, nimgs_uniq_pair, nao, nao))
+            vk_supmol = cp.zeros((n_dm, nao, nao_supmol))
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
@@ -286,7 +293,7 @@ class PBCShortRangeJKmatrixOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 err = kern(
-                    ctypes.cast(vk.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(vk_supmol.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao_supmol),
                     rys_envs, (ctypes.c_int*8)(*shls_slice),
@@ -320,13 +327,17 @@ class PBCShortRangeJKmatrixOpt:
             cp.cuda.get_current_stream().synchronize()
             if kpts_band is not None:
                 raise NotImplementedError
-            if not is_gamma_point:
-                scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-                Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
-                expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
-                expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
-                vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
-                vk = vk.view(np.complex128)[:,:,:,:,0]
+
+            vk = cp.zeros((n_dm, nao, nimgs*nao))
+            vk[:,:,supmol.ao_mapping] = vk_supmol
+            vk = vk.reshape(n_dm, nao, nimgs, nao)
+            if is_gamma_point:
+                vk = vk.sum(axis=2)[:,None]
+            else:
+                expLk = cp.exp(1j * asarray(supmol.Ls).dot(asarray(kpts).T))
+                expLkz = expLk.view(np.float64).reshape(nimgs, nkpts, 2)
+                vk = contract('smLn,Lkz->skmnz', vk, expLkz)
+                vk = cp.asarray(vk, order='C').view(np.complex128)[:,:,:,:,0]
             return vk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
@@ -349,13 +360,32 @@ class PBCShortRangeJKmatrixOpt:
         vk = vk.reshape(-1,nao,nao)
         vk = apply_coeff_CT_mat_C(vk, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
+
+        if 0:
+            # difference associated to the G=0 term between the real space
+            # integrals and the AFT integrals
+            vk = vk.reshape(n_dm, nkpts, nao_orig, nao_orig)
+            dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
+            omega = self.omega
+            s = int1e.int1e_ovlp(cell, kpts)
+            w_coulG0_SR = np.pi / omega**2 / cell.vol
+            for i in range(n_dm):
+                for k in range(nkpts):
+                    vk[i,k] += s[k].dot(dms[i,k]).dot(s[k]) * w_coulG0_SR
+
+        if not is_gamma_point:
+            weight = 1. / nkpts
+            vk *= weight
+
         if kpts_band is None:
             vk = vk.reshape(dm.shape)
         else:
             raise NotImplementedError
         return vk
 
-    def get_ek_ip1(self, dm, hermi, kpts, verbose=None):
+    get_k = _get_k_sr
+
+    def _get_ek_sr_ip1(self, dm, hermi, kpts, verbose=None):
         raise NotImplementedError
         cell = self.cell
         sorted_cell = self.sorted_cell
@@ -373,15 +403,16 @@ class PBCShortRangeJKmatrixOpt:
         is_gamma_point = kpts is None or is_zero(kpts)
         if is_gamma_point:
             expLk = cp.ones((1, 1))
-            n_Ts, nkpts = expLk.shape
+            nkpts = 1
         else:
-            scaled_kpts = cell.lattice_vectors().dot(kpts.T)
+            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
             Ts = cp.asarray(double_latsum_Ts, dtype=np.float64)
             expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
-            n_Ts, nkpts = expLk.shape
+            nkpts = expLk.shape[1]
         dms = dms.reshape(-1, nkpts, nao, nao)
         n_dm = len(dms)
         dms = contract('skpq,Lk->spLq', dms, expLk)
+        assert abs(dms.imag).max() < 1e-6
         expLk = None
         dms = dms.real
         dms = cp.asarray(dms, order='C')
@@ -499,6 +530,10 @@ class PBCShortRangeJKmatrixOpt:
             log.debug1('kernel launches %d', kern_counts)
             for llll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', llll, t)
+
+        ek = multi_gpu.array_reduce(ek_dist, inplace=True)
+        if not is_gamma_point:
+            ek *= 1. / nkpts
         return ek
 
 
@@ -568,7 +603,7 @@ class ExtendedMole(gto.Mole):
         translation_vectors = asarray(np.linalg.solve(cell.lattice_vectors().T, Ls.T).T)
         translation_vectors = cp.asarray(translation_vectors.round(), dtype=np.int32)
         supmol.double_latsum_Ts, inverse = _unique_image_pair(translation_vectors)
-        supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32)
+        supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32).reshape(nimgs, nimgs)
         return supmol
 
 def estimate_rcut(cell, omega, precision=None):
@@ -649,24 +684,51 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
 
     nbas = q_cond.shape[0]
     q_cond = q_cond.ravel()
-    pair_kl_mappings = {}
-    pair_ij_mappings = {}
+    pair_mappings = {}
     for i in range(n_groups):
-        for j in range(n_groups):
+        for j in range(i+1):
             ish = bas_idx_lookup[i][:,None,:,None]
             jsh = bas_idx_lookup[j][None,:,None,:]
-            pair_kl = ish * nbas + jsh
-            mask = (ish >= 0) & (jsh >= 0)
-            pair_ij = pair_kl[mask & (ish < nbas_cell0)]
-            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
+            pair_ij = ish * nbas + jsh
             if i == j:
-                pair_kl = pair_kl[mask & (ish >= jsh)]
+                pair_ij = pair_ij[(ish >= 0) & (jsh >= 0) & (ish >= jsh)]
             else:
-                pair_kl = pair_kl[mask]
-            pair_kl = pair_kl[q_cond[pair_kl] > cutoff]
-            pair_ij_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
-            pair_kl_mappings[i,j] = asarray(pair_kl, dtype=np.int32)
-    return pair_ij_mappings, pair_kl_mappings
+                pair_ij = pair_ij[(ish >= 0) & (jsh >= 0)]
+            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
+            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
+    return pair_mappings
+
+def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
+    nimgs = len(supmol.Ls)
+    cell = supmol.cell
+    nbas_cell0 = cell.nbas
+    bas_mask = np.zeros(nimgs*nbas_cell0, dtype=bool)
+    bas_mask[supmol.bas_mask_idx] = True
+    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
+    raw_bas_idx = np.empty(nimgs*nbas_cell0, dtype=np.int32)
+    raw_bas_idx[supmol.bas_mask_idx] = np.arange(supmol.nbas, dtype=np.int32)
+    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
+    n_groups = len(l_ctr_bas_loc) - 1
+    bas_idx_lookup = []
+    for i in range(n_groups):
+        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+        bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
+        bas_idx_lookup.append(asarray(bas_idx))
+
+    nbas = q_cond.shape[0]
+    q_cond = q_cond.ravel()
+    pair_mappings = {}
+    for i in range(n_groups):
+        for j in range(n_groups):
+            # pair_ij is sorted in the order that the ish changes fast.
+            # This order can reduce the atomicAdd conflicts in the CUDA kernel.
+            ish = bas_idx_lookup[i]
+            ish = ish[None, ish < nbas_cell0]
+            jsh = bas_idx_lookup[j][:,None]
+            pair_ij = ish * nbas + jsh
+            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
+            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
+    return pair_mappings
 
 def _compressed_dm_cond(supmol, dms):
     '''Largest density matrix elements for each shell-pair. The input and output
@@ -675,12 +737,14 @@ def _compressed_dm_cond(supmol, dms):
     cell = supmol.cell
     ao_loc = asarray(cell.ao_loc)
     n_dm, n_Ts, nao = dms.shape[:3]
+    nimgs = len(supmol.Ls)
     i_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
     i_loc = cp.append(i_loc.ravel(), np.int32(n_Ts*nao))
     dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), i_loc, ao_loc)
+    nbas = cell.nbas
+    dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
 
-    bas_mask_idx = supmol.bas_mask_idx
-    img_idx, ish_cell0 = divmod(bas_mask_idx, cell.nbas)
-    T_in_pair = supmol.Ts_ji_lookup[img_idx[:,None] * n_Ts + img_idx]
+    img_idx, ish_cell0 = divmod(supmol.bas_mask_idx, nbas)
+    T_in_pair = supmol.Ts_ji_lookup[img_idx[:,None],img_idx]
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
     return dm_cond

@@ -442,22 +442,23 @@ while (1) {
             int nfj = bounds.nfj;
             int nfk = bounds.nfk;
             int nfl = bounds.nfl;
-            int ldi = bounds.ntiles_i * 3;
+            //int ldi = bounds.ntiles_i * 3;
+            int ldj = bounds.ntiles_j * 3;
             int ldk = bounds.ntiles_k * 3;
             int ldl = bounds.ntiles_l * 3;
             double *dm_cache = shared_memory + sq_id;
             int active = task_id < ntasks;
             for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *dm = kmat.dm + i_dm * nao * nao_supmol;
-                double *vk = kmat.vk + i_dm * nao * nao * nimgs_uniq_pair;
-                double *vk_jk = vk + Ts_ji_lookup[cell_k*nimgs+cell_j] * nao2;
-                double *vk_jl = vk + Ts_ji_lookup[cell_l*nimgs+cell_j] * nao2;
-                load_dm(dm+i0*nao_supmol+k0_supmol, dm_cache, nao_supmol, nfi, nfk, ldi, ldk, active);
-                dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
-                                    joff, ioff, koff, loff, ldk, nfj, nfl, active);
-                load_dm(dm+i0*nao_supmol+l0_supmol, dm_cache, nao_supmol, nfi, nfl, ldi, ldl, active);
-                dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
-                                    joff, ioff, loff, koff, ldl, nfj, nfk, active);
+                double *vk = kmat.vk + i_dm * nao * nao_supmol;
+                double *dm = kmat.dm + i_dm * nao2 * nimgs_uniq_pair;
+                double *dm_jk = dm + Ts_ji_lookup[cell_j*nimgs+cell_k] * nao2;
+                double *dm_jl = dm + Ts_ji_lookup[cell_j*nimgs+cell_l] * nao2;
+                load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
+                dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao_supmol, i0, l0_supmol,
+                                    ioff, joff, koff, loff, ldk, nfi, nfl, active);
+                load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
+                dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao_supmol, i0, k0_supmol,
+                                    ioff, joff, loff, koff, ldl, nfi, nfk, active);
             }
         }
     }

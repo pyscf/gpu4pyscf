@@ -228,8 +228,8 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
     output_complex = False
     if cartesian_matrix.dtype == np.complex128:
         cartesian_matrix = cartesian_matrix.view(np.float64)
-        cartesian_matrix = cartesian_matrix.reshape(-1,n_spherical,n_spherical,2)
-        cartesian_matrix = cartesian_matrix.transpose(3,0,1,2).reshape(-1,n_spherical,n_spherical)
+        cartesian_matrix = cartesian_matrix.reshape(-1,n_cartesian,n_cartesian,2)
+        cartesian_matrix = cartesian_matrix.transpose(3,0,1,2).reshape(-1,n_cartesian,n_cartesian)
         output_complex = True
     else:
         assert cartesian_matrix.dtype == np.float64

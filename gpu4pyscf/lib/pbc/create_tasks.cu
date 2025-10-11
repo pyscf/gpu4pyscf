@@ -87,9 +87,9 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
         float d_cutoff = kl_cutoff - q_kl;
-        float dm_ik = dm_cond[ish*nbas+ksh];
-        float dm_il = dm_cond[ish*nbas+lsh];
-        if (dm_ik > d_cutoff || dm_il > d_cutoff) {
+        float dm_jk = dm_cond[jsh*nbas+ksh];
+        float dm_jl = dm_cond[jsh*nbas+lsh];
+        if (dm_jk > d_cutoff || dm_jl > d_cutoff) {
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
             float ak = diffuse_exps[ksh];
@@ -118,7 +118,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
             float theta_rr = logf(rr + 1.f) + theta * rr;
             float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
-            if (dm_ik > d_cutoff || dm_il > d_cutoff) {
+            if (dm_jk > d_cutoff || dm_jl > d_cutoff) {
                 int off = atomicAdd(&ntasks, 1);
                 bas_kl_idx[off] = bas_kl;
             }
