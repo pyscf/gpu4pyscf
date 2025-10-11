@@ -353,6 +353,7 @@ def add_sparse(a, b, indices):
     return a
 
 def dist_matrix(x, y, out=None):
+    '''np.linalg.norm(x[:,None,:] - y[None,:,:], axis=2)'''
     x = cupy.asarray(x, dtype=np.float64)
     y = cupy.asarray(y, dtype=np.float64)
     assert x.flags.c_contiguous
@@ -531,12 +532,13 @@ def transpose_sum(a, stream=None):
     assert m == n
     out = a
     stream = cupy.cuda.get_current_stream()
-    err = libcupy_helper.transpose_sum(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n),
-        ctypes.c_int(count)
-    )
+    if a.dtype == np.float64:
+        fn = libcupy_helper.transpose_dsum
+    else:
+        fn = libcupy_helper.transpose_zsum
+    err = fn(ctypes.cast(stream.ptr, ctypes.c_void_p),
+             ctypes.cast(a.data.ptr, ctypes.c_void_p),
+             ctypes.c_int(n), ctypes.c_int(count))
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
     if ndim == 2:

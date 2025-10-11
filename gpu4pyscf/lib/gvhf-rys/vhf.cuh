@@ -97,8 +97,8 @@ typedef struct {
     int lprim;
     int npairs_ij;
     int npairs_kl;
-    int *pair_ij_mapping;
-    int *pair_kl_mapping;
+    uint32_t *pair_ij_mapping;
+    uint32_t *pair_kl_mapping;
     float *q_cond;
     float *s_estimator;
     float *dm_cond;

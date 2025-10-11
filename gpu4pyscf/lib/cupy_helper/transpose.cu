@@ -16,53 +16,110 @@
 
 #include <cuda_runtime.h>
 
-#define THREADS        32
-#define BLOCK_DIM   32
+#define THREADS     16
+#define BLOCK_DIM   16
 
-__global__
-void _transpose_sum(double *a, int n)
+static __global__
+void _transpose_dsum(double *a, int n, int counts)
 {
     if(blockIdx.x > blockIdx.y){
         return;
     }
-	__shared__ double block[BLOCK_DIM][BLOCK_DIM+1];
+    __shared__ double block[THREADS][THREADS];
 
-    unsigned int blockx_off = blockIdx.x * BLOCK_DIM;
-    unsigned int blocky_off = blockIdx.y * BLOCK_DIM;
-	unsigned int x0 = blockx_off + threadIdx.x;
-	unsigned int y0 = blocky_off + threadIdx.y;
-    unsigned int x1 = blocky_off + threadIdx.x;
-	unsigned int y1 = blockx_off + threadIdx.y;
-    unsigned int z = blockIdx.z;
+    int blockx_off = blockIdx.x * BLOCK_DIM;
+    int blocky_off = blockIdx.y * BLOCK_DIM;
+    size_t x0 = blockx_off + threadIdx.x;
+    size_t y0 = blocky_off + threadIdx.y;
+    size_t x1 = blocky_off + threadIdx.x;
+    size_t y1 = blockx_off + threadIdx.y;
+    size_t nn = n * n;
+    size_t xy0 = y0 * n + x0;
+    size_t xy1 = y1 * n + x1;
 
-    size_t off = n * n * z;
-    size_t xy0 = y0 * n + x0 + off;
-    size_t xy1 = y1 * n + x1 + off;
+    for (int k = 0; k < counts; ++k) {
+        double *pa = a + nn * k;
+        if (x0 < n && y0 < n){
+            block[threadIdx.y][threadIdx.x] = pa[xy0];
+        }
+        __syncthreads();
+        if (x1 < n && y1 < n){
+            block[threadIdx.x][threadIdx.y] += pa[xy1];
+        }
+        __syncthreads();
 
-    if (x0 < n && y0 < n){
-        block[threadIdx.y][threadIdx.x] = a[xy0];
+        if(x0 < n && y0 < n){
+            pa[xy0] = block[threadIdx.y][threadIdx.x];
+        }
+        if(x1 < n && y1 < n){
+            pa[xy1] = block[threadIdx.x][threadIdx.y];
+        }
+        __syncthreads();
     }
-    __syncthreads();
-    if (x1 < n && y1 < n){
-        block[threadIdx.x][threadIdx.y] += a[xy1];
-    }
-    __syncthreads();
+}
 
-    if(x0 < n && y0 < n){
-        a[xy0] = block[threadIdx.y][threadIdx.x];
+static __global__
+void _transpose_zsum(double *a, int n, int counts)
+{
+    if(blockIdx.x > blockIdx.y){
+        return;
     }
-    if(x1 < n && y1 < n){
-        a[xy1] = block[threadIdx.x][threadIdx.y];
+    __shared__ double blockR[THREADS][THREADS];
+    __shared__ double blockI[THREADS][THREADS];
+
+    int blockx_off = blockIdx.x * BLOCK_DIM;
+    int blocky_off = blockIdx.y * BLOCK_DIM;
+    size_t x0 = blockx_off + threadIdx.x;
+    size_t y0 = blocky_off + threadIdx.y;
+    size_t x1 = blocky_off + threadIdx.x;
+    size_t y1 = blockx_off + threadIdx.y;
+    size_t nn = n * n * 2;
+    size_t xy0 = (y0 * n + x0) * 2;
+    size_t xy1 = (y1 * n + x1) * 2;
+
+    for (int k = 0; k < counts; ++k) {
+        double *pa = a + nn * k;
+        if (x0 < n && y0 < n){
+            blockR[threadIdx.y][threadIdx.x] = pa[xy0  ];
+            blockI[threadIdx.y][threadIdx.x] = pa[xy0+1];
+        }
+        __syncthreads();
+        if (x1 < n && y1 < n){
+            blockR[threadIdx.x][threadIdx.y] += pa[xy1  ];
+            blockI[threadIdx.x][threadIdx.y] -= pa[xy1+1];
+        }
+        __syncthreads();
+
+        if(x0 < n && y0 < n){
+            pa[xy0  ] = blockR[threadIdx.y][threadIdx.x];
+            pa[xy0+1] = blockI[threadIdx.y][threadIdx.x];
+        }
+        if(x1 < n && y1 < n){
+            pa[xy1  ] =  blockR[threadIdx.x][threadIdx.y];
+            pa[xy1+1] = -blockI[threadIdx.x][threadIdx.y];
+        }
+        __syncthreads();
     }
 }
 
 extern "C" {
-__host__
-int transpose_sum(cudaStream_t stream, double *a, int n, int counts){
+int transpose_dsum(cudaStream_t stream, double *a, int n, int counts){
     int ntile = (n + THREADS - 1) / THREADS;
     dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile, counts);
-    _transpose_sum<<<blocks, threads, 0, stream>>>(a, n);
+    dim3 blocks(ntile, ntile);
+    _transpose_dsum<<<blocks, threads, 0, stream>>>(a, n, counts);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int transpose_zsum(cudaStream_t stream, double *a, int n, int counts){
+    int ntile = (n + THREADS - 1) / THREADS;
+    dim3 threads(THREADS, THREADS);
+    dim3 blocks(ntile, ntile);
+    _transpose_zsum<<<blocks, threads, 0, stream>>>(a, n, counts);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
