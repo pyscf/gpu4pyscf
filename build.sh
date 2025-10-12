@@ -11,7 +11,7 @@ CURRENT_PATH=`pwd`
 mkdir -p /tmp/build
 cmake -B /tmp/build -S gpu4pyscf/lib -DCUDA_ARCHITECTURES=70 -DBUILD_LIBXC=OFF -DCMAKE_MESSAGE_LOG_LEVEL=WARNING
 cd /tmp/build
-make -j8
+make -j16
 cd $CURRENT_PATH
 
 echo "Current Path: ${CURRENT_PATH}"
