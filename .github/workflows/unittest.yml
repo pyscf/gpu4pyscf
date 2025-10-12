@@ -21,7 +21,7 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Test with pytest
       run: |
@@ -32,7 +32,7 @@ jobs:
           -e HTTPS_PROXY=$HTTPS_PROXY \
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
-          pyscf/gpu4pyscf-devel:latest \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
           /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not slow and not benchmark' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
 
   multi-gpu:
@@ -43,7 +43,7 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Test with pytest
       run: |
@@ -54,5 +54,5 @@ jobs:
           -e HTTPS_PROXY=$HTTPS_PROXY \
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
-          pyscf/gpu4pyscf-devel:latest \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
           /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not slow and not benchmark' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
