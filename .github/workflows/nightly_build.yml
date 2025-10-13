@@ -31,7 +31,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
-          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not benchmark' --cov=/workspace --durations=20 && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir -r requirements.txt && source build.sh && pytest -m 'not benchmark' --cov=/workspace --durations=20 && rm -rf .pytest_cache"
 
   test_rks:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -51,7 +51,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_uks:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -71,7 +71,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_tddft:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -91,7 +91,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_ecp:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -110,7 +110,7 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_ecp.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_ecp_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_ecp.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_ecp_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_properties:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -130,5 +130,5 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_properties.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_properties_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_properties.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_properties_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
