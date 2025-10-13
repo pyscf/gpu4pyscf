@@ -1,7 +1,23 @@
-name: Unittest dev
+name: Unittest with custom dependency
 
 on:
   workflow_dispatch:
+    inputs:
+      pyscf_version:
+        required: false
+        default: "2.8.0"
+      cupy_versoin:
+        required: false
+        default: "13.4.1"
+      cutensor_version:
+        required: false
+        default: "2.2.0"
+      libxc_version:
+        required: false
+        default: "0.5.0"
+      dispersion_version:
+        required: false
+        default: "1.3.0"
 
 jobs:
   manual-single-gpu:
@@ -24,4 +40,6 @@ jobs:
           -v $GITHUB_WORKSPACE:/workspace \
           -v ~/.cache/pip:/root/.cache/pip \
           pyscf/gpu4pyscf-devel:pyscf-2.8 \
-          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not slow and not benchmark' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && \
+                        pip3 install pyscf==${{ github.event.inputs.pyscf_version }} cupy-cuda12x==${{ github.event.inputs.cupy_versoin }} cutensor-cu12==${{ github.event.inputs.cutensor_version }} gpu4pyscf-libxc-cuda12x==${{ github.event.inputs.libxc_version }} pyscf-dispersion==${{ github.event.inputs.dispersion_version }} && \
+                        source build.sh && pytest -m 'not slow and not benchmark' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
