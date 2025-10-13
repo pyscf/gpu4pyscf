@@ -19,18 +19,19 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Test with pytest
       run: |
         docker run --gpus all \
           --rm \
-          -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest -m 'not benchmark' --cov=/workspace --durations=20 && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install --no-cache-dir -r requirements.txt && source build.sh && pytest -m 'not benchmark' --cov=/workspace --durations=20 && rm -rf .pytest_cache"
 
   test_rks:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -39,17 +40,18 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Run RKS tests
       run: |
         docker run --gpus all \
-          -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_rks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_rks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_uks:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -58,17 +60,18 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Run UKS tests
       run: |
         docker run --gpus all \
-          -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_uks.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_uks_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_tddft:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -77,17 +80,18 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Run TDDFT tests
       run: |
         docker run --gpus all \
-          -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_tddft.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.3.0_tddft_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_ecp:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -95,17 +99,18 @@ jobs:
     - uses: actions/checkout@v3
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Run ECP tests
       run: |
         docker run --gpus all \
-          -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_ecp.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_ecp_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_ecp.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_ecp_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
   test_properties:
     runs-on: [self-hosted, Linux, X64, v100]
@@ -114,15 +119,16 @@ jobs:
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull pyscf/gpu4pyscf-devel:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Run properties tests
       run: |
         docker run --gpus all \
-          -u "$(id -u):$(id -g)" \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace pyscf/gpu4pyscf-devel:latest \
-          /bin/bash -c "cd /workspace && pip3 install --target=/tmp/deps -r requirements.txt && export PYTHONPATH=/tmp/deps:$PYTHONPATH && source build.sh && pytest gpu4pyscf/tests/test_benchmark_properties.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_properties_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest gpu4pyscf/tests/test_benchmark_properties.py -s -v -m 'not slow and not high_memory' --benchmark-compare-fail=min:10% --benchmark-compare=v1.4.0_properties_1v100 --benchmark-storage=gpu4pyscf/tests/benchmark_results/ && rm -rf .pytest_cache"
 
