@@ -16,7 +16,6 @@ import cupy as cp
 import numpy as np
 import sys
 import scipy.linalg
-import inspect
 
 from gpu4pyscf.tdscf import math_helper
 from gpu4pyscf.lib import logger, cusolver
@@ -401,14 +400,11 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         ''' Matrix-vector product '''
         t0 = log.init_timer()
+        mvp = matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :]))
         if in_ram:
-            W_holder[size_old:size_new, :] = matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :])).get()
-        else:
-            if 'out' in inspect.signature(matrix_vector_product).parameters:
-                matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :]), out=W_holder[size_old:size_new, :])
-            else:
-                W_holder[size_old:size_new, :] = matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :]))
-
+            mvp = mvp.get()
+        W_holder[size_old:size_new, :] = mvp
+    
         _time_add(log, t_mvp, t0)
 
         ''' Project into Krylov subspace '''
