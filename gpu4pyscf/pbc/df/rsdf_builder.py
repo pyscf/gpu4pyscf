@@ -1040,12 +1040,14 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             ish, jsh = divmod(c_pair_idx, nctrj)
             ish += i0
             jsh += j0
+            print(buflen, j3c_tmp.shape)
             if with_long_range:
                 ft_idx = aopair_offsets_lookup[ish,0,jsh]
                 ij = np.arange(nfi*nfj, dtype=np.int32)
                 idx = ij + ft_idx[:,None]
                 #:cderi[:,idx.ravel()] += j3c_tmp.get()
                 _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
+                print(idx.min(), idx.max())
                 idx = np.asarray(idx.ravel(), dtype=np.int32)
                 libpbc.take2d_add( # this copy back operation is very slow
                     cderi.ctypes, _buf.ctypes, idx.ctypes,
@@ -1186,7 +1188,9 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
             j3c_block = contract('uv,up->vp', aux_coeff, j3c_block)
             _buf = buf[:j3c_block.size].reshape(j3c_block.shape)
+            print(buflen, _buf.shape)
             if with_long_range:
+                print(idx.min(), idx.max())
                 _buf = j3c_block.get(out=_buf)
                 libpbc.take2d_add( # this copy back operation is very slow
                     cderi.ctypes, _buf.ctypes, idx.ctypes,
@@ -1341,8 +1345,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 aux_coeff = _cd_j2c_cache[j2c_idx] # at -(kj-ki)
                 cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
                 _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
+                print(kp, cderi[kp].shape, _buf.shape)
                 if with_long_range:
-                    print(kp, cderi[kp].shape, _buf.shape)
                     _buf = cderi_k.get(out=_buf)
                     nao_pairs = cderi[kp].shape[1] * 2 # *2 to view complex as doubles
                     libpbc.take2d_add( # this copy back operation is very slow
