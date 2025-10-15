@@ -179,9 +179,7 @@ class PBCShortRangeJKmatrixOpt:
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
-        double_lat_sum_penalty = 1
-        if theta * lat_unit < 2:
-            double_lat_sum_penalty = max(1, (25.13/(exp_min*lat_unit**2))**3)
+        double_lat_sum_penalty = max(1, (50/(exp_min*lat_unit**2))**3)
         cutoff /= double_lat_sum_penalty
         logger.debug1(cell, 'int3c_kernel integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
@@ -197,7 +195,6 @@ class PBCShortRangeJKmatrixOpt:
         matrix is still evaluated as the k-point sampling case. The "nkpts"
         dimension is set to 1
         '''
-        assert hermi == 1
         cell = self.cell
         assert cell.dimension == 3
         sorted_cell = self.sorted_cell
@@ -385,7 +382,7 @@ class PBCShortRangeJKmatrixOpt:
 
     get_k = _get_k_sr
 
-    def _get_ek_sr_ip1(self, dm, hermi, kpts, verbose=None):
+    def _get_ek_sr_ip1(self, dm, kpts, verbose=None):
         raise NotImplementedError
         cell = self.cell
         sorted_cell = self.sorted_cell
@@ -426,7 +423,6 @@ class PBCShortRangeJKmatrixOpt:
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
-        assert hermi == 1
         if is_gamma_point:
             dm_cond = condense('absmax', dms.reshape(n_dm, nao, nao),
                                ao_loc[:sorted_cell.nbas+1])
@@ -737,7 +733,6 @@ def _compressed_dm_cond(supmol, dms):
     cell = supmol.cell
     ao_loc = asarray(cell.ao_loc)
     n_dm, n_Ts, nao = dms.shape[:3]
-    nimgs = len(supmol.Ls)
     i_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
     i_loc = cp.append(i_loc.ravel(), np.int32(n_Ts*nao))
     dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), i_loc, ao_loc)

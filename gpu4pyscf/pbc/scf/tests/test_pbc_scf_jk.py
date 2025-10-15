@@ -122,8 +122,9 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     nkpts = len(kpts)
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao)*.2 + np.random.rand(nkpts, nao, nao) * .1j
+    dm = np.random.rand(nkpts, nao, nao)*.2
     dm = dm + dm.transpose(0, 2, 1).conj()
+    dm[4:6] = dm[2:4].conj()
     vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts).get()
 
     omega = cell.omega = -rsjk.OMEGA
@@ -178,7 +179,8 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     nkpts = len(kpts)
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao)*.2 + np.random.rand(nkpts, nao, nao) * .1j
+    dm = np.random.rand(nkpts, nao, nao)*.2
+    dm[4:6] = dm[2:4].conj()
     vk = rsjk.get_k(cell, dm, hermi=0, kpts=kpts).get()
 
     omega = cell.omega = -rsjk.OMEGA
