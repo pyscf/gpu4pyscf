@@ -15,16 +15,18 @@
 import numpy as np
 import cupy
 from gpu4pyscf.lib import logger
+from gpu4pyscf.__config__ import props
 
 try:
-    import cupy_backends.cuda.libs.cutensor  # NOQA
+    import cupy_backends.cuda.libs.cutensor as cutensor_backend
     from cupyx import cutensor
-    from cupy_backends.cuda.libs import cutensor as cutensor_backend
     ALGO_DEFAULT = cutensor_backend.ALGO_DEFAULT
     OP_IDENTITY = cutensor_backend.OP_IDENTITY
     JIT_MODE_NONE = cutensor_backend.JIT_MODE_NONE
     WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_MIN
     #WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_RECOMMENDED
+    if cutensor_backend.get_version() >= 20300 and props['major'] <= 7:
+        cutensor = None
 
     import ctypes
     libcutensor = ctypes.CDLL(cutensor_backend.__file__)
