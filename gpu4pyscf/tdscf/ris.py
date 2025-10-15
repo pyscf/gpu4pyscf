@@ -14,19 +14,18 @@
 
 import numpy as np
 import cupy as cp
+
 import cupyx.scipy.linalg as cpx_linalg
-import gc
 
 from pyscf import gto, lib
 from gpu4pyscf import scf
-from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
-from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem, cholesky
-from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, _krylov_tools
+# from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
+from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _krylov_tools
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df import int3c2e_bdiv
-from cupyx import scatter_add
 
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
@@ -385,11 +384,9 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
                 log=None, in_ram=True, single=True):
     ''' calculate lower part of uvP'''
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
-    # ao_idx = cp.asarray(int3c2e_opt.ao_idx)
-    # print('ao_idx.shape', ao_idx.shape)
 
     nao, nao_orig = int3c2e_opt.coeff.shape
-    # log.info(f'nao, nao_orig {nao, nao_orig}') 
+    log.info(f'nao, nao_orig {nao, nao_orig}') 
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
@@ -409,8 +406,6 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
 
         int3c2e_opt_omega = int3c2e_bdiv.Int3c2eOpt(mol_omega, auxmol_omega).build()
 
-
-
     aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
     aux_coeff_lower_inv_eri2c = cp.asarray(aux_coeff_lower_inv_eri2c, dtype=cp_int3c_dtype, order='F')
 
@@ -426,22 +421,23 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
     bytes_per_aux = naopair *8 +  naopair * cp_int3c_dtype.itemsize 
     if omega and omega != 0:  
         bytes_per_aux *= 2
-    batch_size = min(nauxao, max(1, int(available_gpu_memory * 0.8 // bytes_per_aux)) )
-    log.info(f'batch_size for int3c2e_bdiv_generator (in aux dimension): {batch_size} / {nauxao}')
+    batch_size = min(nauxao, max(1, int(available_gpu_memory * 0.2 // bytes_per_aux)) )
+    log.info(f'int3c2e_bdiv_generator batch_size/nauxao: {batch_size} / {nauxao}')
     log.info(f'compression rate: {naopair/(nao_orig*nao_orig):.4f}')
 
     # gpu_memG_threshold = 0.5* get_avail_mem()/1024**3
     # if eri3c_mem < gpu_memG_threshold:
     eri3c = cp.empty((naopair, nauxao), dtype=int3c_dtype, order='F')
     log.info(f' generate eri3c in GPU, download to CPU only at final step')
-    p1 = 0
+    
     # for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
 
     gen = int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size)
 
     if omega and omega != 0:
         gen_omega = int3c2e_opt_omega.int3c2e_bdiv_generator(batch_size=batch_size)
-        
+
+    p1 = 0
     while True:
         try:
             eri3c_batch = next(gen)
@@ -627,7 +623,6 @@ def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
 
     for auxp0 in range(0, nauxao, aux_batch_size):
         auxp1 = min(auxp0+aux_batch_size, nauxao)
-        # print('auxp0, auxp1, mop0, mop1', auxp0, auxp1, mop0, mop1)
 
         eri3c_batch = cp.asarray(eri3c[:, auxp0:auxp1])   #(naopair, aux_batch_size)
 
@@ -639,7 +634,6 @@ def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
 
             C_tmp_batch = C_q[:, mop0:mop1]
             dm_sparse = 2*C_tmp_batch[pair_rows, :] * C_tmp_batch[pair_cols, :]  # (naopair, mo_batch_size)
-            # dm_sparse = dm_sparse.T
 
             dm_sparse[pair_diag, :] *= 0.5 
 
@@ -658,8 +652,6 @@ def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
 
             C_tmp_batch = C_p[:, mop0:mop1]
             dm_sparse = 2*C_tmp_batch[pair_rows, :] * C_tmp_batch[pair_cols, :]  # (naopair, mo_batch_size)
-
-            # dm_sparse = dm_sparse.T
 
             dm_sparse[pair_diag,:] *= 0.5 
 
@@ -1392,8 +1384,7 @@ class RisBase(lib.StreamObject):
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
                 nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = False, 
-                single: bool = True, group_size: int = 256, group_size_aux: int = 256, 
-                store_Tpq: bool = True, tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
+                single: bool = True, store_Tpq: bool = True, tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
                 verbose=None, citation=True):
         """
         Args:
@@ -1431,8 +1422,6 @@ class RisBase(lib.StreamObject):
             print_threshold (float, optional): Threshold for printing the transition coefficients. Defaults to 0.05.
             gram_schmidt (bool, optional): Whether to calculate the ground state. Defaults to False.
             single (bool, optional): Whether to use single precision. Defaults to True.
-            group_size (int, optional): Group size for the integral calculation. Defaults to 256.
-            group_size_aux (int, optional): Group size for the auxiliary integral calculation. Defaults to 256.
             tensor_in_ram (bool, optional): Whether to store Tpq tensors in RAM. Defaults to False.
             krylov_in_ram (bool, optional): Whether to store Krylov vectors in RAM. Defaults to False.
             verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
@@ -1469,8 +1458,6 @@ class RisBase(lib.StreamObject):
         self.out_name = out_name
         self.print_threshold = print_threshold
         self.gram_schmidt = gram_schmidt
-        self.group_size = group_size
-        self.group_size_aux = group_size_aux
 
         self.verbose = verbose if verbose else mf.verbose
 
@@ -1482,7 +1469,6 @@ class RisBase(lib.StreamObject):
 
         logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
-        # self.log.info(f'group_size {group_size}, group_size_aux {group_size_aux}')
     
         ''' following attributes will be initialized in self.build() '''
         self.n_occ = None
@@ -1614,7 +1600,6 @@ class RisBase(lib.StreamObject):
         log.info(f'a_x: {self.a_x}')
         log.info(f'gram_schmidt: {self.gram_schmidt}')
         log.info(f'single: {self.single}')
-        # log.info(f'group_size: {self.group_size}')
 
         if self.J_fit == self.K_fit:
             log.info(f'use same J and K fitting basis: {self.J_fit}')
