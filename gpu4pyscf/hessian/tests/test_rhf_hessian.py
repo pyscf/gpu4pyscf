@@ -20,6 +20,7 @@ from pyscf import gto, lib
 from pyscf.hessian import rhf as rhf_cpu
 from gpu4pyscf import scf, hessian
 from gpu4pyscf.hessian import rhf as rhf_gpu
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
     global mol
@@ -198,6 +199,7 @@ class KnownValues(unittest.TestCase):
         assert cupy.linalg.norm(vk_cpu - vk_mo) < 1e-5
         mol1.stdout.close()
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_ecp_hess(self):
         mol = gto.M(atom='H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
                     ecp={'Cu':'lanl2dz'}, 

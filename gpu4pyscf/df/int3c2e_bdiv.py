@@ -378,7 +378,9 @@ class Int3c2eOpt:
 
         assert auxvec.ndim == 1
         n_dm = 1
-        auxvec = _vector_sph2cart(self.sorted_auxmol, asarray(auxvec[self.aux_idx]))
+        auxvec = asarray(auxvec[self.aux_idx])
+        if not self.auxmol.cart:
+            auxvec = _vector_sph2cart(self.sorted_auxmol, auxvec)
 
         nsp_lookup = np.empty([L_AUX_MAX+1, LMAX+1, LMAX+1], dtype=np.int32)
         lmax = self.uniq_l_ctr[:,0].max()
@@ -413,7 +415,7 @@ class Int3c2eOpt:
         ish, jsh = divmod(bas_ij, sorted_mol.nbas)
         li = sorted_mol._bas[ish,ANG_OF]
         lj = sorted_mol._bas[jsh,ANG_OF]
-        preferred_blksizes = nsp_lookup[0,li,lj]
+        preferred_blksizes = nsp_lookup[0,li,lj] * 2
         pair_ij_offsets = []
         for shl_pair0, shl_pair1, blksize in zip(
                 self.shl_pair_offsets[:-1], self.shl_pair_offsets[1:], preferred_blksizes):

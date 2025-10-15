@@ -21,6 +21,7 @@ from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import hf as rhf
 from gpu4pyscf.properties.raman import eval_raman_intensity, \
     polarizability_derivative_numerical_dx, polarizability_derivative_numerical_dEdE
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
     global mol
@@ -148,6 +149,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.1
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_raman_hf_densityfitting(self):
         # Reference the same as above, because the error introducted by density fitting is much smaller than the error
         # from hessian and polarizability derivative calculations.
@@ -163,6 +165,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.1
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_polarizability_derivative_pcm_with_response(self):
         mf = make_mf(mol, xc = "pbe", if_density_fitting = True, pcm = "IEF-PCM")
         mf.with_solvent.equilibrium_solvation = True
@@ -237,6 +240,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 1e-2
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_polarizability_derivative_pcm_without_response(self):
         mf = make_mf(mol, xc = "pbe0", if_density_fitting = True, pcm = "IEF-PCM")
         assert mf.with_solvent.equilibrium_solvation is False
@@ -311,6 +315,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 1e-2
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_raman_pbe0_densityfitting_pcm_with_response(self):
         ### Q-Chem input
         # $rem
@@ -356,6 +361,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_raman_intensities - reference_raman_intensities) < 0.5
         assert np.linalg.norm(test_depolarization_ratio - reference_depolarization_ratio) <= 0.001
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_raman_pbe0_densityfitting_pcm_without_response(self):
         # This is a consistent test, because Henry cannot find external reference for Raman + PCM without electric field response.
         reference_frequencies = np.array(

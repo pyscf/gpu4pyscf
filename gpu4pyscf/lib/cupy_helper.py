@@ -843,7 +843,9 @@ def ndarray(shape, dtype=np.float64, buffer=None):
     if buffer is None:
         return cupy.empty(shape, dtype)
     else:
-        return cupy.ndarray(shape, dtype, memptr=buffer.data)
+        out = cupy.ndarray(shape, dtype, memptr=buffer.data)
+        assert buffer.nbytes >= out.nbytes
+        return out
 
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
