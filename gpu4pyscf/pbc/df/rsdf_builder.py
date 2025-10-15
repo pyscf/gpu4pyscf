@@ -1134,6 +1134,9 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         p0, p1 = p1, p1 + npairs
         ao_pair_offsets[li, lj] = p0, p1
 
+    import gc
+    cp.get_default_memory_pool().free_all_blocks()
+    gc.collect()
     tasks = iter(img_idx_cache)
     def proc():
         if not cell.cart:
@@ -1174,6 +1177,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             j3c_block = cp.empty((naux_cart,nji))
             for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
                 j3c_tmp = evaluate(li, lj, k)[1]
+                cp.cuda.get_current_stream().synchronize()
                 if j3c_tmp.size == 0:
                     continue
                 # It is possible to optimize the j-only case by performing the
@@ -1185,6 +1189,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 j3c_tmp = j3c_tmp.transpose(4,0,3,1,2)
                 k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
                 j3c_block[k0:k1] = j3c_tmp.reshape(-1,nji)
+                cp.cuda.get_current_stream().synchronize()
 
             j3c_block = contract('uv,up->vp', aux_coeff, j3c_block)
             _buf = buf[:j3c_block.size].reshape(j3c_block.shape)
@@ -1284,6 +1289,9 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         ao_pair_offsets[li, lj] = p0, p1
 
     tasks = iter(img_idx_cache)
+    import gc
+    cp.get_default_memory_pool().free_all_blocks()
+    gc.collect()
     def proc():
         if not cell.cart:
             c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
@@ -1341,6 +1349,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
             if with_long_range:
                 print(idx.min(), idx.max(), len(idx))
+            cp.cuda.get_current_stream().synchronize()
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = _cd_j2c_cache[j2c_idx] # at -(kj-ki)
                 cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])

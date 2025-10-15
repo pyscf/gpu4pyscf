@@ -1041,6 +1041,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
                 _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
             if err != 0:
                 raise RuntimeError(f'fill_int3c2e kernel for {lll} failed')
+            cp.cuda.get_current_stream().synchronize()
             return c_pair_idx, eri3c
         return evaluate_j3c
 
