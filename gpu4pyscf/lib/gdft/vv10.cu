@@ -551,6 +551,110 @@ static void vv10_hess_eval_EUW_with_weight1_kernel(double* __restrict__ Ew, doub
     }
 }
 
+__global__
+static void vv10_hess_eval_D_B_in_double_grid_response_kernel(double* __restrict__ D_B,
+                                                              const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
+                                                              const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
+                                                              const int* __restrict__ grid_associated_atom,
+                                                              const int ngrids, const int natoms)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int B_atom = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= ngrids || B_atom >= natoms)
+        return;
+    const int i_associated_atom = grid_associated_atom[i];
+    if (i_associated_atom < 0) {
+        D_B[B_atom * 9 * ngrids + 0 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 1 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 2 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 3 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 4 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 5 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 6 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 7 * ngrids + i] = 0;
+        D_B[B_atom * 9 * ngrids + 8 * ngrids + i] = 0;
+        return;
+    }
+    const bool i_in_B = (i_associated_atom == B_atom);
+
+    const double omega_i = omega[i];
+    const double kappa_i = kappa[i];
+    const double3 r_i = { grid_coord[i * 3 + 0], grid_coord[i * 3 + 1], grid_coord[i * 3 + 2] };
+
+    double D_B_i[9] { 0,0,0, 0,0,0, 0,0,0, };
+
+    for (int j = 0; j < ngrids; j++) {
+        const int j_associated_atom = grid_associated_atom[j];
+        if (j_associated_atom < 0)
+            continue;
+        const int j_in_B = (j_associated_atom == B_atom);
+        if (!i_in_B && !j_in_B)
+            continue;
+        if (i_in_B && j_in_B)
+            continue;
+
+        const double omega_j = omega[j];
+        const double kappa_j = kappa[j];
+        const double3 r_j = { grid_coord[j * 3 + 0], grid_coord[j * 3 + 1], grid_coord[j * 3 + 2] };
+        const double weight_j = grid_weight[j];
+        const double rho_j = rho[j];
+
+        const double3 r_ji = { r_j.x - r_i.x, r_j.y - r_i.y, r_j.z - r_i.z };
+        const double r_ij2 = r_ji.x * r_ji.x + r_ji.y * r_ji.y + r_ji.z * r_ji.z;
+        const double g_ij = omega_i * r_ij2 + kappa_i;
+        const double g_ji = omega_j * r_ij2 + kappa_j;
+        const double g_ij_1 = 1 / g_ij;
+        const double g_ji_1 = 1 / g_ji;
+        const double g_sum_1 = 1 / (g_ij + g_ji);
+        const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
+        const double omega_i_over_g_ij = omega_i * g_ij_1;
+        const double omega_j_over_g_ji = omega_j * g_ji_1;
+        const double omega_sum_over_g_sum = (omega_i + omega_j) * g_sum_1;
+        const double omega_over_g_three_term_sum = omega_i_over_g_ij + omega_j_over_g_ji + omega_sum_over_g_sum;
+
+        const double E_ij = weight_j * rho_j * Phi_ij;
+        const double outer_product_prefactor = 2 * E_ij * (
+            omega_over_g_three_term_sum * omega_over_g_three_term_sum
+            + omega_i_over_g_ij * omega_i_over_g_ij
+            + omega_j_over_g_ji * omega_j_over_g_ji
+            + omega_sum_over_g_sum * omega_sum_over_g_sum
+        );
+        const double identity_prefactor = -E_ij * omega_over_g_three_term_sum;
+
+        D_B_i[0] += outer_product_prefactor * r_ji.x * r_ji.x + identity_prefactor;
+        D_B_i[1] += outer_product_prefactor * r_ji.x * r_ji.y;
+        D_B_i[2] += outer_product_prefactor * r_ji.x * r_ji.z;
+        D_B_i[3] += outer_product_prefactor * r_ji.y * r_ji.x;
+        D_B_i[4] += outer_product_prefactor * r_ji.y * r_ji.y + identity_prefactor;
+        D_B_i[5] += outer_product_prefactor * r_ji.y * r_ji.z;
+        D_B_i[6] += outer_product_prefactor * r_ji.z * r_ji.x;
+        D_B_i[7] += outer_product_prefactor * r_ji.z * r_ji.y;
+        D_B_i[8] += outer_product_prefactor * r_ji.z * r_ji.z + identity_prefactor;
+    }
+
+    if (i_in_B) {
+        D_B_i[0] *= -1;
+        D_B_i[1] *= -1;
+        D_B_i[2] *= -1;
+        D_B_i[3] *= -1;
+        D_B_i[4] *= -1;
+        D_B_i[5] *= -1;
+        D_B_i[6] *= -1;
+        D_B_i[7] *= -1;
+        D_B_i[8] *= -1;
+    }
+
+    D_B[B_atom * 9 * ngrids + 0 * ngrids + i] = -2 * D_B_i[0];
+    D_B[B_atom * 9 * ngrids + 1 * ngrids + i] = -2 * D_B_i[1];
+    D_B[B_atom * 9 * ngrids + 2 * ngrids + i] = -2 * D_B_i[2];
+    D_B[B_atom * 9 * ngrids + 3 * ngrids + i] = -2 * D_B_i[3];
+    D_B[B_atom * 9 * ngrids + 4 * ngrids + i] = -2 * D_B_i[4];
+    D_B[B_atom * 9 * ngrids + 5 * ngrids + i] = -2 * D_B_i[5];
+    D_B[B_atom * 9 * ngrids + 6 * ngrids + i] = -2 * D_B_i[6];
+    D_B[B_atom * 9 * ngrids + 7 * ngrids + i] = -2 * D_B_i[7];
+    D_B[B_atom * 9 * ngrids + 8 * ngrids + i] = -2 * D_B_i[8];
+}
+
 extern "C" {
 __host__
 int VXC_vv10nlc(cudaStream_t stream, double *Fvec, double *Uvec, double *Wvec,
@@ -704,6 +808,30 @@ int VXC_vv10nlc_hess_eval_EUW_with_weight1(const cudaStream_t stream,
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 hess eval_EUW_with_weight1: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+__host__
+int VXC_vv10nlc_hess_eval_D_B_in_double_grid_response(const cudaStream_t stream,
+                                                      double* D_B,
+                                                      const double* grid_coord, const double* grid_weight,
+                                                      const double* rho, const double* omega, const double* kappa,
+                                                      const int* grid_associated_atom,
+                                                      const int ngrids, const int natm)
+{
+    constexpr int n_grids_per_block = 32;
+    constexpr int n_atoms_per_block = 4;
+    const dim3 threads(n_grids_per_block, n_atoms_per_block);
+    const dim3 blocks((ngrids + n_grids_per_block - 1) / n_grids_per_block,
+                      (  natm + n_atoms_per_block - 1) / n_atoms_per_block);
+    vv10_hess_eval_D_B_in_double_grid_response_kernel<<<blocks, threads, 0, stream>>>(
+        D_B, grid_coord, grid_weight, rho, omega, kappa, grid_associated_atom, ngrids, natm
+    );
+    const cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of vv10 hess eval_E_grgr_AB: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
