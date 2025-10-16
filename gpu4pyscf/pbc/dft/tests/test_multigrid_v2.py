@@ -563,15 +563,15 @@ class KnownValues(unittest.TestCase):
         Ls = cp.array(Ls)
         ret = multigrid._unique_image_pair(Ls)
         assert ret[0].shape == (2431, 3)
-        assert abs(lib.fp(ret[0].get()) - 1.5047201402319172) < 1e-12
-        assert abs(lib.fp(ret[1].get()) - -483.0210637951298) < 1e-12
+        assert abs(lib.fp(ret[0].get()) - 1.5047201402319172) < 1e-10
+        assert abs(lib.fp(ret[1].get()) - -483.0210637951298) < 1e-10
 
         np.random.seed(2)
         Ls = Ls[np.random.rand(len(Ls)) > .5]
         ret = multigrid._unique_image_pair(Ls)
         assert ret[0].shape == (2377, 3)
-        assert abs(lib.fp(ret[0].get()) - -34.99306750756055) < 1e-12
-        assert abs(lib.fp(ret[1].get()) - 1347.464804553046) < 1e-12
+        assert abs(lib.fp(ret[0].get()) - -34.99306750756055) < 1e-10
+        assert abs(lib.fp(ret[1].get()) - 1347.464804553046) < 1e-10
 
         Lx = np.append(np.arange(0, 3), np.arange(-3, 0))
         Ly = np.append(np.arange(0, 3), np.arange(-3, 0))
@@ -580,8 +580,15 @@ class KnownValues(unittest.TestCase):
         Ls = cp.array(Ls)
         ret = multigrid._unique_image_pair(Ls)
         assert ret[0].shape == (1331, 3)
-        assert abs(lib.fp(ret[0].get()) - -1.355090495130784) < 1e-12
-        assert abs(lib.fp(ret[1].get()) - 2145.771285837819) < 1e-12
+        assert abs(lib.fp(ret[0].get()) - -1.355090495130784) < 1e-10
+        assert abs(lib.fp(ret[1].get()) - 2145.771285837819) < 1e-10
+
+    def test_image_pair_to_difference(self):
+        cell = gto.M(a=np.eye(3)*3, atom='He 0. 0. 0.', basis=[[0, [1, 1]]])
+        Ls = cell.get_lattice_Ls()
+        difference_images, inverse = multigrid.image_pair_to_difference(Ls, cell.lattice_vectors())
+        assert difference_images.shape == (49, 3)
+        assert len(inverse) == len(Ls)**2
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")

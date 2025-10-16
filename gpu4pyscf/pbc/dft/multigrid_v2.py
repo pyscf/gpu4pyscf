@@ -131,8 +131,7 @@ def image_pair_to_difference(
     )
     translation_vectors = cp.asarray(cp.round(translation_vectors), dtype = cp.int32)
     difference_images, inverse = _unique_image_pair(translation_vectors)
-
-    difference_images = translation_vectors @ lattice_vectors
+    difference_images = difference_images @ lattice_vectors
 
     # Given our pair data structure, the difference_images here should be interpretted as R2 - R1,
     # where R1 is associated with the first orbital in a pair, and R2 associated to the second.
