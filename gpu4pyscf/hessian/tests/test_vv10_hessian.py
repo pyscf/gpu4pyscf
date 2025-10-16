@@ -61,12 +61,11 @@ def make_mf(mol, nlcgrid = (75,302), vv10_only = False, density_fitting = False)
     assert mf.converged
     return mf
 
-def numerical_d2enlc(mf):
+def numerical_d2e_dft(mf, dx = 1e-3):
     mol = mf.mol
 
     numerical_hessian = np.zeros([mol.natm, mol.natm, 3, 3])
 
-    dx = 1e-3
     mol_copy = mol.copy()
     for i_atom in range(mol.natm):
         for i_xyz in range(3):
@@ -111,7 +110,7 @@ class KnownValues(unittest.TestCase):
     def test_vv10_only_hessian_direct(self):
         mf = make_mf(mol, vv10_only = True)
 
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.5416385094555443,  0.0608587976822506,  0.4059780361467813],
          [ 0.0608583153386411,  0.2400708605971857,  0.0171074122129466],
          [ 0.4059767934618819,  0.0171075175856572,  0.0715012127059378]],
@@ -187,7 +186,7 @@ class KnownValues(unittest.TestCase):
     def test_vv10_only_hessian_density_fitting(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True)
 
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.5415690822132557,  0.0608562722286266,  0.4059126705860394],
          [ 0.0608570487260485,  0.2400788616032656,  0.0171129679309989],
          [ 0.4059109970324659,  0.0171147380978454,  0.0714620692536805]],
@@ -262,7 +261,7 @@ class KnownValues(unittest.TestCase):
     @pytest.mark.slow
     def test_wb97xv_hessian(self):
         mf = make_mf(mol, vv10_only = False, density_fitting = True)
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.4979170248502474,  0.0488882371119104,  0.2658377292182879],
          [ 0.0488888333068926,  0.1883207192108216, -0.0079990676912778],
          [ 0.2658379285943591, -0.0080001048310407,  0.1861260525712338]],
@@ -342,7 +341,7 @@ class KnownValues(unittest.TestCase):
         mol_copy.build()
         mf = make_mf(mol_copy, vv10_only = False, density_fitting = True)
 
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.6336308259090595,  0.0573456704611175,  0.3625810477652647],
          [ 0.0573439018618505,  0.3182666549745861,  0.0059004173367794],
          [ 0.3625793744401751,  0.0058954672264022,  0.2139051350200094]],
@@ -423,6 +422,16 @@ class KnownValues(unittest.TestCase):
         test_de2 = _get_enlc_deriv2(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
         assert np.linalg.norm(test_de2 - reference_de2) < 1e-5
+
+    def test_vv10_energy_second_derivative_grid_response(self):
+        mf = make_mf(mol, vv10_only = True, density_fitting = True, nlcgrid = (10,14))
+        hess_obj = mf.Hessian()
+        hess_obj.grid_response = True
+
+        reference_de2 = _get_enlc_deriv2_numerical(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+        test_de2 = _get_enlc_deriv2(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+
+        assert np.linalg.norm(test_de2 - reference_de2) < 1e-7
 
     def test_vv10_fock_first_derivative(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True, nlcgrid = (10,14))

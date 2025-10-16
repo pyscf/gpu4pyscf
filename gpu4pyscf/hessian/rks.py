@@ -87,10 +87,23 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             de2 += rhf_hess._partial_ejk_ip2(
                 mol, dm0, vhfopt, j_factor, k_factor, verbose=verbose)
 
+    t1 = log.timer_debug1('hessian of 2e part', *t1)
+    de2 += _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst)
+    if mf.do_nlc():
+        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+
+    log.timer('RKS partial hessian', *time0)
+    return de2
+
+def _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst = None):
+    mol = hessobj.mol
+    mf = hessobj.base
+
+    de2 = cupy.zeros([mol.natm, mol.natm, 3, 3])
+
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.9-mem_now)
     veff_diag = _get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
-    t1 = log.timer_debug1('hessian of 2e part', *t1)
 
     aoslices = mol.aoslice_by_atom()
     vxc_dm = _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
@@ -109,10 +122,6 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if hessobj.grid_response:
         de2 += _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory)
 
-    if mf.do_nlc():
-        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
-
-    log.timer('RKS partial hessian', *time0)
     return de2
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
