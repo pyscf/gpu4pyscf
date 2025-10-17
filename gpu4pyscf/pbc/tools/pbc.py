@@ -276,8 +276,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             Nk = len(kpts)
         else:
             Nk = 1
-        if omega is None: # Affects DFT-RSH
+        if omega is None or omega == 0:
             coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
-        else: # for RangeSeparatedJKBuilder
-            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega=0)
+        else: # G=0 term should be handled separately in RSGDF and RSJK
+            raise NotImplementedError(f'exx=ewald for omega={omega}')
     return coulG

@@ -39,6 +39,7 @@ from gpu4pyscf.scf.jk import (
     PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
+from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.gto import int1e
 
 __all__ = [
@@ -50,25 +51,61 @@ libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 
 OMEGA = 0.3
 
-def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None, verbose=None):
+def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None,
+          lr_factor=None, sr_factor=None, exxdiv=None, verbose=None):
     '''Compute K matrix
     '''
     if vhfopt is None:
-        vhfopt = PBCShortRangeJKmatrixOpt(cell, omega).build()
-    vk = vhfopt.get_k(dm, hermi, kpts, verbose)
+        vhfopt = PBCJKmatrixOpt(cell, omega).build()
+
+    if exxdiv == 'ewald':
+        # In FFTDF.get_jk(), the SR integrals at G=0 are added back to K matrix
+        # by the Ewald correction. When the vk_sr is evaluated in real space,
+        # the G=0 component is included in vk_sr. In vk_lr, only the long-range
+        # Coulomb correction needs to be considered in the exxdiv='ewald'.
+        remove_G0 = False
+    else:
+        # If sr_factor and lr_factor are not specified, the full-range Coulomb
+        # interaction is used for the HFX computation. Removing the G=0 contribution
+        # can make the result be identical to the output of FFTDF.get_jk().
+        # In a RSH functional, the SR part is evaluated independently of the LR
+        # part. The G=0 part for SR can be retained.
+        remove_G0 = sr_factor == lr_factor
+
+    vk_sr = None
+    if sr_factor != 0:
+        vk_sr = vhfopt._get_k_sr(dm, hermi, kpts, remove_G0=remove_G0, verbose=verbose)
+        if sr_factor is not None:
+            vk_sr *= sr_factor
+
+    if lr_factor != 0:
+        vk_lr = vhfopt._get_k_lr(dm, hermi, kpts, exxdiv=exxdiv, verbose=verbose)
+        if lr_factor is not None:
+            vk_lr *= lr_factor
+        if vk_sr is None:
+            vk = vk_lr
+        else:
+            vk = vk_sr
+            vk += vk_lr
     return vk
 
-class PBCShortRangeJKmatrixOpt:
+class PBCJKmatrixOpt:
+
     def __init__(self, cell, omega=None):
         self.cell = cell
         if omega is None: # TODO: dynamically determine omega based on rcut?
             omega = OMEGA
+        self.verbose = cell.verbose
+        self.stdout = cell.stdout
+
         self.omega = omega
         self.mesh = None
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
         self.h_shls = None
         self.supmol = None
+        self.time_reversal_symmetry = True
+        self.kpts = None
         # Hold cache on GPU devices
         self._rys_envs = {}
         self._q_cond = {}
@@ -186,7 +223,7 @@ class PBCShortRangeJKmatrixOpt:
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
         return cutoff
 
-    def _get_k_sr(self, dm, hermi, kpts, kpts_band=None, verbose=None):
+    def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, remove_G0=False, verbose=None):
         '''
         Build K for the sorted_mol over the sampled k-points.
         Return a (*, nkpts, nao, nao) array.
@@ -243,6 +280,7 @@ class PBCShortRangeJKmatrixOpt:
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
+        # TODO: i >= k if hermi == 1
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
                  for j in range(n_groups)
@@ -358,17 +396,21 @@ class PBCShortRangeJKmatrixOpt:
         vk = apply_coeff_CT_mat_C(vk, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
 
-        if 0:
+        #FIXME: Should the G=0 contribution be removed to match the FFT.get_jk
+        # results?
+        if (remove_G0 and
+            (cell.dimension == 3 or
+             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             vk = vk.reshape(n_dm, nkpts, nao_orig, nao_orig)
             dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
             omega = self.omega
             s = int1e.int1e_ovlp(cell, kpts)
-            w_coulG0_SR = np.pi / omega**2 / cell.vol
+            wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
             for i in range(n_dm):
                 for k in range(nkpts):
-                    vk[i,k] += s[k].dot(dms[i,k]).dot(s[k]) * w_coulG0_SR
+                    vk[i,k] -= s[k].dot(dms[i,k]).dot(s[k]) * wcoulG_SR_at_G0
 
         if not is_gamma_point:
             weight = 1. / nkpts
@@ -380,7 +422,53 @@ class PBCShortRangeJKmatrixOpt:
             raise NotImplementedError
         return vk
 
-    get_k = _get_k_sr
+    def _get_k_lr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None, verbose=None):
+        from gpu4pyscf.pbc.df.aft_jk import get_k_kpts
+        cell = self.cell
+        assert cell.dimension == 3
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        self.kpts = kpts # get_coulG() might need to access the .kpts attribute
+        return get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv)
+
+    def weighted_coulG(self, kpt=np.zeros(3), exx=None, mesh=None):
+        '''weighted LR Coulomb kernel'''
+        if mesh is None:
+            mesh = self.mesh
+        cell = self.cell
+        omega = abs(self.omega)
+        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        coulG = get_coulG(cell, kpt, False, self, mesh, Gv, wrap_around=True,
+                          omega=omega)
+        coulG *= kws
+        if not is_zero(kpt):
+            return coulG
+
+        if exx == 'ewald':
+            Nk = len(self.kpts)
+            # In the full-range Coulomb, the ewald correction corresponds to
+            # +Nk*pbctools.madelung(cell, kpts) - np.pi / omega**2 * kws
+            # The second term removes the contribution of the SR integrals at G=0.
+            # The first term includes four terms: -2*ewovrl, -2*ewself and
+            # -2*ewg. The ewself is the sum of ewself_lr_point_charge and
+            # ewself_sr_at_G0. Function madelung(cell, kpts, omega=omega)
+            # evaluates -2*(ewself_lr_point_charges + ewg)
+            # The ewself_sr_at_G0 should cancel out the second term.
+            coulG[0] += Nk*pbctools.madelung(cell, self.kpts, omega=omega)
+            # The remaining term is the -2*ewovrl. For large number of k-points,
+            # this term rapidly decays to 0.
+            # Add back ewovrl to make get_k match to the results of FFTDF.get_jk.
+            from scipy.special import erfc
+            kmesh = pbctools.get_monkhorst_pack_size(cell, self.kpts)
+            rcut = (-np.log(cell.precision*1e-3)/omega**2)**.5
+            Ls = cell.get_lattice_Ls(rcut=rcut) * kmesh
+            r = np.linalg.norm(Ls, axis=1)
+            r = r[(r > 1e-10) & (omega * r < 7)]
+            ewovrl = .5 * (erfc(omega * r) / r).sum()
+            coulG[0] += -2 * ewovrl * Nk
+            # TODO: How to assign the SR and LR character for the individual
+            # terms in the ewald exx correction?
+        return coulG
 
     def _get_ek_sr_ip1(self, dm, kpts, verbose=None):
         raise NotImplementedError
