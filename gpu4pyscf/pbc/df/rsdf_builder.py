@@ -1102,6 +1102,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         nf = uniq_l * 2 + 1
 
     img_idx_cache = int3c2e_opt.make_img_idx_cache()
+    print('compressed_cderi_j_only')
 
     if with_long_range:
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
@@ -1122,6 +1123,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             int3c2e_opt, img_idx_cache)
         nao_pairs = len(ao_pair_mapping)
         cderi = empty_mapped((naux, nao_pairs))
+    print('compressed_cderi_j_only SR')
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
@@ -1253,6 +1255,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         nf = uniq_l * 2 + 1
 
     img_idx_cache = int3c2e_opt.make_img_idx_cache()
+    print('compressed_cderi_kk')
 
     if with_long_range:
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
@@ -1275,6 +1278,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
             naux = cd_j2c_cache[j2c_idx].shape[1]
             cderi[kp] = empty_mapped((naux,nao_pairs), dtype=np.complex128)
+    print('compressed_cderi_kk SR')
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
