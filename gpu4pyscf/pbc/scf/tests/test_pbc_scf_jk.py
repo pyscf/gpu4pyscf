@@ -43,6 +43,7 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     with_rsjk = RangeSeparationJKBuilder(cell)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
+    omega = -rsjk.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=np.zeros((1,3)), with_j=False)[0,0]
     assert abs(vk - ref).max() < 1e-8
@@ -71,6 +72,7 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
     with_rsjk = RangeSeparationJKBuilder(cell, kpts=kpts)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
+    omega = -rsjk.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=kpts, with_j=False)[0,0]
     # Small errors might be due to the rcut, Ecut estimation in the CPU
