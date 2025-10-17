@@ -38,7 +38,6 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, remove_G0=False).get()
-    omega = rsjk.OMEGA
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell)
@@ -67,7 +66,6 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
     dm = dm + dm.transpose(0, 2, 1).conj()
     dm[4:6] = dm[2:4].conj()
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts, remove_G0=False).get()
-    omega = rsjk.OMEGA
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell, kpts=kpts)
@@ -98,7 +96,7 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     dm = dm.dot(dm.T)
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, remove_G0=True).get()
 
-    omega = cell.omega = -rsjk.OMEGA
+    cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
@@ -124,7 +122,7 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     dm[4:6] = dm[2:4].conj()
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts, remove_G0=True).get()
 
-    omega = cell.omega = -rsjk.OMEGA
+    cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, with_j=False, kpts=kpts)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
@@ -146,7 +144,7 @@ def test_sr_vk_hermi0_gamma_point_vs_fft():
     dm = np.random.rand(nao, nao)*.2
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, remove_G0=True).get()
 
-    omega = cell.omega = -rsjk.OMEGA
+    cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
@@ -171,7 +169,7 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     dm[4:6] = dm[2:4].conj()
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, kpts=kpts, remove_G0=True).get()
 
-    omega = cell.omega = -rsjk.OMEGA
+    cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
