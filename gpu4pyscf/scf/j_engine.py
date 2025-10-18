@@ -44,7 +44,8 @@ THREADS = 256
 
 libvhf_md = load_library('libgvhf_md')
 libvhf_md.MD_build_j.restype = ctypes.c_int
-libvhf_md.init_mdj_constant.restype = ctypes.c_int
+
+libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
 
 def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
     '''Compute J matrix
@@ -251,10 +252,6 @@ class _VHFOpt(jk._VHFOpt):
                 _atm_gpu.data.ptr, _bas_gpu.data.ptr, _env_gpu.data.ptr, 0,
             )
 
-            err = libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
-            if err != 0:
-                raise RuntimeError('CUDA kernel initialization')
-
             _pair_mappings = pair_mappings
             if num_devices > 1:
                 # Ensure the precomputation copied to each device
@@ -398,6 +395,7 @@ def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
 VJ_IJ_REGISTERS = 11
 MULTI_VJ_IJ_REGISTERS = 8
 RT_TMP_REGISTERS = 31
+RT2_IDX_CACHE_SIZE = 35 * 56
 def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     vj_ij_registers = VJ_IJ_REGISTERS
     if n_dm > 1:
@@ -426,6 +424,10 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     kl = _nearest_power2(int(nsq**.5))
     ij = nsq // kl
 
+    cache_Rt2_idx = nf3ij * nf3kl <= RT2_IDX_CACHE_SIZE
+    if cache_Rt2_idx:
+        shm_size -= nf3ij * nf3kl * 2
+
     tilex = 48
     # Guess number of batches for kl indices
     tiley = (shm_size//8 - nsq*unit - (ij*4+ij*nf3ij*n_dm)) // (kl*4+kl*nf3kl*n_dm)
@@ -443,5 +445,7 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
         ij = nsq // kl
         cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
     gout_stride = threads // nsq
-    buflen = nsq*unit+cache_size
+    buflen = (nsq * unit + cache_size) * 8
+    if cache_Rt2_idx:
+        buflen += nf3ij * nf3kl * 2
     return ij, kl, gout_stride, tilex, tiley, buflen
