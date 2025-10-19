@@ -19,6 +19,7 @@ import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
+from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
 
 mol = pyscf.M(
@@ -282,6 +283,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot - e_ref) < 1e-5
     '''
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_chkfile(self):
         mol = mol1.copy()
         mol.basis = 'ccpvdz'

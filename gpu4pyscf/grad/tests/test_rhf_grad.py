@@ -22,6 +22,7 @@ from pyscf import scf as cpu_scf
 from gpu4pyscf import scf as gpu_scf
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad_gpu
+from gpu4pyscf.lib.multi_gpu import num_devices
 from packaging import version
 
 atom = '''
@@ -115,6 +116,7 @@ class KnownValues(unittest.TestCase):
             ref[n] = np.einsum('xpq,pq->x', veff[:,i0:i1], dm[i0:i1])
         self.assertAlmostEqual(abs(ejk - ref).max(), 0, 9)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_ecp_grad(self):
         mol = gto.M(atom=' H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
                     ecp='lanl2dz', verbose=0)
@@ -122,7 +124,7 @@ class KnownValues(unittest.TestCase):
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(mol.atom)[1]
         self.assertAlmostEqual(lib.fp(g), 0.012310573162997052, 7)
-        
+
         mfs = mf.as_scanner()
         e1 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0 -0.001'))
         e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0  0.001'))
