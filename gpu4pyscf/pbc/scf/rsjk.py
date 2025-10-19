@@ -289,6 +289,7 @@ class PBCJKmatrixOpt:
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(cell, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms)
