@@ -401,6 +401,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         ''' Matrix-vector product '''
         t0 = log.init_timer()
         mvp = matrix_vector_product(cp.asarray(V_holder[size_old:size_new, :]))
+        logger.TIMER_LEVEL = 4
         if in_ram:
             mvp = mvp.get()
         W_holder[size_old:size_new, :] = mvp

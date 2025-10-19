@@ -14,7 +14,10 @@
 
 import numpy as np
 import cupy as cp
-
+from concurrent.futures import ThreadPoolExecutor
+# from concurrent.futures import ProcessPoolExecutor
+# import multiprocessing as mp
+# mp.set_start_method("spawn", force=True)
 import cupyx.scipy.linalg as cpx_linalg
 
 from pyscf import gto, lib
@@ -51,22 +54,37 @@ Please cite the TDDFT-ris method:
 
 LINEAR_EPSILON = 1e-8
 
-def get_memory_info(words):
+def get_memory_info(words, device_id=0):
     cp.cuda.PinnedMemoryPool().free_all_blocks()
     cp.get_default_memory_pool().free_all_blocks()
-    device = cp.cuda.Device()
+    device = cp.cuda.Device(device_id)
     free_mem, total_mem = device.mem_info
     used_mem = total_mem - free_mem
     memory_info = f"{words} memory usage: {used_mem / 1024**3:.2f} GB / {total_mem / 1024**3:.2f} GB"
     return memory_info
 
 
-def release_memory():
-    '''Releases the GPU memory using Cupy.'''
-    cp.cuda.PinnedMemoryPool().free_all_blocks()
-    cp.get_default_memory_pool().free_all_blocks()
+def release_memory(device_id=None):
+    '''Releases GPU and pinned memory pools safely in async context.'''
+    if device_id is not None:
+        with cp.cuda.Device(device_id):  # 确保上下文
+            # 先同步 stream 如果 async（避免 race）
+            cp.cuda.Stream.null.synchronize()  # 或你的 stream.synchronize()
+            
+            mempool = cp.get_default_memory_pool()
+            pinned_pool = cp.cuda.PinnedMemoryPool()
+            
+            # 只 free 用于块（检查前）
+            if mempool.used_bytes() > 0:
+                mempool.free_all_blocks()
+            if pinned_pool.n_free_blocks() > 0:  # 检查 pinned
+                pinned_pool.free_all_blocks()
+    else:
+        # 当前 device
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.cuda.PinnedMemoryPool().free_all_blocks()
 
-def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis):
+def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=False):
     '''
     Args:
         auxmol_basis_keys: (['C1', 'H2', 'O3', 'H4', 'H5', 'H6'])
@@ -86,6 +104,10 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis):
 
     for atom_index in auxmol_basis_keys:
         atom = ''.join([char for char in atom_index if char.isalpha()])
+
+        # if excludeHs:
+        #     if atom == 'H':
+        #         continue
         '''
         exponent_alpha = theta/R^2
         '''
@@ -99,9 +121,10 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis):
                 aux_basis[atom_index].append([1, [exp_alpha, 1.0]])
             if 'd' in fitting_basis:
                 aux_basis[atom_index].append([2, [exp_alpha, 1.0]])
+    # print(aux_basis)
     return aux_basis
 
-def get_auxmol(mol, theta=0.2, fitting_basis='s'):
+def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
     """
     Assigns a minimal auxiliary basis set to the molecule.
 
@@ -121,7 +144,7 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s'):
     '''
     auxmol = mol.copy()
     auxmol_basis_keys = mol._basis.keys()
-    auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis)
+    auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis,excludeHs=False)
     auxmol.build(dump_input=False, parse_arg=False)
     return auxmol
 
@@ -155,7 +178,7 @@ def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in
         Ppq = Ppq.get()
     return Ppq
 
-def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
+def get_uvPCupCvq_to_Ppq1(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
     '''    
     eri3c : (uv|P) , P = nauxao
     C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
@@ -168,6 +191,29 @@ def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in
     if in_ram:
         Ppq = Ppq.get()
     return Ppq
+
+
+def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
+    '''    
+    eri3c : (uv|P) , P = nauxao
+    C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
+
+    Ppq = einsum("uvP,up,vq->Ppq", eri3c, Cp, C_q)
+    '''
+    nao, nao, nauxao = eri3c.shape
+    nao, size_p = C_p.shape
+    nao, size_q = C_q.shape
+
+    eri3c = eri3c.reshape(nao,  nao * nauxao)  # (u, vP)
+    tmp = C_p.T.dot(eri3c)  #(p,u) (u, vP) -> p,vP
+    tmp = tmp.reshape(size_p, nao, nauxao)
+    # tmp = contract('uvP,up->Ppv', eri3c, C_p)
+    Ppq = contract('pvP,vq->Ppq', tmp, C_q)
+
+    if in_ram:
+        Ppq = Ppq.get()
+    return Ppq
+
 
 
 def get_uvPCupCvq_to_Ppq_symmetry(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
@@ -296,7 +342,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
 
     bytes_per_aux = ( n_eri3c_per_aux + n_eri3c_unzip_per_aux + n_Ppq_per_aux) * cp_int3c_dtype.itemsize  
-    batch_size = max(1, int(available_gpu_memory * 0.4 // bytes_per_aux)) 
+    batch_size = min(naux, max(1, int(available_gpu_memory * 0.4 // bytes_per_aux)) )
     log.info(f'batch_size for int3c2e_bdiv_generator (in aux dimension): {batch_size}')
 
     log.info(f'eri3c per aux dimension will take {byte_eri3c / (1024 ** 2):.0f} MB memory')
@@ -342,8 +388,9 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
                 aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
                 out = contract('uvP,PQ->uvQ', eri3c_unzip_batch, aux_coeff)
                 out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
+                log.warn(f'-------------eri3c DEBUG: out vs .incore.aux_e2(mol, auxmol) {abs(out.get()-ref).max()}')
                 assert abs(out.get()-ref).max() < 1e-10
-                log.info(f'-------------eri3c DEBUG passed {abs(out.get()-ref).max()}')
+                
 
             '''Puv -> Ppq, AO->MO transform '''
             if 'J' in calc:
@@ -617,19 +664,19 @@ def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
     bytes_per_mo = n_C_tmp_batch * dtype_size  
 
     mo_batch_size = min(max(n_occ, n_vir), max(1, int(available_gpu_memory * 0.4 // bytes_per_mo)))
-    log.info(f'mo_batch_size {mo_batch_size} / n_occ {n_occ} & n_vir {n_vir}')
+    log.info(f'mo_batch_size={mo_batch_size}, n_occ={n_occ}, n_vir={n_vir}')
 
     cpu00 = log.init_timer()
 
     for auxp0 in range(0, nauxao, aux_batch_size):
         auxp1 = min(auxp0+aux_batch_size, nauxao)
-
+        log.info(f' gen_K_diag auxao slicing: {auxp1} / {nauxao}')
         eri3c_batch = cp.asarray(eri3c[:, auxp0:auxp1])   #(naopair, aux_batch_size)
 
         cpu0 = log.init_timer()
         for mop0 in range(0, n_vir, mo_batch_size):
             mop1 = min(mop0+mo_batch_size, n_vir)    
-            log.info(f' gen_K_diag mop0:mop1 {mop0,mop1}')
+            log.info(f'        n_vir slicing: {mop1}/{n_vir}')
             cpu = log.init_timer()
 
             C_tmp_batch = C_q[:, mop0:mop1]
@@ -647,7 +694,7 @@ def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
         cpu0 = log.init_timer()
         for mop0 in range(0, n_occ, mo_batch_size):
             mop1 = min(mop0+mo_batch_size, n_occ)    
-            log.info(f'mop0:mop1 {mop0,mop1}')
+            log.info(f'        n_occ slicing: {mop1}/{n_occ}')
             cpu = log.init_timer()
 
             C_tmp_batch = C_p[:, mop0:mop1]
@@ -907,6 +954,15 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
     naopair = len(ao_pair_mapping)
     rows, cols = divmod(ao_pair_mapping, nao_orig)
 
+    C_full = cp.empty((nao_orig, size_p+size_q), dtype=C_p.dtype)
+    C_full[:,:size_p] = C_p
+    C_full[:,size_p:] = C_q
+    # C_full = cp.hstack((C_p, C_q))
+    log.info(f'C_full.flags {C_full.flags}')
+    log.info(f'C_full.dtype {C_full.dtype}')
+    log.info(f'C_full.shape {C_full.shape}')
+
+
     def ijab_MVP(V, a_x, out=None):
         '''
         Optimized calculation of (ij|ab) = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
@@ -923,14 +979,15 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
         
         available_gpu_memory = get_avail_mem()
 
-        mem_per_aux = (naopair + nao_orig*nao_orig + nao_orig*size_q + nao_orig*size_p)*cp_int3c_dtype.itemsize
+        mem_per_aux = (naopair + nao_orig*nao_orig + nao_orig*(size_q + size_p))*cp_int3c_dtype.itemsize
         batch_size = min(nauxao, max(1, int(available_gpu_memory * 0.8 // mem_per_aux)))
         log.info(f'     ijab batch_size for aux dimension {batch_size}')
+        log.info(f'     ijab eri3c_unzip_batch {batch_size*nao_orig*nao_orig*cp_int3c_dtype.itemsize/1024**3:.2f} GB')
 
         # batch_size = 24
-        log.info(f'     TFLOPs uvP,ua->avP: {int(2*nao_orig*n_vir*nao_orig*batch_size*10**-12)}')
-        log.info(f'     TFLOPs uvP,ui->ivP: {int(2*nao_orig*n_occ*nao_orig*batch_size*10**-12)}')
-
+        log.info(f'     TFLOPs Pvu,ur->Pvr: {int(2*batch_size*nao_orig*nao_orig*(n_vir+n_occ)*10**-12)}')
+        # log.info(f'     TFLOPs uvP,ui->ivP: {int(2*nao_orig*n_occ*nao_orig*batch_size*10**-12)}')
+        logger.TIMER_LEVEL = 5
         for p0 in range(0, nauxao, batch_size):
             p1 = min(p0+batch_size, nauxao)
             # log.info(f' ijab slice over nauxao p0, p1 {p0,p1}/ {nauxao}')
@@ -939,38 +996,42 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
 
             cpu = log.init_timer()
             eri3c_batch = cp.asarray(eri3c[:, p0:p1])
-            # log.timer(' cp.asarray(eri3c[:, p0:p1])', *cpu)
+            eri3c_batch = cp.transpose(eri3c_batch, axes=(1, 0))
+            log.timer(' cp.asarray(eri3c[:, p0:p1])', *cpu)
 
             cpu = log.init_timer()
-            eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, p1-p0), dtype=cp_int3c_dtype, order='F')
-            # log.timer(' eri3c_unzip_batch', *cpu)
+            eri3c_unzip_batch = cp.zeros((p1-p0, nao_orig*nao_orig), dtype=cp_int3c_dtype)
+            log.timer(' eri3c_unzip_batch', *cpu)
 
-            eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
-            eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
-            # log.timer(' eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch', *cpu)
             cpu = log.init_timer()
-            eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, p1-p0)
+            eri3c_unzip_batch[:, ao_pair_mapping] = eri3c_batch
+            eri3c_unzip_batch[:, cols*nao_orig+rows] = eri3c_batch
+            # log.timer(' eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch', *cpu)  # 0.01s
+            
+            eri3c_unzip_batch = eri3c_unzip_batch.reshape(p1-p0, nao_orig, nao_orig)
+            # log.info(f' eri3c_unzip_batch.shape {eri3c_unzip_batch.shape}')
 
-            T_av = contract('uvP,ua->Pav', eri3c_unzip_batch, C_q)
-            # log.timer(' uvP,ua->Pav', *cpu)
+            cpu = log.init_timer()
+            T_rv = eri3c_unzip_batch.dot(C_full)  # Pva
+            # cp.cuda.Stream.null.synchronize()
+            log.timer(' Pvu,ur->Pvr', *cpu)
             cpu = log.init_timer()
 
-            T_iv = contract('uvP,ui->ivP', eri3c_unzip_batch, C_p)
-            # log.timer(' uvP,ui->ivP', *cpu)
-            cpu = log.init_timer()
+            T_iv = T_rv[:,:,:n_occ]
+            T_av = T_rv[:,:,n_occ:]
 
             del eri3c_unzip_batch
             release_memory()
 
-            T_ab = contract('Pav,vb->Pab', T_av, C_q)
-            # log.timer(' Pav,vb->Pab', *cpu)
+            T_ab = contract('Pva,vb->Pab', T_av, C_q)
+            log.timer(' Pav,vb->Pab', *cpu)
             cpu = log.init_timer()
 
             del T_av
             release_memory()
 
-            T_ij = contract('ivP,vj->Pij', T_iv, C_p)
-            # log.timer(' ivP,vj->Pij', *cpu)
+            T_ij = contract('Pvi,vj->Pij', T_iv, C_p)
+            log.timer(' ivP,vj->Pij', *cpu)
             cpu = log.init_timer()  
 
             del T_iv
@@ -979,14 +1040,14 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
             T_ab_V = contract('Pab,mjb->mPja', T_ab, V)
             del T_ab
             release_memory()
-            # log.timer(' Pab,mjb->mPja', *cpu)
+            log.timer(' Pab,mjb->mPja', *cpu)
             cpu = log.init_timer()
 
             out -= a_x*contract('Pij,mPja->mia', T_ij, T_ab_V)
             del T_ij, T_ab_V
             release_memory()
 
-            # log.timer(' Pij,mPja->mia', *cpu)
+            log.timer(' Pij,mPja->mia', *cpu)
 
             log.timer(f' ijab slice over nauxao {p1}/{nauxao}', *cpu0)
 
@@ -995,68 +1056,170 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
     log.info(get_memory_info('after generate ijab_MVP'))    
     return ijab_MVP
 
-# def gen_ibja_MVP_Tpq(T_ia, log=None):
-#     '''
-#     the exchange (ib|ja) in B matrix
-#     (ib|ja) = Σ_Pjb (T_ib^P T_ja^P V_jb^m)
-#             = Σ_P [T_ja^P Σ_jb(T_ib^P V_jb^m)]
-#     '''
-#     # def ibja_MVP(V):
-#     #     T_ib_V = einsum("Pib,mjb->Pimj", T_ia, V)
-#     #     ibja_V = einsum("Pja,Pimj->mia", T_ia, T_ib_V)
-#     #     return ibja_V
 
-#     def ibja_MVP(V, a_x, out=None):
-#         '''
-#         Optimized calculation of (ib|ja) = Σ_Pjb (T_ib^P T_ja^P V_jb^m)
-#         by chunking along the n_occ dimension to reduce memory usage.
 
-#         Parameters:
-#             V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
-#             occ_chunk_size (int): Chunk size for splitting the n_occ dimension.
+def gen_ijab_MVP_eri3c1(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
+    # ... (前面的代码保持不变，直到 def ijab_MVP)
+    nao, nao_orig = int3c2e_opt.coeff.shape
 
-#         Returns:
-#             ibja_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
-#         '''
-#         nauxao, n_occ, n_vir = T_ia.shape
-#         n_state, n_occ, n_vir = V.shape
+    size_p = C_p.shape[1]
+    size_q = C_q.shape[1]
 
-#         available_gpu_memory = get_avail_mem()
+    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
-#         n_T_ib_V_chunk = nauxao * n_occ * n_state * 1
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    naopair = len(ao_pair_mapping)
+    rows, cols = divmod(ao_pair_mapping, nao_orig)
 
-#         bytes_per_vir = 2 * n_T_ib_V_chunk * T_ia.itemsize 
+    C_full = cp.empty((nao_orig, size_p+size_q), dtype=C_p.dtype)
+    C_full[:,:size_p] = C_p
+    C_full[:,size_p:] = C_q
+    # C_full = cp.hstack((C_p, C_q))
+    log.info(f'C_full.flags {C_full.flags}')
+    log.info(f'C_full.dtype {C_full.dtype}')
+    log.info(f'C_full.shape {C_full.shape}')
 
-#         occ_chunk_size = max(1, int(available_gpu_memory * 0.8 // bytes_per_vir)) 
+    def ijab_MVP(V, a_x, out=None):
+        '''
+        Optimized calculation of (ij|ab) = Σ_Pjb (T_ij^P T_ab^P V_jb^m)
+        Parameters:
+            V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
 
-#         # Initialize result tensor
-#         # ibja_V = cp.empty((n_state, n_occ, n_vir), dtype=T_ia.dtype)
-#         if out is None:
-#             out = cp.zeros_like(V)
-#         # Iterate over chunks of the n_occ dimension
-#         for occ_start in range(0, n_occ, occ_chunk_size):
-#             occ_end = min(occ_start + occ_chunk_size, n_occ)
-#             #occ_range = occ_end - occ_start
+        Returns:
+            ijab_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
+        '''
+        n_state, n_occ, n_vir = V.shape
+        if out is None: 
+            out = cp.zeros_like(V)  # Assume out is on GPU 0 initially; will be shared via lock
+        nauxao = int3c2e_opt.aux_coeff.shape[0]
+        
 
-#             # Extract the current chunk of V
-#             V_chunk = V[:, occ_start:occ_end, :]  # Shape: (n_state, occ_range, n_vir)
+        # Lock for protecting out writes
+        # out_lock = threading.Lock()
+        
+        # Function for single GPU worker
+        def gpu_worker(device_id, p_ranges):
+            # nonlocal out
+            with cp.cuda.Device(device_id):
+                # Replicate data to this GPU
+                cpu00 = log.init_timer()
+                C_full_gpu = cp.asarray(C_full)  # Transfer to this GPU
+                C_p_gpu = cp.asarray(C_p)
+                C_q_gpu = cp.asarray(C_q)
+                V_gpu = cp.asarray(V)  # Transfer V to this GPU
+                out_gpu = cp.zeros_like(V_gpu)  # Local out on this GPU, later add to shared
+                ao_pair_mapping_gpu = cp.asarray(ao_pair_mapping)
+                cols_gpu = cp.asarray(cols)
+                rows_gpu = cp.asarray(rows)
 
-#             # Extract the corresponding chunk of T_ia
-#             T_ia_chunk = T_ia[:, occ_start:occ_end, :]  # Shape: (nauxao, occ_range, n_vir)
+                start_p, end_p = p_ranges[0]
+                log.timer(f' ijab slice on GPU {device_id} initiate {start_p}-{end_p}', *cpu00)
 
-#             # Compute T_ib_V for the current chunk
-#             T_ib_V_chunk = contract("Pib,mjb->Pimj", T_ia_chunk, V_chunk)
+                available_gpu_memory = get_avail_mem()  
+                
+                log.info(f'     device {device_id} available_gpu_memory {available_gpu_memory} GB')
 
-#             # Compute ibja_V for the current chunk
-#             out[:, occ_start:occ_end, :] -= a_x*contract("Pja,Pimj->mia", T_ia_chunk, T_ib_V_chunk)
+                mem_per_aux = (naopair + nao_orig*nao_orig + nao_orig*(size_q + size_p)) * cp_int3c_dtype.itemsize
+                batch_size = min(end_p - start_p, max(1, int(available_gpu_memory * 0.8 // mem_per_aux)))  # Adjust per slice if needed
+                batch_size = (batch_size // 8) * 8
+                # batch_size = 40
+                log.info(f' GPU {device_id} batch_size {batch_size}, mem_per_aux {available_gpu_memory, mem_per_aux}')
+                for p0 in range(start_p, end_p, batch_size):
+                    p1 = min(p0 + batch_size, end_p)
+                    # log.info(f'     device {device_id} p0:p1 {p0,p1}')
+                    
+                    # cpu0 = log.init_timer()
+                    
+                    # Transfer eri slice to this GPU
+                    cpu = log.init_timer()
+                    eri3c_batch = cp.asarray(eri3c[:, p0:p1])  # Assume eri3c is CPU numpy
+                    eri3c_batch = cp.transpose(eri3c_batch, axes=(1, 0))
+                    log.timer(f' GPU {device_id} cp.asarray(eri3c[:, p0:p1])', *cpu)
+                    
+                    # cpu = log.init_timer()
+                    eri3c_unzip_batch = cp.zeros((p1 - p0, nao_orig * nao_orig), dtype=cp_int3c_dtype)
+                    # log.timer(f' GPU {device_id} eri3c_unzip_batch', *cpu)
 
-#             # Release intermediate variables and clean up memory
-#             del V_chunk, T_ia_chunk, T_ib_V_chunk
-#             release_memory()
+                    eri3c_unzip_batch[:, ao_pair_mapping_gpu] = eri3c_batch
+                    eri3c_unzip_batch[:, cols_gpu * nao_orig + rows_gpu] = eri3c_batch
+                    eri3c_unzip_batch = eri3c_unzip_batch.reshape(p1 - p0, nao_orig, nao_orig)
+                    
+                    # cpu = log.init_timer()
+                    T_rv = eri3c_unzip_batch.dot(C_full_gpu)  # Pva
+                    # log.timer(f' GPU {device_id} Pvu,ur->Pvr', *cpu)
 
-#         return out
+                    T_iv = T_rv[:, :, :n_occ]
+                    T_av = T_rv[:, :, n_occ:]
+                    
+                    # del eri3c_unzip_batch
+                    # release_memory()
+                    
+                    # cpu = log.init_timer()
+                    T_ab = contract('Pva,vb->Pab', T_av, C_q_gpu)
+                    # del T_av
+                    # release_memory()
+                    
+                
+                    T_ij = contract('Pvi,vj->Pij', T_iv, C_p_gpu)
+                    # del T_iv
+                    # release_memory()
+                    # log.timer(f' GPU {device_id} Pav,vb->Pab & Pvi,vj->Pij', *cpu)
+                    
+                    T_ab_V = contract('Pab,mjb->mPja', T_ab, V_gpu)
+                    # del T_ab
+                    # release_memory()
+                    
+                    out_gpu += a_x * contract('Pij,mPja->mia', T_ij, T_ab_V)
+                    
+                    # del T_ij, T_ab_V
+                    # release_memory()
+                    
+                    # log.timer(f' ijab slice on GPU {device_id} over nauxao {p1}/{end_p}', *cpu0)
+                log.timer(f' ijab slice on GPU {device_id} total {start_p}-{end_p}', *cpu00)
+            
+                return out_gpu
+                
+        # cut = int(nauxao * 0.5)
+        # cut = (cut // 8) * 8
+        # ranges_gpu0 = [(0, cut)]
+        # ranges_gpu1 = [(cut, nauxao)]
+        
 
-#     return ibja_MVP
+        # with ThreadPoolExecutor(max_workers=2) as executor:
+        #     futures = [
+        #         executor.submit(gpu_worker, 0, ranges_gpu0),
+        #         executor.submit(gpu_worker, 1, ranges_gpu1)
+        #     ]
+
+        cut = int(nauxao * 0.25)
+        cut = (cut // 8) * 8
+        ranges_gpu0 = [(0, cut)]
+        ranges_gpu1 = [(cut, 2*cut)]
+        ranges_gpu2 = [(2*cut, 3*cut)]
+        ranges_gpu3 = [(3*cut, nauxao)]
+
+        
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(gpu_worker, 0, ranges_gpu0),
+                executor.submit(gpu_worker, 1, ranges_gpu1),
+                executor.submit(gpu_worker, 2, ranges_gpu2),
+                executor.submit(gpu_worker, 3, ranges_gpu3)
+            ]
+            # 收集返回的 out_gpu
+            out_gpu_results = [f.result() for f in futures]
+
+        with cp.cuda.Device(0):
+            for out_gpu in out_gpu_results:
+                out -= cp.array(out_gpu)  # Accumulate to GPU 0
+        
+        return out
+
+    log.info(get_memory_info('after generate ijab_MVP'))    
+    return ijab_MVP
 
 def gen_ibja_MVP_Tpq(T_ia, log=None):
     '''
@@ -1383,8 +1546,8 @@ class RisBase(lib.StreamObject):
                 Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None, 
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
                 nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
-                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = False, 
-                single: bool = True, store_Tpq: bool = True, tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
+                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True, 
+                single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False, tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
                 verbose=None, citation=True):
         """
         Args:
@@ -1463,12 +1626,14 @@ class RisBase(lib.StreamObject):
 
         self.device = mf.device
         self.converged = None
-        self._store_Tpq = store_Tpq
+        self._store_Tpq_J = store_Tpq_J
+        self._store_Tpq_K = store_Tpq_K
+
         self._tensor_in_ram = tensor_in_ram
         self._krylov_in_ram = krylov_in_ram
 
-        logger.TIMER_LEVEL = 4
-        self.log = logger.new_logger(self)
+        logger.TIMER_LEVEL = 5
+        self.log = logger.new_logger(self, verbose=self.verbose)
     
         ''' following attributes will be initialized in self.build() '''
         self.n_occ = None
@@ -1483,7 +1648,10 @@ class RisBase(lib.StreamObject):
 
         self.delta_hdiag = None
         self.hdiag = None
-        self.eri_tag = None
+        if self.mol.cart:
+            self.eri_tag = '_cart'
+        else:
+            self.eri_tag = '_sph'
 
         self.auxmol_J = None
         self.auxmol_K = None
@@ -1549,7 +1717,21 @@ class RisBase(lib.StreamObject):
         log.info(f'calculate and print UV-vis spectra info: {self.spectra}')
         if self.spectra:
             log.info(f'spectra files will be written and their name start with: {self.out_name}')
-        log.info(f'store Tia Tij Tab in RAM: {self._tensor_in_ram}')
+
+        if self._store_Tpq_J:
+            log.info(f'will calc Tia_J. In CPU RAM? {self._tensor_in_ram}')
+        else:
+            log.info('will calc J on-the-fly')
+
+
+
+        if self._store_Tpq_K:
+            log.info(f'will calc Tia_J (if full TDDFT) Tij_K Tab_K. In CPU RAM? {self._tensor_in_ram}')
+        else:
+            log.info(f'will store K eri3c ')
+
+
+
 
         if self.a_x or self.omega or self.alpha or self.beta:
             ''' user wants to define some XC parameters '''
@@ -1606,10 +1788,7 @@ class RisBase(lib.StreamObject):
         else:
             log.info(f'use different J and K fitting basis: J with {self.J_fit} and K with {self.K_fit}')
 
-        if self.mol.cart:
-            self.eri_tag = '_cart'
-        else:
-            self.eri_tag = '_sph'
+
         log.info(f'cartesian or spherical electron integral: {self.eri_tag}')
 
         if self.mo_coeff.ndim == 2:
@@ -1624,17 +1803,20 @@ class RisBase(lib.StreamObject):
             self.C_vir_notrunc = cp.asfortranarray(self.mo_coeff[:,n_occ:])
             mo_energy = self._scf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
-            vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
+            
             occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
+            vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
+
             delta_hdiag = cp.repeat(vir_ene, n_occ, axis=0) - cp.repeat(occ_ene, n_vir, axis=1)
             if self.single:
                 delta_hdiag = cp.asarray(delta_hdiag, dtype=cp.float32)
 
+            # print(delta_hdiag)
             self.delta_hdiag = delta_hdiag
             self.hdiag = cp.asarray(delta_hdiag.reshape(-1))
 
-            log.info(f'n_occ = {n_occ}')
-            log.info(f'n_vir = {n_vir}')
+            log.info(f'n_occ = {n_occ}, E_HOMO ={occ_ene[-1,0]}')
+            log.info(f'n_vir = {n_vir}, E_LOMO ={vir_ene[0,0]}')
 
             if self.Ktrunc > 0:
                 log.info(f' MO truncation in K with threshold {self.Ktrunc} eV above HOMO and below LUMO')
@@ -1646,6 +1828,9 @@ class RisBase(lib.StreamObject):
 
                 rest_occ = cp.sum(occ_lumo_delta_ene <= trunc_tol_au)
                 rest_vir = cp.sum(homo_vir_delta_ene <= trunc_tol_au)
+
+                rest_occ = (rest_occ//2)*2
+                rest_vir = (rest_vir//2)*2
 
             elif self.Ktrunc == 0:
                 log.info('no MO truncation in K')
@@ -1678,22 +1863,37 @@ class RisBase(lib.StreamObject):
         auxmol_J = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.J_fit)
         log.info(f'n_bf in auxmol_J = {auxmol_J.nao_nr()}')
         self.auxmol_J = auxmol_J
+        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
+        byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
+        log.info(f'T_ia_J will take {byte_T_ia_J / (1024 ** 2):.0f} MB memory')  
 
 
         if self.a_x != 0:
-            if self.K_fit == self.J_fit and (self.omega == 0 or self.omega is None):
-                log.info('J and K use same aux basis')
-                auxmol_K = auxmol_J
-                self._JK_share_aux = True
 
-            else:
-                log.info('either (1) J and K use different aux basis, or (2) RSH omega != 0')
-                auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit) 
-                self._JK_share_aux = False
+            # if self.K_fit == self.J_fit and (self.omega == 0 or self.omega is None):
+            #     log.info('J and K use same aux basis')
+            #     auxmol_K = auxmol_J
+            #     self._JK_share_aux = True
+
+            # else:
+            #     log.info('either (1) J and K use different aux basis, or (2) RSH omega != 0')
+            #     auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=True) 
+            #     self._JK_share_aux = False
+
+            # log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
+            # self.auxmol_K = auxmol_K
+
+            # if self._JK_share_aux:
+            #     self.lower_inv_eri2c_K = self.lower_inv_eri2c_J
+            # else:
+            #     self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
+
+            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=True) 
 
             log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
             self.auxmol_K = auxmol_K
 
+            self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
 
             byte_T_ij_K = auxmol_K.nao_nr() * self.rest_occ **2 * self.dtype.itemsize
             byte_T_ab_K = auxmol_K.nao_nr() * self.rest_vir **2 * self.dtype.itemsize
@@ -1703,17 +1903,8 @@ class RisBase(lib.StreamObject):
             byte_T_ia_K = auxmol_K.nao_nr() * self.rest_occ * self.rest_vir * self.dtype.itemsize
             log.info(f'(if full TDDFT) T_ia_K will take {byte_T_ia_K / (1024 ** 2):.0f} MB memory')
 
-            if self._JK_share_aux:
-                self.lower_inv_eri2c_K = self.lower_inv_eri2c_J
-            else:
-                self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
-
-
         self.log = log
 
-        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
-        byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
-        log.info(f'T_ia_J will take {byte_T_ia_J / (1024 ** 2):.0f} MB memory')  
 
     def get_T_J(self):
         log = self.log
@@ -1842,18 +2033,18 @@ class TDA(RisBase):
         ''' TDA RKS hybrid '''
         log = self.log
 
-        if self._store_Tpq:
+        if self._store_Tpq_J:
             T_ia_J = self.get_T_J()
-            T_ij_K, T_ab_K = self.get_2T_K()
             iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
-            ijab_MVP = gen_ijab_MVP_Tpq(T_ij=T_ij_K, T_ab=T_ab_K, log=log)
-            # ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K, T_ab=T_ab_K)
         else:
             int3c2e_opt_J, aux_coeff_lower_inv_eri2c_J = self.get_int3c2e_J()
-
             iajb_MVP = gen_iajb_MVP_bdiv(int3c2e_opt=int3c2e_opt_J, aux_coeff_lower_inv_eri2c=aux_coeff_lower_inv_eri2c_J, 
                                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
 
+        if self._store_Tpq_K:
+            T_ij_K, T_ab_K = self.get_2T_K()
+            ijab_MVP = gen_ijab_MVP_Tpq(T_ij=T_ij_K, T_ab=T_ab_K, log=log)
+        else:
             eri3c_K, int3c2e_opt_K = self.get_eri3c_K()
             ijab_MVP = gen_ijab_MVP_eri3c(eri3c=eri3c_K, int3c2e_opt=int3c2e_opt_K, C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, log=log, single=self.single)
 
@@ -1913,7 +2104,7 @@ class TDA(RisBase):
             log.timer('--iajb_MVP', *cpu0)
 
             cpu1 = log.init_timer()
-            X_trunc = X[:,self.n_occ-self.rest_occ:,:self.rest_vir]
+            X_trunc = X[:,self.n_occ-self.rest_occ:,:self.rest_vir].copy()
             ijab_MVP(X_trunc, a_x=self.a_x, out=out[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             # out[:,self.n_occ-self.rest_occ:,:self.rest_vir] -= self.a_x*ijab_MVP(X_trunc)
 
@@ -1931,13 +2122,11 @@ class TDA(RisBase):
         log = self.log  
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
-        if self._store_Tpq:
+        if self._store_Tpq_J:
             T_ia_J = self.get_T_J()
-            iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J)
+            iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
         else:
             int3c2e_opt_J, aux_coeff_lower_inv_eri2c_J = self.get_int3c2e_J()
-            log.info(get_memory_info('after int3c2e_opt_J'))
-
             iajb_MVP = gen_iajb_MVP_bdiv(int3c2e_opt=int3c2e_opt_J, aux_coeff_lower_inv_eri2c=aux_coeff_lower_inv_eri2c_J, 
                                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
 
@@ -2041,22 +2230,22 @@ class TDDFT(RisBase):
             _hdiag = self.hdiag
         hdiag_MVP = gen_hdiag_MVP(hdiag=_hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
-        if self._store_Tpq:
-            T_ia_J = self.get_T_J()
-            T_ia_K, T_ij_K, T_ab_K = self.get_3T_K()
 
-            iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J)
+        if self._store_Tpq_J:
+            T_ia_J = self.get_T_J()
+            iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
+        else:
+            int3c2e_opt_J, aux_coeff_lower_inv_eri2c_J = self.get_int3c2e_J()
+            iajb_MVP = gen_iajb_MVP_bdiv(int3c2e_opt=int3c2e_opt_J, aux_coeff_lower_inv_eri2c=aux_coeff_lower_inv_eri2c_J, 
+                                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
+
+
+        if self._store_Tpq_K:
+            T_ia_K, T_ij_K, T_ab_K = self.get_3T_K()
             ijab_MVP = gen_ijab_MVP_Tpq(T_ij=T_ij_K, T_ab=T_ab_K, log=log)
             ibja_MVP = gen_ibja_MVP_Tpq(T_ia=T_ia_K, log=log)
 
         else:
-            int3c2e_opt_J, aux_coeff_lower_inv_eri2c_J = self.get_int3c2e_J()
-
-            log.info(get_memory_info('after int3c2e_opt_J'))
-
-            iajb_MVP = gen_iajb_MVP_bdiv(int3c2e_opt=int3c2e_opt_J, aux_coeff_lower_inv_eri2c=aux_coeff_lower_inv_eri2c_J, 
-                                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
-
             eri3c_K, int3c2e_opt_K = self.get_eri3c_K()
             ijab_MVP = gen_ijab_MVP_eri3c(eri3c=eri3c_K, int3c2e_opt=int3c2e_opt_K, C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, log=log, single=self.single)
             ibja_MVP = gen_ibja_MVP_eri3c(eri3c=eri3c_K, int3c2e_opt=int3c2e_opt_K, C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, log=log, single=self.single)
