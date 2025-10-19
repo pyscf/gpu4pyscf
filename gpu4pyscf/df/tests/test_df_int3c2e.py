@@ -192,3 +192,19 @@ def test_int3c2e_sparse1():
     dat = int3c2e_bdiv.aux_e2(mol, mol)
     ref = incore.aux_e2(mol, mol)
     assert abs(dat.get() - ref).max() < 1e-9
+
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, mol).build()
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
+    nao = mol.nao
+    i, j = divmod(ao_pair_mapping, nao)
+    coeff = cp.asarray(int3c2e_opt.coeff)
+    aux_coeff = cp.asarray(int3c2e_opt.coeff)
+    for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator():
+        eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+        dat = cp.zeros((nao*nao, nao))
+        dat[i*nao+j] = dat[j*nao+i] = eri3c_batch
+        dat = dat.reshape(nao,nao,nao)
+        dat = contract('pqr,rk->pqk', dat, aux_coeff)
+        dat = contract('pqk,qj->pjk', dat, coeff)
+        dat = contract('pjk,pi->ijk', dat, coeff)
+        assert abs(dat.get() - ref).max() < 1e-9

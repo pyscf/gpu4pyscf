@@ -494,6 +494,8 @@ class Int3c2eOpt:
         p0 = p1 = 0
         for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
             nshl_pair = bas_ij_idx.size
+            if nshl_pair == 0:
+                continue
             ci = c2s[i]
             cj = c2s[j]
             nfi, di = ci.shape
