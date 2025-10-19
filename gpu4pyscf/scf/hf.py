@@ -581,7 +581,10 @@ class SCF(pyscf_lib.StreamObject):
     direct_scf_tol      = hf_cpu.SCF.direct_scf_tol
     conv_check          = hf_cpu.SCF.conv_check
     callback            = hf_cpu.SCF.callback
-    _keys               = hf_cpu.SCF._keys
+
+    _keys = {'mol', 'verbose', 'max_memory', 'stdout', 'chkfile', 'mo_energy',
+             'mo_coeff', 'mo_occ', 'e_tot', 'converged', 'scf_summary',
+             'overlap_canonical_decomposed_x'}
 
     # methods
     def __init__(self, mol):
