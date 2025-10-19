@@ -23,10 +23,8 @@ from pyscf.pbc.dft.multigrid.multigrid_pair import _eval_rhoG
 from pyscf.pbc.dft.multigrid.pp import fake_cell_vloc_part1
 import cupy as cp
 
-from gpu4pyscf.lib.cupy_helper import load_library
-libpbc = load_library('libpbc')
-# from pyscf import lib
-# libpbc = lib.load_library('libdft')
+from gpu4pyscf.pbc.tools.pbc import get_coulG, ifft
+from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 
 # Henry's note 20250821:
@@ -121,9 +119,9 @@ def vpploc_part1_nuc_grad(mydf, dm, kpts=np.zeros((1,3)), atm_id=None, precision
         assert rhoG.shape[0] == 1
         rhoG = rhoG[0]
 
-    coulG = tools.get_coulG(cell, mesh=mesh)
-    vG = np.multiply(rhoG, coulG)
-    v_rs = tools.ifft(vG, mesh).real
+    coulG = get_coulG(cell, mesh=mesh)
+    vG = rhoG * coulG
+    v_rs = ifft(vG, mesh).real.get()
 
     grad = int_gauss_charge_v_rs(
         v_rs,

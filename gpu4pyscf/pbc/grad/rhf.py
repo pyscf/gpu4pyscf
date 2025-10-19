@@ -78,7 +78,7 @@ class Gradients(GradientsBase):
         de += cpu_rhf._contract_vhf_dm(self, s1, dme0) * 2
 
         # the CPU code requires the attribute .rhoG
-        rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0).get()
+        rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
         with lib.temporary_env(ni, rhoG=rhoG):
             de += vpploc_part1_nuc_grad(ni, dm0_cpu)
         de += pp_int.vpploc_part2_nuc_grad(cell, dm0_cpu)

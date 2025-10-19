@@ -21,7 +21,6 @@ import warnings
 import math
 import numpy as np
 import cupy as cp
-import scipy.linalg
 from collections import Counter
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
@@ -162,11 +161,20 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
     spherical_matrix_ndim = spherical_matrix.ndim
     if spherical_matrix_ndim == 2:
         spherical_matrix = spherical_matrix[None]
-    counts = spherical_matrix.shape[0]
     n_spherical = mol.nao
     assert spherical_matrix.shape[1] == n_spherical
     assert spherical_matrix.shape[2] == n_spherical
     n_cartesian = sorted_mol.nao
+
+    output_complex = False
+    if spherical_matrix.dtype == np.complex128:
+        spherical_matrix = spherical_matrix.view(np.float64)
+        spherical_matrix = spherical_matrix.reshape(-1,n_spherical,n_spherical,2)
+        spherical_matrix = spherical_matrix.transpose(3,0,1,2).reshape(-1,n_spherical,n_spherical)
+        output_complex = True
+    else:
+        assert spherical_matrix.dtype == np.float64
+    counts = spherical_matrix.shape[0]
 
     l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
     l_ctr_l = np.asarray(uniq_l_ctr[:,0], dtype=np.int32, order='C')
@@ -193,6 +201,11 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
             ctypes.c_bool(mol.cart),
         )
 
+    if output_complex:
+        outR, outI = out.reshape(2, -1, n_cartesian, n_cartesian)
+        out = outR.astype(np.complex128)
+        out.imag = outI
+
     if spherical_matrix_ndim == 2:
         out = out[0]
     return out
@@ -207,11 +220,20 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
     cartesian_matrix_ndim = cartesian_matrix.ndim
     if cartesian_matrix_ndim == 2:
         cartesian_matrix = cartesian_matrix[None]
-    counts = cartesian_matrix.shape[0]
     n_cartesian = sorted_mol.nao
     assert cartesian_matrix.shape[1] == n_cartesian
     assert cartesian_matrix.shape[2] == n_cartesian
     n_spherical = mol.nao
+
+    output_complex = False
+    if cartesian_matrix.dtype == np.complex128:
+        cartesian_matrix = cartesian_matrix.view(np.float64)
+        cartesian_matrix = cartesian_matrix.reshape(-1,n_cartesian,n_cartesian,2)
+        cartesian_matrix = cartesian_matrix.transpose(3,0,1,2).reshape(-1,n_cartesian,n_cartesian)
+        output_complex = True
+    else:
+        assert cartesian_matrix.dtype == np.float64
+    counts = cartesian_matrix.shape[0]
 
     l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
     l_ctr_l = np.asarray(uniq_l_ctr[:,0], dtype=np.int32, order='C')
@@ -237,6 +259,11 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
             ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
             ctypes.c_bool(mol.cart),
         )
+
+    if output_complex:
+        outR, outI = out.reshape(2, -1, n_spherical, n_spherical)
+        out = outR.astype(np.complex128)
+        out.imag = outI
 
     if cartesian_matrix_ndim == 2:
         out = out[0]
@@ -792,7 +819,7 @@ class _VHFOpt:
 
     def get_k(self, dms, hermi, verbose):
         '''
-        Build JK for the sorted_mol. Density matrices dms and the return K
+        Build K matrix for the sorted_mol. Density matrices dms and the return K
         matrix are all corresponding to the sorted_mol
         '''
         if callable(dms):
@@ -952,7 +979,6 @@ class RysIntEnvVars(ctypes.Structure):
                             env.data.ptr, ao_loc.data.ptr)
         # Keep a reference to these arrays, prevent releasing them upon returning
         obj._env_ref_holder = (atm, bas, env, ao_loc)
-        obj._device = cp.cuda.device.get_device_id()
         return obj
 
     def copy(self):
@@ -962,6 +988,10 @@ class RysIntEnvVars(ctypes.Structure):
         env = cp.asarray(env)
         ao_loc = cp.asarray(ao_loc)
         return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
+
+    @property
+    def device(self):
+        return self._env_ref_holder[0].device
 
 def _scale_sp_ctr_coeff(mol):
     # Match normalization factors of s, p functions in libcint
@@ -1038,13 +1068,11 @@ def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
             njsh = jsh1 - jsh0
             ntiles_i = (nish+tile-1) // tile
             ntiles_j = (njsh+tile-1) // tile
-            pair_ij = (cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32)[:,None] * nbas +
-                       cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32))
-            pair_ij = pair_ij.reshape(ntiles_i,tile,ntiles_j,tile).transpose(0,2,1,3)
             ish = cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32).reshape(ntiles_i,tile)
             jsh = cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32).reshape(ntiles_j,tile)
             ish = ish[:,None,:,None]
             jsh = jsh[None,:,None,:]
+            pair_ij = ish * nbas + jsh
             if i == j:
                 pair_ij = pair_ij[(ish >= jsh) & (ish < ish1) & (jsh < jsh1)]
             else:
@@ -1060,6 +1088,7 @@ def _make_j_engine_pair_locs(mol):
     return np.asarray(pair_loc, dtype=np.int32)
 
 def quartets_scheme(mol, l_ctr_pattern, with_j, with_k, shm_size=SHM_SIZE):
+    raise RuntimeError('deprecated')
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
     order = li + lj + lk + ll
