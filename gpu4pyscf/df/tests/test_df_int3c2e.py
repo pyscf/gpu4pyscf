@@ -180,7 +180,7 @@ def test_contract_int3c2e():
     assert abs(dat.get() - ref).max() < 1e-9
 
 # issue 540
-def test_int3c2e_sparse():
+def test_int3c2e_sparse1():
     mol = pyscf.M(
         atom='C 1. 1. 0.; O 8. 0. 0.',
         basis={
