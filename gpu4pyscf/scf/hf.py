@@ -582,7 +582,6 @@ class SCF(pyscf_lib.StreamObject):
     conv_check          = hf_cpu.SCF.conv_check
     callback            = hf_cpu.SCF.callback
     _keys               = hf_cpu.SCF._keys
-    overlap_canonical_decomposed_x = None
 
     # methods
     def __init__(self, mol):
@@ -605,6 +604,7 @@ class SCF(pyscf_lib.StreamObject):
         self.converged = False
         self.scf_summary = {}
 
+        self.overlap_canonical_decomposed_x = None
         self._opt_gpu = {None: None}
         self._opt_jengine = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory

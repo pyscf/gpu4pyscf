@@ -43,7 +43,7 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     with_rsjk = RangeSeparationJKBuilder(cell)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
-    omega = -rsjk.OMEGA
+    omega = rsjk.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=np.zeros((1,3)), with_j=False)[0,0]
     assert abs(vk - ref).max() < 1e-8
@@ -72,7 +72,7 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
     with_rsjk = RangeSeparationJKBuilder(cell, kpts=kpts)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
-    omega = -rsjk.OMEGA
+    omega = rsjk.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=kpts, with_j=False)[0,0]
     # Small errors might be due to the rcut, Ecut estimation in the CPU
@@ -98,6 +98,8 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     dm = dm.dot(dm.T)
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, remove_G0=True).get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
@@ -124,6 +126,8 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     dm[4:6] = dm[2:4].conj()
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts, remove_G0=True).get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, with_j=False, kpts=kpts)[1].get()
     assert abs(vk - ref).max() < 1e-8
@@ -146,6 +150,8 @@ def test_sr_vk_hermi0_gamma_point_vs_fft():
     dm = np.random.rand(nao, nao)*.2
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, remove_G0=True).get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
@@ -171,6 +177,8 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     dm[4:6] = dm[2:4].conj()
     vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, kpts=kpts, remove_G0=True).get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
@@ -197,6 +205,8 @@ def test_vk_hermi1_gamma_point_vs_fft():
     dm = dm.dot(dm.T)
     vk = rsjk.get_k(cell, dm, hermi=1, exxdiv='ewald').get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, with_j=False, exxdiv='ewald')[1].get()
     assert abs(vk - ref).max() < 1e-8
 
@@ -223,6 +233,8 @@ def test_vk_hermi1_kpts_vs_fft():
     dm = np.array([np.eye(nao)]*nkpts)
     vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_j=False, kpts=kpts, exxdiv='ewald')[1].get()
     assert abs(vk - ref).max() < 1e-8
 
@@ -244,6 +256,8 @@ def test_vk_hermi0_gamma_point_vs_fft():
     dm = np.random.rand(nao, nao)*.2
     vk = rsjk.get_k(cell, dm, hermi=0).get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
@@ -268,5 +282,7 @@ def test_vk_hermi0_kpts_vs_fft():
     dm[4:6] = dm[2:4].conj()
     vk = rsjk.get_k(cell, dm, hermi=0, kpts=kpts).get()
 
+    cell.precision = 1e-10
+    cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8

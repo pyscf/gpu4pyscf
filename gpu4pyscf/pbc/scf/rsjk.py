@@ -260,6 +260,7 @@ class PBCJKmatrixOpt:
             nkpts = 1
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc[:sorted_cell.nbas+1])
+            dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
             ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
             dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
         else:
@@ -276,7 +277,6 @@ class PBCJKmatrixOpt:
             dms = cp.asarray(dms, order='C')
             dm_cond = _compressed_dm_cond(supmol, dms)
         n_dm = len(dms)
-        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
@@ -348,18 +348,18 @@ class PBCJKmatrixOpt:
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
                     t1, t1p = log.timer_debug1(msg, *t1), t1
                     timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
+                if num_devices > 1:
+                    stream.synchronize()
 
-            cp.cuda.get_current_stream().synchronize()
             if kpts_band is not None:
                 raise NotImplementedError
 
@@ -515,10 +515,10 @@ class PBCJKmatrixOpt:
             dm_cond = condense('absmax', dms.reshape(n_dm, nao, nao),
                                ao_loc[:sorted_cell.nbas+1])
             ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
+            dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
             dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
         else:
             dm_cond = _compressed_dm_cond(supmol, dms)
-        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
@@ -530,6 +530,7 @@ class PBCJKmatrixOpt:
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(cell, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms)
@@ -587,16 +588,17 @@ class PBCJKmatrixOpt:
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
                     t1, t1p = log.timer_debug1(msg, *t1), t1
                     timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
+                if num_devices > 1:
+                    stream.synchronize()
             return ek, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
@@ -824,6 +826,7 @@ def _compressed_dm_cond(supmol, dms):
     i_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
     i_loc = cp.append(i_loc.ravel(), np.int32(n_Ts*nao))
     dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), i_loc, ao_loc)
+    dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
     nbas = cell.nbas
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
 

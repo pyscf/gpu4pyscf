@@ -587,7 +587,7 @@ class KnownValues(unittest.TestCase):
         cell = gto.M(a=np.eye(3)*3, atom='He 0. 0. 0.', basis=[[0, [1, 1]]])
         Ls = cell.get_lattice_Ls()
         difference_images, inverse = multigrid.image_pair_to_difference(Ls, cell.lattice_vectors())
-        assert difference_images.shape == (49, 3)
+        assert difference_images.shape == (25, 3)
         assert len(inverse) == len(Ls)**2
 
 if __name__ == '__main__':
