@@ -56,6 +56,20 @@ def _auto_create_mode(array, mode):
 #            cutensor_dtype, alignment_req=alignment_req)
 #    return _tensor_descriptors[key]
 
+def _contract_einsum(pattern, a, b, alpha, beta, out=None, einsum=cupy.einsum):
+    if out is None:
+        out = einsum(pattern, a, b)
+        out *= alpha
+    elif beta == 0.:
+        out[:] = einsum(pattern, a, b)
+        out *= alpha
+    else:
+        out *= beta
+        tmp = einsum(pattern, a, b)
+        tmp *= alpha
+        out += tmp
+    return cupy.asarray(out, order='C')
+
 def contraction(
     pattern, a, b, alpha, beta,
     out=None,
@@ -67,6 +81,9 @@ def contraction(
     compute_desc=0,
     ws_pref=WORKSPACE_RECOMMENDED
 ):
+    if a.size == 0 or b.size == 0:
+        # cutensor does not support the 0-sized operands
+        return _contract_einsum(pattern, a, b, alpha, beta, out)
 
     pattern = pattern.replace(" ", "")
     str_a, rest = pattern.split(',')
@@ -138,22 +155,11 @@ if contract_engine is not None:
     warnings.warn(f'using {contract_engine} as the tensor contraction engine.')
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
         try:
-            if out is None:
-                out = einsum(pattern, a, b)
-                out *= alpha
-            elif beta == 0.:
-                out[:] = einsum(pattern, a, b)
-                out *= alpha
-            else:
-                out *= beta
-                tmp = einsum(pattern, a, b)
-                tmp *= alpha
-                out += tmp
+            return _contract_einsum(pattern, a, b, alpha, beta, out, einsum)
         except cupy.cuda.memory.OutOfMemoryError:
             print('Out of memory error caused by cupy.einsum. '
                   'It is recommended to install cutensor to resolve this.')
             raise
-        return cupy.asarray(out, order='C')
 else:
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
         '''
