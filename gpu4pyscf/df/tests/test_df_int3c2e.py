@@ -178,3 +178,17 @@ def test_contract_int3c2e():
     dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
     ref = np.einsum('ijP,P->ij', eri3c, auxvec)
     assert abs(dat.get() - ref).max() < 1e-9
+
+# issue 540
+def test_int3c2e_sparse1():
+    mol = pyscf.M(
+        atom='C 1. 1. 0.; O 8. 0. 0.',
+        basis={
+            'C': [[0, [1e4, -.2], [1e3, .8]],
+                  [0, [10., 1]]],
+            'O': [[0, [1e4, -.2], [3e3, .2], [1e3, .8]],
+                  [0, [10., 1]]],},
+    )
+    dat = int3c2e_bdiv.aux_e2(mol, mol)
+    ref = incore.aux_e2(mol, mol)
+    assert abs(dat.get() - ref).max() < 1e-9
