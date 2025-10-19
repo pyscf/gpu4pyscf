@@ -29,7 +29,7 @@ void _fill_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -39,7 +39,7 @@ void _fill_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float kl_cutoff = cutoff - q_ij;
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
-        int bas_kl = pair_kl_mapping[pair_kl];
+        uint32_t bas_kl = pair_kl_mapping[pair_kl];
         int q_kl = q_cond[bas_kl];
         if (q_kl < kl_cutoff) {
             continue;
@@ -72,7 +72,7 @@ void _fill_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -117,7 +117,7 @@ void _fill_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *q_cond = bounds.q_cond;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
@@ -156,7 +156,7 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -197,6 +197,7 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -237,7 +238,7 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -270,7 +271,7 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -312,6 +313,7 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -354,7 +356,7 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -389,7 +391,7 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -431,6 +433,7 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -469,7 +472,7 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -499,7 +502,7 @@ void _fill_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -543,7 +546,7 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -585,6 +588,7 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
@@ -624,7 +628,7 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;
@@ -658,7 +662,7 @@ static void _fill_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -704,7 +708,7 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -746,6 +750,7 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
+    float theta_ij = omega2 * aij / (aij + omega2);
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
@@ -787,7 +792,7 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             float xkl = xk + xqc;
             float ykl = yk + yqc;
             float zkl = zk + zqc;
-            float theta = 1./(1./aij+1./akl+1./omega2);
+            float theta = theta_ij * akl / (theta_ij + akl);
             float xpq = xij - xkl;
             float ypq = yij - ykl;
             float zpq = zij - zkl;

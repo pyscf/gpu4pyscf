@@ -13,3 +13,4 @@
 # limitations under the License.
 
 from gpu4pyscf.qmmm import chelpg
+from gpu4pyscf.qmmm.itrf import *

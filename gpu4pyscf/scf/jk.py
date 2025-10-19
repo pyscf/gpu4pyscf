@@ -21,7 +21,6 @@ import warnings
 import math
 import numpy as np
 import cupy as cp
-import scipy.linalg
 from collections import Counter
 from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
@@ -152,6 +151,125 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     log.timer('vj', *cput0)
     return vj
 
+def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
+                         l_ctr_offsets, ao_idx, l_ctr_paddings=None):
+    '''
+    Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
+    Fused kernel to perform 'ip,npq,qj->nij'
+    '''
+    spherical_matrix = cp.asarray(spherical_matrix)
+    spherical_matrix_ndim = spherical_matrix.ndim
+    if spherical_matrix_ndim == 2:
+        spherical_matrix = spherical_matrix[None]
+    n_spherical = mol.nao
+    assert spherical_matrix.shape[1] == n_spherical
+    assert spherical_matrix.shape[2] == n_spherical
+    n_cartesian = sorted_mol.nao
+
+    output_complex = False
+    if spherical_matrix.dtype == np.complex128:
+        spherical_matrix = spherical_matrix.view(np.float64)
+        spherical_matrix = spherical_matrix.reshape(-1,n_spherical,n_spherical,2)
+        spherical_matrix = spherical_matrix.transpose(3,0,1,2).reshape(-1,n_spherical,n_spherical)
+        output_complex = True
+    else:
+        assert spherical_matrix.dtype == np.float64
+    counts = spherical_matrix.shape[0]
+
+    l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
+    l_ctr_l = np.asarray(uniq_l_ctr[:,0], dtype=np.int32, order='C')
+    if l_ctr_paddings is None:
+        l_ctr_pad_counts = np.zeros_like(l_ctr_count)
+    else:
+        l_ctr_pad_counts = np.asarray(l_ctr_paddings, dtype=np.int32)
+    ao_idx = cp.asarray(ao_idx, dtype=np.int32)
+    stream = cp.cuda.get_current_stream()
+
+    out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
+    for i_dm in range(counts):
+        libgint.cart2sph_C_mat_CT_with_padding(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
+            ctypes.cast(spherical_matrix[i_dm].data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_cartesian),
+            ctypes.c_int(n_spherical),
+            ctypes.c_int(l_ctr_l.shape[0]),
+            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
+            ctypes.c_bool(mol.cart),
+        )
+
+    if output_complex:
+        outR, outI = out.reshape(2, -1, n_cartesian, n_cartesian)
+        out = outR.astype(np.complex128)
+        out.imag = outI
+
+    if spherical_matrix_ndim == 2:
+        out = out[0]
+    return out
+
+def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
+                         l_ctr_offsets, ao_idx, l_ctr_paddings=None):
+    '''
+    Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
+    Fused kernel to perform 'ip,npq,qj->nij'
+    '''
+    cartesian_matrix = cp.asarray(cartesian_matrix)
+    cartesian_matrix_ndim = cartesian_matrix.ndim
+    if cartesian_matrix_ndim == 2:
+        cartesian_matrix = cartesian_matrix[None]
+    n_cartesian = sorted_mol.nao
+    assert cartesian_matrix.shape[1] == n_cartesian
+    assert cartesian_matrix.shape[2] == n_cartesian
+    n_spherical = mol.nao
+
+    output_complex = False
+    if cartesian_matrix.dtype == np.complex128:
+        cartesian_matrix = cartesian_matrix.view(np.float64)
+        cartesian_matrix = cartesian_matrix.reshape(-1,n_cartesian,n_cartesian,2)
+        cartesian_matrix = cartesian_matrix.transpose(3,0,1,2).reshape(-1,n_cartesian,n_cartesian)
+        output_complex = True
+    else:
+        assert cartesian_matrix.dtype == np.float64
+    counts = cartesian_matrix.shape[0]
+
+    l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
+    l_ctr_l = np.asarray(uniq_l_ctr[:,0], dtype=np.int32, order='C')
+    if l_ctr_paddings is None:
+        l_ctr_pad_counts = np.zeros_like(l_ctr_count)
+    else:
+        l_ctr_pad_counts = np.asarray(l_ctr_paddings, dtype=np.int32)
+    ao_idx = cp.asarray(ao_idx, dtype=np.int32)
+    stream = cp.cuda.get_current_stream()
+
+    out = cp.empty((counts, n_spherical, n_spherical), order = "C")
+    for i_dm in range(counts):
+        libgint.cart2sph_CT_mat_C_with_padding(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(cartesian_matrix[i_dm].data.ptr, ctypes.c_void_p),
+            ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_cartesian),
+            ctypes.c_int(n_spherical),
+            ctypes.c_int(l_ctr_l.shape[0]),
+            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
+            ctypes.c_bool(mol.cart),
+        )
+
+    if output_complex:
+        outR, outI = out.reshape(2, -1, n_spherical, n_spherical)
+        out = outR.astype(np.complex128)
+        out.imag = outI
+
+    if cartesian_matrix_ndim == 2:
+        out = out[0]
+    return out
+
+
 class _VHFOpt:
     def __init__(self, mol, cutoff=1e-13, tile=TILE):
         self.mol = mol
@@ -175,7 +293,7 @@ class _VHFOpt:
         mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, sparse_coeff = True)
         self.sorted_mol = mol
         self.ao_idx = ao_idx
-        self.l_ctr_pad_counts = l_ctr_pad_counts
+        self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
@@ -220,8 +338,8 @@ class _VHFOpt:
         return self
 
     def sort_orbitals(self, mat, axis=[]):
-        ''' 
-        Transform given axis of a matrix into sorted AO 
+        '''
+        Transform given axis of a matrix into sorted AO
         '''
         idx = self.ao_idx
         shape_ones = (1,) * mat.ndim
@@ -237,8 +355,8 @@ class _VHFOpt:
         return mat[tuple(fancy_index)]
 
     def unsort_orbitals(self, sorted_mat, axis=[]):
-        ''' 
-        Transform given axis of a matrix into sorted AO 
+        '''
+        Transform given axis of a matrix into sorted AO
         '''
         idx = self.ao_idx
         shape_ones = (1,) * sorted_mat.ndim
@@ -258,93 +376,25 @@ class _VHFOpt:
     def apply_coeff_C_mat_CT(self, spherical_matrix):
         '''
         Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
-        Fused kernel to perform 'ip,npq,qj->nij' 
+        Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        spherical_matrix = cp.asarray(spherical_matrix)
-        spherical_matrix_ndim = spherical_matrix.ndim
-        if spherical_matrix_ndim == 2:
-            spherical_matrix = spherical_matrix[None]
-        counts = spherical_matrix.shape[0]
-        n_spherical = self.mol.nao
-        assert spherical_matrix.shape[1] == n_spherical
-        assert spherical_matrix.shape[2] == n_spherical
-        n_cartesian = self.sorted_mol.nao
-
-        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
-        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
-        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
-        cupy_ao_idx = self.cupy_ao_idx
-        stream = cp.cuda.get_current_stream()
-
-        # ref = cp.einsum("ij,qjk,kl->qil", self.coeff, spherical_matrix, self.coeff.T)
-
-        out = cp.zeros((counts, n_cartesian, n_cartesian), order = "C")
-        for i_dm in range(counts):
-            libgint.cart2sph_C_mat_CT_with_padding(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
-                ctypes.cast(spherical_matrix[i_dm].data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n_cartesian),
-                ctypes.c_int(n_spherical),
-                ctypes.c_int(l_ctr_l.shape[0]),
-                l_ctr_l.ctypes.data_as(ctypes.c_void_p),
-                l_ctr_count.ctypes.data_as(ctypes.c_void_p),
-                self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
-                ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
-                ctypes.c_bool(self.mol.cart),
-            )
-
-        if spherical_matrix_ndim == 2:
-            out = out[0]
-        return out
+        return apply_coeff_C_mat_CT(
+            spherical_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
+            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
 
     def apply_coeff_CT_mat_C(self, cartesian_matrix):
         '''
         Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
-        Fused kernel to perform 'ip,npq,qj->nij' 
+        Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        cartesian_matrix = cp.asarray(cartesian_matrix)
-        cartesian_matrix_ndim = cartesian_matrix.ndim
-        if cartesian_matrix_ndim == 2:
-            cartesian_matrix = cartesian_matrix[None]
-        counts = cartesian_matrix.shape[0]
-        n_cartesian = self.sorted_mol.nao
-        assert cartesian_matrix.shape[1] == n_cartesian
-        assert cartesian_matrix.shape[2] == n_cartesian
-        n_spherical = self.mol.nao
-
-        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
-        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
-        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
-        cupy_ao_idx = self.cupy_ao_idx
-        stream = cp.cuda.get_current_stream()
-
-        # ref = cp.einsum("ij,qjk,kl->qil", self.coeff.T, cartesian_matrix, self.coeff)
-
-        out = cp.empty((counts, n_spherical, n_spherical), order = "C")
-        for i_dm in range(counts):
-            libgint.cart2sph_CT_mat_C_with_padding(
-                ctypes.cast(stream.ptr, ctypes.c_void_p),
-                ctypes.cast(cartesian_matrix[i_dm].data.ptr, ctypes.c_void_p),
-                ctypes.cast(out[i_dm].data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n_cartesian),
-                ctypes.c_int(n_spherical),
-                ctypes.c_int(l_ctr_l.shape[0]),
-                l_ctr_l.ctypes.data_as(ctypes.c_void_p),
-                l_ctr_count.ctypes.data_as(ctypes.c_void_p),
-                self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
-                ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
-                ctypes.c_bool(self.mol.cart),
-            )
-
-        if cartesian_matrix_ndim == 2:
-            out = out[0]
-        return out
+        return apply_coeff_CT_mat_C(
+            cartesian_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
+            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
 
     def apply_coeff_C_mat(self, right_matrix):
         '''
         Sort AO and perform cart2sph transformation (if needed) for the second last axis
-        Fused kernel to perform 'ip,npq->niq' 
+        Fused kernel to perform 'ip,npq->niq'
         '''
         right_matrix = cp.asarray(right_matrix)
         assert right_matrix.ndim == 2
@@ -443,17 +493,18 @@ class _VHFOpt:
             cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
         i_spherical_offset = 0
         i_cartesian_offset = 0
-        for i, (l, _) in enumerate(self.uniq_l_ctr):
+        for i, l in enumerate(self.uniq_l_ctr[:,0]):
             cart2sph = cart2sph_per_l[l]
+            ncart, nsph = cart2sph.shape
             l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
+            cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
+            sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
+            cart_idx = cart_offs[:,None] + np.arange(ncart)
+            sph_idx = sph_offs[:,None] + np.arange(nsph)
+            coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
             l_ctr_pad_count = self.l_ctr_pad_counts[i]
-            for _ in range(l_ctr_count - l_ctr_pad_count):
-                coeff[i_cartesian_offset : i_cartesian_offset + cart2sph.shape[0],
-                      i_spherical_offset : i_spherical_offset + cart2sph.shape[1]] = cart2sph
-                i_cartesian_offset += cart2sph.shape[0]
-                i_spherical_offset += cart2sph.shape[1]
-            for _ in range(l_ctr_pad_count):
-                i_cartesian_offset += cart2sph.shape[0]
+            i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
+            i_spherical_offset += l_ctr_count * nsph
         assert len(self.ao_idx) == self.mol.nao
         coeff = self.unsort_orbitals(coeff, axis = [1])
         return asarray(coeff)
@@ -512,7 +563,7 @@ class _VHFOpt:
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            # An additional integer to count for the proccessed pair_ijs 
+            # An additional integer to count for the proccessed pair_ijs
             pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
 
             timing_counter = Counter()
@@ -768,7 +819,7 @@ class _VHFOpt:
 
     def get_k(self, dms, hermi, verbose):
         '''
-        Build JK for the sorted_mol. Density matrices dms and the return K
+        Build K matrix for the sorted_mol. Density matrices dms and the return K
         matrix are all corresponding to the sorted_mol
         '''
         if callable(dms):
@@ -914,13 +965,33 @@ class _VHFOpt:
 
 class RysIntEnvVars(ctypes.Structure):
     _fields_ = [
-        ('natm', ctypes.c_uint16),
-        ('nbas', ctypes.c_uint16),
+        ('natm', ctypes.c_int),
+        ('nbas', ctypes.c_int),
         ('atm', ctypes.c_void_p),
         ('bas', ctypes.c_void_p),
         ('env', ctypes.c_void_p),
         ('ao_loc', ctypes.c_void_p),
     ]
+
+    @classmethod
+    def new(cls, natm, nbas, atm, bas, env, ao_loc):
+        obj = RysIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr,
+                            env.data.ptr, ao_loc.data.ptr)
+        # Keep a reference to these arrays, prevent releasing them upon returning
+        obj._env_ref_holder = (atm, bas, env, ao_loc)
+        return obj
+
+    def copy(self):
+        atm, bas, env, ao_loc = self._env_ref_holder
+        atm = cp.asarray(atm)
+        bas = cp.asarray(bas)
+        env = cp.asarray(env)
+        ao_loc = cp.asarray(ao_loc)
+        return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
+
+    @property
+    def device(self):
+        return self._env_ref_holder[0].device
 
 def _scale_sp_ctr_coeff(mol):
     # Match normalization factors of s, p functions in libcint
@@ -997,13 +1068,11 @@ def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
             njsh = jsh1 - jsh0
             ntiles_i = (nish+tile-1) // tile
             ntiles_j = (njsh+tile-1) // tile
-            pair_ij = (cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32)[:,None] * nbas +
-                       cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32))
-            pair_ij = pair_ij.reshape(ntiles_i,tile,ntiles_j,tile).transpose(0,2,1,3)
             ish = cp.arange(ish0, ish0+ntiles_i*tile, dtype=np.int32).reshape(ntiles_i,tile)
             jsh = cp.arange(jsh0, jsh0+ntiles_j*tile, dtype=np.int32).reshape(ntiles_j,tile)
             ish = ish[:,None,:,None]
             jsh = jsh[None,:,None,:]
+            pair_ij = ish * nbas + jsh
             if i == j:
                 pair_ij = pair_ij[(ish >= jsh) & (ish < ish1) & (jsh < jsh1)]
             else:
@@ -1019,6 +1088,7 @@ def _make_j_engine_pair_locs(mol):
     return np.asarray(pair_loc, dtype=np.int32)
 
 def quartets_scheme(mol, l_ctr_pattern, with_j, with_k, shm_size=SHM_SIZE):
+    raise RuntimeError('deprecated')
     ls = l_ctr_pattern[:,0]
     li, lj, lk, ll = ls
     order = li + lj + lk + ll

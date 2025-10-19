@@ -165,10 +165,6 @@ class _VHFOpt(jk._VHFOpt):
         log = logger.new_logger(self.mol, verbose)
         sorted_mol = self.sorted_mol
         prim_mol = self.prim_mol
-        # Small arrays pair_mappings, pair_loc etc may the occupy freed memory
-        # created in dms(). Preallocate workspace for these arrays
-        workspace = cp.empty(prim_mol.nbas**2*2)
-        workspace = None # noqa: F841
         if callable(dms):
             dms = dms()
         p2c_mapping = cp.asarray(self.prim_to_ctr_mapping)

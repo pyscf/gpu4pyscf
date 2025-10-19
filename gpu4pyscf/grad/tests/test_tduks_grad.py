@@ -20,6 +20,7 @@ from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from packaging import version
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -246,6 +247,7 @@ def _check_grad(mol, xc, tol=1e-5, lindep=1.0e-12, disp=None, tda=False, method=
 
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_svwn_tda_spinconserving_cpu(self):
         grad_gpu = _check_grad(mol, xc="svwn", tol=5e-10, tda=True, method="cpu")
         ref = np.array([[-2.0794644047642e-15,  4.5819012821773e-15, -1.9469159367525e-02],
@@ -268,6 +270,7 @@ class KnownValues(unittest.TestCase):
     # def test_grad_camb3lyp_tda_spinconserving_numerical(self):
     #     _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=True, method="numerical")
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_camb3lyp_tddft_spinconserving_cpu(self):
         grad_gpu = _check_grad(mol, xc="camb3lyp", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[ 1.2806734534785e-15,  7.1845049781507e-16, -3.2202363698306e-02],

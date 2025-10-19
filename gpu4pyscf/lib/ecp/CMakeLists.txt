@@ -14,6 +14,23 @@
 
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
+set(HAS_BLACKWELL_OR_NEWER OFF)
+foreach(arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
+  string(REGEX MATCH "([0-9]+)" arch_number ${arch})
+  if("${arch_number}" STREQUAL "")
+    message(FATAL_ERROR "Cannot extract architecture id from CMAKE_CUDA_ARCHITECTURES term ${arch}.")
+  endif()
+  if(arch_number GREATER_EQUAL 100)
+    set(HAS_BLACKWELL_OR_NEWER ON)
+    break()
+  endif()
+endforeach()
+
+if(HAS_BLACKWELL_OR_NEWER)
+  message(WARNING "Blackwell or newer GPU detected with sm ${arch_number} >= 100. To get around with a severe bug in nvcc, we turn off compiler optimization. The performance will be damaged.")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --Ofast-compile max")
+endif()
+
 add_library(gecp SHARED
   nr_ecp_driver.cu
 )

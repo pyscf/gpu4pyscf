@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 import cupy as cp
 import pyscf
 from pyscf.df import incore
@@ -147,3 +148,47 @@ def test_group_blocks():
     assert int3c2e_bdiv.group_blocks([0, 1, 3, 4], 3) == [0, 2, 3]
     with pytest.raises(RuntimeError):
         int3c2e_bdiv.group_blocks([0, 4, 9, 14], 3)
+
+def test_contract_int3c2e():
+    from gpu4pyscf.df.j_engine_3c2e import contract_int3c2e_dm
+    from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    8.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        ''',
+        basis=('ccpvtz', [[1, [3.7, 1]], [1, [2., 1]], [1, [.8, 1]]])
+    )
+    auxmol = mol.copy()
+    auxmol.basis = ('weigend', [[3, [2, 1, .5], [1, .2, 1]]])
+    auxmol.build(0, 0)
+    np.random.seed(10)
+    nao = mol.nao
+    dm = np.random.rand(nao,nao)
+    dm = dm.dot(dm.T)
+    eri3c = incore.aux_e2(mol, auxmol)
+
+    dat = contract_int3c2e_dm(mol, auxmol, dm)
+    ref = np.einsum('ijP,ji->P', eri3c, dm)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+    auxvec = np.random.rand(auxmol.nao)
+    dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
+    ref = np.einsum('ijP,P->ij', eri3c, auxvec)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+# issue 540
+def test_int3c2e_sparse1():
+    mol = pyscf.M(
+        atom='C 1. 1. 0.; O 8. 0. 0.',
+        basis={
+            'C': [[0, [1e4, -.2], [1e3, .8]],
+                  [0, [10., 1]]],
+            'O': [[0, [1e4, -.2], [3e3, .2], [1e3, .8]],
+                  [0, [10., 1]]],},
+    )
+    dat = int3c2e_bdiv.aux_e2(mol, mol)
+    ref = incore.aux_e2(mol, mol)
+    assert abs(dat.get() - ref).max() < 1e-9

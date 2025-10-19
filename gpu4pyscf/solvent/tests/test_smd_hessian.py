@@ -100,6 +100,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
         assert abs(h[1,0,0,0] - -0.4599888) < 1e-3
         h2o.stdout.close()
 
+    @pytest.mark.slow
     def test_CN(self):
         atom = '''
 C  0.0  0.0  0.0
@@ -111,6 +112,7 @@ N  0.0  0.0  1.16
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_CC(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -123,6 +125,7 @@ H 1.846 -0.927 0.000
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_OO(self):
         atom = '''
 O 0.000 0.000 0.000
@@ -131,6 +134,7 @@ O 1.207 0.000 0.000
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_ON(self):
         atom = '''
 N 0.000 0.000 0.000
@@ -140,6 +144,7 @@ H -0.360 0.000 0.000
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_OP(self):
         atom = '''
 P 0.000 0.000 0.000
@@ -151,6 +156,7 @@ H 0.368 0.000 0.933
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_OC(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -161,6 +167,7 @@ H -0.603 -0.928 0.000
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_F(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -172,6 +179,7 @@ H -0.520 0.000 1.000
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Si(self):
         atom = '''
 Si 0.000 0.000 0.000
@@ -183,6 +191,7 @@ H -0.875 0.875 -0.875
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_S(self):
         atom = '''
 S 0.000 0.000 0.000
@@ -192,6 +201,7 @@ H -0.962 0.280 0.000
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Cl(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -203,6 +213,7 @@ H -0.595 -0.476 -0.824
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Br(self):
         atom = '''
 C 0.000 0.000 0.000

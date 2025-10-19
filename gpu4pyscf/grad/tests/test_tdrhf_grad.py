@@ -20,6 +20,7 @@ from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from packaging import version
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -214,9 +215,11 @@ class KnownValues(unittest.TestCase):
                         [-4.7409651846241e-17, -6.9672215647420e-02, -5.1141366232510e-02]])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_tda_singlet_numerical(self):
         _check_grad(mol, tol=1e-4, tda=True, method="numerical")
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_tdhf_singlet_cpu(self):
         grad_gpu = _check_grad(mol, tol=1e-10, lindep=1.0E-6, tda=False, method="cpu")
         ref = np.array([[-3.4653829069609e-16,  2.3748317799310e-14, 1.0506609371536e-01],

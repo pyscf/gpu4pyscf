@@ -212,3 +212,23 @@ H  -5.8042 -1.0067 12.1503
 
     vj1 = j_engine.get_j(mol, dm).get()
     assert abs(vj1 - ref).max() < 1e-9
+
+def test_general_contraction():
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        ''',
+        basis=('ccpvdz', [[3, [2., 1., .5], [1., .5, 1.]]]),
+        unit='B',)
+
+    np.random.seed(9)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao)
+    dm = dm.dot(dm.T)
+
+    vj = j_engine.get_j(mol, dm)
+    ref = jk.get_jk(mol, dm)[0]
+    assert abs(vj - ref).max() < 1e-9
