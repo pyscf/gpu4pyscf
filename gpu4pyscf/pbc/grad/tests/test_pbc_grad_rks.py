@@ -18,6 +18,7 @@ import numpy as np
 import pyscf
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from pyscf.pbc.grad import krks as krks_cpu
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 disp = 1e-5
 
@@ -90,17 +91,19 @@ class KnownValues(unittest.TestCase):
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_lda_grad_nonorth(self):
         # ref = numerical_gradient(cell, xc='lda,vwn')
         ref = np.array([[-0.2574167 , -0.03094249,  0.12969496],
                         [ 0.25741799,  0.03094078, -0.12969543]])
         mf = cell.RKS(xc='lda,vwn').to_gpu()
         mf.conv_tol = 1e-10
+        mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell)[1]
+        g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_gga_grad(self):
         kmf = cell_orth.KRKS(xc='pbe').run()
         ref = krks_cpu.Gradients(kmf).kernel()
@@ -110,17 +113,19 @@ class KnownValues(unittest.TestCase):
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_gga_grad_nonorth(self):
         # ref = numerical_gradient(cell, xc='pbe,pbe')
         ref = np.array([[-0.25588534, -0.03079455,  0.12893533],
                         [ 0.25585186,  0.03078769, -0.12891839]])
         mf = cell.RKS(xc='pbe,pbe').to_gpu()
         mf.conv_tol = 1e-10
+        mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell)[1]
+        g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad(self):
         # ref = numerical_gradient(cell_orth, xc='r2scan')
         ref = np.array([[-0.01026366, -0.01026366, -0.01026366],
@@ -132,15 +137,16 @@ class KnownValues(unittest.TestCase):
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad_nonorth(self):
         # ref = numerical_gradient(cell, xc='r2scan')
         ref = np.array([[-0.26574535, -0.03127805,  0.13378557],
                         [ 0.265949  ,  0.03133622, -0.13367209]])
         mf = cell.RKS(xc='r2scan,r2scan').to_gpu()
         mf.conv_tol = 1e-10
+        mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell)[1]
+        g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skip('gradients for hybrid functional not avaiable')

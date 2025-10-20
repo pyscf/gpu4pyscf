@@ -2247,22 +2247,20 @@ def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
 
 def _scale_ao(ao, wv, out=None):
     if wv.ndim == 1:
-        if ao.flags.f_contiguous or ao.dtype != np.float64:
-            return cupy.multiply(ao, wv, out=out)
         nvar = 1
         nao, ngrids = ao.shape
         assert wv.size == ngrids
+        out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
+        if not ao.flags.c_contiguous or ao.dtype != np.float64:
+            return cupy.multiply(ao, wv, out=out)
     else:
-        if ao[0].flags.f_contiguous or ao.dtype != np.float64:
-            return contract('nip,np->ip', ao, wv, out=out)
         nvar, nao, ngrids = ao.shape
         assert wv.shape == (nvar, ngrids)
+        out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
+        if not ao[0].flags.c_contiguous or ao.dtype != np.float64:
+            return contract('nip,np->ip', ao, wv, out=out)
 
     wv = cupy.asarray(wv, order='C')
-    if out is None:
-        out = cupy.empty((nao, ngrids), order='C')
-    else:
-        out = cupy.ndarray((nao, ngrids), dtype=np.float64, memptr=out.data)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTscale_ao(
         ctypes.cast(stream.ptr, ctypes.c_void_p),

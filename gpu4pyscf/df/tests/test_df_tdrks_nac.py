@@ -19,6 +19,7 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
+import pytest
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -155,6 +156,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(nac2.de_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(nac2.de_etf_scaled)).max() < 5e-4
 
+    @pytest.mark.slow
     def test_nac_pbe_tda_singlet_df_fdiff(self):       
         """
         Compare the analytical nacv with finite difference nacv
@@ -185,6 +187,7 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
+    @pytest.mark.slow
     def test_nac_pbe0_tda_singlet_df_fdiff(self):       
         """
         Compare the analytical nacv with finite difference nacv

@@ -137,7 +137,7 @@ void type2_ang_nuc_l<{{ l }}>(double * __restrict__ omega, const int lc,
 
     double c[2*l+1];
     for (int m = 0; m < 2*l+1; m++) c[m] = 0.0;
-{{ c_scripts }};
+{{ c_scripts }}
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;

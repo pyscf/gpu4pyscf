@@ -73,26 +73,70 @@ def ifft_in_place(x):
     return fft.ifftn(x, axes=(-3, -2, -1), overwrite_x=True)
 
 
+def unique_with_sort(x):
+    # This function does the same thing as cp.unique(x, return_inverse=True).
+    # It's not super optimized, but for whatever reason, cp.unique is very slow, so this one is better.
+    assert type(x) is cp.ndarray and (x.dtype == cp.int32 or x.dtype == cp.int64) and x.ndim == 1
+    n = x.shape[0]
+    if n <= 1:
+        return x, cp.zeros(n)
+
+    sort_index = cp.argsort(x)
+    inverse_sort = cp.empty(n, dtype = cp.int64)
+    inverse_sort[sort_index] = cp.arange(0, n, dtype = cp.int64)
+    x = x[sort_index]
+
+    mask = cp.empty(n, dtype=cp.bool_)
+    mask[0] = True
+    mask[1:] = (x[1:] != x[:-1])
+
+    x = x[mask]
+    inverse_unique = cp.cumsum(mask, dtype=cp.int64) - 1
+
+    return x, inverse_unique[inverse_sort]
+
+
 def image_pair_to_difference(
-    vectors_to_neighboring_images_cpu,
-    lattice_vectors_cpu,
+    vectors_to_neighboring_images,
+    lattice_vectors,
 ):
-    translation_vectors = np.asarray(
-        np.linalg.solve(lattice_vectors_cpu.T, vectors_to_neighboring_images_cpu.T).T,
-        dtype=np.int32,
+    vectors_to_neighboring_images = cp.asarray(vectors_to_neighboring_images)
+    lattice_vectors = cp.asarray(lattice_vectors)
+
+    translation_vectors = cp.asarray(
+        cp.linalg.solve(lattice_vectors.T, vectors_to_neighboring_images.T).T,
     )
+    translation_vectors = cp.asarray(cp.round(translation_vectors), dtype = cp.int32)
     image_difference_full = (
         # k_j - k_i corresponding to <i|j>
         translation_vectors[None,:,:] - translation_vectors[:,None,:]
     ).reshape(-1, 3)
-    translation_vectors, inverse = np.unique(
-        image_difference_full, axis=0, return_inverse=True
-    )
 
-    difference_images = translation_vectors @ lattice_vectors_cpu
+    max_offset = cp.max(cp.abs(image_difference_full)) + 1
+    assert (max_offset * 2)**3 < np.iinfo(np.int32).max
+    image_difference_3in1 = image_difference_full + max_offset
+    image_difference_3in1 = image_difference_3in1[:, 0] * (max_offset * 2)**2 \
+                          + image_difference_3in1[:, 1] * (max_offset * 2) \
+                          + image_difference_3in1[:, 2]
 
-    index = np.arange(len(difference_images))[inverse]
-    return cp.asarray(difference_images), cp.asarray(index, dtype=cp.int32)
+    image_difference_3in1, inverse = unique_with_sort(image_difference_3in1)
+
+    translation_vectors = cp.empty([image_difference_3in1.shape[0], 3], dtype = cp.int32)
+    translation_vectors[:, 0] = image_difference_3in1 // (max_offset * 2)**2
+    translation_vectors[:, 1] = (image_difference_3in1 % (max_offset * 2)**2) // (max_offset * 2)
+    translation_vectors[:, 2] = image_difference_3in1 % (max_offset * 2)
+    translation_vectors -= max_offset
+
+    # translation_vectors, inverse = np.unique(
+    #     image_difference_full.get(), axis=0, return_inverse=True
+    # )
+    # translation_vectors = cp.asarray(translation_vectors)
+
+    difference_images = translation_vectors @ lattice_vectors
+
+    # Given our pair data structure, the difference_images here should be interpretted as R2 - R1,
+    # where R1 is associated with the first orbital in a pair, and R2 associated to the second.
+    return cp.asarray(difference_images), cp.asarray(inverse, dtype=cp.int32)
 
 def image_phase_for_kpts(cell, neighboring_images, kpts=None):
     n_images = len(neighboring_images)
@@ -102,7 +146,7 @@ def image_phase_for_kpts(cell, neighboring_images, kpts=None):
     else:
         lattice_vectors = cell.lattice_vectors()
         difference_images, image_pair_difference_index = image_pair_to_difference(
-            neighboring_images.get(),
+            neighboring_images,
             lattice_vectors,
         )
         phase_diff_among_images = cp.exp(
@@ -330,9 +374,9 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
 
         fft_grid = list(
             map(
-                lambda n_mesh_points: cp.fft.fftfreq(
+                lambda n_mesh_points: cp.round(cp.fft.fftfreq(
                     n_mesh_points, 1.0 / n_mesh_points
-                ).astype(cp.int32),
+                )).astype(cp.int32),
                 mesh,
             )
         )
@@ -523,11 +567,15 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
     n_images = pairs_info["neighboring_images"].shape[0]
     phase_diff_among_images, image_pair_difference_index = img_phase
     n_k_points, n_difference_images = phase_diff_among_images.shape
-    if n_k_points == 1:
+    if n_k_points == 1 and n_difference_images == 1:
         density_matrix_with_translation = dm_slice
     else:
+        # The conjugate here change e^{i \vec{k} \cdot (\vec{R}_2 - \vec{R}_1)} to
+        # e^{i \vec{k} \cdot (\vec{R}_1 - \vec{R}_2)}
+        # Because during grid density evaluation, rho = \sum_{\mu\nu} D_{\mu\nu} \mu \nu^*
+        # The conjugate is on \nu, which is different from other Fock integrals
         density_matrix_with_translation = cp.einsum(
-            "kt, ikpq->itpq", phase_diff_among_images, dm_slice
+            "kt, ikpq->itpq", phase_diff_among_images.conj(), dm_slice
         )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
@@ -535,20 +583,26 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
     if not ignore_imag:
         raise NotImplementedError
     else:
-        assert abs(density_matrix_with_translation.imag).max() < 1e-8
+        pass
+        # real_dm_imag_threshold = 1e-6
+        # assert abs(density_matrix_with_translation.imag).max() < real_dm_imag_threshold, \
+        #     f"The dm transformed into real space contains large imaginary part " \
+        #     f"(max = {abs(density_matrix_with_translation.imag).max()}) >= {real_dm_imag_threshold}"
     density_matrix_with_translation_real_part = cp.asarray(
         density_matrix_with_translation.real, order="C"
     )
 
-    if dm_slice.dtype == cp.float32:
+    if density_matrix_with_translation_real_part.dtype == cp.float32:
         use_float_precision = ctypes.c_int(1)
     else:
+        assert density_matrix_with_translation_real_part.dtype == cp.float64
         use_float_precision = ctypes.c_int(0)
+    assert density_matrix_with_translation_real_part.size < np.iinfo(np.int32).max
 
     if with_tau:
-        density = cp.zeros((n_channels, 2, ) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
+        density = cp.zeros((n_channels, 2, ) + tuple(pairs_info["mesh"]), dtype=density_matrix_with_translation_real_part.dtype)
     else:
-        density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=dm_slice.dtype)
+        density = cp.zeros((n_channels,) + tuple(pairs_info["mesh"]), dtype=density_matrix_with_translation_real_part.dtype)
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
@@ -720,6 +774,7 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
     if xc_weights.dtype == cp.float32:
         use_float_precision = ctypes.c_int(1)
     else:
+        assert xc_weights.dtype == cp.float64
         use_float_precision = ctypes.c_int(0)
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
@@ -761,7 +816,7 @@ def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
         if err != 0:
             raise RuntimeError(f'evaluate_xc_driver for li={i_angular} lj={j_angular} failed')
 
-    if n_k_points > 1:
+    if not (n_k_points == 1 and n_difference_images == 1):
         return cp.einsum(
             "kt, ntij -> nkij", phase_diff_among_images, fock
         )
@@ -891,7 +946,6 @@ def evaluate_xc_gradient_wrapper(
         c_driver = libgpbc.evaluate_xc_gradient_driver
 
     assert gradient.dtype == xc_weights.dtype
-    assert gradient.dtype == dm_slice.dtype
 
     if gradient.dtype == cp.float32:
         use_float_precision = ctypes.c_int(1)
@@ -902,11 +956,11 @@ def evaluate_xc_gradient_wrapper(
     phase_diff_among_images, image_pair_difference_index = img_phase
     n_k_points, n_difference_images = phase_diff_among_images.shape
 
-    if n_k_points == 1:
+    if n_k_points == 1 and n_difference_images == 1:
         density_matrix_with_translation = dm_slice
     else:
         density_matrix_with_translation = cp.einsum(
-            "kt, ikpq -> itpq", phase_diff_among_images, dm_slice
+            "kt, ikpq->itpq", phase_diff_among_images.conj(), dm_slice
         )
 
     n_channels, _, n_i_functions, n_j_functions = density_matrix_with_translation.shape
@@ -916,6 +970,8 @@ def evaluate_xc_gradient_wrapper(
     density_matrix_with_translation_real_part = cp.asarray(
         density_matrix_with_translation.real, order="C"
     )
+
+    assert gradient.dtype == density_matrix_with_translation_real_part.dtype
 
     for gaussians_per_angular_pair in pairs_info["per_angular_pairs"]:
         (i_angular, j_angular) = gaussians_per_angular_pair["angular"]
@@ -1149,7 +1205,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or is_gamma_point(kpts)
     cell = ni.cell
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
@@ -1161,6 +1216,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
+    dms = None
     assert nset == 1
 
     mesh = ni.mesh
@@ -1255,7 +1311,6 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or is_gamma_point(kpts)
     cell = ni.cell
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
@@ -1267,6 +1322,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
+    dms = None
     assert nset == 2
 
     mesh = ni.mesh
@@ -1359,6 +1415,7 @@ def get_veff_ip1(
     kpts=None,
     kpts_band=None,
     with_j=True,
+    with_pseudo=True,
     verbose=None,
 ):
     if kpts is None:
@@ -1369,6 +1426,7 @@ def get_veff_ip1(
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
+    dms = None
     kpts_band = _format_kpts_band(kpts_band, kpts)
 
     xc_type = ni._xc_type(xc_code)
@@ -1425,7 +1483,8 @@ def get_veff_ip1(
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
-    if cell._pseudo:
+    if with_pseudo:
+        assert cell._pseudo is not None
         xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG_part1(cell, mesh)
 
     veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(

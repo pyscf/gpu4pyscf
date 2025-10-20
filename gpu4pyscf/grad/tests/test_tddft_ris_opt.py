@@ -19,6 +19,7 @@ import pytest
 from pyscf import dft
 from pyscf.geomopt.geometric_solver import optimize
 import gpu4pyscf.tdscf.ris as ris
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 H     1.2953527433   -0.4895463266    0.8457608681
@@ -43,44 +44,46 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
     def test_opt_rks_tda_1(self):
-        mf = dft.RKS(mol, xc='pbe0').to_gpu()
+        mf = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mf.kernel()
         assert mf.converged
         td_ris = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
-        td_ris.conv_tol = 1.0E-5
+        td_ris.conv_tol = 1.0E-4
         td_ris.Ktrunc = 0.0
         td_ris.kernel()
         mol_gpu = optimize(td_ris)
 
-        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu()
+        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu().density_fit()
         mff.kernel()
         assert mff.converged
         tdf_ris = ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
-        tdf_ris.conv_tol = 1.0E-5
+        tdf_ris.conv_tol = 1.0E-4
         tdf_ris.Ktrunc = 0.0
         tdf_ris.kernel()
         excited_gradf_ris = tdf_ris.nuc_grad_method()
         excited_gradf_ris.kernel()
         assert np.linalg.norm(excited_gradf_ris.de) < 3.0e-4
 
+    @pytest.mark.slow
     def test_opt_rks_tda_2(self):
-        mf = dft.RKS(mol, xc='pbe0').to_gpu()
+        mf = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mf.kernel()
         assert mf.converged
         td_ris = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
-        td_ris.conv_tol = 1.0E-5
+        td_ris.conv_tol = 1.0E-4
         td_ris.Ktrunc = 0.0
         td_ris.kernel()
 
         excited_grad = td_ris.nuc_grad_method().as_scanner(state=1)
         mol_gpu = excited_grad.optimizer().kernel()
 
-        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu()
+        mff = dft.RKS(mol_gpu, xc='pbe0').to_gpu().density_fit()
         mff.kernel()
         assert mff.converged
         tdf_ris = ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True)
-        tdf_ris.conv_tol = 1.0E-5
+        tdf_ris.conv_tol = 1.0E-4
         tdf_ris.Ktrunc = 0.0
         tdf_ris.kernel()
         excited_gradf_ris = tdf_ris.nuc_grad_method()

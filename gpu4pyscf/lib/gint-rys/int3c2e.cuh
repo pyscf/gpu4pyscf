@@ -21,8 +21,8 @@
 #ifndef HAVE_DEFINED_INT3CENVVAS_H
 #define HAVE_DEFINED_INT3CENVVAS_H
 typedef struct {
-    uint16_t natm;
-    uint16_t nbas;
+    int natm;
+    int nbas;
     int *atm;
     int *bas;
     double *env;

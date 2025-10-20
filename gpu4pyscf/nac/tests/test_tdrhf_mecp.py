@@ -19,7 +19,7 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 from gpu4pyscf.nac.mecp import MECPScanner, ConicalIntersectionOptimizer
-import gpu4pyscf
+import pytest
 
 atom = [
     ['C', ( 1.08714538e-07,  1.42742925e+00,  1.66180082e-02)],
@@ -70,6 +70,7 @@ def calc_energy(mol):
 
 
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_mecp_hf_tda_singlet(self):
         mf = scf.RHF(mol).to_gpu()
         mf.kernel()

@@ -30,6 +30,8 @@ def get_int3c1e_ipip1_charge_contracted(mol, grids, charge_exponents, charges, i
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -109,6 +111,8 @@ def get_int3c1e_ipvip1_charge_contracted(mol, grids, charge_exponents, charges, 
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -184,6 +188,8 @@ def get_int3c1e_ip1ip2_charge_contracted(mol, grids, charge_exponents, charges, 
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -262,6 +268,8 @@ def get_int3c1e_ipip2_density_contracted(mol, grids, charge_exponents, dm, intop
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     dm = cp.asarray(dm)
     assert dm.ndim == 2

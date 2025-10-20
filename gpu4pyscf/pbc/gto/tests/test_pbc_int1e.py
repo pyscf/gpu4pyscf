@@ -62,6 +62,11 @@ def test_int1e_kin():
     dat = int1e.int1e_kin(cell, kpts=kpts).get()
     assert abs(dat - ref).max() < 1e-10
 
+    mol = cell.to_mol()
+    dat = int1e.int1e_kin(mol).get()
+    ref = mol.intor('int1e_kin', hermi=1)
+    assert abs(dat - ref).max() < 1e-12
+
 def test_int1e_ipovlp():
     cell = pyscf.M(
         atom='''C1  1.3    .2       .3
@@ -84,6 +89,11 @@ def test_int1e_ipovlp():
 
     dat = int1e.int1e_ipovlp(cell, kpts=kpts).get()
     assert abs(dat - ref).max() < 1e-10
+
+    mol = cell.to_mol()
+    dat = int1e.int1e_ipovlp(mol).get()
+    ref = mol.intor('int1e_ipovlp')
+    assert abs(dat - ref).max() < 1e-12
 
 def test_int1e_ipkin():
     cell = pyscf.M(

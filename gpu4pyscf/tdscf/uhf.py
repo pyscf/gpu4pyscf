@@ -691,14 +691,6 @@ class TDBase(tdhf_gpu.TDBase):
         if mf is None: mf = self._scf
         return get_ab(self, mf)
 
-    def nuc_grad_method(self):
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.grad import tduhf
-            return tduhf.Gradients(self)
-        else:
-            from gpu4pyscf.grad import tduhf
-            return tduhf.Gradients(self)
-
     def nac_method(self): 
         raise NotImplementedError("Nonadiabatic coupling vector for unrestricted case is not implemented.")
 
@@ -817,6 +809,14 @@ class TDA(TDBase):
         log.timer('TDA', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tduhf
+            return tduhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tduhf
+            return tduhf.Gradients(self)
 
 CIS = TDA
 
@@ -1164,6 +1164,8 @@ class TDHF(TDBase):
         log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    Gradients = TDA.Gradients
 
 TDUHF = TDHF
 

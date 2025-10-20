@@ -841,7 +841,9 @@ def ndarray(shape, dtype=np.float64, buffer=None):
     if buffer is None:
         return cupy.empty(shape, dtype)
     else:
-        return cupy.ndarray(shape, dtype, memptr=buffer.data)
+        out = cupy.ndarray(shape, dtype, memptr=buffer.data)
+        assert buffer.nbytes >= out.nbytes
+        return out
 
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
@@ -1007,7 +1009,6 @@ def condense(opname, a, loc_x, loc_y=None):
     '''
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
-    a = cupy.asarray(a, order='C')
     assert a.ndim >= 2
     if loc_y is None:
         loc_y = loc_x
@@ -1021,6 +1022,7 @@ def condense(opname, a, loc_x, loc_y=None):
     else:
         nx, ny = a.shape[-2:]
         a = a.reshape(-1, nx, ny)
+    a = cupy.asarray(a, order='C')
     loc_x = cupy.asarray(loc_x, cupy.int32)
     loc_y = cupy.asarray(loc_y, cupy.int32)
     nloc_x = loc_x.size - 1
@@ -1103,7 +1105,7 @@ void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
 
     kernel = _kernel_registery[fn_name]
     out = cupy.zeros((nloc_x, nloc_y))
-    blocks = ((nloc_x+15)//16, (nloc_y+15)//16)
+    blocks = ((nloc_y+15)//16, (nloc_x+15)//16)
     threads = (16, 16)
     kernel(blocks, threads, (out, a, loc_x, loc_y, nloc_x, nloc_y, counts))
     cupy.cuda.Stream.null.synchronize()

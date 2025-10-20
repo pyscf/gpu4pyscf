@@ -21,6 +21,7 @@ from gpu4pyscf.dft import rks
 from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_vnlc_deriv1_numerical, \
                                   _get_enlc_deriv2, _get_enlc_deriv2_numerical, \
                                   get_dweight_dA, get_d2weight_dAdB
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
     global mol
