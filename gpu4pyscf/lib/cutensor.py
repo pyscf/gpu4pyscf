@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 import numpy as np
 import cupy
 from gpu4pyscf.lib import logger
@@ -25,7 +26,10 @@ try:
     JIT_MODE_NONE = cutensor_backend.JIT_MODE_NONE
     WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_MIN
     #WORKSPACE_RECOMMENDED = cutensor_backend.WORKSPACE_RECOMMENDED
-    if cutensor_backend.get_version() >= 20300 and props['major'] <= 7:
+    __version__ = cutensor_backend.get_version()
+    if __version__ >= 20301 and props['major'] <= 7:
+        warnings.warn(f'cuTENSOR {__version__} does not support sm_70. '
+                      'It is recommended to install 2.2.0 or older versions.')
         cutensor = None
 
     import ctypes
@@ -36,6 +40,7 @@ except (ImportError, AttributeError):
     OP_IDENTITY = None
     JIT_MODE_NONE = None
     WORKSPACE_RECOMMENDED = None
+    __version__ = None
 
 def _auto_create_mode(array, mode):
     if not isinstance(mode, cutensor.Mode):
@@ -182,7 +187,7 @@ def _create_contraction_trinary(desc_a, mode_a, op_a, desc_b, mode_b, op_b,
         _contraction_operators[key] = _OperationDescriptor(op_desc_ptr.value)
     return _contraction_operators[key]
 
-def _contract_trinary(pattern, a, b, c, alpha=1., beta=0., out=None):
+def contract_trinary(pattern, a, b, c, alpha=1., beta=0., out=None):
     '''Three-tensor contraction
     out = alpha * A * B * C + beta * out
     '''
@@ -268,7 +273,6 @@ if contract_engine is not None:
     else:
         raise RuntimeError('unknown tensor contraction engine.')
 
-    import warnings
     warnings.warn(f'using {contract_engine} as the tensor contraction engine.')
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
         try:
@@ -277,6 +281,10 @@ if contract_engine is not None:
             print('Out of memory error caused by cupy.einsum. '
                   'It is recommended to install cutensor to resolve this.')
             raise
+
+    def contract_trinary(pattern, a, b, c, alpha=1., beta=0., out=None):
+        raise RuntimeError('contract_trinary is only supported with the cuTENSOR backend')
+
 else:
     def contract(pattern, a, b, alpha=1.0, beta=0.0, out=None):
         '''
@@ -285,8 +293,6 @@ else:
         '''
         return contraction(pattern, a, b, alpha, beta, out=out)
 
-    if cutensor_backend.get_version() < 20300:
+    if __version__ < 20301:
         def contract_trinary(pattern, a, b, c, alpha=1., beta=0., out=None):
-            raise RuntimeError('cutensor 2.3 or newer is required')
-    else:
-        contract_trinary = _contract_trinary
+            raise RuntimeError('cuTENSOR 2.3 or newer is required')
