@@ -26,9 +26,9 @@
 #define GOUT_WIDTH      54
 #define PAGE_SIZE       30
 #define REMOTE_THRESHOLD 50
-#define PAGES_PER_BLOCK  524288
-// approximately, 4000 images in each ijk shell triplet for 256 threads
-#define KTASKS_PER_BLOCK 16
+#define PAGES_PER_BLOCK  1048576
+// approximately, 15000 images in each ijk shell triplet for 256 threads
+#define KTASKS_PER_BLOCK 8
 
 typedef struct {
     int pair_ij;
@@ -43,8 +43,6 @@ __device__ __forceinline__ unsigned get_smid() {
     asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
     return smid;
 }
-
-#define allocate_page() (page_pool + atomicAdd(&num_pages, 1))
 
 __device__ __forceinline__
 void _filter_images(int& num_pages, // is stored in shm
@@ -163,7 +161,12 @@ void _filter_images(int& num_pages, // is stored in shm
                         if (page != NULL) {
                             page->nimgs = PAGE_SIZE;
                         }
-                        page = allocate_page();
+                        int page_offset = atomicAdd(&num_pages, 1);
+                        if (page_offset >= PAGES_PER_BLOCK) {
+                            printf("Page overflow\n");
+                            __trap();
+                        }
+                        page = page_pool + page_offset;
                         page->pair_ij = pair_ij;
                         page->ksh = ksh;
                         counts = 0;
@@ -204,7 +207,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
     int nksh_per_block = k_per_block * KTASKS_PER_BLOCK;
     int kcount0 = ksh_block_id * nksh_per_block;
     int kcount1 = min(ncells*bounds.nksh, kcount0 + nksh_per_block);
-    int nimgs = envs.nimgs;
 
     int li = bounds.li;
     int lj = bounds.lj;
@@ -248,7 +250,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                    kcount0, kcount1, log_cutoff);
     __syncthreads();
     if (num_pages >= PAGES_PER_BLOCK) {
-        printf("Page overflow\n");
         __trap();
     }
     __shared__ int img_max;

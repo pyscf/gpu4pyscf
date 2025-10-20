@@ -638,3 +638,37 @@ def test_2c2e():
     dat = rsdf_builder._get_2c2e(cell, kpts, omega, with_long_range=True)
     ref = _get_2c2e_slow(cell, kpts, omega, with_long_range=True)
     assert abs(dat - cp.asarray(ref)).max() < 1e-10
+
+def test_kpts_compressed_linear_dep():
+    from pyscf.pbc.df import df as df_cpu
+    cell = pyscf.M(
+        atom='''
+        C 0.0 0.0 0.0
+        C 0.0 1.8 1.8
+        C 1.8 0.0 1.8
+        C 1.8 1.8 0.0''', a=np.eye(3) * 3.6,
+        basis=[[0, [4., 1.]],
+               [0, [.1, 1.]],
+               [0, [.035, 1.]]])
+    auxcell = df_cpu.make_auxcell(cell)
+    nao = cell.nao
+    kmesh = [2, 1, 1]
+    kpts = cell.make_kpts(kmesh)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(
+        cell, auxcell, kpts=kpts)
+    ref = build_cderi(cell, auxcell, kpts)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    for kp in sorted(dat):
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        ki_idx, kj_idx = np.where(kk_conserv == kp)
+        for ki, kj in zip(ki_idx, kj_idx):
+            if (ki, kj) in ref:
+                _ref = ref[ki, kj]
+            else:
+                _ref = ref[kj, ki].conj().transpose(0,2,1)
+            _ref = np.einsum('pij,plk->ijkl', _ref, _ref.conj(), optimize=True)
+            _dat = np.einsum('pij,plk->ijkl', out[ki], out[ki].conj(), optimize=True)
+            print(ki, kj)
+            assert abs(_ref - _dat).max() < 3e-7
