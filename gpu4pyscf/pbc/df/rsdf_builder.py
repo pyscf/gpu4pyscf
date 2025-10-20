@@ -784,6 +784,9 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
         _buf = buf[:j3c_tmp.size].reshape(j3c_tmp.shape)
         cderi_compressed[:,pair0:pair1] = j3c_tmp.get(out=_buf)
         j3c_tmp = None
+    # It's important to synchronize the host and CUDA kernel before releasing
+    # local variables, as the mapped memory may still be in use by the device.
+    multi_gpu.synchronize()
     return cderi_compressed
 
 # The long-range part of the cderi for k points. The 3-index cderi tensor is compressed.
@@ -939,9 +942,11 @@ def _lr_int3c2e_kk(ft_opt, bas_ij_cache, cd_j2c_cache, auxcell, omega, kpts, kpt
                 pair0, pair1 = ao_pair_offsets[i, j]
                 cderi_compressed[kp][:,pair0:pair1] = j3c_tmp.get(out=_buf)
             #t1 = log.timer_debug2(f'processing {ll_pattern}', *t1)
+        # It's important to synchronize the host and CUDA kernel before releasing
+        # local variables, as the mapped memory may still be in use by the device.
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
-
     return cderi_compressed
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
@@ -1039,12 +1044,14 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
             ish, jsh = divmod(c_pair_idx, nctrj)
             ish += i0
             jsh += j0
+            print(buflen, j3c_tmp.shape)
             if with_long_range:
                 ft_idx = aopair_offsets_lookup[ish,0,jsh]
                 ij = np.arange(nfi*nfj, dtype=np.int32)
                 idx = ij + ft_idx[:,None]
                 #:cderi[:,idx.ravel()] += j3c_tmp.get()
                 _buf = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
+                print(idx.min(), idx.max())
                 idx = np.asarray(idx.ravel(), dtype=np.int32)
                 libpbc.take2d_add( # this copy back operation is very slow
                     cderi.ctypes, _buf.ctypes, idx.ctypes,
@@ -1054,6 +1061,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
                 p0, p1 = ao_pair_offsets[li, lj]
                 cderi[:,p0:p1] = j3c_tmp.get(out=buf[:j3c_tmp.size].reshape(j3c_tmp.shape))
             j3c_tmp = ish = jsh = c_pair_idx = None
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -1098,6 +1106,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         nf = uniq_l * 2 + 1
 
     img_idx_cache = int3c2e_opt.make_img_idx_cache()
+    print('compressed_cderi_j_only')
 
     if with_long_range:
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
@@ -1118,6 +1127,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             int3c2e_opt, img_idx_cache)
         nao_pairs = len(ao_pair_mapping)
         cderi = empty_mapped((naux, nao_pairs))
+    print('compressed_cderi_j_only SR')
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
@@ -1130,6 +1140,9 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         p0, p1 = p1, p1 + npairs
         ao_pair_offsets[li, lj] = p0, p1
 
+    import gc
+    cp.get_default_memory_pool().free_all_blocks()
+    gc.collect()
     tasks = iter(img_idx_cache)
     def proc():
         if not cell.cart:
@@ -1170,6 +1183,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             j3c_block = cp.empty((naux_cart,nji))
             for k in range(len(int3c2e_opt.uniq_l_ctr_aux)):
                 j3c_tmp = evaluate(li, lj, k)[1]
+                cp.cuda.get_current_stream().synchronize()
                 if j3c_tmp.size == 0:
                     continue
                 # It is possible to optimize the j-only case by performing the
@@ -1181,10 +1195,13 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 j3c_tmp = j3c_tmp.transpose(4,0,3,1,2)
                 k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
                 j3c_block[k0:k1] = j3c_tmp.reshape(-1,nji)
+                cp.cuda.get_current_stream().synchronize()
 
             j3c_block = contract('uv,up->vp', aux_coeff, j3c_block)
             _buf = buf[:j3c_block.size].reshape(j3c_block.shape)
+            print(buflen, _buf.shape)
             if with_long_range:
+                print(idx.min(), idx.max())
                 _buf = j3c_block.get(out=_buf)
                 libpbc.take2d_add( # this copy back operation is very slow
                     cderi.ctypes, _buf.ctypes, idx.ctypes,
@@ -1195,6 +1212,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 p0, p1 = ao_pair_offsets[li, lj]
                 cderi[:,p0:p1] = j3c_block.get(out=_buf)
             j3c_tmp = j3c_block = None
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -1241,6 +1259,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         nf = uniq_l * 2 + 1
 
     img_idx_cache = int3c2e_opt.make_img_idx_cache()
+    print('compressed_cderi_kk')
 
     if with_long_range:
         # LR int3c2e generally creates more non-negligible Coulomb integrals.
@@ -1263,6 +1282,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
             naux = cd_j2c_cache[j2c_idx].shape[1]
             cderi[kp] = empty_mapped((naux,nao_pairs), dtype=np.complex128)
+    print('compressed_cderi_kk SR')
 
     log.debug('Avail GPU mem = %s B', get_avail_mem())
     aux_loc = int3c2e_opt.sorted_auxcell.ao_loc_nr(cart=True)
@@ -1277,6 +1297,9 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         ao_pair_offsets[li, lj] = p0, p1
 
     tasks = iter(img_idx_cache)
+    import gc
+    cp.get_default_memory_pool().free_all_blocks()
+    gc.collect()
     def proc():
         if not cell.cart:
             c2s = [cart2sph_by_l(l) for l in range(lmax+1)]
@@ -1332,10 +1355,14 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 k0, k1 = aux_loc[int3c2e_opt.l_ctr_aux_offsets[k:k+2]]
                 j3c_block[:,k0:k1] = j3c_tmp
 
+            if with_long_range:
+                print(idx.min(), idx.max(), len(idx))
+            cp.cuda.get_current_stream().synchronize()
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = _cd_j2c_cache[j2c_idx] # at -(kj-ki)
                 cderi_k = contract('uv,up->vp', aux_coeff, j3c_block[j2c_idx])
                 _buf = buf[:cderi_k.size].reshape(cderi_k.shape)
+                print(kp, cderi[kp].shape, _buf.shape)
                 if with_long_range:
                     _buf = cderi_k.get(out=_buf)
                     nao_pairs = cderi[kp].shape[1] * 2 # *2 to view complex as doubles
@@ -1348,6 +1375,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                     p0, p1 = ao_pair_offsets[li, lj]
                     cderi[kp][:,p0:p1] = cderi_k.get(out=_buf)
             j3c_tmp = j3c_block = None
+        cp.cuda.get_current_stream().synchronize()
 
     multi_gpu.run(proc, non_blocking=True)
 
