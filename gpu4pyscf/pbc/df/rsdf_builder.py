@@ -332,7 +332,11 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     v1 = v[:,mask]
     v1 *= w[mask]**-.5
     j2c = v1
-    idx = cp.where(w < -linear_dep_threshold)[0]
+    # linear_dep_threshold for negative eigenvalues are too tight. Small errors
+    # in 2c2e metric would lead to small negative eigenvalues. They can be
+    # safely filtered.
+    #idx = cp.where(w < -linear_dep_threshold)[0]
+    idx = cp.where(w < -1e-4)[0]
     j2c_negative = None
     if len(idx) > 0:
         j2c_negative = (v[:,idx] * (-w[idx])**-.5)

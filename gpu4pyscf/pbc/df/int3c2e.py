@@ -56,7 +56,7 @@ LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 54
 THREADS = 256
-PAGES_PER_BLOCK = 524288
+PAGES_PER_BLOCK = 1048576
 PAGE_SIZE = 32 * 4 # Bytes
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
