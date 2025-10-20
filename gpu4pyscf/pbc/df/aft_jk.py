@@ -34,9 +34,12 @@ from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.lib import logger
 
-def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
+def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     if kpts_band is not None:
         return get_j_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band)
+
+    if kpts is None:
+        kpts = np.zeros((1,3))
 
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -69,7 +72,9 @@ def _update_vj_(vj_kpts, Gpq, dms, coulG, weight=None):
         vj_kpts += contract('ng,kgij->nkij', vG, Gpq)
     return vj_kpts
 
-def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
+def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
+    if kpts is None:
+        kpts = np.zeros((1,3))
     dm_kpts = lib.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
@@ -94,10 +99,13 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None
         vj_kpts = vj_kpts.real
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
+def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                exxdiv=None):
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
+
+    if kpts is None:
+        kpts = np.zeros((1,3))
 
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -207,7 +215,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     log.timer_debug1('get_k_kpts', *cpu0)
     return vk_kpts.reshape(dm_kpts.shape)
 
-def get_k_for_bands(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
+def get_k_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                     exxdiv=None):
     raise NotImplementedError
 

@@ -294,6 +294,12 @@ def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     assert mo_coeff.dtype == cp.float64
     mo_energy = mf.mo_energy
     mo_occ = mf.mo_occ
+    if not isinstance(mo_coeff, cp.ndarray):
+        mo_coeff = cp.asarray(mo_coeff)
+    if not isinstance(mo_energy, cp.ndarray):
+        mo_energy = cp.asarray(mo_energy)
+    if not isinstance(mo_occ, cp.ndarray):
+        mo_occ = cp.asarray(mo_occ)
     occidx = mo_occ == 2
     viridx = mo_occ == 0
     orbv = mo_coeff[:,viridx]
@@ -597,6 +603,12 @@ def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     assert mo_coeff.dtype == cp.float64
     mo_energy = mf.mo_energy
     mo_occ = mf.mo_occ
+    if not isinstance(mo_coeff, cp.ndarray):
+        mo_coeff = cp.asarray(mo_coeff)
+    if not isinstance(mo_energy, cp.ndarray):
+        mo_energy = cp.asarray(mo_energy)
+    if not isinstance(mo_occ, cp.ndarray):
+        mo_occ = cp.asarray(mo_occ)
     occidx = mo_occ == 2
     viridx = mo_occ == 0
     orbv = mo_coeff[:,viridx]
