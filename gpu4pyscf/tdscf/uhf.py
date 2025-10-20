@@ -689,6 +689,7 @@ class TDBase(tdhf_gpu.TDBase):
 
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
+        
         return get_ab(self, mf)
 
     def nac_method(self): 
@@ -936,10 +937,10 @@ class SpinFlipTDA(TDBase):
 
     def dump_flags(self, verbose=None):
         TDBase.dump_flags(self, verbose)
-        logger.info(self, 'extype = %s', self.extype)
-        logger.info(self, 'collinear = %s', self.collinear)
+        logger.note(self, 'extype = %s', self.extype)
+        logger.note(self, 'collinear = %s', self.collinear)
         if self.collinear == 'mcol':
-            logger.info(self, 'collinear_samples = %s', self.collinear_samples)
+            logger.note(self, 'collinear_samples = %s', self.collinear_samples)
         return self
 
     def check_sanity(self):

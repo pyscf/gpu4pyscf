@@ -52,9 +52,8 @@ def eval_xc_eff_sf(func, rho_tmz, deriv=1, collinear_samples=200):
     if rho_tmz.dtype != cp.double:
         raise RuntimeError('rho and mz must be real')
     ngrids = rho_tmz.shape[-1]
-    grids_per_task = min(ngrids//3+1, MAX_GRIDS_PER_TASK)
+    grids_per_task = MAX_GRIDS_PER_TASK
     
-    print(collinear_samples)
     results = []
     for p0, p1 in _prange(0, ngrids, grids_per_task):
         r = _eval_xc_sf(func, rho_tmz[...,p0:p1], deriv, collinear_samples)
