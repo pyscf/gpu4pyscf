@@ -131,27 +131,13 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
 class FTOpt:
     def __init__(self, cell, kpts=None, bvk_kmesh=None):
         self.cell = cell
-        sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
+        sorted_cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
+            cell, tile=1, sparse_coeff=True)
         self.sorted_cell = sorted_cell
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        self.coeff = cp.asarray(coeff)
-
-        # TODO: ao_idx from group_basis
-        ls = np.repeat(cell._bas[:,ANG_OF], cell._bas[:,NCTR_OF])
-        nprims = np.repeat(cell._bas[:,NPRIM_OF], cell._bas[:,NCTR_OF])
-        l_ctrs = np.column_stack((ls, -nprims))
-        _, inv_idx = np.unique(l_ctrs, return_inverse=True, axis=0)
-        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
-        if cell.cart:
-            dims = (ls + 1) * (ls + 2) // 2
-        else:
-            dims = ls * 2 + 1
-        ao_loc = np.append(0, dims.cumsum())
-        ao_idx = np.array_split(np.arange(ao_loc[-1]), ao_loc[1:-1])
-        # mat[ao_idx[:,None],ao_idx] transforms the matrix in original cell into
-        # the matrix represented in the sorted AOs.
-        self.ao_idx = np.hstack([ao_idx[i] for i in sorted_idx])
+        self.ao_idx = ao_idx
+        self.l_ctr_pad_counts = l_ctr_pad_counts
 
         if bvk_kmesh is None:
             if kpts is None or is_zero(kpts):
@@ -192,6 +178,35 @@ class FTOpt:
             cell.natm, cell.nbas, bvk_ncells, nimgs, _atm, _bas, _env, ao_loc, Ls)
         init_constant(cell)
         return self
+
+    @property
+    def coeff(self):
+        from pyscf import gto
+        coeff = np.zeros((self.sorted_cell.nao, self.cell.nao))
+
+        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
+        if self.cell.cart:
+            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+        else:
+            cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
+        i_spherical_offset = 0
+        i_cartesian_offset = 0
+        for i, l in enumerate(self.uniq_l_ctr[:,0]):
+            cart2sph = cart2sph_per_l[l]
+            ncart, nsph = cart2sph.shape
+            l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
+            cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
+            sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
+            cart_idx = cart_offs[:,None] + np.arange(ncart)
+            sph_idx = sph_offs[:,None] + np.arange(nsph)
+            coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
+            l_ctr_pad_count = self.l_ctr_pad_counts[i]
+            i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
+            i_spherical_offset += l_ctr_count * nsph
+        assert len(self.ao_idx) == self.cell.nao
+        out = cp.zeros_like(coeff)
+        out[:,self.ao_idx] = coeff
+        return asarray(out)
 
     @property
     def aft_envs(self):
@@ -334,7 +349,9 @@ class FTOpt:
             bvkmesh_Ls = cp.asarray(
                 k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True))
             conj_mapping = cp.asarray(conj_images_in_bvk_cell(bvk_kmesh), dtype=np.int32)
-        nao, nao_orig = self.coeff.shape
+        nao = self.sorted_cell.nao
+        nao_orig = self.cell.nao
+        coeff = cp.asarray(self.coeff, dtype=np.complex128)
 
         def _ft_sub(Gv, q, kptjs, img_idx_cache, transform_ao=True):
             t1 = log.init_timer()
@@ -408,7 +425,6 @@ class FTOpt:
                 out = contract('Lk,LpqG->kpqG', expLk, out)
 
             if transform_ao:
-                coeff = cp.asarray(self.coeff, dtype=np.complex128)
                 log.debug1('transform basis')
                 #:out = einsum('pqLG,pi,qj->LGij', out, coeff, coeff)
                 out = contract('kpqG,pi->kiqG', out, coeff)

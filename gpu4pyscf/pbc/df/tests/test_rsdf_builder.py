@@ -351,6 +351,46 @@ def test_kpts_compressed1():
             print(ki, kj)
             assert abs(_ref - out[ki]).max() < 1e-10
 
+def test_kpts_compressed_general_contraction():
+    cell = pyscf.M(
+        atom='''C   1.3    .2       .3
+                C   .19   .1      1.1
+        ''',
+        basis='''
+        C  D
+           173    0.27   -0.03
+           5.8    0.8    -0.26
+           1.9    0.1     0.81
+        ''',
+        a=np.eye(3)*6)
+
+    auxcell = cell.copy()
+    auxcell.basis = '''
+C  S
+    2.00   1.
+C  D
+    0.59   1.''',
+    auxcell.build()
+    nao = cell.nao
+    omega = 0.3
+    kmesh = [2,1,1]
+    kpts = cell.make_kpts(kmesh)
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts, omega=omega)
+    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
+    bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
+    expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
+    for kp in sorted(dat):
+        out = rsdf_builder.unpack_cderi(dat[kp], idx, kp, kk_conserv, expLk, nao)
+        ki_idx, kj_idx = np.where(kk_conserv == kp)
+        for ki, kj in zip(ki_idx, kj_idx):
+            if (ki, kj) in ref:
+                _ref = ref[ki, kj]
+            else:
+                _ref = ref[kj, ki].conj().transpose(0,2,1)
+            print(ki, kj)
+            assert abs(_ref - out[ki]).max() < 1e-11
+
 @pytest.mark.skip('Must include gamma point')
 def test_kpts_compressed2():
     from pyscf.pbc.df import df as df_cpu
