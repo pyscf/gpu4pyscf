@@ -370,7 +370,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
             #     if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
             #     if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
             # else:
-                # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            #   # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             dmvo_mask = dmvo[mask[:, None], mask]
             rho1 = (
