@@ -28,7 +28,7 @@ from gpu4pyscf.lib.cupy_helper import transpose_sum, add_sparse, contract
 from concurrent.futures import ThreadPoolExecutor
 
 
-MAX_GRIDS_PER_TASK = 65536
+MAX_GRIDS_PER_TASK = 8192 # Approximately (2,4,2,4,200,8192) ~ 800MB
 
 def _prange(start, end, step):
     '''Partitions range into segments: i0:i1, i1:i2, i2:i3, ...'''
