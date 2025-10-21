@@ -1360,11 +1360,29 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     if hessobj.grid_response:
         # The code above includes only the orbital response piece of E_{G,G}^{AB} in Eq 37.
 
-        # First half of E_{w,w}^{AB} in Eq 32
-        d2w_dAdB = get_d2weight_dAdB(mol, grids)
-        d2w_dAdB = d2w_dAdB[:, :, :, :, rho_nonzero_mask]
-        d2e += contract("ABdDg,g->ABdD", d2w_dAdB, rho_i * (beta + E_i))
-        d2w_dAdB = None
+        # # First half of E_{w,w}^{AB} in Eq 32
+        # d2w_dAdB = get_d2weight_dAdB(mol, grids)
+        # d2w_dAdB = d2w_dAdB[:, :, :, :, rho_nonzero_mask]
+        # d2e += contract("ABdDg,g->ABdD", d2w_dAdB, rho_i * (beta + E_i))
+        available_gpu_memory = get_avail_mem()
+        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+        ao_nbytes_per_grid = ((9 * 2) * mol.natm * mol.natm + 2) * 8
+        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+        if ngrids_per_batch < 16:
+            raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
+                              f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids_full}")
+        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+
+        g0_nonzero = 0
+        for g0_full in range(0, ngrids_full, ngrids_per_batch):
+            g1_full = min(g0_full + ngrids_per_batch, ngrids_full)
+            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0_full, g1_full))
+            d2w_dAdB = d2w_dAdB[:, :, :, :, rho_nonzero_mask[g0_full : g1_full]]
+            g1_nonzero = g0_nonzero + d2w_dAdB.shape[4]
+            d2e += contract("ABdDg,g->ABdD", d2w_dAdB, rho_i[g0_nonzero : g1_nonzero] * (beta + E_i[g0_nonzero : g1_nonzero]))
+            g0_nonzero = g1_nonzero
+        assert g0_nonzero == ngrids
 
         grids_weights_1 = get_dweight_dA(mol, grids)
         grids_weights_1 = grids_weights_1[:, :, rho_nonzero_mask]
@@ -3548,7 +3566,33 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     if xctype == 'LDA':
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((10) * mol.nao + (9*2) * mol.natm * mol.natm + (3*4) * mol.natm + 2) * 8 # TODO: count this after optimization
+        ao_nbytes_per_grid = ((1) * mol.nao + (9) * mol.natm * mol.natm + 2) * 8
+        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+        if ngrids_per_batch < 16:
+            raise MemoryError(f"Out of GPU memory for LDA energy second derivative, available gpu memory = {get_avail_mem()}"
+                                f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
+        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+
+        for g0 in range(0, ngrids, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, ngrids)
+            split_grids_coords = grids.coords[g0:g1, :]
+            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 0, gdftopt = None, transpose = False)
+            rho = numint.eval_rho2(mol, split_ao, mo_coeff, mo_occ, xctype=xctype)
+            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype)[0]
+
+            epsilon = exc[:, 0] * rho
+            rho = None
+            exc = None
+
+            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
+            d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
+            d2w_dAdB = None
+            epsilon = None
+
+        available_gpu_memory = get_avail_mem()
+        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+        ao_nbytes_per_grid = ((10) * mol.nao + (3*4) * mol.natm + 2) * 8 # TODO: count this after optimization
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for LDA energy second derivative, available gpu memory = {get_avail_mem()}"
@@ -3566,16 +3610,11 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             d2mu_dr2 = get_d2mu_dr2(split_ao)
 
             rho = numint.eval_rho2(mol, mu, mo_coeff, mo_occ, xctype=xctype)
-            exc, vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[0:3]
-
-            epsilon = exc[:, 0] * rho # Just of shape (ngrids,)
-            depsilon_drho = vxc[0] # Just of shape (ngrids,)
-            d2epsilon_drho2 = fxc[0,0] # Just of shape (ngrids,)
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
             rho = None
 
-            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
-            d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
-            d2w_dAdB = None
+            depsilon_drho = vxc[0] # Just of shape (ngrids,)
+            d2epsilon_drho2 = fxc[0,0] # Just of shape (ngrids,)
 
             grid_to_atom_index_map = grids.atm_idx[g0:g1]
             atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
@@ -3617,7 +3656,37 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     elif xctype == 'GGA':
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((20 + 9 + 27) * mol.nao + (9*2 + 27) * mol.natm * mol.natm + (3*2 + 9*2) * mol.natm + 4 + 16) * 8 # TODO: count this after optimization
+        ao_nbytes_per_grid = ((4) * mol.nao + (9) * mol.natm * mol.natm + 4 + 1*2) * 8
+        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+        if ngrids_per_batch < 16:
+            raise MemoryError(f"Out of GPU memory for GGA energy second derivative, available gpu memory = {get_avail_mem()}"
+                                f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
+        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+
+        for g0 in range(0, ngrids, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, ngrids)
+            split_grids_coords = grids.coords[g0:g1, :]
+            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
+
+            rho_drho = numint.eval_rho2(mol, split_ao, mo_coeff, mo_occ, xctype=xctype)
+            exc = ni.eval_xc_eff(mf.xc, rho_drho, deriv = 0, xctype=xctype)[0]
+
+            rho = rho_drho[0]
+            rho_drho = None
+
+            epsilon = exc[:, 0] * rho
+            rho = None
+            exc = None
+
+            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
+            d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
+            d2w_dAdB = None
+            epsilon = None
+
+        available_gpu_memory = get_avail_mem()
+        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+        ao_nbytes_per_grid = ((20 + 9 + 27) * mol.nao + (3*2 + 9*2) * mol.natm + 4 + 16) * 8 # TODO: count this after optimization
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for GGA energy second derivative, available gpu memory = {get_avail_mem()}"
@@ -3636,23 +3705,14 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             d3mu_dr3 = get_d3mu_dr3(split_ao)
 
             rho_drho = numint.eval_rho2(mol, split_ao[:4], mo_coeff, mo_occ, xctype=xctype)
-            exc, vxc, fxc = ni.eval_xc_eff(mf.xc, rho_drho, deriv = 2, xctype=xctype)[0:3]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho_drho, deriv = 2, xctype=xctype)[1:3]
+            rho_drho = None
 
-            rho = rho_drho[0]
-            # drho_dr = rho_drho[1:4]
-            rho_drho_tau = None
-
-            epsilon = exc[:, 0] * rho
             depsilon_drho = vxc[0]
             depsilon_dnablarho = vxc[1:4]
             # d2epsilon_drho2 = fxc[0,0]
             # d2epsilon_drho_dnablarho = fxc[0,1:4]
             # d2epsilon_dnablarho2 = fxc[1:4,1:4]
-            rho = None
-
-            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
-            d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
-            d2w_dAdB = None
 
             grid_to_atom_index_map = grids.atm_idx[g0:g1]
             atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
@@ -3723,7 +3783,37 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     elif xctype == 'MGGA':
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((20 + 9 + 27) * mol.nao + (9*3 + 27) * mol.natm * mol.natm + (3*3 + 9*2) * mol.natm + 5 + 25) * 8 # TODO: count this after optimization
+        ao_nbytes_per_grid = ((4) * mol.nao + (9) * mol.natm * mol.natm + 5 + 1*2) * 8
+        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+        if ngrids_per_batch < 16:
+            raise MemoryError(f"Out of GPU memory for mGGA energy second derivative, available gpu memory = {get_avail_mem()}"
+                                f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
+        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+
+        for g0 in range(0, ngrids, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, ngrids)
+            split_grids_coords = grids.coords[g0:g1, :]
+            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
+
+            rho_drho_tau = numint.eval_rho2(mol, split_ao, mo_coeff, mo_occ, xctype=xctype)
+            exc = ni.eval_xc_eff(mf.xc, rho_drho_tau, deriv = 0, xctype=xctype)[0]
+
+            rho = rho_drho_tau[0]
+            rho_drho_tau = None
+
+            epsilon = exc[:, 0] * rho
+            rho = None
+            exc = None
+
+            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
+            d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
+            d2w_dAdB = None
+            epsilon = None
+
+        available_gpu_memory = get_avail_mem()
+        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+        ao_nbytes_per_grid = ((20 + 9 + 27) * mol.nao + (3*3 + 9*2) * mol.natm + 5 + 25) * 8 # TODO: count this after optimization
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for mGGA energy second derivative, available gpu memory = {get_avail_mem()}"
@@ -3742,14 +3832,9 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             d3mu_dr3 = get_d3mu_dr3(split_ao)
 
             rho_drho_tau = numint.eval_rho2(mol, split_ao[:4], mo_coeff, mo_occ, xctype=xctype)
-            exc, vxc, fxc = ni.eval_xc_eff(mf.xc, rho_drho_tau, deriv = 2, xctype=xctype)[0:3]
-
-            rho = rho_drho_tau[0]
-            # drho_dr = rho_drho_tau[1:4]
-            # tau = rho_drho_tau[4]
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho_drho_tau, deriv = 2, xctype=xctype)[1:3]
             rho_drho_tau = None
 
-            epsilon = exc[:, 0] * rho
             depsilon_drho = vxc[0]
             depsilon_dnablarho = vxc[1:4]
             depsilon_dtau = vxc[4]
@@ -3759,11 +3844,6 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             # d2epsilon_dnablarho2 = fxc[1:4,1:4]
             # d2epsilon_dnablarho_dtau = fxc[1:4,4]
             # d2epsilon_dtau2 = fxc[4,4]
-            rho = None
-
-            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
-            d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
-            d2w_dAdB = None
 
             grid_to_atom_index_map = grids.atm_idx[g0:g1]
             atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
