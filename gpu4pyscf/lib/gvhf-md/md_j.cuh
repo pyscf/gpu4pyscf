@@ -39,7 +39,7 @@ typedef struct {
 } MDBoundsInfo;
 
 int offset_for_Rt2_idx(int lij, int lkl);
-int block_id_for_threads(int threads);
+int qd_offset_for_threads(int npairs, int threads);
 
 extern __constant__ int8_t c_Rt2_efg_phase[];
 extern __device__ uint16_t Rt2_kl_ij[];

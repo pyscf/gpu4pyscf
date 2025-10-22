@@ -41,15 +41,13 @@ int offset_for_Rt2_idx(int lij, int lkl)
     return _Rt2_idx_offsets[lij*RT2_MAX+lkl];
 }
 
-int block_id_for_threads(int threads)
+int qd_offset_for_threads(int npairs, int threads)
 {
-    switch (threads) {
-    case 1: return 0;
-    case 2: return 1;
-    case 4: return 2;
-    case 8: return 3;
-    case 16: return 4;
-    case 32: return 5;
+    int npairs_aligned = (npairs + 31) & 0xffffffe0; // 32-element aligned
+    int address = 0;
+    for (int i = 1; i < threads; i *= 2) {
+        address += npairs_aligned;
+        npairs_aligned /= 2;
     }
-    return 0;
+    return address;
 }

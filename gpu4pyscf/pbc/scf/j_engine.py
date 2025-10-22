@@ -152,7 +152,6 @@ class PBCJmatrixOpt:
         assert cell.dimension == 3
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
-        nao = sorted_cell.nao
         supmol = self.supmol
         prim_cell = supmol.cell
         assert supmol.nbas < 65536
@@ -201,13 +200,13 @@ class PBCJmatrixOpt:
         idx = np.arange(prim_cell.nbas)
         ll = ll[idx[:,None] >= idx] # transform only the tril of dm
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
-        pair_loc_cell0 = np.cumsum(xyz_size.ravel(), dtype=np.int32)
-        dm_xyz_size = pair_loc_cell0[-1]
+        pair_cum_cell0 = np.cumsum(xyz_size.ravel(), dtype=np.int32)
+        dm_xyz_size = pair_cum_cell0[-1]
         log.debug1('dm_xyz_size = %s, nao = %s', dm_xyz_size, nao) # for one image
         nimgs_uniq_pair = len(supmol.double_latsum_Ts)
-        npairs = len(pair_loc_cell0)
+        npairs = len(pair_cum_cell0)
         pair_loc = np.arange(0, npairs*nimgs_uniq_pair, npairs,
-                             dtype=np.int32)[:,None] + pair_loc_cell0
+                             dtype=np.int32)[:,None] + pair_cum_cell0
         pair_loc = np.append(np.int32(0), pair_loc.ravel())
         tril_idx = _tril_indices(nbas_cell0)
         dms = dms.get()
@@ -224,7 +223,7 @@ class PBCJmatrixOpt:
             tril_idx.ctypes, ctypes.c_int(len(tril_idx)),
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
-            ctypes.c_int(nimgs_uniq_pair),
+            ctypes.c_int(nimgs_uniq_pair), ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(prim_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
 
@@ -232,11 +231,11 @@ class PBCJmatrixOpt:
         n_groups = len(l_counts)
         l_ctr_bas_loc = np.cumsum(np.append(0, l_counts))
         l_symb = lib.param.ANGULAR
+        pair_loc_in_cell0 = np.append(np.int32(0), pair_cum_cell0)
         pair_ij_mappings, pair_kl_mappings = _make_pair_qd_cond(
-            supmol, l_ctr_bas_loc, self.q_cond, dm_cond, q_cutoff)
+            supmol, l_ctr_bas_loc, self.q_cond, dm_cond, q_cutoff,
+            pair_loc_in_cell0)
         dm_cond = None
-        pair_loc_gpu, task_offsets = _pair_loc_from_compressed(
-            supmol, pair_kl_mappings, n_groups, pair_loc[:npairs+1])
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
@@ -253,38 +252,31 @@ class PBCJmatrixOpt:
             dm_xyz *= 2 # because build_j only contracts the tril dm
             vj_xyz = cp.zeros_like(dm_xyz)
 
-            _pair_kl_mappings = {}
-            _pair_ij_mappings = {}
-            for task, (pair_idx, qd) in pair_ij_mappings.items():
-                qd = [cp.asarray(x) for x in qd]
-                addrs = [ctypes.cast(x.data.ptr, ctypes.c_void_p) for x in qd]
-                _pair_ij_mappings[task] = (cp.asarray(pair_idx), addrs, qd)
-            for task, (pair_idx, qd) in pair_kl_mappings.items():
-                qd = [cp.asarray(x) for x in qd]
-                addrs = [ctypes.cast(x.data.ptr, ctypes.c_void_p) for x in qd]
-                _pair_kl_mappings[task] = (cp.asarray(pair_idx), addrs, qd)
-
-            _pair_loc_gpu = cp.asarray(pair_loc_gpu)
+            _pair_kl_mappings = pair_ij_mappings
+            _pair_ij_mappings = pair_kl_mappings
+            if device_id > 0:
+                # Ensure the precomputation avail on each device
+                _pair_kl_mappings = {k: [cp.asarray(x) for x in v]
+                                     for k, v in pair_ij_mappings.items()}
+                _pair_kl_mappings = {k: [cp.asarray(x) for x in v]
+                                     for k, v in pair_kl_mappings.items()}
             q_cond = cp.asarray(self.q_cond)
             t1 = log.timer_debug1(f'q_cond on Device {device_id}', *t0)
 
             timing_counter = Counter()
             kern_counts = 0
             kern = libvhf_md.PBC_build_j
-            return vj_xyz, kern_counts, timing_counter
             rys_envs = self.rys_envs
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping, qd_ij_addrs = _pair_ij_mappings[i,j][:2]
-                pair_kl_mapping, qd_kl_addrs = _pair_kl_mappings[k,l][:2]
+                pair_ij_mapping, pair_ij_loc, qd_ij = _pair_ij_mappings[i,j]
+                pair_kl_mapping, pair_kl_loc, qd_kl = _pair_kl_mappings[k,l]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
-                pair_ij_loc = _pair_loc_gpu[task_offsets[i,j]:]
-                pair_kl_loc = _pair_loc_gpu[task_offsets[k,l]:]
                 scheme = _md_j_engine_quartets_scheme(task)
                 err = kern(
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
@@ -297,8 +289,8 @@ class PBCJmatrixOpt:
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_ij_loc.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_kl_loc.data.ptr, ctypes.c_void_p),
-                    (ctypes.c_void_p*6)(*qd_ij_addrs),
-                    (ctypes.c_void_p*6)(*qd_kl_addrs),
+                    ctypes.cast(qd_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(qd_kl.data.ptr, ctypes.c_void_p),
                     ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
@@ -341,6 +333,8 @@ class PBCJmatrixOpt:
         vj_xyz = vj_xyz.get()
         vj, dms = dms, None
         vj[:] = 0.
+        assert vj_xyz.ndim == 3
+        assert vj.ndim == 3
         libvhf_md.PBC_jengine_dot_Et(
             vj.ctypes, vj_xyz.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
@@ -348,18 +342,18 @@ class PBCJmatrixOpt:
             tril_idx.ctypes, ctypes.c_int(len(tril_idx)),
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
-            ctypes.c_int(nimgs_uniq_pair),
+            ctypes.c_int(nimgs_uniq_pair), ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
         vj = transpose_sum(asarray(vj))
 
         vj = asarray(vj)
-        if is_gamma_point:
-            vj = vj.sum(axis=2)[:,None]
-        else:
+        if not is_gamma_point:
             expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
+            vj = vj.reshape(n_dm, nimgs_uniq_pair, nao, nao)
             vj = contract('sLmn,Lkz->skmnz', vj, expLkz)
             vj = cp.asarray(vj, order='C').view(np.complex128)[:,:,:,:,0]
+            vj = vj.reshape(-1, nao, nao)
 
         vj = apply_coeff_CT_mat_C(vj, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
@@ -394,31 +388,6 @@ class PBCJmatrixOpt:
             coulG[0] += np.pi / omega**2
         return coulG
 
-def _pair_loc_from_compressed(supmol, pair_mappings, n_groups, pair_loc_cell0):
-    pair_loc_cell0 = cp.asarray(pair_loc_cell0, dtype=np.int32)
-    nbas_cell0 = supmol.cell.nbas
-    Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup, dtype=np.int32)
-    bas_mask_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
-    img_idx, sh_cell0 = divmod(bas_mask_idx, nbas_cell0)
-    task_offsets = {} # the pair_loc offsets for each ij pair
-    pair_loc = []
-    p0 = p1 = 0
-    for i in range(n_groups):
-        for j in range(i+1):
-            pair_ij = pair_mappings[i,j][0]
-            p0, p1 = p1, p1 + pair_ij.size
-            task_offsets[i,j] = p0
-            bas_i, bas_j = divmod(pair_ij, supmol.nbas)
-            iL = img_idx[bas_i]
-            jL = img_idx[bas_j]
-            ish_cell0 = sh_cell0[bas_i]
-            jsh_cell0 = sh_cell0[bas_j]
-            ij_loc = pair_loc_cell0[ish_cell0*(ish_cell0+1)//2 + jsh_cell0]
-            ij_loc += Ts_ji_lookup[iL, jL] * pair_loc_cell0.size
-            pair_loc.append(ij_loc)
-    pair_loc = cp.asarray(cp.hstack(pair_loc), dtype=np.int32)
-    return pair_loc, task_offsets
-
 def _dm_cond_from_compressed_dm(supmol, dms, cell, p2c_mapping):
     '''Largest density matrix elements for each shell-pair. The input and output
     are the abstract arrays that are compressed over the double-lattice-sum
@@ -443,7 +412,8 @@ def _tril_indices(n):
     i = np.arange(n)
     return np.asarray(np.where(i[:,None] >= i)[0], dtype=np.int32)
 
-def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
+def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
+                       pair_loc_in_cell0):
     nimgs = len(supmol.Ls)
     cell = supmol.cell
     nbas_cell0 = cell.nbas
@@ -465,6 +435,9 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
         bas_idx = asarray(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
         bas_idx_lookup.append([img_idx[bas_idx], sh_cell0[bas_idx], bas_idx])
 
+    pair_loc_in_cell0 = cp.asarray(pair_loc_in_cell0, dtype=np.int32)
+    tril_pairs_in_cell0 = len(pair_loc_in_cell0) - 1
+    Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup, dtype=np.int32)
     q_cond = q_cond.ravel()
     dm_cond = dm_cond.ravel()
     nbas = np.uint32(supmol.nbas)
@@ -477,7 +450,7 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             pair_kl = pair_idx = ish[:,None] * nbas + jsh
             if i == j:
                 # pair_ij includes only the shell i within the first image.
-                pair_ij = pair_idx[(iL[:,None] == 0) & (ish_cell0 >= jsh_cell0)]
+                pair_ij = pair_idx[(iL[:,None] == 0) & (ish_cell0[:,None] >= jsh_cell0)]
                 pair_kl = pair_idx[ish >= jsh]
             else:
                 pair_ij = pair_idx[iL == 0].ravel()
@@ -487,11 +460,26 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             pair_ij = pair_ij[cp.argsort(q_cond[pair_ij])[::-1]]
             pair_kl = pair_kl[cp.argsort(q_cond[pair_kl])[::-1]]
 
+            bas_i, bas_j = divmod(pair_ij, nbas)
+            bas_k, bas_l = divmod(pair_kl, nbas)
+            iL = img_idx[bas_i]
+            jL = img_idx[bas_j]
+            kL = img_idx[bas_k]
+            lL = img_idx[bas_l]
+            ish_cell0 = sh_cell0[bas_i]
+            jsh_cell0 = sh_cell0[bas_j]
+            ksh_cell0 = sh_cell0[bas_k]
+            lsh_cell0 = sh_cell0[bas_l]
+            ij_loc = pair_loc_in_cell0[ish_cell0*(ish_cell0+1)//2 + jsh_cell0]
+            ij_loc += Ts_ji_lookup[iL, jL] * tril_pairs_in_cell0
+            kl_loc = pair_loc_in_cell0[ksh_cell0*(ksh_cell0+1)//2 + lsh_cell0]
+            kl_loc += Ts_ji_lookup[kL, lL] * tril_pairs_in_cell0
+
             # qd_tile_max is the product of q_cond and dm_cond within each batch
             qd_ij = q_cond[pair_ij] + dm_cond[pair_ij]
             qd_kl = q_cond[pair_kl] + dm_cond[pair_kl]
-            pair_ij_mappings[i,j] = (pair_ij, _make_tile_max_hierarchy(qd_ij))
-            pair_kl_mappings[i,j] = (pair_kl, _make_tile_max_hierarchy(qd_kl))
+            pair_ij_mappings[i,j] = (pair_ij, ij_loc, _make_tile_max_hierarchy(qd_ij))
+            pair_kl_mappings[i,j] = (pair_kl, kl_loc, _make_tile_max_hierarchy(qd_kl))
     return pair_ij_mappings, pair_kl_mappings
 
 VJ_IJ_REGISTERS = 11

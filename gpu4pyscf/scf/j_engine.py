@@ -258,13 +258,9 @@ class _VHFOpt(jk._VHFOpt):
             vj_xyz = cp.zeros_like(dm_xyz)
 
             _pair_mappings = pair_mappings
-            if num_devices > 1:
-                # Ensure the precomputation copied to each device
-                _pair_mappings = {}
-                for task, (pair_idx, _, qd) in pair_mappings.items():
-                    qd = [cp.asarray(x) for x in qd]
-                    addrs = [ctypes.cast(x.data.ptr, ctypes.c_void_p) for x in qd]
-                    _pair_mappings[task] = (cp.asarray(pair_idx), addrs, qd)
+            if device_id > 0: # Ensure the precomputation avail on each device
+                _pair_mappings = {k: (cp.asarray(pair_idx), cp.asarray(qd))
+                                  for k, (pair_idx, qd) in pair_mappings.items()}
             _pair_loc_gpu = cp.asarray(pair_loc_gpu)
             q_cond = cp.asarray(self.q_cond)
             t1 = log.timer_debug1(f'q_cond on Device {device_id}', *t0)
@@ -277,8 +273,9 @@ class _VHFOpt(jk._VHFOpt):
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping, qd_ij_addrs = _pair_mappings[i,j][:2]
-                pair_kl_mapping, qd_kl_addrs = _pair_mappings[k,l][:2]
+                pair_ij_mapping, qd_ij = _pair_mappings[i,j]
+                pair_kl_mapping, qd_kl = _pair_mappings[k,l]
+                print(qd_ij, qd_kl)
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -297,8 +294,8 @@ class _VHFOpt(jk._VHFOpt):
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_ij_loc.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_kl_loc.data.ptr, ctypes.c_void_p),
-                    (ctypes.c_void_p*6)(*qd_ij_addrs),
-                    (ctypes.c_void_p*6)(*qd_kl_addrs),
+                    ctypes.cast(qd_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(qd_kl.data.ptr, ctypes.c_void_p),
                     ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
@@ -382,20 +379,25 @@ def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             # qd_tile_max is the product of q_cond and dm_cond within each batch
             sub_q += dm_cond[ish0:ish1,jsh0:jsh1][mask]
             qd_batch_max = _make_tile_max_hierarchy(sub_q[idx])
-            addrs = [ctypes.cast(x.data.ptr, ctypes.c_void_p) for x in qd_batch_max]
-            pair_mappings[i,j] = (t_ij[mask][idx], addrs, qd_batch_max)
+            pair_mappings[i,j] = (t_ij[mask][idx], qd_batch_max)
     return pair_mappings
 
 def _make_tile_max_hierarchy(sub_q):
-    tile_max = cp.zeros((sub_q.size+31) & 0xffffffe0, # 32-element aligned
-                        dtype=np.float32)
+    size_aligned = (sub_q.size+31) & 0xffffffe0 # 32-element aligned
+    offset2 = size_aligned
+    offset4 = offset2 + size_aligned // 2
+    offset8 = offset4 + size_aligned // 4
+    offset16 = offset8 + size_aligned // 8
+    offset32 = offset16 + size_aligned // 16
+    tile_max = cp.zeros(offset32+size_aligned//32, dtype=np.float32)
     tile_max[:sub_q.size] = sub_q.ravel()
-    tile2_max = tile_max.reshape(-1,2).max(axis=1)
-    tile4_max = tile2_max.reshape(-1,2).max(axis=1)
-    tile8_max = tile4_max.reshape(-1,2).max(axis=1)
-    tile16_max = tile8_max.reshape(-1,2).max(axis=1)
-    tile32_max = tile16_max.reshape(-1,2).max(axis=1)
-    return tile_max, tile2_max, tile4_max, tile8_max, tile16_max, tile32_max
+    tile1_max = tile_max[:offset2]
+    tile2_max = tile1_max.reshape(-1,2).max(axis=1, out=tile_max[offset2:offset4])
+    tile4_max = tile2_max.reshape(-1,2).max(axis=1, out=tile_max[offset4:offset8])
+    tile8_max = tile4_max.reshape(-1,2).max(axis=1, out=tile_max[offset8:offset16])
+    tile16_max = tile8_max.reshape(-1,2).max(axis=1, out=tile_max[offset16:offset32])
+    tile32_max = tile16_max.reshape(-1,2).max(axis=1, out=tile_max[offset32:])
+    return tile_max
 
 VJ_IJ_REGISTERS = 11
 MULTI_VJ_IJ_REGISTERS = 8

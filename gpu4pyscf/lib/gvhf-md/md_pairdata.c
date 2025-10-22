@@ -239,7 +239,7 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
 void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                    int *ao_loc, int *pair_loc,
                    int *pair_lst, int npairs, int *p2c_mapping,
-                   int *double_latsum_Ls, int nimgs_uniq_pair,
+                   int *double_latsum_Ls, int nimgs_uniq_pair, int is_gamma_point,
                    int p_nbas, int c_nbas, int *bas, double *env)
 {
 #pragma omp parallel
@@ -286,7 +286,10 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                         riL[2] = ri[2] + double_latsum_Ls[img*3+2];
                         get_E_tensor(Et, li, lj, ai, aj, riL, rj, buf);
                         double *rho = Et_dm_ij + img * Et_dm_size;
-                        double *pdm = dm_ij + img * nao2;
+                        double *pdm = dm_ij;
+                        if (!is_gamma_point) {
+                                pdm += img * nao2;
+                        }
                         for (int i_dm = 0; i_dm < n_dm; i_dm++) {
                                 for (int n = 0, t = 0; t < Et_len; t++) {
                                         double rho_t = 0.;
@@ -296,7 +299,11 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                                         } }
                                         rho[t] = rho_t;
                                 }
-                                pdm += nao2 * nimgs_uniq_pair;
+                                if (is_gamma_point) {
+                                        pdm += nao2;
+                                } else {
+                                        pdm += nao2 * nimgs_uniq_pair;
+                                }
                                 rho += Et_dm_size * nimgs_uniq_pair;
                         }
                 }
@@ -308,7 +315,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
 void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                         int *ao_loc, int *pair_loc,
                         int *pair_lst, int npairs, int *p2c_mapping,
-                        int *double_latsum_Ls, int nimgs_uniq_pair,
+                        int *double_latsum_Ls, int nimgs_uniq_pair, int is_gamma_point,
                         int p_nbas, int c_nbas, int *bas, double *env)
 {
 #pragma omp parallel
@@ -323,7 +330,12 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
         size_t nao2 = nao * nao;
 #pragma omp for schedule(static, 1)
         for (int i_dm = 0; i_dm < n_dm; i_dm++) {
-                double *vj_priv = vj + i_dm * nao2 * nimgs_uniq_pair;
+                double *vj_priv;
+                if (is_gamma_point) {
+                        vj_priv = vj + i_dm * nao2;
+                } else {
+                        vj_priv = vj + i_dm * nao2 * nimgs_uniq_pair;
+                }
                 double *jvec_priv = jvec + i_dm * Et_dm_size * nimgs_uniq_pair;
                 for (int task_ij = 0; task_ij < npairs; task_ij++) {
                         int pair_ij = pair_lst[task_ij];
@@ -357,7 +369,10 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                                 riL[1] = ri[1] + double_latsum_Ls[img*3+1];
                                 riL[2] = ri[2] + double_latsum_Ls[img*3+2];
                                 get_E_tensor(Et, li, lj, ai, aj, riL, rj, buf);
-                                double *pj = vj_ij + img * nao2;
+                                double *pj = vj_ij;
+                                if (!is_gamma_point) {
+                                        pj += img * nao2;
+                                }
                                 double *pjvec = jvec_ij + img * Et_dm_size;
                                 for (int n = 0, t = 0; t < Et_len; t++) {
                                         double fac = cc * pjvec[t];
