@@ -852,6 +852,8 @@ def get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_m
         d2rho_dAdr_grid_response = cupy.zeros([natm, 3, 3, ngrids])
         for i_atom in range(natm):
             associated_grid_index = atom_to_grid_index_map[i_atom]
+            if len(associated_grid_index) == 0:
+                continue
             # d2rho_dAdr_response  = cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], dm0)
             # d2rho_dAdr_response += cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], dm0.T)
             # d2rho_dAdr_response += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], dm0)
@@ -931,6 +933,8 @@ def get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, drho_dr, dm0, atom_t
         dgamma_dA_grid_response = cupy.zeros([natm, 3, ngrids])
         for i_atom in range(natm):
             associated_grid_index = atom_to_grid_index_map[i_atom]
+            if len(associated_grid_index) == 0:
+                continue
             # rho_response  = cupy.einsum('dig,jg,ij->dg', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index], dm0)
             # rho_response += cupy.einsum('dig,jg,ij->dg', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index], dm0.T)
             dmu_dr_grid_i = dmu_dr[:, :, associated_grid_index]
@@ -1605,6 +1609,8 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
         for i_atom in range(natm):
             g_i_with_response = atom_to_grid_index_map[i_atom]
+            if len(g_i_with_response) == 0:
+                continue
             d2e[i_atom, :, :, :] += contract("BdDg,g->BdD", D_B_i[:, :, :, g_i_with_response], rho_i[g_i_with_response] * grids_weights[g_i_with_response])
         D_B_i = None
 
@@ -2641,6 +2647,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     if grid_response:
         for i_atom in range(natm):
             associated_grid_index = atom_to_grid_index_map[i_atom]
+            if len(associated_grid_index) == 0:
+                continue
             associated_grids_coords = grids_coords[associated_grid_index, :]
             ngrids_per_atom = associated_grids_coords.shape[0]
 
@@ -2747,6 +2755,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
         if grid_response:
             associated_grid_index = atom_to_grid_index_map[i_atom]
+            if len(associated_grid_index) == 0:
+                continue
             associated_grids_coords = grids_coords[associated_grid_index, :]
             ngrids_per_atom = associated_grids_coords.shape[0]
 
@@ -2841,6 +2851,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
         if grid_response:
             associated_grid_index = atom_to_grid_index_map[i_atom]
+            if len(associated_grid_index) == 0:
+                continue
             associated_grids_coords = grids_coords[associated_grid_index, :]
             ngrids_per_atom = associated_grids_coords.shape[0]
 
