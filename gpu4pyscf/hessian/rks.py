@@ -1801,6 +1801,9 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                         rks_grad._d1_dot_(aow, mo[j].T,  beta=1.0, out=vmat[ia])
                         rks_grad._d1_dot_(mow, ao1[j].T, beta=1.0, transpose=True, out=vmat[ia])
                 t1 = log.timer_debug2('integration', *t1)
+
+        elif xctype == 'HF':
+            pass
         else:
             raise NotImplementedError(f"xctype = {xctype} not supported")
 
@@ -2246,6 +2249,8 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                         dmu_dr_grid_i = None
                         d2mudr2_occ_grid_i = None
 
+            elif xctype == 'HF':
+                pass
             else:
                 raise NotImplementedError(f"xctype = {xctype} not supported")
             t2 = log.timer_debug2('grid response', *t2)
@@ -3958,6 +3963,8 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
                                             depsilon_drho * weight, depsilon_dnablarho * weight, depsilon_dtau * weight,
                                             with_orbital_response = False)
 
+    elif xctype == 'HF':
+        pass
     else:
         raise NotImplementedError(f"xctype = {xctype} not supported")
 
