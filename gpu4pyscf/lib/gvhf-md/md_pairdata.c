@@ -237,8 +237,7 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
 }
 
 void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
-                   int *ao_loc, int *pair_loc,
-                   int *pair_lst, int npairs, int *p2c_mapping,
+                   int *ao_loc, int *pair_loc, int *p2c_mapping,
                    double *double_latsum_Ls, int nimgs_uniq_pair,
                    int diagonal_img_id, int is_gamma_point,
                    int p_nbas, int c_nbas, int *bas, double *env)
@@ -254,8 +253,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
         size_t nao = ao_loc[c_nbas]; // for the unit cell
         size_t nao2 = nao * nao;
 #pragma omp for schedule(dynamic, 1)
-        for (int task_ij = 0; task_ij < npairs; task_ij++) {
-                int bas_ij = pair_lst[task_ij];
+        for (int bas_ij = 0; bas_ij < p_nbas*p_nbas; bas_ij++) {
                 int ish = bas_ij / p_nbas;
                 int jsh = bas_ij % p_nbas;
                 int ctr_ish = p2c_mapping[ish];
@@ -276,7 +274,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                 int nfj = (lj + 1) * (lj + 2) / 2;
                 int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
                 double cc = ci * cj;
-                double *Et_dm_ij = Et_dm + pair_loc[task_ij];
+                double *Et_dm_ij = Et_dm + pair_loc[bas_ij];
                 double *dm_ij = dm + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
                 for (int img = 0; img < nimgs_uniq_pair; img++) {
                         double cc_with_img = cc;
@@ -317,9 +315,9 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
 }
 
 void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
-                        int *ao_loc, int *pair_loc,
-                        int *pair_lst, int npairs, int *p2c_mapping,
-                        double *double_latsum_Ls, int nimgs_uniq_pair, int is_gamma_point,
+                        int *ao_loc, int *pair_loc, int *p2c_mapping,
+                        double *double_latsum_Ls, int nimgs_uniq_pair,
+                        int diagonal_img_id, int is_gamma_point,
                         int p_nbas, int c_nbas, int *bas, double *env)
 {
 #pragma omp parallel
@@ -329,7 +327,7 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
         double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
-        double riL[3];
+        double rjL[3];
         size_t nao = ao_loc[c_nbas];
         size_t nao2 = nao * nao;
 #pragma omp for schedule(static, 1)
@@ -341,10 +339,9 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                         vj_priv = vj + i_dm * nao2 * nimgs_uniq_pair;
                 }
                 double *jvec_priv = jvec + i_dm * Et_dm_size * nimgs_uniq_pair;
-                for (int task_ij = 0; task_ij < npairs; task_ij++) {
-                        int pair_ij = pair_lst[task_ij];
-                        int ish = pair_ij / p_nbas;
-                        int jsh = pair_ij % p_nbas;
+                for (int bas_ij = 0; bas_ij < p_nbas*p_nbas; bas_ij++) {
+                        int ish = bas_ij / p_nbas;
+                        int jsh = bas_ij % p_nbas;
                         int ctr_ish = p2c_mapping[ish];
                         int ctr_jsh = p2c_mapping[jsh];
                         int li = bas[ish*BAS_SLOTS+ANG_OF];
@@ -367,12 +364,12 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                                 cc *= .5;
                         }
                         double *vj_ij = vj_priv + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
-                        double *jvec_ij = jvec_priv + pair_loc[task_ij];
+                        double *jvec_ij = jvec_priv + pair_loc[bas_ij];
                         for (int img = 0; img < nimgs_uniq_pair; img++) {
-                                riL[0] = ri[0] + double_latsum_Ls[img*3+0];
-                                riL[1] = ri[1] + double_latsum_Ls[img*3+1];
-                                riL[2] = ri[2] + double_latsum_Ls[img*3+2];
-                                get_E_tensor(Et, li, lj, ai, aj, riL, rj, buf);
+                                rjL[0] = rj[0] + double_latsum_Ls[img*3+0];
+                                rjL[1] = rj[1] + double_latsum_Ls[img*3+1];
+                                rjL[2] = rj[2] + double_latsum_Ls[img*3+2];
+                                get_E_tensor(Et, li, lj, ai, aj, ri, rjL, buf);
                                 double *pj = vj_ij;
                                 if (!is_gamma_point) {
                                         pj += img * nao2;

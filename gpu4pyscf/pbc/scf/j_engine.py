@@ -195,27 +195,28 @@ class PBCJmatrixOpt:
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
         q_cutoff = log_cutoff - log_max_dm
 
+        # dm_xyz tensor is compressed over the image-Id dimension. While the
+        # tril part of the DM for supmol is required, certain tril part could
+        # contribute to the triu part of the compressed dm_xyz. Therefore, all
+        # AO-pairs should be transformed.
         ls = prim_cell._bas[:,ANG_OF]
         ll = ls[:,None] + ls
-        idx = np.arange(prim_cell.nbas)
-        ll = ll[idx[:,None] >= idx] # transform only the tril of dm
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
         pair_cum_cell0 = np.cumsum(xyz_size.ravel(), dtype=np.int32)
         pair_loc_in_cell0 = np.append(np.int32(0), pair_cum_cell0)
         dm_xyz_size = pair_cum_cell0[-1]
         log.debug1('dm_xyz_size = %s, nao = %s', dm_xyz_size, nao) # for one image
         nimgs_uniq_pair = len(supmol.double_latsum_Ts)
-        npairs = len(pair_cum_cell0)
+        npairs = xyz_size.size
         pair_loc = np.arange(0, npairs*nimgs_uniq_pair, npairs,
                              dtype=np.int32)[:,None] + pair_cum_cell0
         pair_loc = np.append(np.int32(0), pair_loc.ravel())
-        tril_idx = _tril_indices(nbas_cell0)
         dms = dms.get()
-        dm_xyz = np.zeros((n_dm, nimgs_uniq_pair, dm_xyz_size))
+        dm_xyz = np.empty((n_dm, nimgs_uniq_pair, dm_xyz_size))
         # Must use this modified _env to ensure the consistency with GPU kernel
         # In this _env, normalization coefficients for s and p funcitons are scaled.
         prim_cell_env = _scale_sp_ctr_coeff(prim_cell)
-        ao_loc = prim_cell.ao_loc
+        ao_loc = sorted_cell.ao_loc
         double_latsum_Ls = cp.asnumpy(supmol.double_latsum_Ts).dot(cell.lattice_vectors())
         # The diagonal elements in the AO-pairs have the same image Id
         diagonal_img_id = cp.asnumpy(supmol.Ts_ji_lookup[0,0])
@@ -223,13 +224,13 @@ class PBCJmatrixOpt:
             dm_xyz.ctypes, dms.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, pair_loc_in_cell0.ctypes,
-            tril_idx.ctypes, ctypes.c_int(len(tril_idx)),
+            #tril_idx.ctypes, ctypes.c_int(npairs),
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
             ctypes.c_int(diagonal_img_id),
             ctypes.c_int(is_gamma_point),
-            ctypes.c_int(prim_cell.nbas), ctypes.c_int(prim_cell.nbas),
+            ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
 
         l_counts = np.bincount(prim_cell._bas[:,ANG_OF])[:LMAX+1]
@@ -253,7 +254,6 @@ class PBCJmatrixOpt:
             log = logger.new_logger(self, verbose)
             t0 = log.init_timer()
             dm_xyz = asarray(dm_xyz) # transfer to current device
-            dm_xyz *= 2 # because build_j only contracts the tril dm
             vj_xyz = cp.zeros_like(dm_xyz)
 
             _pair_ij_mappings = pair_ij_mappings
@@ -343,14 +343,15 @@ class PBCJmatrixOpt:
             vj.ctypes, vj_xyz.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, pair_loc_in_cell0.ctypes,
-            tril_idx.ctypes, ctypes.c_int(len(tril_idx)),
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
+            ctypes.c_int(diagonal_img_id),
             ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
         vj = transpose_sum(asarray(vj))
+        vj *= 2 # because build_j only contracts the tril dm
 
         if not is_gamma_point:
             expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
@@ -440,7 +441,7 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
         bas_idx_lookup.append([img_idx[bas_idx], sh_cell0[bas_idx], bas_idx])
 
     pair_loc_in_cell0 = cp.asarray(pair_loc_in_cell0, dtype=np.int32)
-    tril_pairs_in_cell0 = len(pair_loc_in_cell0) - 1
+    dm_xyz_size = pair_loc_in_cell0[-1]
     Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup, dtype=np.int32)
     q_cond = q_cond.ravel()
     dm_cond = dm_cond.ravel()
@@ -451,7 +452,7 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
         for j in range(i+1):
             iL, ish_cell0, ish = bas_idx_lookup[i]
             jL, jsh_cell0, jsh = bas_idx_lookup[j]
-            pair_kl = pair_idx = ish[:,None] * nbas + jsh
+            pair_idx = ish[:,None] * nbas + jsh
             if i == j:
                 # pair_ij includes only the shell i within the first image.
                 pair_ij = pair_idx[(iL[:,None] == 0) & (ish_cell0[:,None] >= jsh_cell0)]
@@ -475,10 +476,10 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
             jsh_cell0 = sh_cell0[bas_j]
             ksh_cell0 = sh_cell0[bas_k]
             lsh_cell0 = sh_cell0[bas_l]
-            ij_loc = pair_loc_in_cell0[ish_cell0*(ish_cell0+1)//2 + jsh_cell0]
-            ij_loc += Ts_ji_lookup[iL, jL] * tril_pairs_in_cell0
-            kl_loc = pair_loc_in_cell0[ksh_cell0*(ksh_cell0+1)//2 + lsh_cell0]
-            kl_loc += Ts_ji_lookup[kL, lL] * tril_pairs_in_cell0
+            ij_loc = pair_loc_in_cell0[ish_cell0*nbas_cell0 + jsh_cell0]
+            ij_loc += Ts_ji_lookup[iL, jL] * dm_xyz_size
+            kl_loc = pair_loc_in_cell0[ksh_cell0*nbas_cell0 + lsh_cell0]
+            kl_loc += Ts_ji_lookup[kL, lL] * dm_xyz_size
 
             # qd_tile_max is the product of q_cond and dm_cond within each batch
             qd_ij = q_cond[pair_ij] + dm_cond[pair_ij]
