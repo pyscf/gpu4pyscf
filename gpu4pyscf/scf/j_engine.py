@@ -275,7 +275,6 @@ class _VHFOpt(jk._VHFOpt):
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 pair_ij_mapping, qd_ij = _pair_mappings[i,j]
                 pair_kl_mapping, qd_kl = _pair_mappings[k,l]
-                print(qd_ij, qd_kl)
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -444,13 +443,15 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
         tiley = 4
     if li == lk and lj == ll:
         tilex = tiley
-    cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
+    # vj_cache reuses the space which was used by ij*4+ij*nf3ij*n_dm+nsq*unit
+    vj_cache_reserve = n_dm * threads - nsq*unit
+    cache_size = max(ij*4 + ij*nf3ij*n_dm, vj_cache_reserve) + kl*tiley*4 + kl*nf3kl*tiley*n_dm
     while (nsq * unit + cache_size) * 8 > shm_size:
         nsq //= 2
         assert nsq >= 1
         kl = _nearest_power2(int(nsq**.5))
         ij = nsq // kl
-        cache_size = ij * 4 + kl*tiley * 4 + ij*nf3ij*n_dm + kl*nf3kl*tiley*n_dm
+        cache_size = max(ij*4 + ij*nf3ij*n_dm, vj_cache_reserve) + kl*tiley*4 + kl*nf3kl*tiley*n_dm
     gout_stride = threads // nsq
     buflen = (nsq * unit + cache_size) * 8
     if cache_Rt2_idx:

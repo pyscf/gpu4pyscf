@@ -442,7 +442,10 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *gamma_inc = Rp_cache + threadsx*4 + nf3ij * threadsx * DM_BLOCK + sq_id;
     double *Rt = gamma_inc + (order+1) * nsq_per_block;
     uint16_t *Rt2_address = pRt2_kl_ij;
-    if (nf3ij * nf3kl <= RT2_IDX_CACHE_SIZE) {
+    // vj_cache requires a size of nthreads*n_dm. order=0 (corresponding to
+    // (ss|ss)) is skipped because the addresses of vj_cache and Rt2_address
+    // overlap.
+    if (order > 1 && nf3ij * nf3kl <= RT2_IDX_CACHE_SIZE) {
         int l4 = bounds.lij + bounds.lkl;
         int nf3 = (l4 + 1) * (l4 + 2) * (l4 + 3) / 6;
         Rt2_address = (uint16_t *)(Rt - sq_id + nf3 * nsq_per_block);
@@ -687,7 +690,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 #pragma unroll
                         for (int n = 0, i = gout_id; n < IJ_SIZE_FOR_MULTIDM; ++n, i += gout_stride) {
                             if (i >= nf3ij) break;
-                            double s = Rt[p1_ij[i*nf3kl]*nsq_per_block];
+                            double s = Rt[p1_ij[i]*nsq_per_block];
                             vj_ij[n                    ] += s * dm_kl ;
                             vj_ij[n+IJ_SIZE_FOR_MULTIDM] += s * dm_kl1;
                         }
@@ -752,7 +755,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 #pragma unroll
                         for (int n = 0, i = gout_id; n < IJ_SIZE_FOR_MULTIDM; ++n, i += gout_stride) {
                             if (i >= nf3ij) break;
-                            double s = Rt[p1_ij[i*nf3kl]*nsq_per_block];
+                            double s = Rt[p1_ij[i]*nsq_per_block];
                             vj_ij[n+IJ_SIZE_FOR_MULTIDM*0] += s * dm_kl0;
                             vj_ij[n+IJ_SIZE_FOR_MULTIDM*1] += s * dm_kl1;
                             vj_ij[n+IJ_SIZE_FOR_MULTIDM*2] += s * dm_kl2;
