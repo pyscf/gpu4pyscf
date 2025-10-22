@@ -239,7 +239,8 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
 void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                    int *ao_loc, int *pair_loc,
                    int *pair_lst, int npairs, int *p2c_mapping,
-                   int *double_latsum_Ls, int nimgs_uniq_pair, int is_gamma_point,
+                   double *double_latsum_Ls, int nimgs_uniq_pair,
+                   int diagonal_img_id, int is_gamma_point,
                    int p_nbas, int c_nbas, int *bas, double *env)
 {
 #pragma omp parallel
@@ -275,12 +276,15 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                 int nfj = (lj + 1) * (lj + 2) / 2;
                 int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
                 double cc = ci * cj;
-                if (ish == jsh) {
-                        cc *= .5;
-                }
                 double *Et_dm_ij = Et_dm + pair_loc[task_ij];
                 double *dm_ij = dm + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
                 for (int img = 0; img < nimgs_uniq_pair; img++) {
+                        double cc_with_img = cc;
+                        // The diagonal elements of the AO-pairs within the
+                        // supmol are scaled by 0.5.
+                        if (img == diagonal_img_id && ish == jsh) {
+                                cc_with_img *= .5;
+                        }
                         riL[0] = ri[0] + double_latsum_Ls[img*3+0];
                         riL[1] = ri[1] + double_latsum_Ls[img*3+1];
                         riL[2] = ri[2] + double_latsum_Ls[img*3+2];
@@ -295,7 +299,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                                         double rho_t = 0.;
                                         for (int i = 0; i < nfi; i++) {
                                         for (int j = 0; j < nfj; j++, n++) {
-                                                rho_t += Et[n] * cc * pdm[i*nao+j];
+                                                rho_t += Et[n] * cc_with_img * pdm[i*nao+j];
                                         } }
                                         rho[t] = rho_t;
                                 }
@@ -315,7 +319,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
 void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                         int *ao_loc, int *pair_loc,
                         int *pair_lst, int npairs, int *p2c_mapping,
-                        int *double_latsum_Ls, int nimgs_uniq_pair, int is_gamma_point,
+                        double *double_latsum_Ls, int nimgs_uniq_pair, int is_gamma_point,
                         int p_nbas, int c_nbas, int *bas, double *env)
 {
 #pragma omp parallel

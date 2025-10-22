@@ -201,6 +201,7 @@ class PBCJmatrixOpt:
         ll = ll[idx[:,None] >= idx] # transform only the tril of dm
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
         pair_cum_cell0 = np.cumsum(xyz_size.ravel(), dtype=np.int32)
+        pair_loc_in_cell0 = np.append(np.int32(0), pair_cum_cell0)
         dm_xyz_size = pair_cum_cell0[-1]
         log.debug1('dm_xyz_size = %s, nao = %s', dm_xyz_size, nao) # for one image
         nimgs_uniq_pair = len(supmol.double_latsum_Ts)
@@ -216,14 +217,18 @@ class PBCJmatrixOpt:
         prim_cell_env = _scale_sp_ctr_coeff(prim_cell)
         ao_loc = prim_cell.ao_loc
         double_latsum_Ls = cp.asnumpy(supmol.double_latsum_Ts).dot(cell.lattice_vectors())
+        # The diagonal elements in the AO-pairs have the same image Id
+        diagonal_img_id = cp.asnumpy(supmol.Ts_ji_lookup[0,0])
         libvhf_md.PBC_Et_dot_dm(
             dm_xyz.ctypes, dms.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
-            ao_loc.ctypes, pair_loc.ctypes,
+            ao_loc.ctypes, pair_loc_in_cell0.ctypes,
             tril_idx.ctypes, ctypes.c_int(len(tril_idx)),
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
-            ctypes.c_int(nimgs_uniq_pair), ctypes.c_int(is_gamma_point),
+            ctypes.c_int(nimgs_uniq_pair),
+            ctypes.c_int(diagonal_img_id),
+            ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(prim_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
 
@@ -231,7 +236,6 @@ class PBCJmatrixOpt:
         n_groups = len(l_counts)
         l_ctr_bas_loc = np.cumsum(np.append(0, l_counts))
         l_symb = lib.param.ANGULAR
-        pair_loc_in_cell0 = np.append(np.int32(0), pair_cum_cell0)
         pair_ij_mappings, pair_kl_mappings = _make_pair_qd_cond(
             supmol, l_ctr_bas_loc, self.q_cond, dm_cond, q_cutoff,
             pair_loc_in_cell0)
@@ -252,11 +256,11 @@ class PBCJmatrixOpt:
             dm_xyz *= 2 # because build_j only contracts the tril dm
             vj_xyz = cp.zeros_like(dm_xyz)
 
-            _pair_kl_mappings = pair_ij_mappings
-            _pair_ij_mappings = pair_kl_mappings
+            _pair_ij_mappings = pair_ij_mappings
+            _pair_kl_mappings = pair_kl_mappings
             if device_id > 0:
                 # Ensure the precomputation avail on each device
-                _pair_kl_mappings = {k: [cp.asarray(x) for x in v]
+                _pair_ij_mappings = {k: [cp.asarray(x) for x in v]
                                      for k, v in pair_ij_mappings.items()}
                 _pair_kl_mappings = {k: [cp.asarray(x) for x in v]
                                      for k, v in pair_kl_mappings.items()}
@@ -338,16 +342,16 @@ class PBCJmatrixOpt:
         libvhf_md.PBC_jengine_dot_Et(
             vj.ctypes, vj_xyz.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
-            ao_loc.ctypes, pair_loc.ctypes,
+            ao_loc.ctypes, pair_loc_in_cell0.ctypes,
             tril_idx.ctypes, ctypes.c_int(len(tril_idx)),
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
-            ctypes.c_int(nimgs_uniq_pair), ctypes.c_int(is_gamma_point),
+            ctypes.c_int(nimgs_uniq_pair),
+            ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
         vj = transpose_sum(asarray(vj))
 
-        vj = asarray(vj)
         if not is_gamma_point:
             expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
             vj = vj.reshape(n_dm, nimgs_uniq_pair, nao, nao)
@@ -410,7 +414,7 @@ def _dm_cond_from_compressed_dm(supmol, dms, cell, p2c_mapping):
 
 def _tril_indices(n):
     i = np.arange(n)
-    return np.asarray(np.where(i[:,None] >= i)[0], dtype=np.int32)
+    return np.asarray(np.where((i[:,None] >= i).ravel())[0], dtype=np.int32)
 
 def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
                        pair_loc_in_cell0):
@@ -451,7 +455,7 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
             if i == j:
                 # pair_ij includes only the shell i within the first image.
                 pair_ij = pair_idx[(iL[:,None] == 0) & (ish_cell0[:,None] >= jsh_cell0)]
-                pair_kl = pair_idx[ish >= jsh]
+                pair_kl = pair_idx[ish[:,None] >= jsh]
             else:
                 pair_ij = pair_idx[iL == 0].ravel()
                 pair_kl = pair_idx.ravel()
@@ -459,6 +463,7 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
             pair_kl = cp.asarray(pair_kl[q_cond[pair_kl] > cutoff], dtype=np.uint32)
             pair_ij = pair_ij[cp.argsort(q_cond[pair_ij])[::-1]]
             pair_kl = pair_kl[cp.argsort(q_cond[pair_kl])[::-1]]
+            # TODO: filter pair_kl based on its distance to pair_ij
 
             bas_i, bas_j = divmod(pair_ij, nbas)
             bas_k, bas_l = divmod(pair_kl, nbas)
