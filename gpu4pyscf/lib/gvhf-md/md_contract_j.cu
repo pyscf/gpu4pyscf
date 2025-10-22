@@ -147,7 +147,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     float *qd_kl_max = bounds.qd_kl_max;
 
     // zero out all cache;
-    for (int n = t_id; n < nf3kl*bsizey + (threadsx+bsizey)*4; n += threads) {
+    for (int n = t_id; n < nf3kl*bsizey; n += threads) {
         vj_kl_cache[n] = 0;
     }
     __syncthreads();
@@ -453,9 +453,6 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     float *qd_ij_max = bounds.qd_ij_max;
     float *qd_kl_max = bounds.qd_kl_max;
 
-    for (int n = t_id; n < (threadsx+bsizey)*4; n += threads) {
-        Rq_cache[n] = 0;
-    }
     __syncthreads();
     for (int n = t_id; n < bsizey; n += threads) {
         int task_kl = blockIdx.y * bsizey + n;

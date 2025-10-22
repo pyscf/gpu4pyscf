@@ -22,7 +22,7 @@ import numpy as np
 import cupy as cp
 from collections import Counter
 from pyscf import lib
-from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, PTR_EXP, PTR_COEFF
+from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
     load_library, condense, dist_matrix, transpose_sum, hermi_triu, asarray)
@@ -83,6 +83,7 @@ def _to_primitive_bas(sorted_mol):
     prim_mol._bas[:,PTR_EXP] += address_inc
     prim_mol._bas[:,PTR_COEFF] += address_inc
     prim_mol._bas[:,NPRIM_OF] = 1
+    prim_mol._bas[:,PTR_BAS_COORD] = prim_mol._atm[prim_mol._bas[:,ATOM_OF],PTR_COORD]
 
     p2c_mapping = np.repeat(np.arange(sorted_mol.nbas), repeats)
     return prim_mol, np.asarray(p2c_mapping, dtype=np.int32)
@@ -115,6 +116,7 @@ class _VHFOpt(jk._VHFOpt):
     def __init__(self, mol, cutoff=1e-13):
         super().__init__(mol, cutoff)
         self.tile = 1
+        self._rys_envs = {}
 
     def build(self, group_size=None, verbose=None):
         mol = self.mol
@@ -161,10 +163,24 @@ class _VHFOpt(jk._VHFOpt):
         log.timer('Initialize q_cond', *cput0)
         return self
 
+    def reset(self, mol):
+        self.mol = mol
+        self._rys_envs = {}
+
+    @multi_gpu.property(cache='_rys_envs')
+    def rys_envs(self):
+        prim_mol = self.prim_mol
+        atm = cp.asarray(prim_mol._atm)
+        bas = cp.asarray(prim_mol._bas)
+        env = cp.asarray(_scale_sp_ctr_coeff(prim_mol))
+        ao_loc = cp.empty(0, dtype=np.int32)
+        return RysIntEnvVars.new(prim_mol.natm, prim_mol.nbas, atm, bas, env, ao_loc)
+
     def get_j(self, dms, verbose):
         log = logger.new_logger(self.mol, verbose)
         sorted_mol = self.sorted_mol
         prim_mol = self.prim_mol
+        assert prim_mol.nbas < 65536
         if callable(dms):
             dms = dms()
         p2c_mapping = cp.asarray(self.prim_to_ctr_mapping)
@@ -201,11 +217,11 @@ class _VHFOpt(jk._VHFOpt):
         ll = ls[:,None] + ls
         ll = ll.ravel()[pair_lst] # drops the pairs that do not contribute to integrals
         xyz_size = (ll+1)*(ll+2)*(ll+3)//6
-        pair_loc = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
+        pair_loc_gpu = cp.cumsum(cp.append(np.int32(0), xyz_size.ravel()), dtype=np.int32)
         xyz_size = ls = ll = None
 
         pair_lst = np.asarray(pair_lst.get(), dtype=np.int32)
-        pair_loc = pair_loc.get()
+        pair_loc = pair_loc_gpu.get()
         dm_xyz_size = pair_loc[-1]
         log.debug1('dm_xyz_size = %s, nao = %s, pair_mapping_size = %s',
                    dm_xyz_size, nao, pair_mapping_size)
@@ -240,13 +256,6 @@ class _VHFOpt(jk._VHFOpt):
             t0 = log.init_timer()
             dm_xyz = asarray(dm_xyz) # transfer to current device
             vj_xyz = cp.zeros_like(dm_xyz)
-            _atm_gpu = cp.asarray(prim_mol._atm)
-            _bas_gpu = cp.asarray(prim_mol._bas)
-            _env_gpu = cp.asarray(_env)
-            rys_envs = RysIntEnvVars(
-                prim_mol.natm, prim_mol.nbas,
-                _atm_gpu.data.ptr, _bas_gpu.data.ptr, _env_gpu.data.ptr, 0,
-            )
 
             _pair_mappings = pair_mappings
             if num_devices > 1:
@@ -256,23 +265,26 @@ class _VHFOpt(jk._VHFOpt):
                     qd = [cp.asarray(x) for x in qd]
                     addrs = [ctypes.cast(x.data.ptr, ctypes.c_void_p) for x in qd]
                     _pair_mappings[task] = (cp.asarray(pair_idx), addrs, qd)
-            pair_loc_on_gpu = asarray(pair_loc)
+            _pair_loc_gpu = cp.asarray(pair_loc_gpu)
             q_cond = cp.asarray(self.q_cond)
             t1 = log.timer_debug1(f'q_cond on Device {device_id}', *t0)
 
             timing_collection = {}
             kern_counts = 0
             kern = libvhf_md.MD_build_j
+            rys_envs = self.rys_envs
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
                 pair_ij_mapping, qd_ij_addrs = _pair_mappings[i,j][:2]
                 pair_kl_mapping, qd_kl_addrs = _pair_mappings[k,l][:2]
-                if len(pair_ij_mapping) == 0 or len(pair_kl_mapping) == 0:
+                npairs_ij = pair_ij_mapping.size
+                npairs_kl = pair_kl_mapping.size
+                if npairs_ij == 0 or npairs_kl == 0:
                     continue
-                pair_ij_loc = pair_loc_on_gpu[task_offsets[i,j]:]
-                pair_kl_loc = pair_loc_on_gpu[task_offsets[k,l]:]
+                pair_ij_loc = _pair_loc_gpu[task_offsets[i,j]:]
+                pair_kl_loc = _pair_loc_gpu[task_offsets[k,l]:]
                 scheme = schemes[task]
                 err = kern(
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
@@ -280,8 +292,7 @@ class _VHFOpt(jk._VHFOpt):
                     ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
                     rys_envs, (ctypes.c_int*6)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(pair_ij_mapping.size),
-                    ctypes.c_int(pair_kl_mapping.size),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_ij_loc.data.ptr, ctypes.c_void_p),
@@ -324,7 +335,8 @@ class _VHFOpt(jk._VHFOpt):
 
         vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
         vj_xyz = vj_xyz.get()
-        vj = np.zeros_like(dms)
+        vj, dms = dms, None
+        vj[:] = 0.
         libvhf_md.jengine_dot_Et(
             vj.ctypes, vj_xyz.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
@@ -353,7 +365,7 @@ class _VHFOpt(jk._VHFOpt):
 def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
     n_groups = len(l_ctr_bas_loc) - 1
     pair_mappings = {}
-    nbas = mol.nbas
+    nbas = np.uint32(mol.nbas)
     for i in range(n_groups):
         for j in range(i+1):
             ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
@@ -362,31 +374,28 @@ def _make_pair_qd_cond(mol, l_ctr_bas_loc, q_cond, dm_cond, cutoff):
             mask = sub_q > cutoff
             if i == j:
                 mask = cp.tril(mask)
-            t_ij = (cp.arange(ish0, ish1, dtype=np.int32)[:,None] * nbas +
-                    cp.arange(jsh0, jsh1, dtype=np.int32))
+            t_ij = (cp.arange(ish0, ish1, dtype=np.uint32)[:,None] * nbas +
+                    cp.arange(jsh0, jsh1, dtype=np.uint32))
             sub_q = sub_q[mask]
             idx = cp.argsort(sub_q)[::-1]
 
             # qd_tile_max is the product of q_cond and dm_cond within each batch
             sub_q += dm_cond[ish0:ish1,jsh0:jsh1][mask]
-            qd_tile_max = cp.zeros((sub_q.size+31) & 0xffffffe0, # 32-element aligned
-                                   dtype=np.float32)
-            qd_tile_max[:sub_q.size] = sub_q[idx]
-            qd_tile2_max = qd_tile_max.reshape(-1,2).max(axis=1)
-            qd_tile4_max = qd_tile2_max.reshape(-1,2).max(axis=1)
-            qd_tile8_max = qd_tile4_max.reshape(-1,2).max(axis=1)
-            qd_tile16_max = qd_tile8_max.reshape(-1,2).max(axis=1)
-            qd_tile32_max = qd_tile16_max.reshape(-1,2).max(axis=1)
-            qd_tile_addrs = (ctypes.cast(qd_tile_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile2_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile4_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile8_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile16_max.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(qd_tile32_max.data.ptr, ctypes.c_void_p))
-            qd_batch_max = (qd_tile_max, qd_tile2_max, qd_tile4_max, qd_tile8_max,
-                            qd_tile16_max, qd_tile32_max)
-            pair_mappings[i,j] = (t_ij[mask][idx], qd_tile_addrs, qd_batch_max)
+            qd_batch_max = _make_tile_max_hierarchy(sub_q[idx])
+            addrs = [ctypes.cast(x.data.ptr, ctypes.c_void_p) for x in qd_batch_max]
+            pair_mappings[i,j] = (t_ij[mask][idx], addrs, qd_batch_max)
     return pair_mappings
+
+def _make_tile_max_hierarchy(sub_q):
+    tile_max = cp.zeros((sub_q.size+31) & 0xffffffe0, # 32-element aligned
+                        dtype=np.float32)
+    tile_max[:sub_q.size] = sub_q.ravel()
+    tile2_max = tile_max.reshape(-1,2).max(axis=1)
+    tile4_max = tile2_max.reshape(-1,2).max(axis=1)
+    tile8_max = tile4_max.reshape(-1,2).max(axis=1)
+    tile16_max = tile8_max.reshape(-1,2).max(axis=1)
+    tile32_max = tile16_max.reshape(-1,2).max(axis=1)
+    return tile_max, tile2_max, tile4_max, tile8_max, tile16_max, tile32_max
 
 VJ_IJ_REGISTERS = 11
 MULTI_VJ_IJ_REGISTERS = 8
@@ -424,7 +433,7 @@ def _md_j_engine_quartets_scheme(ls, shm_size=SHM_SIZE, n_dm=1):
     if cache_Rt2_idx:
         shm_size -= nf3ij * nf3kl * 2
 
-    tilex = 48
+    tilex = 32
     # Guess number of batches for kl indices
     tiley = (shm_size//8 - nsq*unit - (ij*4+ij*nf3ij*n_dm)) // (kl*4+kl*nf3kl*n_dm)
     tiley = min(tilex, tiley)

@@ -1,4 +1,4 @@
-# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
 import numpy as np
 import numpy as cp
 import pyscf
 from pyscf import lib, gto
+from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.pbc.scf import rsjk
-from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 
 def test_sr_vk_hermi1_gamma_point_vs_cpu():
     cell = pyscf.M(
