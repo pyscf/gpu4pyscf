@@ -1521,7 +1521,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((10 + 1*4 + 3*4 + 9) * mol.nao + (3*4) * mol.natm) * 8 # TODO: count it after optimization
+        ao_nbytes_per_grid = ((20 + 9 + 27 + 4*4 + 12*4 + 4*2) * mol.nao + (9*2) * mol.natm + 4 + 18*4 + 27*2*4 + 3) * 8
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
@@ -1811,7 +1811,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
                 available_gpu_memory = get_avail_mem()
                 available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-                ao_nbytes_per_grid = ((4) * mol.nao + (3) * mol.natm + 16 + 4) * 8 # TODO: count this after optimization
+                ao_nbytes_per_grid = ((4 + 3 + 2 + 3*2 + 1) * mol.nao + (3*2) * mol.natm + 16 + 4) * 8
                 ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
                 if ngrids_per_batch < 16:
                     raise MemoryError(f"Out of GPU memory for LDA Fock first derivative, available gpu memory = {get_avail_mem()}"
@@ -1892,7 +1892,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
                 available_gpu_memory = get_avail_mem()
                 available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-                ao_nbytes_per_grid = ((10 + 9) * mol.nao + (3) * mol.natm + 25 + 5) * 8 # TODO: count this after optimization
+                ao_nbytes_per_grid = ((10 + 9 + 2 + 3*2 + 2 + 3*2 + 3*3 + 9 + 4*3) * mol.nao + (3 + 3 + 9 + 3*4*2) * mol.natm + 4*2 + 16*2 + 2 + 2) * 8
                 ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
                 if ngrids_per_batch < 16:
                     raise MemoryError(f"Out of GPU memory for GGA Fock first derivative, available gpu memory = {get_avail_mem()}"
@@ -2050,7 +2050,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                 # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
                 available_gpu_memory = get_avail_mem()
                 available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-                ao_nbytes_per_grid = ((10 + 9) * mol.nao + (3) * mol.natm + 2) * 8 # TODO: count this after optimization
+                ao_nbytes_per_grid = ((10 + 9 + 24 + 4*2 + 24 + 3 + 24) * mol.nao + (3 + 15*3) * mol.natm + 5*2 + 25*2 + 2 + 2) * 8
                 ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
                 if ngrids_per_batch < 16:
                     raise MemoryError(f"Out of GPU memory for mGGA Fock first derivative, available gpu memory = {get_avail_mem()}"
@@ -3582,7 +3582,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for LDA energy second derivative, available gpu memory = {get_avail_mem()}"
-                                f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
+                              f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
         ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
         ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
@@ -3604,7 +3604,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((10) * mol.nao + (3*4) * mol.natm + 2) * 8 # TODO: count this after optimization
+        ao_nbytes_per_grid = ((10 + 9 + 2 + 4*4) * mol.nao + (3*3 + 3) * mol.natm + 3 + 1 + 18*4) * 8
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for LDA energy second derivative, available gpu memory = {get_avail_mem()}"
@@ -3698,7 +3698,8 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((20 + 9 + 27) * mol.nao + (3*2 + 9*2) * mol.natm + 4 + 16) * 8 # TODO: count this after optimization
+        ao_nbytes_per_grid = ((20 + 9 + 27 + 2 + 3*2 + 4*4 + 12*4) * mol.nao
+                              + (3*3 + 9*3 + 3 + 2*3 + 4*2*3) * mol.natm + 4*2 + 16*2 + 18*4 + 27*2*4) * 8
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for GGA energy second derivative, available gpu memory = {get_avail_mem()}"
@@ -3825,7 +3826,8 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((20 + 9 + 27) * mol.nao + (3*3 + 9*2) * mol.natm + 5 + 25) * 8 # TODO: count this after optimization
+        ao_nbytes_per_grid = ((20 + 9 + 27 + 2 + 3*2 + 4*4 + 12*4 + 9*4) * mol.nao
+                              + (3*3 + 9*3 + 3*3 + 3 + 3*3 + 5*2*3) * mol.natm + 5*2 + 25*2 + 18*4 + 27*2*4 + 18*4) * 8
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for mGGA energy second derivative, available gpu memory = {get_avail_mem()}"
