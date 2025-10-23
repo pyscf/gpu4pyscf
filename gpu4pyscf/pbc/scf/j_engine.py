@@ -437,7 +437,7 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
     for i in range(n_groups):
         ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
         bas_idx = asarray(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
-        bas_idx_lookup.append([img_idx[bas_idx], sh_cell0[bas_idx], bas_idx])
+        bas_idx_lookup.append([bas_idx, img_idx[bas_idx], sh_cell0[bas_idx]])
 
     pair_loc_in_cell0 = cp.asarray(pair_loc_in_cell0, dtype=np.int32)
     dm_xyz_size = pair_loc_in_cell0[-1]
@@ -449,8 +449,8 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
     pair_kl_mappings = {}
     for i in range(n_groups):
         for j in range(i+1):
-            iL, ish_cell0, ish = bas_idx_lookup[i]
-            jL, jsh_cell0, jsh = bas_idx_lookup[j]
+            ish, iL, ish_cell0 = bas_idx_lookup[i]
+            jsh, jL, jsh_cell0 = bas_idx_lookup[j]
             pair_idx = ish[:,None] * nbas + jsh
             if i == j:
                 # pair_ij includes only the shell i within the first image.

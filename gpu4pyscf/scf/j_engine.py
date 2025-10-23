@@ -396,7 +396,7 @@ def _make_tile_max_hierarchy(sub_q):
     tile4_max = tile2_max.reshape(-1,2).max(axis=1, out=tile_max[offset4:offset8])
     tile8_max = tile4_max.reshape(-1,2).max(axis=1, out=tile_max[offset8:offset16])
     tile16_max = tile8_max.reshape(-1,2).max(axis=1, out=tile_max[offset16:offset32])
-    tile32_max = tile16_max.reshape(-1,2).max(axis=1, out=tile_max[offset32:])
+    tile32_max = tile16_max.reshape(-1,2).max(axis=1, out=tile_max[offset32:]) # noqa
     return tile_max
 
 VJ_IJ_REGISTERS = 11
