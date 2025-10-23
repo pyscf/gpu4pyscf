@@ -239,9 +239,18 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
 void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                    int *ao_loc, int *pair_loc, int *p2c_mapping,
                    double *double_latsum_Ls, int nimgs_uniq_pair,
-                   int diagonal_img_id, int is_gamma_point,
+                   int is_gamma_point,
                    int p_nbas, int c_nbas, int *bas, double *env)
 {
+        int diagonal_img_id = 0;
+        for (int img = 0; img < nimgs_uniq_pair; img++) {
+                if (fabs(double_latsum_Ls[img*3+0]) < 1e-9 &&
+                    fabs(double_latsum_Ls[img*3+1]) < 1e-9 &&
+                    fabs(double_latsum_Ls[img*3+2]) < 1e-9) {
+                        diagonal_img_id = img;
+                        break;
+                }
+        }
 #pragma omp parallel
 {
         int l2 = 2*LMAX;
@@ -249,7 +258,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
         int Ex_size = (2*LMAX+1)*(LMAX+1)*(LMAX+1);
         double *Et = malloc(sizeof(double) * (Et_size+3*Ex_size));
         double *buf = Et + Et_size;
-        double riL[3];
+        double rjL[3];
         size_t nao = ao_loc[c_nbas]; // for the unit cell
         size_t nao2 = nao * nao;
 #pragma omp for schedule(dynamic, 1)
@@ -283,10 +292,10 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                         if (img == diagonal_img_id && ish == jsh) {
                                 cc_with_img *= .5;
                         }
-                        riL[0] = ri[0] + double_latsum_Ls[img*3+0];
-                        riL[1] = ri[1] + double_latsum_Ls[img*3+1];
-                        riL[2] = ri[2] + double_latsum_Ls[img*3+2];
-                        get_E_tensor(Et, li, lj, ai, aj, riL, rj, buf);
+                        rjL[0] = rj[0] + double_latsum_Ls[img*3+0];
+                        rjL[1] = rj[1] + double_latsum_Ls[img*3+1];
+                        rjL[2] = rj[2] + double_latsum_Ls[img*3+2];
+                        get_E_tensor(Et, li, lj, ai, aj, ri, rjL, buf);
                         double *rho = Et_dm_ij + img * Et_dm_size;
                         double *pdm = dm_ij;
                         if (!is_gamma_point) {
@@ -317,7 +326,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
 void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                         int *ao_loc, int *pair_loc, int *p2c_mapping,
                         double *double_latsum_Ls, int nimgs_uniq_pair,
-                        int diagonal_img_id, int is_gamma_point,
+                        int is_gamma_point,
                         int p_nbas, int c_nbas, int *bas, double *env)
 {
 #pragma omp parallel

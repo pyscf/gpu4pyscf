@@ -219,17 +219,13 @@ class PBCJmatrixOpt:
         prim_cell_env = _scale_sp_ctr_coeff(prim_cell)
         ao_loc = sorted_cell.ao_loc
         double_latsum_Ls = cp.asnumpy(supmol.double_latsum_Ts).dot(cell.lattice_vectors())
-        # The diagonal elements in the AO-pairs have the same image Id
-        diagonal_img_id = cp.asnumpy(supmol.Ts_ji_lookup[0,0])
         libvhf_md.PBC_Et_dot_dm(
             dm_xyz.ctypes, dms.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
             ao_loc.ctypes, pair_loc_in_cell0.ctypes,
-            #tril_idx.ctypes, ctypes.c_int(npairs),
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
-            ctypes.c_int(diagonal_img_id),
             ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
@@ -347,7 +343,6 @@ class PBCJmatrixOpt:
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
-            ctypes.c_int(diagonal_img_id),
             ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
@@ -477,9 +472,9 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
             jsh_cell0 = sh_cell0[bas_j]
             ksh_cell0 = sh_cell0[bas_k]
             lsh_cell0 = sh_cell0[bas_l]
-            ij_loc = pair_loc_in_cell0[ish_cell0*nbas_cell0 + jsh_cell0]
+            ij_loc = pair_loc_in_cell0[ish_cell0*nbas_cell0+jsh_cell0]
             ij_loc += Ts_ji_lookup[iL, jL] * dm_xyz_size
-            kl_loc = pair_loc_in_cell0[ksh_cell0*nbas_cell0 + lsh_cell0]
+            kl_loc = pair_loc_in_cell0[ksh_cell0*nbas_cell0+lsh_cell0]
             kl_loc += Ts_ji_lookup[kL, lL] * dm_xyz_size
 
             # qd_tile_max is the product of q_cond and dm_cond within each batch
