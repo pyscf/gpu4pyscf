@@ -429,15 +429,13 @@ while (1) {
             int koff = goff.koff;
             int loff = goff.loff;
             int *ao_loc = envs.ao_loc;
-            int nao = ao_loc[nbas_cell0];
-            int nao2 = nao * nao;
-            int nao_supmol = ao_loc[envs.nbas];
             int i0 = ao_loc[ish_cell0];
             int j0 = ao_loc[jsh_cell0];
             int k0 = ao_loc[ksh_cell0];
             int l0 = ao_loc[lsh_cell0];
-            int k0_supmol = ao_loc[ksh];
-            int l0_supmol = ao_loc[lsh];
+            int nao = ao_loc[nbas_cell0];
+            int nao2 = nao * nao;
+            int dm_size = nao2 * nimgs_uniq_pair;
             int nfi = bounds.nfi;
             int nfj = bounds.nfj;
             int nfk = bounds.nfk;
@@ -449,15 +447,17 @@ while (1) {
             double *dm_cache = shared_memory + sq_id;
             int active = task_id < ntasks;
             for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *vk = kmat.vk + i_dm * nao * nao_supmol;
-                double *dm = kmat.dm + i_dm * nao2 * nimgs_uniq_pair;
+                double *vk = kmat.vk + i_dm * dm_size;
+                double *dm = kmat.dm + i_dm * dm_size;
                 double *dm_jk = dm + Ts_ji_lookup[cell_j+cell_k*nimgs] * nao2;
                 double *dm_jl = dm + Ts_ji_lookup[cell_j+cell_l*nimgs] * nao2;
+                double *vk_il = vk + Ts_ji_lookup[cell_l] * nao2;
+                double *vk_ik = vk + Ts_ji_lookup[cell_k] * nao2;
                 load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
-                dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao_supmol, i0, l0_supmol,
+                dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
                                     ioff, joff, koff, loff, ldk, nfi, nfl, active);
                 load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
-                dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao_supmol, i0, k0_supmol,
+                dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
                                     ioff, joff, loff, koff, ldl, nfi, nfk, active);
             }
         }

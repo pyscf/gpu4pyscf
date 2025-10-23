@@ -313,7 +313,7 @@ class PBCJKmatrixOpt:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
             else:
                 Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
-            vk_supmol = cp.zeros((n_dm, nao, nao_supmol))
+            vk = cp.zeros(dms.shape)
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
@@ -334,7 +334,7 @@ class PBCJKmatrixOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 err = kern(
-                    ctypes.cast(vk_supmol.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao_supmol),
                     rys_envs, (ctypes.c_int*8)(*shls_slice),
@@ -369,15 +369,12 @@ class PBCJKmatrixOpt:
             if kpts_band is not None:
                 raise NotImplementedError
 
-            vk = cp.zeros((n_dm, nao, nimgs*nao))
-            vk[:,:,supmol.ao_mapping] = vk_supmol
-            vk = vk.reshape(n_dm, nao, nimgs, nao)
-            if is_gamma_point:
-                vk = vk.sum(axis=2)[:,None]
-            else:
-                expLk = cp.exp(1j * asarray(supmol.Ls).dot(asarray(kpts).T))
-                expLkz = expLk.view(np.float64).reshape(nimgs, nkpts, 2)
-                vk = contract('smLn,Lkz->skmnz', vk, expLkz)
+            if not is_gamma_point:
+                scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+                Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
+                expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
+                expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
+                vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = cp.asarray(vk, order='C').view(np.complex128)[:,:,:,:,0]
             return vk, kern_counts, timing_counter
 
@@ -805,7 +802,7 @@ def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
         bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
         bas_idx_lookup.append(asarray(bas_idx))
 
-    nbas = q_cond.shape[0]
+    nbas = np.int32(q_cond.shape[0])
     q_cond = q_cond.ravel()
     pair_mappings = {}
     for i in range(n_groups):
@@ -813,9 +810,9 @@ def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
             # pair_ij is sorted in the order that the ish changes fast.
             # This order can reduce the atomicAdd conflicts in the CUDA kernel.
             ish = bas_idx_lookup[i]
-            ish = ish[None, ish < nbas_cell0]
-            jsh = bas_idx_lookup[j][:,None]
-            pair_ij = ish * nbas + jsh
+            ish = ish[ish < nbas_cell0]
+            jsh = bas_idx_lookup[j]
+            pair_ij = (ish * nbas + jsh[:,None]).ravel()
             pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
             pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
     return pair_mappings
