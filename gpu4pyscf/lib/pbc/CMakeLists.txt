@@ -6,8 +6,9 @@ add_library(pbc SHARED
   fill_int3c2e_v2.cu
   overlap.cu
   estimator.cu
-  rys_contract_k.cu
   rys_roots_dat.cu
+  rys_contract_k.cu
+  rys_contract_jk_ip1.cu
   nr_eval_gto.cu
   sorting.c grid_integrate.c
 )
