@@ -107,11 +107,12 @@ class PBCJmatrixOpt:
         ao_loc = supmol.ao_loc
         q_cond = np.empty((nbas,nbas))
         intor = supmol._add_suffix('int2e')
-        _vhf.libcvhf.CVHFnr_int2e_q_cond(
-            getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
-            q_cond.ctypes, ao_loc.ctypes,
-            supmol._atm.ctypes, ctypes.c_int(supmol.natm),
-            supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
+        with supmol.with_integral_screen(cell.precision**2*1e-4):
+            _vhf.libcvhf.CVHFnr_int2e_q_cond(
+                getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
+                q_cond.ctypes, ao_loc.ctypes,
+                supmol._atm.ctypes, ctypes.c_int(supmol.natm),
+                supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
         q_cond = np.log(q_cond + 1e-300).astype(np.float32)
         self.q_cond_cpu = q_cond
         log.timer('Initialize q_cond', *cput0)
