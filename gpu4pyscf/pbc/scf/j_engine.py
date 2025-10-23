@@ -38,6 +38,7 @@ from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import ExtendedMole, PBCJKmatrixOpt, OMEGA
+from gpu4pyscf.pbc.df import aft
 
 __all__ = [
     'get_j',
@@ -153,6 +154,7 @@ class PBCJmatrixOpt:
         assert cell.dimension == 3
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
+        nao = sorted_cell.nao
         supmol = self.supmol
         prim_cell = supmol.cell
         assert supmol.nbas < 65536
@@ -163,9 +165,11 @@ class PBCJmatrixOpt:
         #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
         dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
                                    self.l_ctr_offsets, self.ao_idx)
-        n_dm, nao = dms.shape[:2]
+        if hermi != 1:
+            dms = transpose_sum(dms)
+            dms *= .5
 
-        p2c_mapping = cp.asarray(self.prim_to_ctr_mapping)
+        p2c_mapping = asarray(self.prim_to_ctr_mapping)
         is_gamma_point = kpts is None or is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
@@ -187,11 +191,10 @@ class PBCJmatrixOpt:
             dms = contract('skpq,Lk->sLpq', dms, expLk)
             # Are dms always real for super-mol?
             assert abs(dms.imag).max() < 1e-6
-            expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
             dm_cond = _dm_cond_from_compressed_dm(supmol, dms, sorted_cell, p2c_mapping)
-
+        n_dm = len(dms)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
         q_cutoff = log_cutoff - log_max_dm
@@ -335,7 +338,6 @@ class PBCJmatrixOpt:
         vj, dms = dms, None
         vj[:] = 0.
         assert vj_xyz.ndim == 3
-        assert vj.ndim == 3
         libvhf_md.PBC_jengine_dot_Et(
             vj.ctypes, vj_xyz.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
@@ -346,8 +348,6 @@ class PBCJmatrixOpt:
             ctypes.c_int(is_gamma_point),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
-        vj = transpose_sum(asarray(vj))
-        vj *= 2 # because build_j only contracts the tril dm
 
         if not is_gamma_point:
             expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
@@ -355,6 +355,10 @@ class PBCJmatrixOpt:
             vj = contract('sLmn,Lkz->skmnz', vj, expLkz)
             vj = cp.asarray(vj, order='C').view(np.complex128)[:,:,:,:,0]
             vj = vj.reshape(-1, nao, nao)
+
+        assert vj.ndim == 3
+        vj = transpose_sum(asarray(vj))
+        vj *= 2 # because build_j only contracts the tril dm
 
         vj = apply_coeff_CT_mat_C(vj, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
@@ -384,10 +388,12 @@ class PBCJmatrixOpt:
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
         coulG = get_coulG(cell, kpt, False, self, mesh, Gv, wrap_around=True,
                           omega=omega)
-        coulG *= kws
         if is_zero(kpt):
-            coulG[0] += np.pi / omega**2
+            coulG[0] -= np.pi / omega**2
+        coulG *= kws
         return coulG
+
+    ft_loop = aft.AFTDF.ft_loop
 
 def _dm_cond_from_compressed_dm(supmol, dms, cell, p2c_mapping):
     '''Largest density matrix elements for each shell-pair. The input and output
@@ -400,18 +406,15 @@ def _dm_cond_from_compressed_dm(supmol, dms, cell, p2c_mapping):
     Ts_ao_loc = cp.append(Ts_ao_loc.ravel(), np.int32(n_Ts*nao))
     dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), Ts_ao_loc, ao_loc)
     dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-    dm_cond = dm_cond[p2c_mapping[:,None], p2c_mapping]
-    nbas = prim_cell.nbas
+    nbas = cell.nbas
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
+    dm_cond = dm_cond[:,p2c_mapping[:,None], p2c_mapping]
 
+    nbas = prim_cell.nbas
     img_idx, ish_cell0 = divmod(cp.asarray(supmol.bas_mask_idx), nbas)
     T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx,img_idx[:,None]]
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
     return dm_cond
-
-def _tril_indices(n):
-    i = np.arange(n)
-    return np.asarray(np.where((i[:,None] >= i).ravel())[0], dtype=np.int32)
 
 def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
                        pair_loc_in_cell0):
