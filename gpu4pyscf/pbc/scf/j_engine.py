@@ -405,7 +405,7 @@ def _dm_cond_from_compressed_dm(supmol, dms, cell, p2c_mapping):
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
 
     img_idx, ish_cell0 = divmod(cp.asarray(supmol.bas_mask_idx), nbas)
-    T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx[:,None],img_idx]
+    T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx,img_idx[:,None]]
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
     return dm_cond
 

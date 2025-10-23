@@ -746,9 +746,11 @@ def estimate_rcut(cell, omega, precision=None):
     return rcut
 
 def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    nimgs = len(supmol.Ls)
     cell = supmol.cell
     nbas_cell0 = cell.nbas
+    nbas = np.uint32(supmol.nbas)
+    assert nbas < 65535
+    nimgs = len(supmol.Ls)
     # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
     # The same pattern can be applied to the remaining images within the supmol.
     # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
@@ -765,10 +767,9 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
         bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
         # Align to "tile", padding -1 at the end
         pad_len = (tile*len(bas_idx) - len(bas_idx)) % tile
-        bas_idx = np.append(bas_idx, np.full(pad_len, -1, dtype=np.uint32))
+        bas_idx = np.append(bas_idx, np.full(pad_len, nbas, dtype=np.uint32))
         bas_idx_lookup.append(asarray(bas_idx.reshape(-1, tile)))
 
-    nbas = np.uint32(supmol.nbas)
     q_cond = q_cond.ravel()
     pair_mappings = {}
     for i in range(n_groups):
@@ -777,9 +778,9 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
             jsh = bas_idx_lookup[j][None,:,None,:]
             pair_ij = ish * nbas + jsh
             if i == j:
-                pair_ij = pair_ij[(ish >= 0) & (jsh >= 0) & (ish >= jsh)]
+                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas) & (ish >= jsh)]
             else:
-                pair_ij = pair_ij[(ish >= 0) & (jsh >= 0)]
+                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas)]
             pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
             pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
     return pair_mappings
@@ -831,6 +832,6 @@ def _dm_cond_from_compressed_dm(supmol, dms):
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
 
     img_idx, ish_cell0 = divmod(cp.asarray(supmol.bas_mask_idx), nbas)
-    T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx[:,None],img_idx]
+    T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx,img_idx[:,None]]
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
     return dm_cond
