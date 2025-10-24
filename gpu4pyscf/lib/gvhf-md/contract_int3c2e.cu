@@ -461,8 +461,6 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
                 double fac = ck/(aij*ak*sqrt(aij+ak));
                 if (pair_ij >= shl_pair1) {
                     fac = 0;
-                } else if (ish == jsh) {
-                    fac *= .5;
                 }
                 boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, sp_id, nsp_per_block);
                 Rt[0] = gamma_inc[sp_id+order*nsp_per_block];
@@ -529,10 +527,11 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
         __shared__ typename BlockReduceT::TempStorage temp_storage;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
-            vj_aux[k] = BlockReduceT(temp_storage).Sum(vj_aux[k]);
+            double sum_jaux = BlockReduceT(temp_storage).Sum(vj_aux[k]);
             if (thread_id == 0) {
-                atomicAdd(vj+k, vj_aux[k]);
+                atomicAdd(vj+k, sum_jaux);
             }
+            __syncthreads();
         }
     }
 }
