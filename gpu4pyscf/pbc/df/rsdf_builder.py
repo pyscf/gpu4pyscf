@@ -706,7 +706,8 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux)))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
-    log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
+    log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
+               ngrids, Gblksize, naux, max_pair_size)
 
     buf = empty_mapped(naux*max_pair_size)
     kern = libpbc.build_ft_aopair

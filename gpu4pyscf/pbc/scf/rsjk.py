@@ -230,7 +230,7 @@ class PBCJKmatrixOpt:
 
     def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, remove_G0=False, verbose=None):
         '''
-        Build K for the sorted_mol over the sampled k-points.
+        Build kpts adapted K matrices
         Return a (*, nkpts, nao, nao) array.
 
         If the "kpts" is supplied as None or [[0,0,0]] (the gamma point), the K
@@ -251,12 +251,6 @@ class PBCJKmatrixOpt:
         #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
         dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
                                    self.l_ctr_offsets, self.ao_idx)
-
-        uniq_l_ctr = self.uniq_l_ctr
-        uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
-        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
-        n_groups = np.count_nonzero(uniq_l <= LMAX)
 
         is_gamma_point = kpts is None or is_zero(kpts)
         if is_gamma_point:
@@ -284,6 +278,12 @@ class PBCJKmatrixOpt:
         n_dm = len(dms)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+
+        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l = uniq_l_ctr[:,0]
+        l_ctr_bas_loc = self.l_ctr_offsets
+        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+        n_groups = np.count_nonzero(uniq_l <= LMAX)
 
         # TODO: i >= k if hermi == 1
         tasks = ((i,j,k,l)
@@ -317,7 +317,7 @@ class PBCJKmatrixOpt:
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.uint32)
 
             timing_counter = Counter()
             kern_counts = 0
@@ -472,14 +472,14 @@ class PBCJKmatrixOpt:
             # terms in the ewald exx correction?
         return coulG
 
-    def _get_ek_sr_ip1(self, dm, kpts, verbose=None):
-        raise NotImplementedError
+    def _get_ejk_sr_ip1(self, dm, kpts, j_factor=1., k_factor=1., verbose=None):
+        log = logger.new_logger(self, verbose)
         cell = self.cell
+        assert cell.dimension == 3
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
         nao = sorted_cell.nao
         supmol = self.supmol
-        nao_supmol = supmol.nao
 
         dm = asarray(dm, order='C')
         dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -487,40 +487,38 @@ class PBCJKmatrixOpt:
         dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
                                    self.l_ctr_offsets, self.ao_idx)
 
-        double_latsum_Ts = supmol.double_latsum_Ts
         is_gamma_point = kpts is None or is_zero(kpts)
         if is_gamma_point:
-            expLk = cp.ones((1, 1))
+            assert dms.dtype == np.float64
             nkpts = 1
+            ao_loc = asarray(sorted_cell.ao_loc)
+            dms = cp.asarray(dms, order='C')
+            dm_cond = condense('absmax', dms, ao_loc)
+            dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
+            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
+            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
         else:
             scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-            Ts = cp.asarray(double_latsum_Ts, dtype=np.float64)
+            Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
             expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
             nkpts = expLk.shape[1]
-        dms = dms.reshape(-1, nkpts, nao, nao)
+            dms = dms.reshape(-1, nkpts, nao, nao)
+            dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # Are dms always real for super-mol?
+            assert abs(dms.imag).max() < 1e-6
+            expLk = None
+            dms = dms.real
+            dms = cp.asarray(dms, order='C')
+            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
         n_dm = len(dms)
-        dms = contract('skpq,Lk->spLq', dms, expLk)
-        assert abs(dms.imag).max() < 1e-6
-        expLk = None
-        dms = dms.real
-        dms = cp.asarray(dms, order='C')
+        log_max_dm = float(dm_cond.max().get())
+        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = self.l_ctr_offsets
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
-
-        if is_gamma_point:
-            ao_loc = asarray(sorted_cell.ao_loc)
-            dm_cond = condense('absmax', dms, ao_loc)
-            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
-            dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
-        else:
-            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
-        log_max_dm = float(dm_cond.max().get())
-        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
@@ -538,7 +536,9 @@ class PBCJKmatrixOpt:
 
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
-            pair_ij_mappings, pair_kl_mappings = _make_tril_pair_mappings(
+            pair_ij_mappings = _make_pair_ij_mappings(
+                supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+            pair_kl_mappings = _make_tril_pair_mappings(
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
             nimgs = len(supmol.Ls)
@@ -547,11 +547,11 @@ class PBCJKmatrixOpt:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
             else:
                 Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
-            ek = cp.zeros((cell.natm, 3))
+            ejk = cp.zeros((cell.natm, 3))
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.uint32)
 
             timing_counter = Counter()
             kern_counts = 0
@@ -568,9 +568,10 @@ class PBCJKmatrixOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 err = kern(
-                    ctypes.cast(ek.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                    ctypes.c_double(j_factor), ctypes.c_double(k_factor),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao_supmol),
+                    ctypes.c_int(n_dm),
                     rys_envs, (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(SHM_SIZE),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -599,17 +600,17 @@ class PBCJKmatrixOpt:
                     kern_counts += 1
                 if num_devices > 1:
                     stream.synchronize()
-            return ek, kern_counts, timing_counter
+            return ejk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
 
         kern_counts = 0
         timing_collection = Counter()
-        ek_dist = []
-        for ek, counts, t_counter in results:
+        ejk_dist = []
+        for ejk, counts, t_counter in results:
             kern_counts += counts
             timing_collection += t_counter
-            ek_dist.append(ek)
+            ejk_dist.append(ejk)
 
         log = logger.new_logger(cell, verbose)
         if log.verbose >= logger.DEBUG1:
@@ -617,11 +618,32 @@ class PBCJKmatrixOpt:
             for llll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', llll, t)
 
-        ek = multi_gpu.array_reduce(ek_dist, inplace=True)
-        if not is_gamma_point:
-            ek *= 1. / nkpts
-        return ek
+        ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
 
+        if (remove_G0 and
+            (cell.dimension == 3 or
+             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            # difference associated to the G=0 term between the real space
+            # integrals and the AFT integrals
+            dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
+            omega = self.omega
+            wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+            int1e_opt = int1e._Int1eOpt(cell, kpts)
+            s = opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
+            s1 = opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
+            j_dm = cp.einsum('kij,nkji->', s, dms)
+            j_dm = dms.sum(axis=0) * j_dm
+            k_dm = contract('nkpq,kqr->nkpr', dms, s)
+            k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
+            aoslices = cell.aoslice_by_atom()
+            for i in range(cell.natm):
+                p0, p1 = aoslices[i, 2:]
+                ejk[i] += j_factor * cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:pq]).real
+                ejk[i] -= k_factor * cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:pq]).real
+
+        if not is_gamma_point:
+            ejk *= 1. / nkpts
+        return ejk
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

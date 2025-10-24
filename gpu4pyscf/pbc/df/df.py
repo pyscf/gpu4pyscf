@@ -74,7 +74,7 @@ class GDF(lib.StreamObject):
         if isinstance(self._kpts, KPoints):
             return self._kpts
         else:
-            return self.cell.get_abs_kpts(self._kpts)
+            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
 
     @kpts.setter
     def kpts(self, val):
