@@ -520,7 +520,7 @@ def takebak(out, a, indices, axis=-1):
 
 def transpose_sum(a, stream=None):
     '''
-    return a + a.transpose(0,2,1)
+    perform a + a.transpose(0,2,1) inplace
     '''
     assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous

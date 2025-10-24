@@ -619,7 +619,8 @@ class SCF(pyscf_lib.StreamObject):
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
-        excludes=('_opt_gpu', '_eri', '_numint'))
+        excludes=('_opt_gpu', '_eri', '_numint', '_opt_jengine',
+                  'overlap_canonical_decomposed_x'))
 
     def check_sanity(self):
         s1e = self.get_ovlp()

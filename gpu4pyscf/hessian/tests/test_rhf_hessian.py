@@ -180,7 +180,6 @@ class KnownValues(unittest.TestCase):
         C    H
             0.4        1
             ''',
-            output = '/dev/null'
         )
         nao = mol1.nao
         mo_coeff = cupy.random.rand(nao, nao)
@@ -197,7 +196,6 @@ class KnownValues(unittest.TestCase):
         vk_cpu = (mo_coeff.T @ vk @ mocc).reshape(1,-1)
         assert cupy.linalg.norm(vj_cpu - vj_mo) < 1e-5
         assert cupy.linalg.norm(vk_cpu - vk_mo) < 1e-5
-        mol1.stdout.close()
 
     @unittest.skipIf(num_devices > 1, '')
     def test_ecp_hess(self):

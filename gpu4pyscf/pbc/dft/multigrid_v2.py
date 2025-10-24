@@ -107,7 +107,7 @@ def image_pair_to_difference(
         einsum('MmNn,Mk,Nk->kMN', orbital_prod_with_double_latsum, k_phase.conj(), k_phase)
     where k_phase = exp(1j*lattice_sum_images.dot(kpts)), the double lattice sum
     can be simplified to
-        einsum('Tmn,Tk->k', orbital_prod, exp(1j*image_pair_diff.dot(kpts)))
+        einsum('Tmn,Tk->kmn', orbital_prod, exp(1j*image_pair_diff.dot(kpts)))
     Here, T is the image_pair_to_difference produced by this function.
     The double lattice-sum over M,N within the orbital product can be pre-summed
     to certain images in T.
@@ -139,10 +139,10 @@ def image_pair_to_difference(
 
 def _unique_image_pair(translation_vectors):
     '''
-    unqiue((L[:,None] - L).reshape(-1, 3), axis=0, return_inverse=True)
+    unqiue((-L[:,None] + L).reshape(-1, 3), axis=0, return_inverse=True)
     '''
     image_difference_full = (
-        # k_j - k_i corresponding to <i|j>
+        # -k_i + k_j corresponding to <i|j>
         translation_vectors[None,:,:] - translation_vectors[:,None,:]
     ).reshape(-1, 3)
 

@@ -18,9 +18,10 @@ import pyscf
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from gpu4pyscf.pbc.df import fft
-from gpu4pyscf.pbc.scf import rsjk
+from gpu4pyscf.pbc.scf import j_engine
+from gpu4pyscf.scf.j_engine import get_j
 
-def test_sr_vk_hermi1_gamma_point_vs_cpu():
+def test_j_engine():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -36,18 +37,18 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, remove_G0=False).get()
+    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1).get()
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
-    omega = rsjk.OMEGA
+    omega = j_engine.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
-        dm, hermi=1, kpts=np.zeros((1,3)), with_j=False)[0,0]
-    assert abs(vk - ref).max() < 1e-8
+        dm, hermi=1, kpts=np.zeros((1,3)), with_k=False)[0,0]
+    assert abs(vj - ref).max() < 1e-8
 
-def test_sr_vk_hermi1_kpts_vs_cpu():
+def test_sr_vj_hermi1_kpts_vs_cpu():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -65,20 +66,20 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm = dm + dm.transpose(0, 2, 1).conj()
     dm[4:6] = dm[2:4].conj()
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts, remove_G0=False).get()
+    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell, kpts=kpts)
     with_rsjk.exclude_dd_block = False
     with_rsjk.allow_drv_nodddd = False
-    omega = rsjk.OMEGA
+    omega = j_engine.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
-        dm, hermi=1, kpts=kpts, with_j=False)[0,0]
+        dm, hermi=1, kpts=kpts, with_k=False)[0,0]
     # Small errors might be due to the rcut, Ecut estimation in the CPU
     # implementation
-    assert abs(vk - ref).max() < 1e-8
+    assert abs(vj - ref).max() < 1e-8
 
-def test_sr_vk_hermi1_gamma_point_vs_fft():
+def test_sr_vj_hermi1_gamma_point_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -95,15 +96,19 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, remove_G0=True).get()
+    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, with_j=False)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    omega = cell.omega = -j_engine.OMEGA
+    ref = fft.FFTDF(cell).get_jk(dm, with_k=False)[0].get()
+    s = cell.pbc_intor('int1e_ovlp')
+    wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+    wcoulG_SR_at_G0 *= np.einsum('ij,ji->', s, dm)
+    ref += wcoulG_SR_at_G0 * s
+    assert abs(vj - ref).max() < 1e-8
 
-def test_sr_vk_hermi1_kpts_vs_fft():
+def test_sr_vj_hermi1_kpts_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -122,16 +127,21 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm = dm + dm.transpose(0, 2, 1).conj()
-    dm[4:6] = dm[2:4].conj()
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts, remove_G0=True).get()
+    dm[:]=1
+    #dm[4:6] = dm[2:4].conj()
+    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, with_j=False, kpts=kpts)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    omega = cell.omega = -j_engine.OMEGA
+    ref = fft.FFTDF(cell).get_jk(dm, with_k=False, kpts=kpts)[0].get()
+    s = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+    wcoulG_SR_at_G0 *= np.einsum('kij,kji->', s, dm) / nkpts
+    ref += wcoulG_SR_at_G0 * s
+    assert abs(vj - ref).max() < 1e-8
 
-def test_sr_vk_hermi0_gamma_point_vs_fft():
+def test_sr_vj_hermi0_gamma_point_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -147,15 +157,19 @@ def test_sr_vk_hermi0_gamma_point_vs_fft():
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.2
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, remove_G0=True).get()
+    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=0).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    omega = cell.omega = -j_engine.OMEGA
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_k=False)[0].get()
+    s = cell.pbc_intor('int1e_ovlp')
+    wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+    wcoulG_SR_at_G0 *= np.einsum('ij,ji->', s, dm)
+    ref += wcoulG_SR_at_G0 * s
+    assert abs(vj - ref).max() < 1e-8
 
-def test_sr_vk_hermi0_kpts_vs_fft():
+def test_sr_vj_hermi0_kpts_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -174,18 +188,22 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm[4:6] = dm[2:4].conj()
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, kpts=kpts, remove_G0=True).get()
+    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=0, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    omega = cell.omega = -j_engine.OMEGA
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_k=False)[0].get()
+    s = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+    wcoulG_SR_at_G0 *= np.einsum('kij,kji->', s, dm) / nkpts
+    ref += wcoulG_SR_at_G0 * s
+    assert abs(vj - ref).max() < 1e-8
 
-def test_vk_kpts_band_vs_fft():
+def test_vj_kpts_band_vs_fft():
     pass
 
-def test_vk_hermi1_gamma_point_vs_fft():
+def test_vj_hermi1_gamma_point_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -202,14 +220,14 @@ def test_vk_hermi1_gamma_point_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.get_k(cell, dm, hermi=1, exxdiv='ewald').get()
+    vj = j_engine.get_j(cell, dm, hermi=1).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, with_j=False, exxdiv='ewald')[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    ref = fft.FFTDF(cell).get_jk(dm, with_k=False)[0].get()
+    assert abs(vj - ref).max() < 1e-8
 
-def test_vk_hermi1_kpts_vs_fft():
+def test_vj_hermi1_kpts_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -230,14 +248,14 @@ def test_vk_hermi1_kpts_vs_fft():
     dm = dm + dm.transpose(0, 2, 1).conj()
     dm[4:6] = dm[2:4].conj()
     dm = np.array([np.eye(nao)]*nkpts)
-    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
+    vj = j_engine.get_j(cell, dm, hermi=1, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_j=False, kpts=kpts, exxdiv='ewald')[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_k=False, kpts=kpts)[0].get()
+    assert abs(vj - ref).max() < 1e-8
 
-def test_vk_hermi0_gamma_point_vs_fft():
+def test_vj_hermi0_gamma_point_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -253,14 +271,14 @@ def test_vk_hermi0_gamma_point_vs_fft():
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.2
-    vk = rsjk.get_k(cell, dm, hermi=0).get()
+    vj = j_engine.get_j(cell, dm, hermi=0).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_k=False)[0].get()
+    assert abs(vj - ref).max() < 1e-8
 
-def test_vk_hermi0_kpts_vs_fft():
+def test_vj_hermi0_kpts_vs_fft():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
@@ -279,9 +297,9 @@ def test_vk_hermi0_kpts_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm[4:6] = dm[2:4].conj()
-    vk = rsjk.get_k(cell, dm, hermi=0, kpts=kpts).get()
+    vj = j_engine.get_j(cell, dm, hermi=0, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_k=False)[0].get()
+    assert abs(vj - ref).max() < 1e-8

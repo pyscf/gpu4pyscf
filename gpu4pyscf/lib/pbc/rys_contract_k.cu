@@ -451,8 +451,8 @@ while (1) {
             for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
                 double *vk = kmat.vk + i_dm * nao * nao_supmol;
                 double *dm = kmat.dm + i_dm * nao2 * nimgs_uniq_pair;
-                double *dm_jk = dm + Ts_ji_lookup[cell_j*nimgs+cell_k] * nao2;
-                double *dm_jl = dm + Ts_ji_lookup[cell_j*nimgs+cell_l] * nao2;
+                double *dm_jk = dm + Ts_ji_lookup[cell_j+cell_k*nimgs] * nao2;
+                double *dm_jl = dm + Ts_ji_lookup[cell_j+cell_l*nimgs] * nao2;
                 load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
                 dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao_supmol, i0, l0_supmol,
                                     ioff, joff, koff, loff, ldk, nfi, nfl, active);

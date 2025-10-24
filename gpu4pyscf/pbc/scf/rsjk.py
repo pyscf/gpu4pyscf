@@ -26,7 +26,7 @@ from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
-from gpu4pyscf.__config__ import _streams, num_devices, shm_size
+from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
@@ -102,8 +102,8 @@ class PBCJKmatrixOpt:
         self.mesh = None
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
-        self.h_shls = None
         self.supmol = None
+        # Attributes required by AFTDF functions
         self.time_reversal_symmetry = True
         self.kpts = None
         # Hold cache on GPU devices
@@ -111,10 +111,13 @@ class PBCJKmatrixOpt:
         self._q_cond = {}
         self._s_estimator = {}
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_rys_envs', '_q_cond', '_s_estimator'))
+
     def build(self, group_size=None, verbose=None):
-        cell = self.cell
-        log = logger.new_logger(cell, verbose)
+        log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
+        cell = self.cell
         cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
             cell, 1, group_size, sparse_coeff=True)
         self.sorted_cell = cell
@@ -180,6 +183,7 @@ class PBCJKmatrixOpt:
     def reset(self, cell):
         self.cell = cell
         self.supmol = None
+        self._rys_envs = {}
         self._q_cond = {}
         self._s_estimator = {}
 
@@ -233,12 +237,14 @@ class PBCJKmatrixOpt:
         matrix is still evaluated as the k-point sampling case. The "nkpts"
         dimension is set to 1
         '''
+        log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
         nao = sorted_cell.nao
         supmol = self.supmol
+        nao_supmol = supmol.nao
 
         dm = asarray(dm, order='C')
         dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -246,9 +252,6 @@ class PBCJKmatrixOpt:
         dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
                                    self.l_ctr_offsets, self.ao_idx)
 
-        ao_loc_cpu = supmol.ao_loc
-        ao_loc = asarray(ao_loc_cpu)
-        nao_supmol = ao_loc_cpu[-1]
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = self.l_ctr_offsets
@@ -259,8 +262,9 @@ class PBCJKmatrixOpt:
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
+            ao_loc = asarray(sorted_cell.ao_loc)
             dms = cp.asarray(dms, order='C')
-            dm_cond = condense('absmax', dms, ao_loc[:sorted_cell.nbas+1])
+            dm_cond = condense('absmax', dms, ao_loc)
             dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
             ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
             dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
@@ -276,7 +280,7 @@ class PBCJKmatrixOpt:
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
-            dm_cond = _compressed_dm_cond(supmol, dms)
+            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
         n_dm = len(dms)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
@@ -291,7 +295,7 @@ class PBCJKmatrixOpt:
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
             stream = cp.cuda.stream.get_current_stream()
-            log = logger.new_logger(cell, verbose)
+            log = logger.new_logger(self, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
@@ -387,7 +391,6 @@ class PBCJKmatrixOpt:
             timing_collection += t_counter
             vk_dist.append(vk)
 
-        log = logger.new_logger(cell, verbose)
         if log.verbose >= logger.DEBUG1:
             log.debug1('kernel launches %d', kern_counts)
             for llll, t in timing_collection.items():
@@ -479,6 +482,7 @@ class PBCJKmatrixOpt:
         nao_orig = cell.nao
         nao = sorted_cell.nao
         supmol = self.supmol
+        nao_supmol = supmol.nao
 
         dm = asarray(dm, order='C')
         dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -504,9 +508,6 @@ class PBCJKmatrixOpt:
         dms = dms.real
         dms = cp.asarray(dms, order='C')
 
-        ao_loc_cpu = supmol.ao_loc
-        ao_loc = asarray(ao_loc_cpu)
-        nao_supmol = ao_loc_cpu[-1]
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = self.l_ctr_offsets
@@ -514,13 +515,13 @@ class PBCJKmatrixOpt:
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
         if is_gamma_point:
-            dm_cond = condense('absmax', dms.reshape(n_dm, nao, nao),
-                               ao_loc[:sorted_cell.nbas+1])
+            ao_loc = asarray(sorted_cell.ao_loc)
+            dm_cond = condense('absmax', dms, ao_loc)
             ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
             dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
             dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
         else:
-            dm_cond = _compressed_dm_cond(supmol, dms)
+            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
@@ -748,17 +749,19 @@ def estimate_rcut(cell, omega, precision=None):
     return rcut
 
 def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    nimgs = len(supmol.Ls)
     cell = supmol.cell
     nbas_cell0 = cell.nbas
+    nbas = np.uint32(supmol.nbas)
+    assert nbas < 65535
+    nimgs = len(supmol.Ls)
     # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
     # The same pattern can be applied to the remaining images within the supmol.
     # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
     bas_mask = np.zeros(nimgs*nbas_cell0, dtype=bool)
     bas_mask[supmol.bas_mask_idx] = True
     bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = np.empty(nimgs*nbas_cell0, dtype=np.int32)
-    raw_bas_idx[supmol.bas_mask_idx] = np.arange(supmol.nbas, dtype=np.int32)
+    raw_bas_idx = np.empty(nimgs*nbas_cell0, dtype=np.uint32)
+    raw_bas_idx[supmol.bas_mask_idx] = np.arange(supmol.nbas, dtype=np.uint32)
     raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
     n_groups = len(l_ctr_bas_loc) - 1
     bas_idx_lookup = []
@@ -767,10 +770,9 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
         bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
         # Align to "tile", padding -1 at the end
         pad_len = (tile*len(bas_idx) - len(bas_idx)) % tile
-        bas_idx = np.append(bas_idx, np.full(pad_len, -1, dtype=np.int32))
+        bas_idx = np.append(bas_idx, np.full(pad_len, nbas, dtype=np.uint32))
         bas_idx_lookup.append(asarray(bas_idx.reshape(-1, tile)))
 
-    nbas = q_cond.shape[0]
     q_cond = q_cond.ravel()
     pair_mappings = {}
     for i in range(n_groups):
@@ -779,11 +781,11 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
             jsh = bas_idx_lookup[j][None,:,None,:]
             pair_ij = ish * nbas + jsh
             if i == j:
-                pair_ij = pair_ij[(ish >= 0) & (jsh >= 0) & (ish >= jsh)]
+                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas) & (ish >= jsh)]
             else:
-                pair_ij = pair_ij[(ish >= 0) & (jsh >= 0)]
+                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas)]
             pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
-            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
+            pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
     return pair_mappings
 
 def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
@@ -818,21 +820,21 @@ def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
             pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
     return pair_mappings
 
-def _compressed_dm_cond(supmol, dms):
+def _dm_cond_from_compressed_dm(supmol, dms):
     '''Largest density matrix elements for each shell-pair. The input and output
     are the abstract arrays that are compressed over the double-lattice-sum
     '''
     cell = supmol.cell
     ao_loc = asarray(cell.ao_loc)
     n_dm, n_Ts, nao = dms.shape[:3]
-    i_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
-    i_loc = cp.append(i_loc.ravel(), np.int32(n_Ts*nao))
-    dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), i_loc, ao_loc)
+    Ts_ao_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
+    Ts_ao_loc = cp.append(Ts_ao_loc.ravel(), np.int32(n_Ts*nao))
+    dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), Ts_ao_loc, ao_loc)
     dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
     nbas = cell.nbas
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
 
-    img_idx, ish_cell0 = divmod(supmol.bas_mask_idx, nbas)
-    T_in_pair = supmol.Ts_ji_lookup[img_idx[:,None],img_idx]
+    img_idx, ish_cell0 = divmod(cp.asarray(supmol.bas_mask_idx), nbas)
+    T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx,img_idx[:,None]]
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
     return dm_cond
