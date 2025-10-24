@@ -31,7 +31,7 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
                                        reduce_to_device, transpose_sum, take_last2d)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, num_devices, min_grid_blksize
+from gpu4pyscf.__config__ import num_devices, min_grid_blksize
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD, _contract_rho1_fxc
 import ctypes
 from pyscf import __config__
@@ -392,7 +392,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ngrids_glob = grids.coords.shape[0]
     grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
 
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(mol, verbose)
         t1 = t0 = log.init_timer()
         mo_occ = cupy.asarray(mo_occ)
@@ -1269,7 +1269,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
     ngrids_glob = grids.coords.shape[0]
     grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         mo_occ = cupy.asarray(mo_occ)
         mo_coeff = cupy.asarray(mo_coeff)
         coeff = cupy.asarray(opt.coeff)
@@ -2133,9 +2133,50 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     return vmat_mo
 
+from gpu4pyscf.lib.cutensor import contract_trinary, __version__
+if __version__ is not None and __version__ >= 20301:
+    # NOTE: contract_trinary seems only working on the default stream (-1).
+    # Calling contract_trinary under the _stream[*] causes random outputs.
+    def _contract_vmat(xctype, ao, wv, vmat, mask, vtmp, buf=None):
+        if xctype == 'LDA':
+            v = contract_trinary('ng,ig,jg->nij', wv[:,0], ao, ao, out=vtmp)
+        elif xctype == 'GGA':
+            wv[:,0] *= .5
+            v = contract_trinary('nxg,xig,jg->nij', wv, ao[:4], ao[0], out=vtmp)
+        elif xctype == 'NLC':
+            raise NotImplementedError('NLC')
+        else:
+            wv[:,0] *= .5
+            wv[:,4] *= .5
+            v = contract_trinary('g,xig,xjg->ij', wv[:,4], bra[1:4], ket[1:4], out=vtmp)
+            v = contract_trinary('xig,nxg,jg->nij', ao[:4], wv, ao[0], beta=1, out=v)
+        add_sparse(vmat, v, mask)
+        return vmat
+else:
+    def _contract_vmat(xctype, ao, wv, vmat, mask, vtmp, buf=None):
+        for i in range(len(wv)):
+            if xctype == 'LDA':
+                aow = numint._scale_ao(ao, wv[i,0], out=buf)
+                add_sparse(vmat[i], ao.dot(aow.T, out=vtmp[0]), mask)
+                # vmat_tmp = ao.dot(numint._scale_ao(ao, wv[i][0]).T)
+            elif xctype == 'GGA':
+                wv[i,0] *= .5
+                aow = numint._scale_ao(ao, wv[i], out=buf)
+                add_sparse(vmat[i], ao[0].dot(aow.T, out=vtmp), mask)
+            elif xctype == 'NLC':
+                raise NotImplementedError('NLC')
+            else:
+                wv[i,0] *= .5
+                wv[i,4] *= .5
+                vtmp = numint._tau_dot(ao, ao, wv[i,4], buf=buf, out=vtmp)
+                aow = numint._scale_ao(ao[:4], wv[i,:4], out=buf)
+                vtmp = contract('ig, jg->ij', ao[0], aow, beta=1, out=vtmp)
+                add_sparse(vmat[i], vtmp, mask)
+        return vmat
+
 def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
                         verbose=None, hermi=1, device_id=0):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo1 is not None: mo1 = cupy.asarray(mo1)
         if mocc is not None: mocc = cupy.asarray(mocc)
@@ -2163,7 +2204,6 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
 
         p0 = p1 = grid_start
         t1 = t0 = log.init_timer()
-        #### 初始化内存
         if xctype == 'LDA':
             ncomp = 1
         elif xctype == 'GGA':
@@ -2172,13 +2212,14 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
             ncomp = 5
         fxc_w_buf = cupy.empty(ncomp*ncomp*MIN_BLK_SIZE)
         buf = cupy.empty(MIN_BLK_SIZE * nao)
-        vtmp_buf = cupy.empty(nao*nao)
+        vtmp_buf = cupy.empty(nset*nao*nao)
+        vmat1 = cupy.zeros_like(vmat)
         for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv,
                                                        max_memory=None, blksize=None,
                                                        grid_range=(grid_start, grid_end)):
             blk_size = len(weights)
             nao_sub = len(mask)
-            vtmp = cupy.ndarray((nao_sub, nao_sub), memptr=vtmp_buf.data)
+            vtmp = cupy.ndarray((nset, nao_sub, nao_sub), memptr=vtmp_buf.data)
 
             p0, p1 = p1, p1+len(weights)
             occ_coeff_mask = mocc[mask]
@@ -2191,26 +2232,7 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
             fxc_w = cupy.ndarray((ncomp, ncomp, blk_size), memptr=fxc_w_buf.data)
             fxc_w = cupy.multiply(fxc[:,:,p0:p1], weights, out=fxc_w)
             wv = contract('axg,xyg->ayg', rho1, fxc_w, out=rho1)
-
-            for i in range(nset):
-                if xctype == 'LDA':
-                    aow = numint._scale_ao(ao, wv[i][0], out=buf)
-                    add_sparse(vmat[i], ao.dot(aow.T, out=vtmp), mask)
-                    # vmat_tmp = ao.dot(numint._scale_ao(ao, wv[i][0]).T)
-                elif xctype == 'GGA':
-                    wv[i,0] *= .5
-                    aow = numint._scale_ao(ao, wv[i], out=buf)
-                    add_sparse(vmat[i], ao[0].dot(aow.T, out=vtmp), mask)
-                elif xctype == 'NLC':
-                    raise NotImplementedError('NLC')
-                else:
-                    wv[i,0] *= .5
-                    wv[i,4] *= .5
-                    vtmp = numint._tau_dot(ao, ao, wv[i,4], buf=buf, out=vtmp)
-                    aow = numint._scale_ao(ao[:4], wv[i,:4], out=buf)
-                    vtmp = contract('ig, jg->ij', ao[0], aow, beta=1, out=vtmp) # ao[0].dot(aow.T, out=vtmp)
-                    add_sparse(vmat[i], vtmp, mask)
-
+            _contract_vmat(xctype, ao, wv, vmat, mask, vtmp, buf)
             t1 = log.timer_debug2('integration', *t1)
             ao = rho1 = None
         t0 = log.timer_debug1(f'vxc on Device {device_id} ', *t0)

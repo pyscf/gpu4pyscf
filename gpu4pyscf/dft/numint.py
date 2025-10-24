@@ -29,7 +29,7 @@ from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf import __config__
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
@@ -448,7 +448,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
                  verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_rks task on given device
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if isinstance(dm, cupy.ndarray):
             assert dm.ndim == 2
             # Ensure dm allocated on each device
@@ -858,7 +858,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_uks task on one device
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None:
             dma, dmb = dms
             dma = cupy.asarray(dma)
@@ -1117,7 +1117,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
 
 def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None: dms = cupy.asarray(dms)
         if mo1 is not None: mo1 = cupy.asarray(mo1)
         if occ_coeff is not None: occ_coeff = cupy.asarray(occ_coeff)
@@ -1281,7 +1281,7 @@ def nr_rks_fxc_st(ni, mol, grids, xc_code, dm0=None, dms_alpha=None,
 
 def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None:
             dma, dmb = dms
             dma = cupy.asarray(dma)
@@ -2272,14 +2272,22 @@ def _scale_ao(ao, wv, out=None):
         raise RuntimeError('CUDA Error')
     return out
 
-def _tau_dot(bra, ket, wv, buf=None, out=None):
-    '''1/2 <nabla i| v | nabla j>'''
-    # einsum('g,xig,xjg->ij', .5*wv, bra[1:4], ket[1:4])
-    wv = cupy.asarray(.5 * wv)
-    out = contract('ig,jg->ij', bra[1], _scale_ao(ket[1], wv, out=buf), out=out)
-    out = contract('ig,jg->ij', bra[2], _scale_ao(ket[2], wv, out=buf), beta=1., out=out)
-    out = contract('ig,jg->ij', bra[3], _scale_ao(ket[3], wv, out=buf), beta=1., out=out)
-    return out
+from gpu4pyscf.lib.cutensor import contract_trinary, __version__
+if __version__ is not None and __version__ >= 20301:
+    # NOTE: contract_trinary seems only working on the default stream (-1).
+    # Calling contract_trinary under the _stream[*] causes random outputs.
+    def _tau_dot(bra, ket, wv, buf=None, out=None):
+        '''1/2 <nabla i| v | nabla j>'''
+        return contract_trinary('g,xig,xjg->ij', .5*wv, bra[1:4], ket[1:4], out=out)
+else:
+    def _tau_dot(bra, ket, wv, buf=None, out=None):
+        '''1/2 <nabla i| v | nabla j>'''
+        # einsum('g,xig,xjg->ij', .5*wv, bra[1:4], ket[1:4])
+        wv = cupy.asarray(.5 * wv)
+        out = contract('ig,jg->ij', bra[1], _scale_ao(ket[1], wv, out=buf), out=out)
+        out = contract('ig,jg->ij', bra[2], _scale_ao(ket[2], wv, out=buf), beta=1., out=out)
+        out = contract('ig,jg->ij', bra[3], _scale_ao(ket[3], wv, out=buf), beta=1., out=out)
+        return out
 
 class _GDFTOpt:
     def __init__(self, mol):

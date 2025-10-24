@@ -33,10 +33,10 @@ eps = 1e-3
 def setUpModule():
     global mol_sph, mol_cart
     mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=0,
-                      output='/dev/null', verbose=1)
+                      output='/dev/null', verbose=6)
 
     mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1,
-                       output='/dev/null', verbose=1)
+                       output='/dev/null', verbose=6)
 
 def tearDownModule():
     global mol_sph, mol_cart
