@@ -105,6 +105,9 @@ def contraction(
         out = cupy.empty([shape[k] for k in str_c], order='C', dtype=dtype)
     c = out
 
+    if a.size == 0 or b.size == 0 or c.size == 0:
+        raise ValueError(f"cutensor contraction doesn't support zero-sized array (a.shape = {a.shape}, b.shape = {b.shape}, expected c.shape = {c.shape})")
+
     desc_a = cutensor.create_tensor_descriptor(a)
     desc_b = cutensor.create_tensor_descriptor(b)
     desc_c = cutensor.create_tensor_descriptor(c)

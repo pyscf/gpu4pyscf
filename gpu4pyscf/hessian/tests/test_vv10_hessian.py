@@ -18,9 +18,7 @@ import cupy as cp
 import pyscf
 import pytest
 from gpu4pyscf.dft import rks
-from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_vnlc_deriv1_numerical, \
-                                  _get_enlc_deriv2, _get_enlc_deriv2_numerical, \
-                                  get_dweight_dA, get_d2weight_dAdB
+from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_enlc_deriv2, get_dweight_dA, get_d2weight_dAdB
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
@@ -61,12 +59,11 @@ def make_mf(mol, nlcgrid = (75,302), vv10_only = False, density_fitting = False)
     assert mf.converged
     return mf
 
-def numerical_d2enlc(mf):
+def numerical_d2e_dft(mf, dx = 1e-3):
     mol = mf.mol
 
     numerical_hessian = np.zeros([mol.natm, mol.natm, 3, 3])
 
-    dx = 1e-3
     mol_copy = mol.copy()
     for i_atom in range(mol.natm):
         for i_xyz in range(3):
@@ -106,12 +103,109 @@ def analytical_d2enlc(mf):
     analytical_hessian = hess_obj.kernel()
     return analytical_hessian
 
+def _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Attention: Numerical nlc energy 2nd derivative includes grid response.
+    """
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = np.dot(mocc, mocc.T) * 2
+
+    de2 = cp.empty([mol.natm, mol.natm, 3, 3])
+
+    def get_nlc_de(grad_obj, dm):
+        from gpu4pyscf.grad.rks import _get_denlc
+        mol = grad_obj.mol
+        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
+        denlc = 2 * denlc_orbital
+        if grad_obj.grid_response:
+            assert denlc_grid is not None
+            denlc += denlc_grid
+        return denlc
+
+    dx = 1e-3
+    mol_copy = mol.copy()
+    grad_obj = mf.Gradients()
+    grad_obj.grid_response = True
+    if not grad_obj.grid_response:
+        from gpu4pyscf.lib.cupy_helper import tag_array
+        dm0 = tag_array(dm0, mo_coeff = mo_coeff, mo_occ = mo_occ)
+
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            grad_obj.reset(mol_copy)
+            de_p = get_nlc_de(grad_obj, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            grad_obj.reset(mol_copy)
+            de_m = get_nlc_de(grad_obj, dm0)
+
+            de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
+    grad_obj.reset(mol)
+
+    return de2
+
+def _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Attention: Numerical nlc Fock matrix 1st derivative includes grid response.
+    """
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = np.dot(mocc, mocc.T) * 2
+
+    nao = mol.nao
+    vmat = cp.empty([mol.natm, 3, nao, nao])
+
+    def get_nlc_vmat(mol, mf, dm):
+        ni = mf._numint
+        if ni.libxc.is_nlc(mf.xc):
+            xc = mf.xc
+        else:
+            assert ni.libxc.is_nlc(mf.nlc)
+            xc = mf.nlc
+        mf.nlcgrids.build()
+        _, _, vnlc = ni.nr_nlc_vxc(mol, mf.nlcgrids, xc, dm)
+        return vnlc
+
+    dx = 1e-3
+    mol_copy = mol.copy()
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            vmat_p = get_nlc_vmat(mol_copy, mf, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            vmat_m = get_nlc_vmat(mol_copy, mf, dm0)
+
+            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
+    mf.reset(mol)
+
+    vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
+    vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
+    return vmat
+
 class KnownValues(unittest.TestCase):
     @pytest.mark.slow
     def test_vv10_only_hessian_direct(self):
         mf = make_mf(mol, vv10_only = True)
 
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.5416385094555443,  0.0608587976822506,  0.4059780361467813],
          [ 0.0608583153386411,  0.2400708605971857,  0.0171074122129466],
          [ 0.4059767934618819,  0.0171075175856572,  0.0715012127059378]],
@@ -187,7 +281,7 @@ class KnownValues(unittest.TestCase):
     def test_vv10_only_hessian_density_fitting(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True)
 
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.5415690822132557,  0.0608562722286266,  0.4059126705860394],
          [ 0.0608570487260485,  0.2400788616032656,  0.0171129679309989],
          [ 0.4059109970324659,  0.0171147380978454,  0.0714620692536805]],
@@ -262,7 +356,7 @@ class KnownValues(unittest.TestCase):
     @pytest.mark.slow
     def test_wb97xv_hessian(self):
         mf = make_mf(mol, vv10_only = False, density_fitting = True)
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.4979170248502474,  0.0488882371119104,  0.2658377292182879],
          [ 0.0488888333068926,  0.1883207192108216, -0.0079990676912778],
          [ 0.2658379285943591, -0.0080001048310407,  0.1861260525712338]],
@@ -342,7 +436,7 @@ class KnownValues(unittest.TestCase):
         mol_copy.build()
         mf = make_mf(mol_copy, vv10_only = False, density_fitting = True)
 
-        # reference_hessian = numerical_d2enlc(mf)
+        # reference_hessian = numerical_d2e_dft(mf)
         reference_hessian = np.array([[[[ 0.6336308259090595,  0.0573456704611175,  0.3625810477652647],
          [ 0.0573439018618505,  0.3182666549745861,  0.0059004173367794],
          [ 0.3625793744401751,  0.0058954672264022,  0.2139051350200094]],
@@ -423,6 +517,16 @@ class KnownValues(unittest.TestCase):
         test_de2 = _get_enlc_deriv2(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
         assert np.linalg.norm(test_de2 - reference_de2) < 1e-5
+
+    def test_vv10_energy_second_derivative_grid_response(self):
+        mf = make_mf(mol, vv10_only = True, density_fitting = True, nlcgrid = (10,14))
+        hess_obj = mf.Hessian()
+        hess_obj.grid_response = True
+
+        reference_de2 = _get_enlc_deriv2_numerical(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+        test_de2 = _get_enlc_deriv2(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+
+        assert np.linalg.norm(test_de2 - reference_de2) < 1e-7
 
     def test_vv10_fock_first_derivative(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True, nlcgrid = (10,14))
