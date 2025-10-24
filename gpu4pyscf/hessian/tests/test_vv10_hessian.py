@@ -18,9 +18,7 @@ import cupy as cp
 import pyscf
 import pytest
 from gpu4pyscf.dft import rks
-from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_vnlc_deriv1_numerical, \
-                                  _get_enlc_deriv2, _get_enlc_deriv2_numerical, \
-                                  get_dweight_dA, get_d2weight_dAdB
+from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_enlc_deriv2, get_dweight_dA, get_d2weight_dAdB
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
@@ -104,6 +102,103 @@ def analytical_d2enlc(mf):
     hess_obj.auxbasis_response = 2
     analytical_hessian = hess_obj.kernel()
     return analytical_hessian
+
+def _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Attention: Numerical nlc energy 2nd derivative includes grid response.
+    """
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = np.dot(mocc, mocc.T) * 2
+
+    de2 = cp.empty([mol.natm, mol.natm, 3, 3])
+
+    def get_nlc_de(grad_obj, dm):
+        from gpu4pyscf.grad.rks import _get_denlc
+        mol = grad_obj.mol
+        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
+        denlc = 2 * denlc_orbital
+        if grad_obj.grid_response:
+            assert denlc_grid is not None
+            denlc += denlc_grid
+        return denlc
+
+    dx = 1e-3
+    mol_copy = mol.copy()
+    grad_obj = mf.Gradients()
+    grad_obj.grid_response = True
+    if not grad_obj.grid_response:
+        from gpu4pyscf.lib.cupy_helper import tag_array
+        dm0 = tag_array(dm0, mo_coeff = mo_coeff, mo_occ = mo_occ)
+
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            grad_obj.reset(mol_copy)
+            de_p = get_nlc_de(grad_obj, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            grad_obj.reset(mol_copy)
+            de_m = get_nlc_de(grad_obj, dm0)
+
+            de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
+    grad_obj.reset(mol)
+
+    return de2
+
+def _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Attention: Numerical nlc Fock matrix 1st derivative includes grid response.
+    """
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = np.dot(mocc, mocc.T) * 2
+
+    nao = mol.nao
+    vmat = cp.empty([mol.natm, 3, nao, nao])
+
+    def get_nlc_vmat(mol, mf, dm):
+        ni = mf._numint
+        if ni.libxc.is_nlc(mf.xc):
+            xc = mf.xc
+        else:
+            assert ni.libxc.is_nlc(mf.nlc)
+            xc = mf.nlc
+        mf.nlcgrids.build()
+        _, _, vnlc = ni.nr_nlc_vxc(mol, mf.nlcgrids, xc, dm)
+        return vnlc
+
+    dx = 1e-3
+    mol_copy = mol.copy()
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            vmat_p = get_nlc_vmat(mol_copy, mf, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            vmat_m = get_nlc_vmat(mol_copy, mf, dm0)
+
+            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
+    mf.reset(mol)
+
+    vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
+    vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
+    return vmat
 
 class KnownValues(unittest.TestCase):
     @pytest.mark.slow

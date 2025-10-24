@@ -18,7 +18,7 @@ import cupy as cp
 import unittest
 import pytest
 from gpu4pyscf.dft import RKS
-from gpu4pyscf.hessian.rks import _get_exc_deriv2, _get_exc_deriv2_numerical, _get_vxc_deriv1, _get_vxc_deriv1_numerical
+from gpu4pyscf.hessian.rks import _get_exc_deriv2, _get_vxc_deriv1
 from gpu4pyscf.hessian.tests.test_vv10_hessian import numerical_d2e_dft
 
 def setUpModule():
@@ -42,6 +42,99 @@ def tearDownModule():
     global mol
     mol.stdout.close()
     del mol
+
+def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Attention: Numerical xc energy 2nd derivative includes grid response.
+    """
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = np.dot(mocc, mocc.T) * 2
+
+    de2 = cp.empty([mol.natm, mol.natm, 3, 3])
+
+    def get_xc_de(grad_obj, dm):
+        assert grad_obj.grid_response
+        from gpu4pyscf.grad.rks import get_exc_full_response
+        mol = grad_obj.mol
+        ni = mf._numint
+        mf.grids.build()
+        exc_grid, exc_orbital = get_exc_full_response(ni, mol, mf.grids, mf.xc, dm)
+
+        aoslices = mol.aoslice_by_atom()
+        exc_orbital = [exc_orbital[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
+        exc_orbital = cp.asarray(exc_orbital)
+        de = 2 * exc_orbital + exc_grid
+        return de
+
+    dx = 1e-5
+    mol_copy = mol.copy()
+    grad_obj = mf.Gradients()
+    grad_obj.grid_response = True
+
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            grad_obj.reset(mol_copy)
+            de_p = get_xc_de(grad_obj, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            grad_obj.reset(mol_copy)
+            de_m = get_xc_de(grad_obj, dm0)
+
+            de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
+    grad_obj.reset(mol)
+
+    return de2
+
+def _get_vxc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
+    """
+        Attention: Numerical xc Fock matrix 1st derivative includes grid response.
+    """
+    mol = hessobj.mol
+    mf = hessobj.base
+    mocc = mo_coeff[:,mo_occ>0]
+    dm0 = np.dot(mocc, mocc.T) * 2
+
+    nao = mol.nao
+    vmat = cp.empty([mol.natm, 3, nao, nao])
+
+    def get_vxc_vmat(mol, mf, dm):
+        ni = mf._numint
+        mf.grids.build()
+        n, exc, vxc = ni.nr_rks(mol, mf.grids, mf.xc, dm)
+        return vxc
+
+    dx = 1e-5
+    mol_copy = mol.copy()
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            vmat_p = get_vxc_vmat(mol_copy, mf, dm0)
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            vmat_m = get_vxc_vmat(mol_copy, mf, dm0)
+
+            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
+    mf.reset(mol)
+
+    vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
+    vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
+    return vmat
 
 class KnownValues(unittest.TestCase):
     # All reference results from the same calculation with mf.level_shift = 0

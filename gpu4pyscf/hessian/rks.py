@@ -88,14 +88,16 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                 mol, dm0, vhfopt, j_factor, k_factor, verbose=verbose)
 
     t1 = log.timer_debug1('hessian of 2e part', *t1)
-    de2 += _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst)
+    de2 += _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst, log)
     if mf.do_nlc():
-        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log)
 
     log.timer('RKS partial hessian', *time0)
     return de2
 
-def _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst = None):
+def _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst = None, log = None):
+    if log is None:
+        log = logger.new_logger(hessobj)
     mol = hessobj.mol
     mf = hessobj.base
 
@@ -120,6 +122,7 @@ def _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst = None):
         for j0 in range(i0):
             de2[j0,i0] = de2[i0,j0].T
     if hessobj.grid_response:
+        log.info("Calculating grid response for DFT Hessian")
         de2 += _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory)
 
     return de2
@@ -630,56 +633,6 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
     return vmat_dm
 
-def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
-    """
-        Attention: Numerical xc energy 2nd derivative includes grid response.
-    """
-    mol = hessobj.mol
-    mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
-
-    de2 = cupy.empty([mol.natm, mol.natm, 3, 3])
-
-    def get_xc_de(grad_obj, dm):
-        assert grad_obj.grid_response
-        from gpu4pyscf.grad.rks import get_exc_full_response
-        mol = grad_obj.mol
-        ni = mf._numint
-        mf.grids.build()
-        exc_grid, exc_orbital = get_exc_full_response(ni, mol, mf.grids, mf.xc, dm)
-
-        aoslices = mol.aoslice_by_atom()
-        exc_orbital = [exc_orbital[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-        exc_orbital = cupy.asarray(exc_orbital)
-        de = 2 * exc_orbital + exc_grid
-        return de
-
-    dx = 1e-5
-    mol_copy = mol.copy()
-    grad_obj = mf.Gradients()
-    grad_obj.grid_response = True
-
-    for i_atom in range(mol.natm):
-        for i_xyz in range(3):
-            xyz_p = mol.atom_coords()
-            xyz_p[i_atom, i_xyz] += dx
-            mol_copy.set_geom_(xyz_p, unit='Bohr')
-            grad_obj.reset(mol_copy)
-            de_p = get_xc_de(grad_obj, dm0)
-
-            xyz_m = mol.atom_coords()
-            xyz_m[i_atom, i_xyz] -= dx
-            mol_copy.set_geom_(xyz_m, unit='Bohr')
-            mol_copy.build()
-            grad_obj.reset(mol_copy)
-            de_m = get_xc_de(grad_obj, dm0)
-
-            de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
-    grad_obj.reset(mol)
-
-    return de2
-
 def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     '''Partially contracted vxc*dm'''
     mol = hessobj.mol
@@ -710,55 +663,6 @@ def _get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
     vmat_dm_dist = [future.result() for future in futures]
     vmat_dm = reduce_to_device(vmat_dm_dist, inplace=True)
     return vmat_dm
-
-def _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
-    """
-        Attention: Numerical nlc energy 2nd derivative includes grid response.
-    """
-    mol = hessobj.mol
-    mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
-
-    de2 = cupy.empty([mol.natm, mol.natm, 3, 3])
-
-    def get_nlc_de(grad_obj, dm):
-        from gpu4pyscf.grad.rks import _get_denlc
-        mol = grad_obj.mol
-        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
-        denlc = 2 * denlc_orbital
-        if grad_obj.grid_response:
-            assert denlc_grid is not None
-            denlc += denlc_grid
-        return denlc
-
-    dx = 1e-3
-    mol_copy = mol.copy()
-    grad_obj = mf.Gradients()
-    grad_obj.grid_response = True
-    if not grad_obj.grid_response:
-        from gpu4pyscf.lib.cupy_helper import tag_array
-        dm0 = tag_array(dm0, mo_coeff = mo_coeff, mo_occ = mo_occ)
-
-    for i_atom in range(mol.natm):
-        for i_xyz in range(3):
-            xyz_p = mol.atom_coords()
-            xyz_p[i_atom, i_xyz] += dx
-            mol_copy.set_geom_(xyz_p, unit='Bohr')
-            grad_obj.reset(mol_copy)
-            de_p = get_nlc_de(grad_obj, dm0)
-
-            xyz_m = mol.atom_coords()
-            xyz_m[i_atom, i_xyz] -= dx
-            mol_copy.set_geom_(xyz_m, unit='Bohr')
-            mol_copy.build()
-            grad_obj.reset(mol_copy)
-            de_m = get_nlc_de(grad_obj, dm0)
-
-            de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
-    grad_obj.reset(mol)
-
-    return de2
 
 def get_d2mu_dr2(ao):
     assert ao.ndim == 3
@@ -1150,7 +1054,7 @@ def contract_d2rhodAdB_d2gammadAdB_grid_response(d3mu_dr3, d2mu_dr2, dmu_dr, mu,
 
     return d2e_rho_gamma
 
-def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
+def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     """
         Equation notation follows:
         Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
@@ -1158,6 +1062,8 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
         benchmark assessments. J Chem Phys. 2023 May 28;158(20):204109. doi: 10.1063/5.0152838.
     """
 
+    if log is None:
+        log = logger.new_logger(hessobj)
     mol = hessobj.mol
     mf = hessobj.base
 
@@ -1363,6 +1269,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory):
 
     if hessobj.grid_response:
         # The code above includes only the orbital response piece of E_{G,G}^{AB} in Eq 37.
+        log.info("Calculating grid response for VV10 Hessian")
 
         # # First half of E_{w,w}^{AB} in Eq 32
         # d2w_dAdB = get_d2weight_dAdB(mol, grids)
@@ -2270,49 +2177,6 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
             contract('xiq,ip->xpq', tmp, mo_coeff, alpha=-1., out=v_mo[ia])
     return v_mo
 
-def _get_vxc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
-    """
-        Attention: Numerical xc Fock matrix 1st derivative includes grid response.
-    """
-    mol = hessobj.mol
-    mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
-
-    nao = mol.nao
-    vmat = cupy.empty([mol.natm, 3, nao, nao])
-
-    def get_vxc_vmat(mol, mf, dm):
-        ni = mf._numint
-        mf.grids.build()
-        n, exc, vxc = ni.nr_rks(mol, mf.grids, mf.xc, dm)
-        return vxc
-
-    dx = 1e-5
-    mol_copy = mol.copy()
-    for i_atom in range(mol.natm):
-        for i_xyz in range(3):
-            xyz_p = mol.atom_coords()
-            xyz_p[i_atom, i_xyz] += dx
-            mol_copy.set_geom_(xyz_p, unit='Bohr')
-            mol_copy.build()
-            mf.reset(mol_copy)
-            vmat_p = get_vxc_vmat(mol_copy, mf, dm0)
-
-            xyz_m = mol.atom_coords()
-            xyz_m[i_atom, i_xyz] -= dx
-            mol_copy.set_geom_(xyz_m, unit='Bohr')
-            mol_copy.build()
-            mf.reset(mol_copy)
-            vmat_m = get_vxc_vmat(mol_copy, mf, dm0)
-
-            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
-    mf.reset(mol)
-
-    vmat = contract('Adij,jq->Adiq', vmat, mocc)
-    vmat = contract('Adiq,ip->Adpq', vmat, mo_coeff)
-    return vmat
-
 def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     '''
     Derivatives of Vxc matrix in MO bases
@@ -2344,54 +2208,6 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             futures.append(future)
     vmat_dist = [future.result() for future in futures]
     vmat = reduce_to_device(vmat_dist, inplace=True)
-    return vmat
-
-def _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
-    """
-        Attention: Numerical nlc Fock matrix 1st derivative includes grid response.
-    """
-    mol = hessobj.mol
-    mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
-
-    nao = mol.nao
-    vmat = cupy.empty([mol.natm, 3, nao, nao])
-
-    def get_nlc_vmat(mol, mf, dm):
-        ni = mf._numint
-        if ni.libxc.is_nlc(mf.xc):
-            xc = mf.xc
-        else:
-            assert ni.libxc.is_nlc(mf.nlc)
-            xc = mf.nlc
-        mf.nlcgrids.build()
-        _, _, vnlc = ni.nr_nlc_vxc(mol, mf.nlcgrids, xc, dm)
-        return vnlc
-
-    dx = 1e-3
-    mol_copy = mol.copy()
-    for i_atom in range(mol.natm):
-        for i_xyz in range(3):
-            xyz_p = mol.atom_coords()
-            xyz_p[i_atom, i_xyz] += dx
-            mol_copy.set_geom_(xyz_p, unit='Bohr')
-            mol_copy.build()
-            mf.reset(mol_copy)
-            vmat_p = get_nlc_vmat(mol_copy, mf, dm0)
-
-            xyz_m = mol.atom_coords()
-            xyz_m[i_atom, i_xyz] -= dx
-            mol_copy.set_geom_(xyz_m, unit='Bohr')
-            mol_copy.build()
-            mf.reset(mol_copy)
-            vmat_m = get_nlc_vmat(mol_copy, mf, dm0)
-
-            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
-    mf.reset(mol)
-
-    vmat = contract('Adij,jq->Adiq', vmat, mocc)
-    vmat = contract('Adiq,ip->Adpq', vmat, mo_coeff)
     return vmat
 
 def get_dweight_dA(mol, grids, grid_range = None):
