@@ -225,6 +225,9 @@ class FFTDF(lib.StreamObject):
         self._numint = numint.KNumInt()
         self._rsh_df = {}  # Range separated Coulomb DF objects
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_rsh_df',))
+
     @property
     def grids(self):
         from gpu4pyscf.pbc.dft.gen_grid import UniformGrids

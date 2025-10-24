@@ -332,8 +332,13 @@ class _VHFOpt(jk._VHFOpt):
 
         vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
         vj_xyz = vj_xyz.get()
-        vj, dms = dms, None
-        vj[:] = 0.
+
+        h_shls = self.h_shls
+        if h_shls:
+            vj = np.zeros_like(dms)
+        else:
+            vj, dms = dms, None
+            vj[:] = 0.
         libvhf_md.jengine_dot_Et(
             vj.ctypes, vj_xyz.ctypes,
             ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
@@ -345,7 +350,6 @@ class _VHFOpt(jk._VHFOpt):
         vj = transpose_sum(asarray(vj))
         vj *= 2.
 
-        h_shls = self.h_shls
         if h_shls:
             mol = self.sorted_mol
             log.debug3('Integrals for %s functions on CPU',

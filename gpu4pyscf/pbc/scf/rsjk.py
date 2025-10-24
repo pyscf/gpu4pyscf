@@ -111,6 +111,9 @@ class PBCJKmatrixOpt:
         self._q_cond = {}
         self._s_estimator = {}
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_rys_envs', '_q_cond', '_s_estimator'))
+
     def build(self, group_size=None, verbose=None):
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
