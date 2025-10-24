@@ -171,7 +171,7 @@ class PBCJKmatrixOpt:
         s_estimator[nbas+1] = diffuse_ctr_coef
         # CVHFnr_sr_int2e_q_cond in pyscf seems not accurate enough for upper
         # bound estimation. Using the implementation in libvhf_rys instead.
-        libvhf_rys.sr_eri_s_estimator_v2(
+        libvhf_rys.sr_eri_s_estimator(
             s_estimator.ctypes, ctypes.c_float(supmol.omega),
             diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
             supmol._atm.ctypes, ctypes.c_int(supmol.natm),

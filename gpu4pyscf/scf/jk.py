@@ -32,7 +32,7 @@ from gpu4pyscf.__config__ import _streams, num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l
+from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l, extract_pgto_params
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -329,9 +329,28 @@ class _VHFOpt:
         if mol.omega < 0:
             # CVHFnr_sr_int2e_q_cond in pyscf has bugs in upper bound estimator.
             # Use the local version of s_estimator instead
-            s_estimator = np.empty((nbas,nbas), dtype=np.float32)
+
+            # FIXME: To avoid changing the CUDA kernel function signature,
+            # temporarily attach the extra information to the s_estimator array and
+            # pass it along with s_estimator.
+            # This is a workaround and should be addressed in the future.
+            s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
+            # The most diffuse pGTO in each shell is used to estimate the
+            # asymptotic value of SR integrals. In a contracted shell, the
+            # diffuse_ctr_coef for the diffuse_exps may only represent a portion
+            # of the AO basis. Using this ctr_coef can introduce errors in the SR
+            # integral estimation. The diffuse pGTO is normalized to approximate the
+            # entire shell.
+            diffuse_exps, _ = extract_pgto_params(mol, 'diffuse')
+            l = mol._bas[:,ANG_OF]
+            diffuse_ctr_coef = gto.gto_norm(l, diffuse_exps)
+            diffuse_exps = diffuse_exps.astype(np.float32)
+            diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
+            s_estimator[nbas] = diffuse_exps
+            s_estimator[nbas+1] = diffuse_ctr_coef
             libvhf_rys.sr_eri_s_estimator(
                 s_estimator.ctypes, ctypes.c_float(mol.omega),
+                diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
             self.s_estimator_cpu = s_estimator
