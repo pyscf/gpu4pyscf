@@ -145,6 +145,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
 
 __device__ static
 void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
+                        int *bas_mask_idx, int nbas_cell0,
                         JKEnergy &jk, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
@@ -158,6 +159,9 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
+    int ish_cell0 = bas_mask_idx[ish] % nbas_cell0;
+    int jsh_cell0 = bas_mask_idx[jsh] % nbas_cell0;
+    int bas_ij_cell0 = ish_cell0 * nbas_cell0 + jsh_cell0;
     float *q_cond = bounds.q_cond;
     float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;

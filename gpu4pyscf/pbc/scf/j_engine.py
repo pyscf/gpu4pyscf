@@ -91,6 +91,7 @@ class PBCJmatrixOpt:
 
         cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
             cell, 1, group_size, sparse_coeff=True)
+        cell.omega = -self.omega
         self.sorted_cell = cell
         self.ao_idx = ao_idx
         self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)

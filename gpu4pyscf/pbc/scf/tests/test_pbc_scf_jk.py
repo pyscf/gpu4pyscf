@@ -295,31 +295,32 @@ def test_ejk_ip1_per_atom_gamma_point():
         O   0.000    0.    0.1174
         H   1.757    0.    0.4696
         H   0.757    0.    0.4696
-        C   1.      1.    0.
+        O   1.      1.    0.
         H   4.      0.    3.
         H   0.      1.    .6
         ''',
-        a=np.eye(3)*24.,
-        basis=[[0, [.25, 1]]],#, [1, [.3, 1]]],
+        a=np.eye(3)*4.,
+        basis={'H': [[0, [.25, 1]], [1, [.3, 1]]],
+               'O': [[0, [.3,  1]], [2, [.2, 1]]]},
     )
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nao, nao)*.1 - .05
+    dm = np.random.rand(nao, nao)
     dm = dm.dot(dm.T)
-    dm=np.eye(nao)
-    ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(
-        dm, remove_G0=not False).get()
+    ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(dm, remove_G0=True).get()
+    assert abs(ejk.sum(axis=0)).max() < 1e-7
 
     cell.precision = 1e-10
     cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
     vj, vk = FFTDF(cell).get_jk_e1(dm, exxdiv=None)
-    vhf = vk - vk * .5
+    vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[:,p0:p1])
-    assert abs(ejk - ref).max() < 1e-8
+    print(abs(ejk - ref).max())
+    assert abs(ejk - ref).max() < 1e-7
 
 test_ejk_ip1_per_atom_gamma_point()

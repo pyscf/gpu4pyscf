@@ -151,7 +151,8 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, jk, envs, bounds);
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij,
+                           bas_mask_idx, nbas_cell0, jk, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
@@ -201,10 +202,10 @@ while (1) {
             int nao2 = nao * nao;
             double *dm_jk = dm + Ts_ji_lookup[cell_j+cell_k*nimgs] * nao2;
             double *dm_jl = dm + Ts_ji_lookup[cell_j+cell_l*nimgs] * nao2;
-            double *dm_ki = dm + Ts_ji_lookup[             cell_k] * nao2;
-            double *dm_li = dm + Ts_ji_lookup[             cell_l] * nao2;
-            double *dm_ji = dm + Ts_ji_lookup[             cell_j] * nao2;
-            double *dm_lk = dm + Ts_ji_lookup[cell_k*nimgs+cell_l] * nao2;
+            double *dm_ki = dm + Ts_ji_lookup[cell_k             ] * nao2;
+            double *dm_li = dm + Ts_ji_lookup[cell_l             ] * nao2;
+            double *dm_ji = dm + Ts_ji_lookup[cell_j             ] * nao2;
+            double *dm_lk = dm + Ts_ji_lookup[cell_l+cell_k*nimgs] * nao2;
             if (jk.n_dm == 1) {
                 for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
                     int kl = n / nfij;
@@ -482,37 +483,37 @@ while (1) {
                     }
                 }
             }
-            int ka = bas[ksh*BAS_SLOTS+ATOM_OF];
-            int la = bas[lsh*BAS_SLOTS+ATOM_OF];
-            int threads = nsq_per_block * gout_stride;
-            double *reduce = shared_memory + thread_id;
-            __syncthreads();
-            if (task_id < ntasks) {
-                reduce[0*threads] = v_kx;
-                reduce[1*threads] = v_ky;
-                reduce[2*threads] = v_kz;
-                reduce[3*threads] = v_lx;
-                reduce[4*threads] = v_ly;
-                reduce[5*threads] = v_lz;
-            }
-            for (int i = gout_stride/2; i > 0; i >>= 1) {
-                __syncthreads();
-                if (gout_id < i && task_id < ntasks) {
-#pragma unroll
-                    for (int n = 0; n < 6; ++n) {
-                        reduce[n*threads] += reduce[n*threads+i*nsq_per_block];
-                    }
-                }
-            }
-            if (gout_id == 0 && task_id < ntasks) {
-                double *ejk = jk.ejk;
-                atomicAdd(ejk+ka*3+0, reduce[0*threads]);
-                atomicAdd(ejk+ka*3+1, reduce[1*threads]);
-                atomicAdd(ejk+ka*3+2, reduce[2*threads]);
-                atomicAdd(ejk+la*3+0, reduce[3*threads]);
-                atomicAdd(ejk+la*3+1, reduce[4*threads]);
-                atomicAdd(ejk+la*3+2, reduce[5*threads]);
-            }
+//            int ka = bas[ksh*BAS_SLOTS+ATOM_OF];
+//            int la = bas[lsh*BAS_SLOTS+ATOM_OF];
+//            int threads = nsq_per_block * gout_stride;
+//            double *reduce = shared_memory + thread_id;
+//            __syncthreads();
+//            if (task_id < ntasks) {
+//                reduce[0*threads] = v_kx;
+//                reduce[1*threads] = v_ky;
+//                reduce[2*threads] = v_kz;
+//                reduce[3*threads] = v_lx;
+//                reduce[4*threads] = v_ly;
+//                reduce[5*threads] = v_lz;
+//            }
+//            for (int i = gout_stride/2; i > 0; i >>= 1) {
+//                __syncthreads();
+//                if (gout_id < i && task_id < ntasks) {
+//#pragma unroll
+//                    for (int n = 0; n < 6; ++n) {
+//                        reduce[n*threads] += reduce[n*threads+i*nsq_per_block];
+//                    }
+//                }
+//            }
+//            if (gout_id == 0 && task_id < ntasks) {
+//                double *ejk = jk.ejk;
+//                atomicAdd(ejk+ka*3+0, reduce[0*threads]);
+//                atomicAdd(ejk+ka*3+1, reduce[1*threads]);
+//                atomicAdd(ejk+ka*3+2, reduce[2*threads]);
+//                atomicAdd(ejk+la*3+0, reduce[3*threads]);
+//                atomicAdd(ejk+la*3+1, reduce[4*threads]);
+//                atomicAdd(ejk+la*3+2, reduce[5*threads]);
+//            }
         }
     }
     int ia = bas[ish*BAS_SLOTS+ATOM_OF];
@@ -522,9 +523,9 @@ while (1) {
     reduce[0*threads] = v_ix;
     reduce[1*threads] = v_iy;
     reduce[2*threads] = v_iz;
-    reduce[3*threads] = v_jx;
-    reduce[4*threads] = v_jy;
-    reduce[5*threads] = v_jz;
+//    reduce[3*threads] = v_jx;
+//    reduce[4*threads] = v_jy;
+//    reduce[5*threads] = v_jz;
     for (int i = gout_stride/2; i > 0; i >>= 1) {
         __syncthreads();
         if (gout_id < i) {
@@ -539,9 +540,9 @@ while (1) {
         atomicAdd(ejk+ia*3+0, reduce[0*threads]);
         atomicAdd(ejk+ia*3+1, reduce[1*threads]);
         atomicAdd(ejk+ia*3+2, reduce[2*threads]);
-        atomicAdd(ejk+ja*3+0, reduce[3*threads]);
-        atomicAdd(ejk+ja*3+1, reduce[4*threads]);
-        atomicAdd(ejk+ja*3+2, reduce[5*threads]);
+//        atomicAdd(ejk+ja*3+0, reduce[3*threads]);
+//        atomicAdd(ejk+ja*3+1, reduce[4*threads]);
+//        atomicAdd(ejk+ja*3+2, reduce[5*threads]);
     }
 }
 }
@@ -612,7 +613,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         dim3 threads(quartets_per_block, gout_stride);
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
-        buflen = (reserved_shm_size + ij_prims)*sizeof(double) + (nfi+nfj+nfk+nfl)*3*sizeof(int);
+        buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
         rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
                 envs, jk, bounds, bas_mask_idx, Ts_ji_lookup,
