@@ -24,7 +24,7 @@
 
 __device__ static
 void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
-                       int *bas_mask_idx, int nbas_cell0,
+                       int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nbas_cell0,
                        RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
@@ -38,9 +38,12 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
-    int ish_cell0 = bas_mask_idx[ish] % nbas_cell0;
-    int jsh_cell0 = bas_mask_idx[jsh] % nbas_cell0;
+    int _jsh = bas_mask_idx[jsh];
+    int ish_cell0 = ish;
+    int jsh_cell0 = _jsh % nbas_cell0;
+    int cell_j = _jsh / nbas_cell0;
     int bas_ij_cell0 = ish_cell0 * nbas_cell0 + jsh_cell0;
+    int nbas2 = nbas_cell0 * nbas_cell0;
     float *q_cond = bounds.q_cond;
     float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
@@ -90,15 +93,24 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
         }
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
-        int ksh_cell0 = bas_mask_idx[ksh] % nbas_cell0;
-        int lsh_cell0 = bas_mask_idx[lsh] % nbas_cell0;
+        int _ksh = bas_mask_idx[ksh];
+        int _lsh = bas_mask_idx[lsh];
+        int ksh_cell0 = _ksh % nbas_cell0;
+        int lsh_cell0 = _lsh % nbas_cell0;
         if (bas_ij_cell0 < ksh_cell0*nbas_cell0+lsh_cell0) {
             continue;
         }
+        int cell_k = _ksh / nbas_cell0;
+        int cell_l = _lsh / nbas_cell0;
         float d_cutoff = kl_cutoff - q_kl;
-        float dm_jk = dm_cond[jsh*nbas+ksh];
-        float dm_jl = dm_cond[jsh*nbas+lsh];
-        if (dm_jk > d_cutoff || dm_jl > d_cutoff) {
+        float *dm_jk = dm_cond + Ts_ji_lookup[cell_j+cell_k*nimgs] * nbas2;
+        float *dm_jl = dm_cond + Ts_ji_lookup[cell_j+cell_l*nimgs] * nbas2;
+        float *dm_ik = dm_cond + Ts_ji_lookup[cell_k             ] * nbas2;
+        float *dm_il = dm_cond + Ts_ji_lookup[cell_l             ] * nbas2;
+        if (dm_jk[jsh_cell0*nbas_cell0+ksh_cell0] > d_cutoff ||
+            dm_jl[jsh_cell0*nbas_cell0+lsh_cell0] > d_cutoff ||
+            dm_ik[ish_cell0*nbas_cell0+ksh_cell0] > d_cutoff ||
+            dm_il[ish_cell0*nbas_cell0+lsh_cell0] > d_cutoff) {
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
             float ak = diffuse_exps[ksh];
@@ -127,7 +139,10 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
             float theta_rr = logf(rr + 1.f) + theta * rr;
             float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
-            if (dm_jk > d_cutoff || dm_jl > d_cutoff) {
+            if (dm_jk[jsh_cell0*nbas_cell0+ksh_cell0] > d_cutoff ||
+                dm_jl[jsh_cell0*nbas_cell0+lsh_cell0] > d_cutoff ||
+                dm_ik[ish_cell0*nbas_cell0+ksh_cell0] > d_cutoff ||
+                dm_il[ish_cell0*nbas_cell0+lsh_cell0] > d_cutoff) {
                 int off = atomicAdd(&ntasks, 1);
                 bas_kl_idx[off] = bas_kl;
             }
@@ -145,7 +160,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
 
 __device__ static
 void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
-                        int *bas_mask_idx, int nbas_cell0,
+                        int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nbas_cell0,
                         JKEnergy &jk, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;

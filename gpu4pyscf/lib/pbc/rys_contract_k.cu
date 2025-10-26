@@ -152,8 +152,8 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij,
-                          bas_mask_idx, nbas_cell0, envs, bounds);
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
+                          Ts_ji_lookup, nimgs, nbas_cell0, envs, bounds);
         if (ntasks == 0) {
             continue;
         }

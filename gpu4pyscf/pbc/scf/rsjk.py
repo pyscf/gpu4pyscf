@@ -219,13 +219,12 @@ class PBCJKmatrixOpt:
         rad = rcut / lat_unit + 1
         surface = 4*np.pi * rad**2
         lattice_sum_factor = 2*np.pi*(rcut+lat_unit)*lsum/(vol*theta) + surface
-        cutoff = cell.precision / lattice_sum_factor
         # When exp_min is small, the lattice sum over j and k in (ij|kl) would
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
         double_lat_sum_penalty = max(1, (50/(exp_min*lat_unit**2))**3)
-        cutoff /= double_lat_sum_penalty
+        cutoff = cell.precision*1e-1 / lattice_sum_factor / double_lat_sum_penalty
         logger.debug1(cell, 'int3c_kernel integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
@@ -262,9 +261,11 @@ class PBCJKmatrixOpt:
             ao_loc = asarray(sorted_cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
-            dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
-            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
+            if hermi == 0:
+                # Wrap the triu contribution to tril
+                dm_cond = dm_cond + dm_cond.T
+            # Add the dimension for kpts
+            dms = dms[:,None,:,:]
         else:
             scaled_kpts = kpts.dot(cell.lattice_vectors().T)
             Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
@@ -278,6 +279,9 @@ class PBCJKmatrixOpt:
             dms = dms.real
             dms = cp.asarray(dms, order='C')
             dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
+            if hermi == 0:
+                dm_cond = dm_cond + dm_cond.transpose(0,2,1)
+        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
@@ -303,6 +307,10 @@ class PBCJKmatrixOpt:
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
 
+            if hermi == 0:
+                # Contract the tril and triu parts separately
+                dms = cp.vstack([dms, dms.transpose(0,1,3,2)])
+            n_dm = len(dms)
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
             pair_ij_mappings = _make_pair_ij_mappings(
@@ -311,11 +319,12 @@ class PBCJKmatrixOpt:
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
             nimgs = len(supmol.Ls)
-            nimgs_uniq_pair = len(supmol.double_latsum_Ts)
             if is_gamma_point:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
+                nimgs_uniq_pair = 1
             else:
                 Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
+                nimgs_uniq_pair = len(supmol.double_latsum_Ts)
             vk = cp.zeros(dms.shape)
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
@@ -339,7 +348,7 @@ class PBCJKmatrixOpt:
                 err = kern(
                     ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao_supmol),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
                     rys_envs, (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(SHM_SIZE),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -379,6 +388,9 @@ class PBCJKmatrixOpt:
                 expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
                 vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = cp.asarray(vk, order='C').view(np.complex128)[:,:,:,:,0]
+            if hermi != 1:
+                vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
+                vk += vkT.transpose(0,1,3,2).conj()
             return vk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
@@ -398,7 +410,8 @@ class PBCJKmatrixOpt:
 
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
         vk = vk.reshape(-1,nao,nao)
-        vk = transpose_sum(vk)
+        if hermi == 1:
+            vk = transpose_sum(vk)
         vk = apply_coeff_CT_mat_C(vk, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
 
@@ -514,7 +527,7 @@ class PBCJKmatrixOpt:
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
-            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
+            dm_cond = _dm_cond_from_compressed_dm_supmol(supmol, dms)
         n_dm = len(dms)
         assert n_dm <= 2
         log_max_dm = float(dm_cond.max().get())
@@ -865,6 +878,20 @@ def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
     return pair_mappings
 
 def _dm_cond_from_compressed_dm(supmol, dms):
+    '''Largest density matrix elements for each shell-pair. The input and output
+    are the abstract arrays that are compressed over the double-lattice-sum
+    '''
+    cell = supmol.cell
+    ao_loc = asarray(cell.ao_loc)
+    n_dm, n_Ts, nao = dms.shape[:3]
+    Ts_ao_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
+    Ts_ao_loc = cp.append(Ts_ao_loc.ravel(), np.int32(n_Ts*nao))
+    dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), Ts_ao_loc, ao_loc)
+    nbas = cell.nbas
+    dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
+    return dm_cond
+
+def _dm_cond_from_compressed_dm_supmol(supmol, dms):
     '''Largest density matrix elements for each shell-pair. The input and output
     are the abstract arrays that are compressed over the double-lattice-sum
     '''

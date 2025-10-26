@@ -60,12 +60,7 @@ def test_sr_vj_hermi1_kpts_vs_cpu():
     )
 
     kpts = cell.make_kpts([3,2,1])
-    nkpts = len(kpts)
-    np.random.seed(9)
-    nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao)*.2
-    dm = dm + dm.transpose(0, 2, 1).conj()
-    dm[4:6] = dm[2:4].conj()
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -122,13 +117,7 @@ def test_sr_vj_hermi1_kpts_vs_fft():
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
     kpts = cell.make_kpts([3,2,1])
-    nkpts = len(kpts)
-    np.random.seed(9)
-    nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao)*.2
-    dm = dm + dm.transpose(0, 2, 1).conj()
-    dm[:]=1
-    #dm[4:6] = dm[2:4].conj()
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
 
     cell.precision = 1e-10
@@ -183,11 +172,7 @@ def test_sr_vj_hermi0_kpts_vs_fft():
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
     kpts = cell.make_kpts([3,2,1])
-    nkpts = len(kpts)
-    np.random.seed(9)
-    nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao)*.2
-    dm[4:6] = dm[2:4].conj()
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=0, kpts=kpts).get()
 
     cell.precision = 1e-10
@@ -241,13 +226,7 @@ def test_vj_hermi1_kpts_vs_fft():
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
     kpts = cell.make_kpts([3,2,1])
-    nkpts = len(kpts)
-    np.random.seed(9)
-    nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao)*.2
-    dm = dm + dm.transpose(0, 2, 1).conj()
-    dm[4:6] = dm[2:4].conj()
-    dm = np.array([np.eye(nao)]*nkpts)
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     vj = j_engine.get_j(cell, dm, hermi=1, kpts=kpts).get()
 
     cell.precision = 1e-10
@@ -292,11 +271,7 @@ def test_vj_hermi0_kpts_vs_fft():
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
     kpts = cell.make_kpts([3,2,1])
-    nkpts = len(kpts)
-    np.random.seed(9)
-    nao = cell.nao
-    dm = np.random.rand(nkpts, nao, nao)*.2
-    dm[4:6] = dm[2:4].conj()
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     vj = j_engine.get_j(cell, dm, hermi=0, kpts=kpts).get()
 
     cell.precision = 1e-10

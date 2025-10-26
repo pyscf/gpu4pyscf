@@ -104,9 +104,8 @@ while (1) {
     __shared__ double ri[3];
     __shared__ double rjri[3];
     if (thread_id == 0) {
-        int _ish = bas_mask_idx[ish];
         int _jsh = bas_mask_idx[jsh];
-        ish_cell0 = _ish % nbas_cell0;
+        ish_cell0 = ish;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
         i0 = ao_loc[ish_cell0];
@@ -154,8 +153,8 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij,
-                           bas_mask_idx, nbas_cell0, jk, envs, bounds);
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
+                           Ts_ji_lookup, nimgs, nbas_cell0, jk, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
