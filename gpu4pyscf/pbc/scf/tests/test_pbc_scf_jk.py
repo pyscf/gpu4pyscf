@@ -28,8 +28,9 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
         H   0.757    0.    0.4696
         C   1.      1.    0.
         ''',
-        a=np.eye(3)*7.,
-        basis=('ccpvdz', [[3, [.5, 1]]]),
+        a=np.eye(3)*6.,
+        basis={'default': ('ccpvdz', [[3, [.5, 1]]]),
+               'H': 'ccpvdz'}
     )
 
     np.random.seed(9)
@@ -54,8 +55,9 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
         H   1.757    0.    0.4696
         H   0.757    0.    0.4696
         ''',
-        a=np.eye(3)*7.,
-        basis=('ccpvdz', [[3, [.5, 1]]]),
+        a=np.eye(3)*6.,
+        basis={'O': ('ccpvdz', [[3, [.5, 1]]]),
+               'H': 'ccpvdz'}
     )
 
     kpts = cell.make_kpts([3,2,1])
@@ -285,3 +287,39 @@ def test_vk_hermi0_kpts_vs_fft():
     cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
+
+def test_ejk_ip1_per_atom_gamma_point():
+    from pyscf.pbc.df.fft import FFTDF
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        H   1.757    0.    0.4696
+        H   0.757    0.    0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*24.,
+        basis=[[0, [.25, 1]]],#, [1, [.3, 1]]],
+    )
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(nao, nao)*.1 - .05
+    dm = dm.dot(dm.T)
+    dm=np.eye(nao)
+    ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(
+        dm, remove_G0=not False).get()
+
+    cell.precision = 1e-10
+    cell.build(0, 0)
+    cell.omega = -rsjk.OMEGA
+    vj, vk = FFTDF(cell).get_jk_e1(dm, exxdiv=None)
+    vhf = vk - vk * .5
+    aoslices = cell.aoslice_by_atom()
+    ref = np.empty((cell.natm, 3))
+    for i in range(cell.natm):
+        p0, p1 = aoslices[i, 2:]
+        ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[:,p0:p1])
+    assert abs(ejk - ref).max() < 1e-8
+
+test_ejk_ip1_per_atom_gamma_point()

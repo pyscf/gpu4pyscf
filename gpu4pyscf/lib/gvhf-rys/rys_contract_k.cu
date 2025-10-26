@@ -98,8 +98,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         idx_l[t_id] = lex_xyz_address(ll, t_id) * stride_l * nsq_per_block;
     }
 
-    __shared__ int ish;
-    __shared__ int jsh;
+    __shared__ int ish, jsh, i0, j0, nao;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
@@ -113,6 +112,10 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         jsh = bas_ij % nbas;
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        int *ao_loc = envs.ao_loc;
+        nao = ao_loc[nbas];
+        i0 = ao_loc[ish];
+        j0 = ao_loc[jsh];
     }
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -162,7 +165,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
-            if (ish == jsh) fac_sym *= .5;
             if (ksh == lsh) fac_sym *= .5;
             if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
         } else {
@@ -467,9 +469,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
             int koff = goff.koff;
             int loff = goff.loff;
             int *ao_loc = envs.ao_loc;
-            int nao = ao_loc[nbas];
-            int i0 = ao_loc[ish];
-            int j0 = ao_loc[jsh];
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             int nfi = bounds.nfi;
@@ -490,12 +489,14 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
             load_dm(dm+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
             dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao, i0, k0,
                                 ioff, joff, loff, koff, ldl, nfi, nfk, active);
-            load_dm(dm+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
-            dot_dm<3, 1, 9, 27>(vk, dm_cache, gout, nao, j0, l0,
-                                joff, ioff, koff, loff, ldk, nfj, nfl, active);
-            load_dm(dm+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
-            dot_dm<3, 1, 27, 9>(vk, dm_cache, gout, nao, j0, k0,
-                                joff, ioff, loff, koff, ldl, nfj, nfk, active);
+            if (ish != jsh) {
+                load_dm(dm+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
+                dot_dm<3, 1, 9, 27>(vk, dm_cache, gout, nao, j0, l0,
+                                    joff, ioff, koff, loff, ldk, nfj, nfl, active);
+                load_dm(dm+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
+                dot_dm<3, 1, 27, 9>(vk, dm_cache, gout, nao, j0, k0,
+                                    joff, ioff, loff, koff, ldl, nfj, nfk, active);
+            }
         }
     }
 }

@@ -24,6 +24,7 @@
 
 __device__ static
 void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
+                       int *bas_mask_idx, int nbas_cell0,
                        RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
@@ -37,6 +38,9 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
+    int ish_cell0 = bas_mask_idx[ish] % nbas_cell0;
+    int jsh_cell0 = bas_mask_idx[jsh] % nbas_cell0;
+    int bas_ij_cell0 = ish_cell0 * nbas_cell0 + jsh_cell0;
     float *q_cond = bounds.q_cond;
     float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
@@ -86,6 +90,11 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
         }
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
+        int ksh_cell0 = bas_mask_idx[ksh] % nbas_cell0;
+        int lsh_cell0 = bas_mask_idx[lsh] % nbas_cell0;
+        if (bas_ij_cell0 < ksh_cell0*nbas_cell0+lsh_cell0) {
+            continue;
+        }
         float d_cutoff = kl_cutoff - q_kl;
         float dm_jk = dm_cond[jsh*nbas+ksh];
         float dm_jl = dm_cond[jsh*nbas+lsh];

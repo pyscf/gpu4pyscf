@@ -97,7 +97,7 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, ish_cell0, jsh_cell0, cell_j, i0, j0;
+    __shared__ int ish, jsh, cell_j, i0, j0;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     if (thread_id == 0) {
@@ -105,10 +105,10 @@ while (1) {
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         int _ish = bas_mask_idx[ish];
-        ish_cell0 = _ish % nbas_cell0;
+        int ish_cell0 = _ish % nbas_cell0;
         int _jsh = bas_mask_idx[jsh];
+        int jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
-        jsh_cell0 = _jsh % nbas_cell0;
         i0 = ao_loc[ish_cell0];
         j0 = ao_loc[jsh_cell0];
     }
@@ -621,12 +621,8 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        int device_id = -1;
-        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
-        if (err_get_device_id != cudaSuccess) {
-            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
-        }
-        fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
+        fprintf(stderr, "CUDA Error in PBC_per_atom_jk_ip1, li,lj,lk,ll = %d,%d,%d,%d, error message = %s\n",
+                li,lj,lk,ll, cudaGetErrorString(err));
         return 1;
     }
     return 0;

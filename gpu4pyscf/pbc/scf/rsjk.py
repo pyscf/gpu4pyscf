@@ -40,6 +40,7 @@ from gpu4pyscf.scf.jk import (
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.tools.pbc import get_coulG
+from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
 libpbc.PBC_build_k.restype = ctypes.c_int
 libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 
+DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 OMEGA = 0.3
 
 def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None,
@@ -288,8 +290,8 @@ class PBCJKmatrixOpt:
         # TODO: i >= k if hermi == 1
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
-                 for j in range(n_groups)
-                 for k in range(n_groups)
+                 for j in range(i+1)
+                 for k in range(i+1)
                  for l in range(k+1))
 
         def proc(dms, dm_cond):
@@ -302,9 +304,9 @@ class PBCJKmatrixOpt:
 
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
-            pair_ij_mappings = _make_pair_ij_mappings(
+            pair_ij_mappings = _make_pair_ij_mappings_s2(
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
-            pair_kl_mappings = _make_tril_pair_mappings(
+            pair_kl_mappings = _make_tril_pair_mappings_cell0(
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
             nimgs = len(supmol.Ls)
@@ -395,6 +397,7 @@ class PBCJKmatrixOpt:
 
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
         vk = vk.reshape(-1,nao,nao)
+        vk = transpose_sum(vk)
         vk = apply_coeff_CT_mat_C(vk, cell, sorted_cell, self.uniq_l_ctr,
                                   self.l_ctr_offsets, self.ao_idx)
 
@@ -472,7 +475,8 @@ class PBCJKmatrixOpt:
             # terms in the ewald exx correction?
         return coulG
 
-    def _get_ejk_sr_ip1(self, dm, kpts, j_factor=1., k_factor=1., verbose=None):
+    def _get_ejk_sr_ip1(self, dm, kpts=None, remove_G0=False,
+                        j_factor=1., k_factor=1., verbose=None):
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
@@ -514,6 +518,9 @@ class PBCJKmatrixOpt:
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
+        libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
+        libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = self.l_ctr_offsets
@@ -552,10 +559,11 @@ class PBCJKmatrixOpt:
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.uint32)
+            dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
 
             timing_counter = Counter()
             kern_counts = 0
-            kern = libpbc.PBC_build_k_ip1
+            kern = libpbc.PBC_per_atom_jk_ip1
             rys_envs = self.rys_envs
 
             for task in tasks:
@@ -567,13 +575,14 @@ class PBCJKmatrixOpt:
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
+                scheme = _ejk_quartets_scheme(sorted_cell, uniq_l_ctr[[i, j, k, l]])
                 err = kern(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                     ctypes.c_double(j_factor), ctypes.c_double(k_factor),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm),
-                    rys_envs, (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(SHM_SIZE),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    rys_envs, (ctypes.c_int*2)(*scheme),
+                    (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
@@ -585,13 +594,14 @@ class PBCJKmatrixOpt:
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(sorted_cell.nbas),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
-                    raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
+                    raise RuntimeError(f'PBC_build_jk_ip1 kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -629,17 +639,20 @@ class PBCJKmatrixOpt:
             omega = self.omega
             wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
             int1e_opt = int1e._Int1eOpt(cell, kpts)
-            s = opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
-            s1 = opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
+            s = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
+            s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
             j_dm = cp.einsum('kij,nkji->', s, dms)
-            j_dm = dms.sum(axis=0) * j_dm
+            j_dm = dms.sum(axis=0) * (j_factor * j_dm * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dms, s)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
+            k_dm *= .5 * k_factor * wcoulG_SR_at_G0
             aoslices = cell.aoslice_by_atom()
+            ejk_G0 = cp.zeros_like(ejk)
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
-                ejk[i] += j_factor * cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:pq]).real
-                ejk[i] -= k_factor * cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:pq]).real
+                ejk_G0[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
+                ejk_G0[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
+            ejk += ejk_G0
 
         if not is_gamma_point:
             ejk *= 1. / nkpts
@@ -695,6 +708,7 @@ class ExtendedMole(gto.Mole):
         mask = cp.any(d < rcut_for_atoms, axis=1).get()
         bas_mask = mask[supmol._bas[:,gto.ATOM_OF]]
         bas_mask[:cell.nbas] = True # Ensure shells in the first image are all included
+        bas_mask[:]=True
         bas_mask_idx = np.where(bas_mask)[0]
 
         ao_loc = supmol.ao_loc
@@ -807,22 +821,66 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
             pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
     return pair_mappings
 
-def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    nimgs = len(supmol.Ls)
+def _make_tril_pair_mappings_cell0(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
     cell = supmol.cell
     nbas_cell0 = cell.nbas
-    bas_mask = np.zeros(nimgs*nbas_cell0, dtype=bool)
+    nbas = np.uint32(supmol.nbas)
+    assert nbas < 65535
+    nimgs = len(supmol.Ls)
+    # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
+    # The same pattern can be applied to the remaining images within the supmol.
+    # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
+    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
     bas_mask[supmol.bas_mask_idx] = True
     bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = np.empty(nimgs*nbas_cell0, dtype=np.int32)
-    raw_bas_idx[supmol.bas_mask_idx] = np.arange(supmol.nbas, dtype=np.int32)
+    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.uint32)
+    raw_bas_idx[supmol.bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.uint32)
     raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
     n_groups = len(l_ctr_bas_loc) - 1
     bas_idx_lookup = []
     for i in range(n_groups):
         ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
         bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
-        bas_idx_lookup.append(asarray(bas_idx))
+        # Align to "tile", padding -1 at the end
+        pad_len = (tile*len(bas_idx) - len(bas_idx)) % tile
+        bas_idx = cp.append(bas_idx, cp.full(pad_len, nbas, dtype=np.uint32))
+        bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.uint32).reshape(-1, tile))
+
+    sh_cell0 = cp.asarray(supmol.bas_mask_idx) % nbas_cell0
+    sh_cell0 = cp.append(sh_cell0, 0)
+    q_cond = q_cond.ravel()
+    pair_mappings = {}
+    for i in range(n_groups):
+        for j in range(i+1):
+            ish = bas_idx_lookup[i][:,None,:,None]
+            jsh = bas_idx_lookup[j][None,:,None,:]
+            pair_ij = ish * nbas + jsh
+            if i == j:
+                ish_cell0 = sh_cell0[ish]
+                jsh_cell0 = sh_cell0[jsh]
+                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas) & (ish_cell0 >= jsh_cell0)]
+            else:
+                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas)]
+            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
+            pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
+    return pair_mappings
+
+def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
+    nimgs = len(supmol.Ls)
+    cell = supmol.cell
+    nbas_cell0 = cell.nbas
+    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
+    bas_mask[supmol.bas_mask_idx] = True
+    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
+    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int32)
+    raw_bas_idx[supmol.bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.int32)
+    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
+    n_groups = len(l_ctr_bas_loc) - 1
+    bas_idx_lookup = []
+    for i in range(n_groups):
+        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+        bas_idx = asarray(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
+        bas_idx_lookup.append(bas_idx)
 
     nbas = np.int32(q_cond.shape[0])
     q_cond = q_cond.ravel()
@@ -835,6 +893,46 @@ def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
             ish = ish[ish < nbas_cell0]
             jsh = bas_idx_lookup[j]
             pair_ij = (ish * nbas + jsh[:,None]).ravel()
+            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
+            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
+    return pair_mappings
+
+def _make_pair_ij_mappings_s2(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
+    nimgs = len(supmol.Ls)
+    cell = supmol.cell
+    nbas_cell0 = cell.nbas
+    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
+    bas_mask[supmol.bas_mask_idx] = True
+    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
+    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int32)
+    raw_bas_idx[supmol.bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.int32)
+    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
+    n_groups = len(l_ctr_bas_loc) - 1
+    bas_idx_lookup = []
+    for i in range(n_groups):
+        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+        bas_idx = asarray(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
+        bas_idx_lookup.append(bas_idx)
+
+    nbas = np.int32(q_cond.shape[0])
+    sh_cell0 = cp.asarray(supmol.bas_mask_idx) % nbas_cell0
+    sh_cell0 = cp.append(sh_cell0, 0)
+    q_cond = q_cond.ravel()
+    pair_mappings = {}
+    for i in range(n_groups):
+        for j in range(i+1):
+            # pair_ij is sorted in the order that the ish changes fast.
+            # This order can reduce the atomicAdd conflicts in the CUDA kernel.
+            ish = bas_idx_lookup[i]
+            ish = ish[ish < nbas_cell0]
+            jsh = bas_idx_lookup[j]
+            pair_ij = ish * nbas + jsh[:,None]
+            if i == j:
+                ish_cell0 = sh_cell0[ish]
+                jsh_cell0 = sh_cell0[jsh]
+                pair_ij = pair_ij[ish_cell0 >= jsh_cell0[:,None]]
+            else:
+                pair_ij = pair_ij.ravel()
             pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
             pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
     return pair_mappings
