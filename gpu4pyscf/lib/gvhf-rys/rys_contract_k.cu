@@ -166,7 +166,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ksh == lsh) fac_sym *= .5;
-            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+            if (bas_ij == bas_kl) fac_sym *= .5;
         } else {
             fac_sym = 0;
         }

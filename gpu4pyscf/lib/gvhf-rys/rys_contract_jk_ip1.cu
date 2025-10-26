@@ -568,7 +568,11 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
+        double cicj = ci[ip] * cj[jp];
+        if (ish == jsh) {
+            cicj *= .5;
+        }
+        cicj_cache[ij] = cicj * Kab;
     }
 
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
@@ -578,9 +582,8 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
-            if (ish == jsh) fac_sym *= .5;
             if (ksh == lsh) fac_sym *= .5;
-            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+            if (bas_ij == bas_kl) fac_sym *= .5;
         } else {
             fac_sym = 0;
         }

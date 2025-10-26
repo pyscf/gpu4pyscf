@@ -97,17 +97,17 @@ while (1) {
         break;
     }
 
-    __shared__ int ish, jsh, cell_j, i0, j0;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
+    int ish = bas_ij / nbas;
+    int jsh = bas_ij % nbas;
+    __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     if (thread_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
         int _ish = bas_mask_idx[ish];
-        int ish_cell0 = _ish % nbas_cell0;
         int _jsh = bas_mask_idx[jsh];
-        int jsh_cell0 = _jsh % nbas_cell0;
+        ish_cell0 = _ish % nbas_cell0;
+        jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
         i0 = ao_loc[ish_cell0];
         j0 = ao_loc[jsh_cell0];
@@ -136,7 +136,11 @@ while (1) {
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
+        double cicj = ci[ip] * cj[jp];
+        if (ish_cell0 == jsh_cell0) {
+            cicj *= .5;
+        }
+        cicj_cache[ij] = cicj * Kab;
     }
     double v_ix = 0;
     double v_iy = 0;
@@ -150,7 +154,6 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij,
                            bas_mask_idx, nbas_cell0, jk, envs, bounds);
         if (ntasks == 0) {
@@ -170,14 +173,15 @@ while (1) {
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
             if (task_id < ntasks) {
-                if (ksh == lsh) fac_sym *= .5;
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
             } else {
                 fac_sym = 0;
             }
             int k0 = ao_loc[ksh_cell0];
             int l0 = ao_loc[lsh_cell0];
-            double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-            double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+            double *expi = env + bas[ish_cell0*BAS_SLOTS+PTR_EXP];
+            double *expj = env + bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
             double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
             double *expl = env + bas[lsh*BAS_SLOTS+PTR_EXP];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -483,49 +487,49 @@ while (1) {
                     }
                 }
             }
-//            int ka = bas[ksh*BAS_SLOTS+ATOM_OF];
-//            int la = bas[lsh*BAS_SLOTS+ATOM_OF];
-//            int threads = nsq_per_block * gout_stride;
-//            double *reduce = shared_memory + thread_id;
-//            __syncthreads();
-//            if (task_id < ntasks) {
-//                reduce[0*threads] = v_kx;
-//                reduce[1*threads] = v_ky;
-//                reduce[2*threads] = v_kz;
-//                reduce[3*threads] = v_lx;
-//                reduce[4*threads] = v_ly;
-//                reduce[5*threads] = v_lz;
-//            }
-//            for (int i = gout_stride/2; i > 0; i >>= 1) {
-//                __syncthreads();
-//                if (gout_id < i && task_id < ntasks) {
-//#pragma unroll
-//                    for (int n = 0; n < 6; ++n) {
-//                        reduce[n*threads] += reduce[n*threads+i*nsq_per_block];
-//                    }
-//                }
-//            }
-//            if (gout_id == 0 && task_id < ntasks) {
-//                double *ejk = jk.ejk;
-//                atomicAdd(ejk+ka*3+0, reduce[0*threads]);
-//                atomicAdd(ejk+ka*3+1, reduce[1*threads]);
-//                atomicAdd(ejk+ka*3+2, reduce[2*threads]);
-//                atomicAdd(ejk+la*3+0, reduce[3*threads]);
-//                atomicAdd(ejk+la*3+1, reduce[4*threads]);
-//                atomicAdd(ejk+la*3+2, reduce[5*threads]);
-//            }
+            int ka = bas[ksh_cell0*BAS_SLOTS+ATOM_OF];
+            int la = bas[lsh_cell0*BAS_SLOTS+ATOM_OF];
+            int threads = nsq_per_block * gout_stride;
+            double *reduce = shared_memory + thread_id;
+            __syncthreads();
+            if (task_id < ntasks) {
+                reduce[0*threads] = v_kx;
+                reduce[1*threads] = v_ky;
+                reduce[2*threads] = v_kz;
+                reduce[3*threads] = v_lx;
+                reduce[4*threads] = v_ly;
+                reduce[5*threads] = v_lz;
+            }
+            for (int i = gout_stride/2; i > 0; i >>= 1) {
+                __syncthreads();
+                if (gout_id < i && task_id < ntasks) {
+#pragma unroll
+                    for (int n = 0; n < 6; ++n) {
+                        reduce[n*threads] += reduce[n*threads+i*nsq_per_block];
+                    }
+                }
+            }
+            if (gout_id == 0 && task_id < ntasks) {
+                double *ejk = jk.ejk;
+                atomicAdd(ejk+ka*3+0, reduce[0*threads]);
+                atomicAdd(ejk+ka*3+1, reduce[1*threads]);
+                atomicAdd(ejk+ka*3+2, reduce[2*threads]);
+                atomicAdd(ejk+la*3+0, reduce[3*threads]);
+                atomicAdd(ejk+la*3+1, reduce[4*threads]);
+                atomicAdd(ejk+la*3+2, reduce[5*threads]);
+            }
         }
     }
-    int ia = bas[ish*BAS_SLOTS+ATOM_OF];
-    int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+    int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+    int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
     double *reduce = shared_memory + thread_id;
     __syncthreads();
     reduce[0*threads] = v_ix;
     reduce[1*threads] = v_iy;
     reduce[2*threads] = v_iz;
-//    reduce[3*threads] = v_jx;
-//    reduce[4*threads] = v_jy;
-//    reduce[5*threads] = v_jz;
+    reduce[3*threads] = v_jx;
+    reduce[4*threads] = v_jy;
+    reduce[5*threads] = v_jz;
     for (int i = gout_stride/2; i > 0; i >>= 1) {
         __syncthreads();
         if (gout_id < i) {
@@ -540,9 +544,9 @@ while (1) {
         atomicAdd(ejk+ia*3+0, reduce[0*threads]);
         atomicAdd(ejk+ia*3+1, reduce[1*threads]);
         atomicAdd(ejk+ia*3+2, reduce[2*threads]);
-//        atomicAdd(ejk+ja*3+0, reduce[3*threads]);
-//        atomicAdd(ejk+ja*3+1, reduce[4*threads]);
-//        atomicAdd(ejk+ja*3+2, reduce[5*threads]);
+        atomicAdd(ejk+ja*3+0, reduce[3*threads]);
+        atomicAdd(ejk+ja*3+1, reduce[4*threads]);
+        atomicAdd(ejk+ja*3+2, reduce[5*threads]);
     }
 }
 }

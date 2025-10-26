@@ -96,19 +96,22 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         idx_l[t_id] = lex_xyz_address(ll, t_id) * stride_l * nsq_per_block;
     }
 
-    __shared__ int ish;
-    __shared__ int jsh;
+    int nbas = envs.nbas;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    int ish = bas_ij / nbas;
+    int jsh = bas_ij % nbas;
+    __shared__ int i0, j0, nao;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
     __shared__ double *expi;
     __shared__ double *expj;
-    int nbas = envs.nbas;
-    int *bas = envs.bas;
-    double *env = envs.env;
     if (t_id == 0) {
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int *ao_loc = envs.ao_loc;
+        nao = ao_loc[nbas];
+        i0 = ao_loc[ish];
+        j0 = ao_loc[jsh];
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
@@ -134,7 +137,11 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double theta_ij = ai * aj / aij;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         double Kab = exp(-theta_ij * rr_ij);
-        cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
+        double cicj = ci[ip] * cj[jp];
+        if (ish == jsh) {
+            cicj *= .5;
+        }
+        cicj_cache[ij] = cicj * Kab;
     }
 
     for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
@@ -160,9 +167,8 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
-            if (ish == jsh) fac_sym *= .5;
             if (ksh == lsh) fac_sym *= .5;
-            if (ish*nbas+jsh == bas_kl) fac_sym *= .5;
+            if (bas_ij == bas_kl) fac_sym *= .5;
         } else {
             fac_sym = 0;
         }
@@ -409,9 +415,6 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             int koff = goff.koff;
             int loff = goff.loff;
             int *ao_loc = envs.ao_loc;
-            int nao = ao_loc[nbas];
-            int i0 = ao_loc[ish];
-            int j0 = ao_loc[jsh];
             int k0 = ao_loc[ksh];
             int l0 = ao_loc[lsh];
             int nfi = bounds.nfi;

@@ -34,7 +34,7 @@
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   int *bas_mask_idx, int *Ts_ji_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0,
+                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                   uint32_t *pool, int *head, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
@@ -435,7 +435,6 @@ while (1) {
             int *ao_loc = envs.ao_loc;
             int k0 = ao_loc[ksh_cell0];
             int l0 = ao_loc[lsh_cell0];
-            int nao = ao_loc[nbas_cell0];
             int nao2 = nao * nao;
             int dm_size = nao2 * nimgs_uniq_pair;
             int nfi = bounds.nfi;
@@ -656,7 +655,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
 
         rys_k_kernel<<<workers, threads, buflen>>>(
             envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -666,7 +665,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
                 envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0,
+                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
 
@@ -676,7 +675,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
                 envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0,
+                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }
     }

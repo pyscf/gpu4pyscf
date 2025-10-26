@@ -214,6 +214,11 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
         }
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
+        int ksh_cell0 = bas_mask_idx[ksh] % nbas_cell0;
+        int lsh_cell0 = bas_mask_idx[lsh] % nbas_cell0;
+        if (bas_ij_cell0 < ksh_cell0*nbas_cell0+lsh_cell0) {
+            continue;
+        }
         float d_cutoff = kl_cutoff - q_kl;
         float dm_jk = dm_cond[jsh*nbas+ksh];
         float dm_jl = dm_cond[jsh*nbas+lsh];

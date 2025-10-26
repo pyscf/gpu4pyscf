@@ -531,8 +531,8 @@ class PBCJKmatrixOpt:
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
-                 for j in range(n_groups)
-                 for k in range(n_groups)
+                 for j in range(i+1)
+                 for k in range(i+1)
                  for l in range(k+1))
 
         def proc(dms, dm_cond):
@@ -545,9 +545,9 @@ class PBCJKmatrixOpt:
 
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
-            pair_ij_mappings = _make_pair_ij_mappings_s1(
+            pair_ij_mappings = _make_pair_ij_mappings(
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
-            pair_kl_mappings = _make_tril_pair_mappings_s1(
+            pair_kl_mappings = _make_tril_pair_mappings(
                 supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
             nimgs = len(supmol.Ls)

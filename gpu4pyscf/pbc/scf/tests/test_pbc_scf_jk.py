@@ -292,7 +292,6 @@ def test_ejk_ip1_per_atom_gamma_point():
     from pyscf.pbc.df.fft import FFTDF
     cell = pyscf.M(
         atom = '''
-        O   0.000    0.    0.1174
         H   1.757    0.    0.4696
         H   0.757    0.    0.4696
         O   1.      1.    0.
@@ -320,7 +319,4 @@ def test_ejk_ip1_per_atom_gamma_point():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[:,p0:p1])
-    print(abs(ejk - ref).max())
     assert abs(ejk - ref).max() < 1e-7
-
-test_ejk_ip1_per_atom_gamma_point()
