@@ -1731,7 +1731,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
                 for g0 in range(grid_start, grid_end, ngrids_per_batch):
                     g1 = min(g0 + ngrids_per_batch, grid_end)
-                    split_grids_coords = grids.coords[g0:g1, :]
+                    split_grids_coords = cupy.asarray(grids.coords)[g0:g1, :]
                     split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
 
                     mu = split_ao[0]
@@ -1756,14 +1756,14 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                         dwdA_depsilondrho_mu = None
                     dwdA_depsilondrho = None
 
-                    grid_to_atom_index_map = grids.atm_idx[g0:g1]
+                    grid_to_atom_index_map = cupy.asarray(grids.atm_idx)[g0:g1]
                     atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
                     grid_to_atom_index_map = None
 
                     _, drho_dA_grid_response = \
                         get_drho_dA_full(dm0, xctype, natm, g1 - g0, None, atom_to_grid_index_map, mu, dmu_dr, with_orbital_response = False)
 
-                    weight = grids.weights[g0:g1]
+                    weight = cupy.asarray(grids.weights)[g0:g1]
                     # # Negative here to cancel the overall negative sign before return
                     # vmat -= cupy.einsum("g,g,Adg,pg,qg,qj->Adpj", weight, d2epsilon_drho2, drho_dA_grid_response, mu, mu, mocc)
                     weight_d2epsilondrho2_drhodA_grid_response = drho_dA_grid_response * (weight * d2epsilon_drho2)
@@ -1812,7 +1812,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
                 for g0 in range(grid_start, grid_end, ngrids_per_batch):
                     g1 = min(g0 + ngrids_per_batch, grid_end)
-                    split_grids_coords = grids.coords[g0:g1, :]
+                    split_grids_coords = cupy.asarray(grids.coords)[g0:g1, :]
                     split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
 
                     mu = split_ao[0]
@@ -1855,14 +1855,14 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                     depsilondnablarho_dmudr_occ = None
                     dw_dA = None
 
-                    grid_to_atom_index_map = grids.atm_idx[g0:g1]
+                    grid_to_atom_index_map = cupy.asarray(grids.atm_idx)[g0:g1]
                     atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
                     grid_to_atom_index_map = None
 
                     _, _, drho_dA_grid_response, dnablarho_dA_grid_response = \
                         get_drho_dA_full(dm0, xctype, natm, g1 - g0, None, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, with_orbital_response = False)
 
-                    weight = grids.weights[g0:g1]
+                    weight = cupy.asarray(grids.weights)[g0:g1]
                     # # Negative here to cancel the overall negative sign before return
                     # # d2epsilon/drho2 * drho/dR * mu * nu
                     # vmat -= cupy.einsum("g,g,Adg,pg,qg,qj->Adpj", weight, d2epsilon_drho2, drho_dA_grid_response, mu, mu, mocc)
@@ -1970,7 +1970,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
                 for g0 in range(grid_start, grid_end, ngrids_per_batch):
                     g1 = min(g0 + ngrids_per_batch, grid_end)
-                    split_grids_coords = grids.coords[g0:g1, :]
+                    split_grids_coords = cupy.asarray(grids.coords)[g0:g1, :]
                     split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
 
                     mu = split_ao[0]
@@ -2025,14 +2025,14 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                     depsilondtau_dmudr_occ = None
                     dw_dA = None
 
-                    grid_to_atom_index_map = grids.atm_idx[g0:g1]
+                    grid_to_atom_index_map = cupy.asarray(grids.atm_idx)[g0:g1]
                     atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
                     grid_to_atom_index_map = None
 
                     _, _, _, drho_dA_grid_response, dnablarho_dA_grid_response, dtau_dA_grid_response = \
                         get_drho_dA_full(dm0, xctype, natm, g1 - g0, None, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, with_orbital_response = False)
 
-                    weight = grids.weights[g0:g1]
+                    weight = cupy.asarray(grids.weights)[g0:g1]
                     # # d2epsilon/drho2 * drho/dR * mu * nu
                     # vmat -= cupy.einsum("g,g,Adg,pg,qg,qj->Adpj", weight, d2epsilon_drho2, drho_dA_grid_response, mu, mu, mocc)
                     # # d2epsilon/(drho d_nabla_rho) * d_nabla_rho/dR * mu * nu
@@ -2219,9 +2219,9 @@ def get_dweight_dA(mol, grids, grid_range = None):
     from gpu4pyscf.dft import radi
     a_factor = radi.get_treutler_fac(mol, grids.atomic_radii)
 
-    grids_coords = grids.coords
-    grids_quadrature_weights = grids.quadrature_weights
-    grids_atm_idx = grids.atm_idx
+    grids_coords = cupy.asarray(grids.coords)
+    grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
+    grids_atm_idx = cupy.asarray(grids.atm_idx)
     if grid_range is not None:
         assert numpy.asarray(grid_range).shape == (2,)
         assert grid_range[1] > grid_range[0]
@@ -2256,9 +2256,9 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
     from gpu4pyscf.dft import radi
     a_factor = radi.get_treutler_fac(mol, grids.atomic_radii)
 
-    grids_coords = grids.coords
-    grids_quadrature_weights = grids.quadrature_weights
-    grids_atm_idx = grids.atm_idx
+    grids_coords = cupy.asarray(grids.coords)
+    grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
+    grids_atm_idx = cupy.asarray(grids.atm_idx)
     if grid_range is not None:
         assert numpy.asarray(grid_range).shape == (2,)
         assert grid_range[1] > grid_range[0]
