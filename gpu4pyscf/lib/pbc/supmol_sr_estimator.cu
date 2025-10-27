@@ -37,8 +37,8 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
     int threads = blockDim.x * blockDim.y;
     int thread_id = tx + blockDim.x * ty;
     uint32_t nbas = envs.nbas;
-    int ish0 = blockIdx.y * blockDim.y + ty;
-    int jsh0 = blockIdx.x * blockDim.x + tx;
+    int ish0 = blockIdx.y * BLOCK_SIZE + ty;
+    int jsh0 = blockIdx.x * BLOCK_SIZE + tx;
     int ish1 = min(ish0 + BLOCK_SIZE, nbas);
     int jsh1 = min(jsh0 + BLOCK_SIZE, nbas);
     jsh1 = min(ish1, jsh1);

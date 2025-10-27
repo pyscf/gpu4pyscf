@@ -22,7 +22,7 @@ import numpy as np
 import cupy as cp
 from collections import Counter
 from pyscf import lib
-from pyscf.gto import ANG_OF
+from pyscf.gto import ANG_OF, gto_norm
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
 from gpu4pyscf.__config__ import num_devices
@@ -30,9 +30,9 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, contract, asarray)
-from gpu4pyscf.gto.mole import group_basis
+from gpu4pyscf.gto.mole import group_basis, extract_pgto_params
 from gpu4pyscf.scf.jk import (
-    _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
+    libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
     apply_coeff_C_mat_CT, apply_coeff_CT_mat_C)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
@@ -120,6 +120,21 @@ class PBCJmatrixOpt:
                 supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
         q_cond = np.log(q_cond + 1e-300).astype(np.float32)
         self.q_cond_cpu = q_cond
+
+        diffuse_exps = np.hstack(supmol.bas_exps(), dtype=np.float32)
+        diffuse_ctr_coef = gto_norm(supmol._bas[:,ANG_OF], diffuse_exps)
+        diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
+        s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
+        s_estimator[nbas] = diffuse_exps
+        s_estimator[nbas+1] = diffuse_ctr_coef
+        libvhf_rys.sr_eri_s_estimator(
+            s_estimator.ctypes, ctypes.c_float(supmol.omega),
+            diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
+            supmol._atm.ctypes, ctypes.c_int(supmol.natm),
+            supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
+        self.q_cond_cpu = PBCJKmatrixOpt._filter_q_cond(
+            self, supmol, q_cond, s_estimator, self.rys_envs,
+            self.estimate_cutoff_with_penalty())[0]
         log.timer('Initialize q_cond', *cput0)
         return self
 
@@ -246,6 +261,7 @@ class PBCJmatrixOpt:
             pair_loc_in_cell0)
         dm_cond = None
 
+        # TODO: 8-fold symmetry
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
                  for j in range(i+1)
@@ -468,7 +484,6 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
             pair_kl = cp.asarray(pair_kl[q_cond[pair_kl] > cutoff], dtype=np.uint32)
             pair_ij = pair_ij[cp.argsort(q_cond[pair_ij])[::-1]]
             pair_kl = pair_kl[cp.argsort(q_cond[pair_kl])[::-1]]
-            # TODO: filter pair_kl based on its distance to pair_ij
 
             bas_i, bas_j = divmod(pair_ij, nbas)
             bas_k, bas_l = divmod(pair_kl, nbas)

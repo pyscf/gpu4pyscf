@@ -181,35 +181,34 @@ class PBCJKmatrixOpt:
             supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
         self.s_estimator_cpu = s_estimator
 
-        #self._filter_q_cond()
+        self.q_cond_cpu, self.s_estimator_cpu = self._filter_q_cond(
+            supmol, q_cond, s_estimator, self.rys_envs,
+            self.estimate_cutoff_with_penalty())
         log.timer('Initialize q_cond', *cput0)
         return self
 
-    def _filter_q_cond(self):
+    def _filter_q_cond(self, supmol, q_cond, s_estimator, rys_envs, cutoff):
         '''adjust q_cond, screening remote pairs'''
-        cell = self.cell
-        sorted_cell = self.sorted_cell
-        supmol = self.supmol
+        sorted_cell = supmol.cell
         nbas = supmol.nbas
-        aoslices = cell.aoslice_by_atom()
         diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
         diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
         diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
 
-        s_diag = self.s_estimator_cpu[:nbas,:nbas].diagonal()
+        s_diag = s_estimator[:nbas,:nbas].diagonal()
         s_max_per_atom = cp.array(s_diag[diffuse_idx], dtype=np.float32)
 
-        self.s_estimator_cpu = asarray(self.s_estimator)
-        self.q_cond_cpu = asarray(self.q_cond)
-        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+        s_estimator = asarray(s_estimator)
+        q_cond = asarray(q_cond)
         libpbc.filter_q_cond_by_distance(
-            ctypes.cast(self.q_cond_cpu.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.s_estimator_cpu.data.ptr, ctypes.c_void_p),
-            self.rys_envs,
+            ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+            ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+            rys_envs,
             ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
             ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff), ctypes.c_int(sorted_cell.natm),
-            ctypes.c_int(supmol.nbas))
+            ctypes.c_float(math.log(cutoff)),
+            ctypes.c_int(sorted_cell.natm), ctypes.c_int(supmol.nbas))
+        return q_cond, s_estimator
 
     def reset(self, cell):
         self.cell = cell
