@@ -60,7 +60,7 @@ def test_sr_vj_hermi1_kpts_vs_cpu():
     )
 
     kpts = cell.make_kpts([3,2,1])
-    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
     vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
     cell.precision = 1e-10
     cell.build(0, 0)
