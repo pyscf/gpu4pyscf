@@ -304,7 +304,8 @@ def test_ejk_ip1_per_atom_gamma_point():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[:,p0:p1])
-    assert abs(ejk - ref).max() < 1e-7
+    # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
+    assert abs(ejk - ref).max() < 1e-6
 
 def test_ejk_ip1_per_atom_kpts():
     from pyscf.pbc.df.fft import FFTDF
@@ -317,8 +318,8 @@ def test_ejk_ip1_per_atom_kpts():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis={'H': [[0, [.25, 1]], [1, [.3, 1]]],
-               'O': [[0, [.3,  1]], [2, [.2, 1]]]},
+        basis={'H': [[0, [.35, 1]], [1, [.3, 1]]],
+               'O': [[0, [.35, 1]], [2, [.3, 1]]]},
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
@@ -335,5 +336,6 @@ def test_ejk_ip1_per_atom_kpts():
     ref = np.empty((cell.natm, 3))
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
-        ref[i] = np.einsum('kxpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-    assert abs(ejk - ref).max() < 1e-7
+        ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
+    # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
+    assert abs(ejk - ref).max() < 5e-6

@@ -126,7 +126,7 @@ def test_sr_vj_hermi1_kpts_vs_fft():
     ref = fft.FFTDF(cell).get_jk(dm, with_k=False, kpts=kpts)[0].get()
     s = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
-    wcoulG_SR_at_G0 *= np.einsum('kij,kji->', s, dm) / nkpts
+    wcoulG_SR_at_G0 *= np.einsum('kij,kji->', s, dm) / len(kpts)
     ref += wcoulG_SR_at_G0 * s
     assert abs(vj - ref).max() < 1e-8
 
@@ -181,7 +181,7 @@ def test_sr_vj_hermi0_kpts_vs_fft():
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_k=False)[0].get()
     s = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
-    wcoulG_SR_at_G0 *= np.einsum('kij,kji->', s, dm) / nkpts
+    wcoulG_SR_at_G0 *= np.einsum('kij,kji->', s, dm) / len(kpts)
     ref += wcoulG_SR_at_G0 * s
     assert abs(vj - ref).max() < 1e-8
 

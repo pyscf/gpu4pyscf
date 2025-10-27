@@ -207,8 +207,10 @@ class PBCJKmatrixOpt:
         ao_loc = asarray(supmol.ao_loc)
         return RysIntEnvVars.new(supmol.natm, supmol.nbas, atm, bas, env, ao_loc)
 
-    def estimate_cutoff_with_penalty(self):
+    def estimate_cutoff_with_penalty(self, precision=None):
         cell = self.cell
+        if precision is None:
+            precision = cell.precision
         vol = cell.vol
         rcut = cell.rcut
         omega = self.omega
@@ -224,7 +226,7 @@ class PBCJKmatrixOpt:
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
         double_lat_sum_penalty = max(1, (50/(exp_min*lat_unit**2))**3)
-        cutoff = cell.precision*1e-1 / lattice_sum_factor / double_lat_sum_penalty
+        cutoff = precision*1e-1 / lattice_sum_factor / double_lat_sum_penalty
         logger.debug1(cell, 'int3c_kernel integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
@@ -246,7 +248,6 @@ class PBCJKmatrixOpt:
         nao_orig = cell.nao
         nao = sorted_cell.nao
         supmol = self.supmol
-        nao_supmol = supmol.nao
 
         dm = asarray(dm, order='C')
         dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -512,9 +513,8 @@ class PBCJKmatrixOpt:
             ao_loc = asarray(sorted_cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
-            dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-            ish_cell0 = supmol.bas_mask_idx % sorted_cell.nbas
-            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
+            # Add the dimension for kpts
+            dms = dms[:,None,:,:]
         else:
             scaled_kpts = kpts.dot(cell.lattice_vectors().T)
             Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
@@ -527,11 +527,12 @@ class PBCJKmatrixOpt:
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
-            dm_cond = _dm_cond_from_compressed_dm_supmol(supmol, dms)
+            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
+        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         assert n_dm <= 2
-        log_max_dm = float(dm_cond.max().get())
-        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
+        log_cutoff = math.log(cutoff)
 
         libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
         libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
@@ -559,16 +560,17 @@ class PBCJKmatrixOpt:
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
             pair_ij_mappings = _make_pair_ij_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
             pair_kl_mappings = _make_tril_pair_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
             nimgs = len(supmol.Ls)
-            nimgs_uniq_pair = len(supmol.double_latsum_Ts)
             if is_gamma_point:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
+                nimgs_uniq_pair = 1
             else:
                 Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
+                nimgs_uniq_pair = len(supmol.double_latsum_Ts)
             ejk = cp.zeros((cell.natm, 3))
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
@@ -878,8 +880,7 @@ def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
     return pair_mappings
 
 def _dm_cond_from_compressed_dm(supmol, dms):
-    '''Largest density matrix elements for each shell-pair. The input and output
-    are the abstract arrays that are compressed over the double-lattice-sum
+    '''Largest density matrix elements for each shell-pair within unit cell.
     '''
     cell = supmol.cell
     ao_loc = asarray(cell.ao_loc)
@@ -890,94 +891,3 @@ def _dm_cond_from_compressed_dm(supmol, dms):
     nbas = cell.nbas
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
     return dm_cond
-
-def _dm_cond_from_compressed_dm_supmol(supmol, dms):
-    '''Largest density matrix elements for each shell-pair. The input and output
-    are the abstract arrays that are compressed over the double-lattice-sum
-    '''
-    cell = supmol.cell
-    ao_loc = asarray(cell.ao_loc)
-    n_dm, n_Ts, nao = dms.shape[:3]
-    Ts_ao_loc = cp.arange(0, n_Ts*nao, nao, dtype=np.int32)[:,None] + ao_loc[:-1]
-    Ts_ao_loc = cp.append(Ts_ao_loc.ravel(), np.int32(n_Ts*nao))
-    dm_cond = condense('absmax', dms.reshape(n_dm, n_Ts*nao, nao), Ts_ao_loc, ao_loc)
-    dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-    nbas = cell.nbas
-    dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
-
-    img_idx, ish_cell0 = divmod(cp.asarray(supmol.bas_mask_idx), nbas)
-    T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx,img_idx[:,None]]
-    dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
-    return dm_cond
-
-def _make_pair_ij_mappings_s1(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    nimgs = len(supmol.Ls)
-    cell = supmol.cell
-    nbas_cell0 = cell.nbas
-    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
-    bas_mask[supmol.bas_mask_idx] = True
-    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int32)
-    raw_bas_idx[supmol.bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.int32)
-    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
-    n_groups = len(l_ctr_bas_loc) - 1
-    bas_idx_lookup = []
-    for i in range(n_groups):
-        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-        bas_idx = asarray(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
-        bas_idx_lookup.append(bas_idx)
-
-    nbas = np.int32(q_cond.shape[0])
-    q_cond = q_cond.ravel()
-    pair_mappings = {}
-    for i in range(n_groups):
-        for j in range(n_groups):
-            # pair_ij is sorted in the order that the ish changes fast.
-            # This order can reduce the atomicAdd conflicts in the CUDA kernel.
-            ish = bas_idx_lookup[i]
-            ish = ish[ish < nbas_cell0]
-            jsh = bas_idx_lookup[j]
-            pair_ij = (ish * nbas + jsh[:,None]).ravel()
-            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
-            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
-    return pair_mappings
-
-def _make_tril_pair_mappings_s1(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    cell = supmol.cell
-    nbas_cell0 = cell.nbas
-    nbas = np.uint32(supmol.nbas)
-    assert nbas < 65535
-    nimgs = len(supmol.Ls)
-    # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
-    # The same pattern can be applied to the remaining images within the supmol.
-    # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
-    bas_mask = np.zeros(nimgs*nbas_cell0, dtype=bool)
-    bas_mask[supmol.bas_mask_idx] = True
-    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = np.empty(nimgs*nbas_cell0, dtype=np.uint32)
-    raw_bas_idx[supmol.bas_mask_idx] = np.arange(supmol.nbas, dtype=np.uint32)
-    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
-    n_groups = len(l_ctr_bas_loc) - 1
-    bas_idx_lookup = []
-    for i in range(n_groups):
-        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-        bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
-        # Align to "tile", padding -1 at the end
-        pad_len = (tile*len(bas_idx) - len(bas_idx)) % tile
-        bas_idx = np.append(bas_idx, np.full(pad_len, nbas, dtype=np.uint32))
-        bas_idx_lookup.append(asarray(bas_idx.reshape(-1, tile)))
-
-    q_cond = q_cond.ravel()
-    pair_mappings = {}
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish = bas_idx_lookup[i][:,None,:,None]
-            jsh = bas_idx_lookup[j][None,:,None,:]
-            pair_ij = ish * nbas + jsh
-            if i == j:
-                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas) & (ish >= jsh)]
-            else:
-                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas)]
-            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
-            pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
-    return pair_mappings
