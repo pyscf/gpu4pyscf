@@ -5,7 +5,7 @@ add_library(pbc SHARED
   fill_int3c2e.cu unrolled_int3c2e.cu fill_int2c2e.cu
   fill_int3c2e_v2.cu
   overlap.cu
-  estimator.cu
+  estimator.cu supmol_sr_estimator.cu
   rys_roots_dat.cu
   rys_contract_k.cu
   rys_contract_jk_ip1.cu

@@ -180,8 +180,36 @@ class PBCJKmatrixOpt:
             supmol._atm.ctypes, ctypes.c_int(supmol.natm),
             supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
         self.s_estimator_cpu = s_estimator
+
+        #self._filter_q_cond()
         log.timer('Initialize q_cond', *cput0)
         return self
+
+    def _filter_q_cond(self):
+        '''adjust q_cond, screening remote pairs'''
+        cell = self.cell
+        sorted_cell = self.sorted_cell
+        supmol = self.supmol
+        nbas = supmol.nbas
+        aoslices = cell.aoslice_by_atom()
+        diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
+        diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
+        diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+
+        s_diag = self.s_estimator_cpu[:nbas,:nbas].diagonal()
+        s_max_per_atom = cp.array(s_diag[diffuse_idx], dtype=np.float32)
+
+        self.s_estimator_cpu = asarray(self.s_estimator)
+        self.q_cond_cpu = asarray(self.q_cond)
+        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+        libpbc.filter_q_cond_by_distance(
+            ctypes.cast(self.q_cond_cpu.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.s_estimator_cpu.data.ptr, ctypes.c_void_p),
+            self.rys_envs,
+            ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+            ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff), ctypes.c_int(sorted_cell.natm),
+            ctypes.c_int(supmol.nbas))
 
     def reset(self, cell):
         self.cell = cell
@@ -722,7 +750,6 @@ class ExtendedMole(gto.Mole):
         mask = cp.any(d < rcut_for_atoms, axis=1).get()
         bas_mask = mask[supmol._bas[:,gto.ATOM_OF]]
         bas_mask[:cell.nbas] = True # Ensure shells in the first image are all included
-        bas_mask[:]=True
         bas_mask_idx = np.where(bas_mask)[0]
 
         ao_loc = supmol.ao_loc

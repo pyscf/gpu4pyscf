@@ -34,7 +34,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
     }
     __syncthreads();
     int *bas = envs.bas;
-    int nbas = envs.nbas;
+    uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
@@ -170,7 +170,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
     }
     __syncthreads();
     int *bas = envs.bas;
-    int nbas = envs.nbas;
+    uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
