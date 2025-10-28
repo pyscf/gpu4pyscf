@@ -3166,13 +3166,14 @@ def contract_d2rho_dAdB_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to
     if with_grid_response:
         assert atom_to_grid_index_map is not None and len(atom_to_grid_index_map) == natm
 
+    dm_dmT = dm0 + dm0.T
     d2e = cupy.zeros([natm, natm, 3, 3])
 
     if with_orbital_response:
         for i_atom in range(natm):
             pi0, pi1 = aoslices[i_atom][2:]
             # d2mu/dr2 * nu, A orbital, B orbital
-            dm_dot_mu = (dm0[pi0:pi1, :] + dm0[:, pi0:pi1].T) @ mu
+            dm_dot_mu = dm_dmT[pi0:pi1, :] @ mu
             d2mudAdA_nu = contract("dDig,ig->dDg", d2mu_dr2[:, :, pi0:pi1, :], dm_dot_mu)
             d2e[i_atom, i_atom, :, :] += d2mudAdA_nu @ weight_depsilon_drho
             d2mudAdA_nu = None
@@ -3183,7 +3184,7 @@ def contract_d2rho_dAdB_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to
                 d2e[i_atom, i_atom, :, :] += contract("dDxg,xg->dD", d3mudAdAdr_nu, weight_depsilon_dnablarho)
                 d3mudAdAdr_nu = None
                 # d2mu/(dA dB) * dnu/dr, A orbital, B orbital
-                dm_dot_dmudr = contract("djg,ij->dig", dmu_dr, dm0[pi0:pi1, :] + dm0[:, pi0:pi1].T)
+                dm_dot_dmudr = contract("djg,ij->dig", dmu_dr, dm_dmT[pi0:pi1, :])
                 d2mudAdA_dnudr = contract("dDig,xig->dDxg", d2mu_dr2[:, :, pi0:pi1, :], dm_dot_dmudr)
                 d2e[i_atom, i_atom, :, :] += contract("dDxg,xg->dD", d2mudAdA_dnudr, weight_depsilon_dnablarho)
                 d2mudAdA_dnudr = None
@@ -3199,7 +3200,7 @@ def contract_d2rho_dAdB_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to
             for j_atom in range(natm):
                 pj0, pj1 = aoslices[j_atom][2:]
                 # dmu/dr * dnu/dr, A orbital, B orbital
-                dm_dot_dmudr = contract("djg,ij->dig", dmu_dr[:, pj0:pj1, :], dm0[pi0:pi1, pj0:pj1] + dm0[pj0:pj1, pi0:pi1].T)
+                dm_dot_dmudr = contract("djg,ij->dig", dmu_dr[:, pj0:pj1, :], dm_dmT[pi0:pi1, pj0:pj1])
                 dmudA_dnudB = contract("dig,Dig->dDg", dmu_dr[:, pi0:pi1, :], dm_dot_dmudr)
                 d2e[i_atom, j_atom, :, :] += dmudA_dnudB @ weight_depsilon_drho
 
@@ -3216,13 +3217,15 @@ def contract_d2rho_dAdB_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to
                 if with_tau:
                     pj0, pj1 = aoslices[j_atom][2:]
                     # d2mu/(dA dr) * d2nu/(dB dr), A orbital, B orbital
-                    dm_dot_d2mudr2 = contract("dDjg,ij->dDig", d2mu_dr2[:, :, pj0:pj1, :], dm0[pi0:pi1, pj0:pj1] + dm0[pj0:pj1, pi0:pi1].T)
+                    dm_dot_d2mudr2 = contract("dDjg,ij->dDig", d2mu_dr2[:, :, pj0:pj1, :], dm_dmT[pi0:pi1, pj0:pj1])
                     d2mudAdr_d2nudBdr = contract("dxig,Dxig->dDg", d2mu_dr2[:, :, pi0:pi1, :], dm_dot_d2mudr2)
                     dm_dot_d2mudr2 = None
                     d2e[i_atom, j_atom, :, :] += 0.5 * d2mudAdr_d2nudBdr @ weight_depsilon_dtau
                     d2mudAdr_d2nudBdr = None
 
     if with_grid_response:
+        buf_27_ngrids = cupy.empty(ngrids * 27)
+
         for i_atom in range(natm):
             g_i_with_response = atom_to_grid_index_map[i_atom]
             if len(g_i_with_response) == 0:
@@ -3238,125 +3241,93 @@ def contract_d2rho_dAdB_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to
             d2mu_dr2_grid_i = d2mu_dr2[:, :, :, g_i_with_response]
             if with_nablarho or with_tau:
                 d3mu_dr3_grid_i = d3mu_dr3[:, :, :, :, g_i_with_response]
+            ngrids_i = len(g_i_with_response)
 
+            d2rhodGdG = cupy.ndarray([3, 3, ngrids_i], memptr = buf_27_ngrids.data)
             # d2mu/dr2 * nu, A grid, B grid
-            dm_dot_mu = (dm0 + dm0.T) @ mu_grid_i
-            d2mudGdG_nu = contract("dDig,ig->dDg", d2mu_dr2_grid_i, dm_dot_mu)
-            d2e[i_atom, i_atom, :, :] += d2mudGdG_nu @ weight_depsilon_drho_grid_i
-            d2mudGdG_nu = None
+            dm_dot_mu = dm_dmT @ mu_grid_i
+            contract("dDig,ig->dDg", d2mu_dr2_grid_i, dm_dot_mu, beta = 0.0, out = d2rhodGdG)
             # dmu/dr * dnu/dr, A grid, B grid
-            dm_dot_dmudr = contract("djg,ij->dig", dmu_dr_grid_i, dm0 + dm0.T)
-            dmudG_dnudG = contract("dig,Dig->dDg", dmu_dr_grid_i, dm_dot_dmudr)
-            d2e[i_atom, i_atom, :, :] += dmudG_dnudG @ weight_depsilon_drho_grid_i
-            dmudG_dnudG = None
+            dm_dot_dmudr = contract("djg,ij->dig", dmu_dr_grid_i, dm_dmT)
+            contract("dig,Dig->dDg", dmu_dr_grid_i, dm_dot_dmudr, beta = 1.0, out = d2rhodGdG)
+            d2e[i_atom, i_atom, :, :] += d2rhodGdG @ weight_depsilon_drho_grid_i
+            d2rhodGdG = None
 
             if with_nablarho:
+                d2nablarhodGdG = cupy.ndarray([3, 3, 3, ngrids_i], memptr = buf_27_ngrids.data)
+
                 # d3mu/(dr dA dB) * nu, A grid, B grid
-                d3mudGdGdr_nu = contract("dDxig,ig->dDxg", d3mu_dr3_grid_i, dm_dot_mu)
-                d2e[i_atom, i_atom, :, :] += contract("dDxg,xg->dD", d3mudGdGdr_nu, weight_depsilon_dnablarho_grid_i)
-                d3mudGdGdr_nu = None
+                contract("dDxig,ig->dDxg", d3mu_dr3_grid_i, dm_dot_mu, beta = 0.0, out = d2nablarhodGdG)
                 # d2mu/(dA dB) * dnu/dr, A grid, B grid
-                d2mudGdG_dnudr = contract("dDig,xig->dDxg", d2mu_dr2_grid_i, dm_dot_dmudr)
-                d2e[i_atom, i_atom, :, :] += contract("dDxg,xg->dD", d2mudGdG_dnudr, weight_depsilon_dnablarho_grid_i)
-                d2mudGdG_dnudr = None
+                contract("dDig,xig->dDxg", d2mu_dr2_grid_i, dm_dot_dmudr, beta = 1.0, out = d2nablarhodGdG)
+                d2e[i_atom, i_atom, :, :] += contract("dDxg,xg->dD", d2nablarhodGdG, weight_depsilon_dnablarho_grid_i)
 
                 # d2mu/(dr dA) * dnu/dB, A grid, B grid
-                d2mudGdr_dnudG = contract("dxig,Dig->dDxg", d2mu_dr2_grid_i, dm_dot_dmudr)
-                d2e_ii_AA = contract("dDxg,xg->dD", d2mudGdr_dnudG, weight_depsilon_dnablarho_grid_i)
-                d2mudGdr_dnudG = None
+                contract("dxig,Dig->dDxg", d2mu_dr2_grid_i, dm_dot_dmudr, beta = 0.0, out = d2nablarhodGdG)
+                d2e_ii_AA = contract("dDxg,xg->dD", d2nablarhodGdG, weight_depsilon_dnablarho_grid_i)
+                d2nablarhodGdG = None
                 d2e[i_atom, i_atom, :, :] += d2e_ii_AA + d2e_ii_AA.T
                 d2e_ii_AA = None
             dm_dot_mu = None
 
             if with_tau:
+                d2taudGdG = cupy.ndarray([3, 3, ngrids_i], memptr = buf_27_ngrids.data)
                 # d3mu/(dA dB dr) * dnu/dr, A grid, B grid
-                d3mudGdGdr_dnudr = contract("dDxig,xig->dDg", d3mu_dr3_grid_i, dm_dot_dmudr)
-                d2e[i_atom, i_atom, :, :] += 0.5 * d3mudGdGdr_dnudr @ weight_depsilon_dtau_grid_i
-                d3mudGdGdr_dnudr = None
+                contract("dDxig,xig->dDg", d3mu_dr3_grid_i, dm_dot_dmudr, beta = 0.0, out = d2taudGdG)
                 # d2mu/(dA dr) * d2nu/(dB dr), A grid, B grid
-                dm_dot_d2mudr2 = contract("dDjg,ij->dDig", d2mu_dr2_grid_i, dm0 + dm0.T)
-                d2mudGdr_d2nudGdr = contract("dxig,Dxig->dDg", d2mu_dr2_grid_i, dm_dot_d2mudr2)
+                dm_dot_d2mudr2 = contract("dDjg,ij->dDig", d2mu_dr2_grid_i, dm_dmT)
+                contract("dxig,Dxig->dDg", d2mu_dr2_grid_i, dm_dot_d2mudr2, beta = 1.0, out = d2taudGdG)
                 dm_dot_d2mudr2 = None
-                d2e[i_atom, i_atom, :, :] += 0.5 * d2mudGdr_d2nudGdr @ weight_depsilon_dtau_grid_i
-                d2mudGdr_d2nudGdr = None
+                d2e[i_atom, i_atom, :, :] += 0.5 * d2taudGdG @ weight_depsilon_dtau_grid_i
+                d2taudGdG = None
             dm_dot_dmudr = None
 
             for j_atom in range(natm):
                 pj0, pj1 = aoslices[j_atom][2:]
+                d2rhodAdG = cupy.ndarray([3, 3, ngrids_i], memptr = buf_27_ngrids.data)
                 # d2mu/dr2 * nu, A orbital, B grid
-                dm_dot_mu = (dm0[pj0:pj1, :] + dm0[:, pj0:pj1].T) @ mu_grid_i
-                d2mudAdG_nu = contract("dDig,ig->dDg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_mu)
-                d2e_ji_AB = d2mudAdG_nu @ weight_depsilon_drho_grid_i
-                d2mudAdG_nu = None
-                # Why is there a transpose for this equation? Because we're using j index at where it supposes to be i. Same for many later cases.
-                d2e[i_atom, j_atom, :, :] -= d2e_ji_AB.T
-                d2e[j_atom, i_atom, :, :] -= d2e_ji_AB
-                d2e_ji_AB = None
-
+                dm_dot_mu = dm_dmT[pj0:pj1, :] @ mu_grid_i
+                contract("dDig,ig->dDg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_mu, beta = 0.0, out = d2rhodAdG)
                 # dmu/dr * dnu/dr, A orbital, B grid
-                dm_dot_dmudr = contract("djg,ij->dig", dmu_dr_grid_i, dm0[pj0:pj1, :] + dm0[:, pj0:pj1].T)
-                dmudA_dnudG = contract("dig,Dig->dDg", dmu_dr_grid_i[:, pj0:pj1, :], dm_dot_dmudr)
+                dm_dot_dmudr = contract("djg,ij->dig", dmu_dr_grid_i, dm_dmT[pj0:pj1, :])
+                contract("dig,Dig->dDg", dmu_dr_grid_i[:, pj0:pj1, :], dm_dot_dmudr, beta = 1.0, out = d2rhodAdG)
                 dm_dot_dmudr = None
-                d2e_ji_AB = dmudA_dnudG @ weight_depsilon_drho_grid_i
-                dmudA_dnudG = None
-                d2e[i_atom, j_atom, :, :] -= d2e_ji_AB.T
-                d2e[j_atom, i_atom, :, :] -= d2e_ji_AB
-                d2e_ji_AB = None
+                d2e_ji_AB = d2rhodAdG @ weight_depsilon_drho_grid_i
+                d2rhodAdG = None
 
                 if with_nablarho:
-                    # d3mu/(dr dA dB) * nu, A orbital, B grid
-                    d3mudAdGdr_nu = contract("dDxig,ig->dDxg", d3mu_dr3_grid_i[:, :, :, pj0:pj1, :], dm_dot_mu)
-                    d2e_ji_AB = contract("dDxg,xg->dD", d3mudAdGdr_nu, weight_depsilon_dnablarho_grid_i)
-                    d3mudAdGdr_nu = None
-                    d2e[i_atom, j_atom, :, :] -= d2e_ji_AB.T
-                    d2e[j_atom, i_atom, :, :] -= d2e_ji_AB
-                    d2e_ji_AB = None
-
+                    d2nablarhodAdG = cupy.ndarray([3, 3, 3, ngrids_i], memptr = buf_27_ngrids.data)
                     # d2mu/(dA dB) * dnu/dr, A orbital, B grid
-                    dm_dot_dmudr = contract("djg,ij->dig", dmu_dr_grid_i, dm0[pj0:pj1, :] + dm0[:, pj0:pj1].T)
-                    d2mudAdG_dnudr = contract("dDig,xig->dDxg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_dmudr)
-                    d2e_ji_AB = contract("dDxg,xg->dD", d2mudAdG_dnudr, weight_depsilon_dnablarho_grid_i)
-                    d2mudAdG_dnudr = None
-                    d2e[i_atom, j_atom, :, :] -= d2e_ji_AB.T
-                    d2e[j_atom, i_atom, :, :] -= d2e_ji_AB
-                    d2e_ji_AB = None
-
+                    dm_dot_dmudr = contract("djg,ij->dig", dmu_dr_grid_i, dm_dmT[pj0:pj1, :])
+                    contract("dDig,xig->dDxg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_dmudr, beta = 0.0, out = d2nablarhodAdG)
                     # d2mu/(dr dA) * dnu/dB, A orbital, B grid
-                    d2mudAdr_dnudG = contract("dxig,Dig->dDxg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_dmudr)
-                    d2e_ji_AB = contract("dDxg,xg->dD", d2mudAdr_dnudG, weight_depsilon_dnablarho_grid_i)
-                    d2mudAdr_dnudG = None
-                    d2e[i_atom, j_atom, :, :] -= d2e_ji_AB.T
-                    d2e[j_atom, i_atom, :, :] -= d2e_ji_AB
-                    d2e_ji_AB = None
-
+                    d2nablarhodAdG += d2nablarhodAdG.transpose(0,2,1,3)
+                    # d3mu/(dr dA dB) * nu, A orbital, B grid
+                    contract("dDxig,ig->dDxg", d3mu_dr3_grid_i[:, :, :, pj0:pj1, :], dm_dot_mu, beta = 1.0, out = d2nablarhodAdG)
                     # d2mu/(dr dA) * dnu/dB, A grid, B orbital
-                    dm_dot_d2mudr2 = contract("dDjg,ij->dDig", d2mu_dr2_grid_i, dm0[pj0:pj1, :] + dm0[:, pj0:pj1].T)
-                    d2mudGdr_dnudA = contract("dig,Dxig->dDxg", dmu_dr_grid_i[:, pj0:pj1, :], dm_dot_d2mudr2)
-                    d2e_ji_AB = contract("dDxg,xg->dD", d2mudGdr_dnudA, weight_depsilon_dnablarho_grid_i)
-                    d2mudGdr_dnudA = None
-                    d2e[i_atom, j_atom, :, :] -= d2e_ji_AB.T
-                    d2e[j_atom, i_atom, :, :] -= d2e_ji_AB
-                    d2e_ji_AB = None
+                    dm_dot_d2mudr2 = contract("dDjg,ij->dDig", d2mu_dr2_grid_i, dm_dmT[pj0:pj1, :])
+                    contract("dig,Dxig->dDxg", dmu_dr_grid_i[:, pj0:pj1, :], dm_dot_d2mudr2, beta = 1.0, out = d2nablarhodAdG)
+
+                    d2e_ji_AB += contract("dDxg,xg->dD", d2nablarhodAdG, weight_depsilon_dnablarho_grid_i)
+                    d2nablarhodAdG = None
                 dm_dot_mu = None
 
                 if with_tau:
+                    d2taudAdG = cupy.ndarray([3, 3, ngrids_i], memptr = buf_27_ngrids.data)
                     # d3mu/(dA dB dr) * dnu/dr, A orbital, B grid
-                    d3mudAdGdr_dnudr = contract("dDxig,xig->dDg", d3mu_dr3_grid_i[:, :, :, pj0:pj1, :], dm_dot_dmudr)
-                    d2e_ji_AB = d3mudAdGdr_dnudr @ weight_depsilon_dtau_grid_i
-                    d3mudAdGdr_dnudr = None
-                    d2e[i_atom, j_atom, :, :] -= 0.5 * d2e_ji_AB.T
-                    d2e[j_atom, i_atom, :, :] -= 0.5 * d2e_ji_AB
-                    d2e_ji_AB = None
-
+                    contract("dDxig,xig->dDg", d3mu_dr3_grid_i[:, :, :, pj0:pj1, :], dm_dot_dmudr, beta = 0.0, out = d2taudAdG)
                     # d2mu/(dA dr) * d2nu/(dB dr), A orbital, B grid
-                    d2mudAdr_d2nudGdr = contract("dxig,Dxig->dDg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_d2mudr2)
-                    d2e_ji_AB = d2mudAdr_d2nudGdr @ weight_depsilon_dtau_grid_i
-                    d2mudAdr_d2nudGdr = None
-                    d2e[i_atom, j_atom, :, :] -= 0.5 * d2e_ji_AB.T
-                    d2e[j_atom, i_atom, :, :] -= 0.5 * d2e_ji_AB
-                    d2e_ji_AB = None
+                    contract("dxig,Dxig->dDg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_d2mudr2, beta = 1.0, out = d2taudAdG)
+                    d2e_ji_AB += 0.5 * d2taudAdG @ weight_depsilon_dtau_grid_i
+                    d2taudAdG = None
+
                 dm_dot_dmudr = None
                 dm_dot_d2mudr2 = None
+
+                # Why is there a transpose for this equation? Because we're using j index at where it supposes to be i.
+                d2e[i_atom, j_atom, :, :] -= d2e_ji_AB.T
+                d2e[j_atom, i_atom, :, :] -= d2e_ji_AB
+                d2e_ji_AB = None
 
             weight_depsilon_drho_grid_i = None
             if with_nablarho:
