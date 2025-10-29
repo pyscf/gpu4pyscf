@@ -223,7 +223,8 @@ class KnownValues(unittest.TestCase):
         )
         np.random.seed(9)
         nao = cell.nao
-        dm = np.random.rand(nao, nao)*.2
+        dm = np.random.rand(nao, nao) * .5
+        dm = dm.dot(dm.T)
         mydf = aft.AFTDF(cell)
         ej = aft_jk.get_ej_ip1(mydf, dm).get()
         assert abs(ej.sum(axis=0)).max() < 1e-8

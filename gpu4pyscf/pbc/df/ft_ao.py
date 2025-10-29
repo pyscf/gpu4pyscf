@@ -148,13 +148,14 @@ class FTOpt:
         self.kpts = kpts
 
         self._aft_envs = None
-        self.bvk_cell = None
+        self.bvkcell = None
         self._img_idx_cache = {}
 
     def build(self, verbose=None):
         log = logger.new_logger(self.cell, verbose)
         cell = self.sorted_cell
         bvk_kmesh = self.bvk_kmesh
+        self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         if np.prod(bvk_kmesh) == 1:
             bvkcell = cell
         else:
@@ -183,7 +184,7 @@ class FTOpt:
         if cell is not None:
             self.cell = cell
         self._aft_envs = None
-        self.bvk_cell = None
+        self.bvkcell = None
         self._img_idx_cache = {}
         return self
 

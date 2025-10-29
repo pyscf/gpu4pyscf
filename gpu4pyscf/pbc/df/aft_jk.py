@@ -33,7 +33,7 @@ from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf.jk import apply_coeff_C_mat_CT
+from gpu4pyscf.scf.jk import apply_coeff_C_mat_CT, SHM_SIZE
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     if kpts_band is not None:
@@ -289,15 +289,17 @@ def get_ej_ip1(mydf, dm, kpts=None, exxdiv=None):
     ft_opt = FTOpt(cell, kpts).build()
     ft_kern = ft_opt.gen_ft_kernel()
     sorted_cell = ft_opt.sorted_cell
-    dms = dms.reshape(-1,nao,nao)
+    dms = cp.asarray(dms.reshape(-1,nao,nao))
     dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, ft_opt.uniq_l_ctr,
                                ft_opt.l_ctr_offsets, ft_opt.ao_idx)
     is_gamma_point = kpts is None or is_zero(kpts)
-    if not is_gamma_point:
-        expLk = cp.exp(1j*cp.dot(ft_opt.bvkmesh_Ls, kpts.T))
-        dms = contract('Lk,kpq->Lpq', expLk, dms)
+    if is_gamma_point:
+        dms_bvkcell = dms
+    else:
+        expLk = cp.exp(1j*cp.asarray(ft_opt.bvkmesh_Ls).dot(cp.asarray(kpts).T))
+        dms_bvkcell = contract('Lk,kpq->Lpq', expLk, dms)
         assert abs(dms.imag).max() < 1e-6
-        dms = cp.asarray(dms.real, order='C')
+        dms_bvkcell = cp.asarray(dms.real, order='C')
         expLk = None
 
     bvk_ncells = np.prod(ft_opt.bvk_kmesh)
@@ -317,30 +319,35 @@ def get_ej_ip1(mydf, dm, kpts=None, exxdiv=None):
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _screen_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
+
     lmax = ft_opt.uniq_l_ctr[:,0].max()
-    shm_size = (lmax+2)*(lmax+1)*6*32
-    shm_size += 3 # for rjri
-    if lmax <= 2:
-        # 0: 3072+24, 1: 4608+12, 2: 4608+6
-        shm_size *= 2**(3-lmax)
-    shm_size *= 8
+    ls = np.arange(lmax+1)
+    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
+    nsp_per_block = np.ones_like(gx_len)
+    for m in [2, 4, 8]:
+        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
+    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
+
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ej_ip1
-    vG = cp.zeros(blksize+256)
+    vG = cp.zeros(blksize+256, dtype=np.complex128)
     GvT = cp.zeros(3*blksize+256)
     ej = cp.zeros((cell.natm, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
-        Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpts, transform_ao=False)
-        rho = contract('kij,kgij->g', dms, Gpq.conj()).real
-        Gpq = None
         nGv = p1 - p0
-        vG[:nGv] = coulG[p0:p1] * rho
+        # TODO: Gpq are transformed to the k-points adapted representation in
+        # gen_ft_kernel. This transfomration can be skipped.
+        Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpts, transform_ao=False)
+        Gpq = Gpq.transpose(0,2,3,1)
+        vG[:nGv] = contract('kji,kijg->g', dms, Gpq).conj()
+        vG[:nGv] *= coulG[p0:p1]
         GvT[:3*nGv].set(Gv[p0:p1].T.ravel())
+        Gpq = None
         err = kern(
             ctypes.cast(ej.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dms_bvkcell.data.ptr, ctypes.c_void_p),
             ctypes.cast(vG.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.byref(aft_envs),
@@ -365,7 +372,7 @@ def _screen_shl_pairs(ft_opt):
     sp0 = sp1 = 0
     for i, j in img_idx_cache:
         bas_ij, img_offsets, img_idx = img_idx_cache[i, j]
-        # bas_ij is the pair indices wrt the bvk_cell.
+        # bas_ij is the pair indices within the bvk_cell.
         img_counts = img_offsets[1:] - img_offsets[:-1]
         bas_ij = cp.asarray(np.repeat(bas_ij.get(), img_counts.get()))
         bas_ij_idx.append(bas_ij)
@@ -380,115 +387,7 @@ def _screen_shl_pairs(ft_opt):
 
 def get_ek_ip1(mydf, dm_kpts, hermi=1, kpts=None, exxdiv=None):
     '''The first order energy derivatives from exact exchange'''
-#    if kpts is None:
-#        kpts = np.zeros((1,3))
-#    log = logger.new_logger(mydf)
-#    cpu0 = cpu1 = log.init_timer()
-#    cell = mydf.cell
-#    mesh = mydf.mesh
-#    ngrids = np.prod(mesh)
-#    mo_coeff = getattr(dm_kpts, 'mo_coeff', None)
-#    mo_occ = getattr(dm_kpts, 'mo_occ', None)
-#    dm_kpts = cp.asarray(dm_kpts)
-#
-#    dms = _format_dms(dm_kpts, kpts)
-#    n_dm, nkpts, nao = dms.shape[:3]
-#    ek = cp.zeros((cell.natm, 3), dtype=np.complex128)
-##?    weight = 1. / nkpts
-##?    # Add ewald_exxdiv contribution because G=0 was not included in the
-##?    # non-uniform grids
-##?    if (exxdiv == 'ewald' and
-##?        (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
-##?         (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
-##?        _ewald_exxdiv_for_G0(cell, kpts, dms, vk_kpts, kpts)
-#
-#    t_rev_pairs = group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
-#    try:
-#        t_rev_pairs = np.asarray(t_rev_pairs, dtype=np.int32, order='F')
-#    except TypeError:
-#        t_rev_pairs = [[k, k] if k_conj is None else [k, k_conj]
-#                       for k, k_conj in t_rev_pairs]
-#        t_rev_pairs = np.asarray(t_rev_pairs, dtype=np.int32, order='F')
-#    log.debug1('Num time-reversal pairs %d', len(t_rev_pairs))
-#
-#    time_reversal_symmetry = mydf.time_reversal_symmetry
-#    if time_reversal_symmetry:
-#        for k, k_conj in t_rev_pairs:
-#            if k != k_conj and abs(dms[:,k_conj] - dms[:,k].conj()).max() > 1e-6:
-#                time_reversal_symmetry = False
-#                log.debug2('Disable time_reversal_symmetry')
-#                break
-#
-#    if time_reversal_symmetry:
-#        k_to_compute = np.zeros(nkpts, dtype=np.int8)
-#        k_to_compute[t_rev_pairs[:,0]] = 1
-#    else:
-#        k_to_compute = np.ones(nkpts, dtype=np.int8)
-#
-#    bvk_kmesh = kpts_to_kmesh(cell, kpts)
-#    log.debug('bvk_kmesh = %s', bvk_kmesh)
-#    bvk_ncells = np.prod(bvk_kmesh)
-#
-#    if mo_coeff is None:
-#        update_vk = _update_vk_
-#    else:
-#        # dm ~= dm_factor * dm_factor.T
-#        n_dm, nkpts, nao = dms.shape[:3]
-#        # mo_coeff, mo_occ may not be a list of aligned array if
-#        # remove_lin_dep was applied to scf object.
-#        # We assume they are of the same length in this version.
-#        mo_occ = cp.asarray(mo_occ)
-#        nocc = cp.count_nonzero(mo_occ > 0, axis=-1).max()
-#        if dm_kpts.ndim == 4:  # KUHF
-#            mo_coeff = cp.asarray(mo_coeff)[:,:,:,:nocc]
-#            occs = mo_occ[:,:,:nocc]
-#            dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
-#            dm_factor *= cp.sqrt(cp.array(occs, dtype=np.double))[:,:,None,:]
-#        else:  # KRHF
-#            mo_coeff = cp.asarray(mo_coeff)[:,:,:nocc]
-#            occs = mo_occ[:,:nocc]
-#            dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
-#            dm_factor *= cp.sqrt(cp.array(occs, dtype=np.double))[:,None,:]
-#            dm_factor = dm_factor[None]
-#        dms, dm_factor = dm_factor, None
-#
-#        log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
-#                   'cell0_nao = %d nocc = %d n_dm = %d',
-#                   time_reversal_symmetry, bvk_ncells, nao, nocc, n_dm)
-#        update_vk = _update_vk_dmf
-#    log.debug2('set update_vk to %s', update_vk)
-#
-#    # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation
-#    # in ft_kern.
-#    ft_opt = FTOpt(cell, bvk_kmesh=bvk_kmesh)
-#    ft_kern = ft_opt.gen_ft_kernel(verbose=log)
-#
-#    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-#    avail_mem = get_avail_mem() * .8
-#    Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
-#    Gblksize = min(Gblksize, ngrids, 16384)
-#    log.debug1('Gblksize = %d', Gblksize)
-#
-#    for group_id, (kpt, ki_idx, kj_idx, self_conj) \
-#            in enumerate(kk_adapted_iter(cell, kpts)):
-#        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh)
-#        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-#            log.debug3('update_vk [%s:%s]', p0, p1)
-#            Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
-#            update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1] * weight, ki_idx, kj_idx,
-#                      not self_conj, k_to_compute, t_rev_pairs)
-#            Gpq = None
-#        cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-#
-#    if is_zero(kpts) and not np.iscomplexobj(dm_kpts):
-#        vk_kpts = vk_kpts.real
-#
-#    if time_reversal_symmetry:
-#        for k, k_conj in t_rev_pairs:
-#            if k != k_conj:
-#                vk_kpts[:,k_conj] = vk_kpts[:,k].conj()
-#    log.timer_debug1('get_k_kpts', *cpu0)
-#    return vk_kpts.reshape(dm_kpts.shape)
+    raise NotImplementedError
 
 ##################################################
 #

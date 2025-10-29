@@ -455,7 +455,7 @@ class SRInt3c2eOpt:
 
         self.rcut = None
         self._int3c2e_envs = None
-        self.bvk_cell = None
+        self.bvkcell = None
         self.bvkmesh_Ls = None
 
     def build(self, verbose=None):

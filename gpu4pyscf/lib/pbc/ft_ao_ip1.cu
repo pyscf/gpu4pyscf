@@ -66,35 +66,33 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
-    int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int g_size = (li + 2) * (lj + 1);
-    int nsp_per_block = NSP_PER_BLOCK;
+    int stride_j = li + 2;
+    int g_size = stride_j * (lj + 1);
+    int gx_len = g_size * nGv_per_block * NSP_PER_BLOCK;
     int gout_stride = 1;
-    while (8*32*6*g_size * nsp_per_block > shm_size) {
-        nsp_per_block /= 2;
+    while (8*6*gx_len > shm_size) {
+        gx_len /= 2;
         gout_stride *= 2;
     }
+    int nsp_per_block = NSP_PER_BLOCK / gout_stride;
     int gout_id = threadIdx.y % gout_stride;
     int sp_id = threadIdx.y / gout_stride;
     int Gv_gout_id = Gv_id_in_block + nGv_per_block * gout_id;
     int nGv_gout = nGv_per_block * gout_stride;
-
-    int lij = li + lj;
+    int lij = li + lj + 1;
     int nfi = (li + 1) * (li + 2) / 2;
     int nfj = (lj + 1) * (lj + 2) / 2;
     int nfij = nfi * nfj;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
     int ijprim = iprim * jprim;
-    int stride_j = li + 2;
     int i_1 =          nGv_per_block;
     int j_1 = stride_j*nGv_per_block;
-    int gx_len = g_size * nGv_per_block * nsp_per_block;
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[envs.cell0_nbas];
 
@@ -104,27 +102,19 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     double ky = Gv[nGv];
     double kz = Gv[nGv * 2];
     double kk = kx * kx + ky * ky + kz * kz;
-    double vGR = vG[Gv_id];
+    double vGR = vG[Gv_id*OF_COMPLEX  ];
+    double vGI = vG[Gv_id*OF_COMPLEX+1];
 
     extern __shared__ double shared_memory[];
     double *gxR = shared_memory + g_size * nGv_per_block * sp_id + Gv_id_in_block;
     double *gxI = gxR + gx_len*1;
-    double *gyR = gxI + gx_len*2;
+    double *gyR = gxR + gx_len*2;
     double *gyI = gxR + gx_len*3;
-    double *gzR = gxI + gx_len*4;
+    double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
     double *rjri = shared_memory + gx_len * 6 + sp_id;
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-
-    double v_ix = 0;
-    double v_iy = 0;
-    double v_iz = 0;
-    double v_jx = 0;
-    double v_jy = 0;
-    double v_jz = 0;
-    double s0xR, s1xR, s2xR;
-    double s0xI, s1xI, s2xI;
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         __syncthreads();
@@ -138,18 +128,18 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
+        int ish_cell0 = ish;
+        int jsh_cell0 = jsh % envs.cell0_nbas;
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
         double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        int ia = bas[ish*BAS_SLOTS+ATOM_OF];
-        int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
-        double *ri = env + atm[ia*ATM_SLOTS+PTR_COORD];
-        double *rj = env + atm[ja*ATM_SLOTS+PTR_COORD];
-        double xjxi = rj[0] + img_coords[jL*3+0] - ri[0];
-        double yjyi = rj[1] + img_coords[jL*3+1] - ri[1];
-        double zjzi = rj[2] + img_coords[jL*3+2] - ri[2];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         if (Gv_gout_id == 0) {
+            double xjxi = rj[0] + img_coords[jL*3+0] - ri[0];
+            double yjyi = rj[1] + img_coords[jL*3+1] - ri[1];
+            double zjzi = rj[2] + img_coords[jL*3+2] - ri[2];
             rjri[0*nsp_per_block] = xjxi;
             rjri[1*nsp_per_block] = yjyi;
             rjri[2*nsp_per_block] = zjzi;
@@ -159,7 +149,17 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
         // Note the density matrix is assumed to be real in get_ej_ip1 function
         double *dm_ij = dm + (j0*nao+i0);
 
+        double v_ix = 0;
+        double v_iy = 0;
+        double v_iz = 0;
+        double v_jx = 0;
+        double v_jy = 0;
+        double v_jz = 0;
+        double s0xR, s1xR, s2xR;
+        double s0xI, s1xI, s2xI;
+
         for (int ijp = 0; ijp < ijprim; ++ijp) {
+            __syncthreads();
             int ip = ijp / jprim;
             int jp = ijp % jprim;
             double ai = expi[ip];
@@ -168,11 +168,19 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
             double aj2 = aj * 2;
             double aij = ai + aj;
             double aj_aij = aj / aij;
-            double theta_ij = ai * aj_aij;
             double a2 = .5 / aij;
-            double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
-
             if (gout_id == 0) {
+                double theta_ij = ai * aj_aij;
+                double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
+                if (ish_cell0 == jsh_cell0) {
+                    fac *= .5;
+                }
+                if (Gv_id >= nGv) {
+                    fac = 0;
+                }
+                double xjxi = rjri[0*nsp_per_block];
+                double yjyi = rjri[1*nsp_per_block];
+                double zjzi = rjri[2*nsp_per_block];
                 double xij = xjxi * aj_aij + ri[0];
                 double yij = yjyi * aj_aij + ri[1];
                 double zij = zjzi * aj_aij + ri[2];
@@ -202,7 +210,7 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 multiply(RpaR, RpaI, s0xR, s0xI, s1xR, s1xI);
                 _gxR[nGv_per_block] = s1xR;
                 _gxI[nGv_per_block] = s1xI;
-                for (int i = 1; i <= lij; i++) {
+                for (int i = 1; i < lij; i++) {
                     double ia2 = i * a2;
                     multiply(RpaR, RpaI, s1xR, s1xI, s2xR, s2xI);
                     s2xR += ia2 * s0xR;
@@ -235,9 +243,8 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                     }
                 }
             }
-
             __syncthreads();
-            if (pair_ij >= shl_pair1) {
+            if (pair_ij >= shl_pair1 || Gv_id >= nGv) {
                 continue;
             }
             for (int ij = gout_id; ij < nfij; ij += gout_stride) {
@@ -252,7 +259,9 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 int addrx = (ix + jx*stride_j) * nGv_per_block;
                 int addry = (iy + jy*stride_j) * nGv_per_block;
                 int addrz = (iz + jz*stride_j) * nGv_per_block;
-                double dm_vG = dm_ij[j*nao+i] * vGR;
+                double tmp = dm_ij[j*nao+i];
+                double dm_vR = tmp * vGR;
+                double dm_vI = tmp * vGI;
                 double IxR = gxR[addrx];
                 double IxI = gxI[addrx];
                 double IyR = gyR[addry];
@@ -265,18 +274,27 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 multiply(IxR, IxI, IyR, IyI, prod_xyR, prod_xyI);
                 multiply(IxR, IxI, IzR, IzI, prod_xzR, prod_xzI);
                 multiply(IyR, IyI, IzR, IzI, prod_yzR, prod_yzI);
-                prod_xyR *= dm_vG;
-                prod_xzR *= dm_vG;
-                prod_yzR *= dm_vG;
-                prod_xyI *= dm_vG;
-                prod_xzI *= dm_vG;
-                prod_yzI *= dm_vG;
+                multiply(prod_xyR, prod_xyI, dm_vR, dm_vI, prod_xyR, prod_xyI);
+                multiply(prod_xzR, prod_xzI, dm_vR, dm_vI, prod_xzR, prod_xzI);
+                multiply(prod_yzR, prod_yzI, dm_vR, dm_vI, prod_yzR, prod_yzI);
                 double gixR = gxR[addrx+i_1];
-                double giyR = gxR[addry+i_1];
-                double gizR = gxR[addrz+i_1];
                 double gixI = gxI[addrx+i_1];
-                double giyI = gxI[addry+i_1];
-                double gizI = gxI[addrz+i_1];
+                double giyR = gyR[addry+i_1];
+                double giyI = gyI[addry+i_1];
+                double gizR = gzR[addrz+i_1];
+                double gizI = gzI[addrz+i_1];
+                double fjxR = aj2 * (gixR - rjri[0*nsp_per_block] * IxR);
+                double fjxI = aj2 * (gixI - rjri[0*nsp_per_block] * IxI);
+                double fjyR = aj2 * (giyR - rjri[1*nsp_per_block] * IyR);
+                double fjyI = aj2 * (giyI - rjri[1*nsp_per_block] * IyI);
+                double fjzR = aj2 * (gizR - rjri[2*nsp_per_block] * IzR);
+                double fjzI = aj2 * (gizI - rjri[2*nsp_per_block] * IzI);
+                if (jx > 0) { fjxR -= jx * gxR[addrx-j_1]; fjxI -= jx * gxI[addrx-j_1]; }
+                if (jy > 0) { fjyR -= jy * gyR[addry-j_1]; fjyI -= jy * gyI[addry-j_1]; }
+                if (jz > 0) { fjzR -= jz * gzR[addrz-j_1]; fjzI -= jz * gzI[addrz-j_1]; }
+                v_jx += fjxR * prod_yzR - fjxI * prod_yzI;
+                v_jy += fjyR * prod_xzR - fjyI * prod_xzI;
+                v_jz += fjzR * prod_xyR - fjzI * prod_xyI;
                 double fixR = ai2 * gixR;
                 double fiyR = ai2 * giyR;
                 double fizR = ai2 * gizR;
@@ -284,23 +302,11 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 double fiyI = ai2 * giyI;
                 double fizI = ai2 * gizI;
                 if (ix > 0) { fixR -= ix * gxR[addrx-i_1]; fixI -= ix * gxI[addrx-i_1]; }
-                if (iy > 0) { fiyR -= iy * gxR[addry-i_1]; fiyI -= iy * gxI[addry-i_1]; }
-                if (iz > 0) { fizR -= iz * gxR[addrz-i_1]; fizI -= iz * gxI[addrz-i_1]; }
+                if (iy > 0) { fiyR -= iy * gyR[addry-i_1]; fiyI -= iy * gyI[addry-i_1]; }
+                if (iz > 0) { fizR -= iz * gzR[addrz-i_1]; fizI -= iz * gzI[addrz-i_1]; }
                 v_ix += fixR * prod_yzR - fixI * prod_yzI;
                 v_iy += fiyR * prod_xzR - fiyI * prod_xzI;
                 v_iz += fizR * prod_xyR - fizI * prod_xyI;
-                double fjxR = aj2 * (gixR - rjri[0*nsp_per_block] * IxR);
-                double fjyR = aj2 * (giyR - rjri[1*nsp_per_block] * IyR);
-                double fjzR = aj2 * (gizR - rjri[2*nsp_per_block] * IzR);
-                double fjxI = aj2 * (gixI - rjri[0*nsp_per_block] * IxI);
-                double fjyI = aj2 * (giyI - rjri[1*nsp_per_block] * IyI);
-                double fjzI = aj2 * (gizI - rjri[2*nsp_per_block] * IzI);
-                if (jx > 0) { fjxR -= jx * gxR[addrx-j_1]; fjxI -= jx * gxI[addrx-j_1]; }
-                if (jy > 0) { fjyR -= jy * gxR[addry-j_1]; fjyI -= jy * gxI[addry-j_1]; }
-                if (jz > 0) { fjzR -= jz * gxR[addrz-j_1]; fjzI -= jz * gxI[addrz-j_1]; }
-                v_jx += fjxR * prod_yzR - fjxI * prod_yzI;
-                v_jy += fjyR * prod_xzR - fjyI * prod_xzI;
-                v_jz += fjzR * prod_xyR - fjzI * prod_xyI;
             }
         }
 
@@ -317,11 +323,13 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
             if (Gv_gout_id < i) {
 #pragma unroll
                 for (int n = 0; n < 6; ++n) {
-                    reduce[n*threads] += reduce[n*threads+i*nsp_per_block];
+                    reduce[n*threads] += reduce[n*threads+i];
                 }
             }
         }
-        if (Gv_gout_id == 0) {
+        if (Gv_gout_id == 0 && pair_ij < shl_pair1) {
+            int ia = bas[ish_cell0*BAS_SLOTS+ATOM_OF];
+            int ja = bas[jsh_cell0*BAS_SLOTS+ATOM_OF];
             atomicAdd(out+ia*3+0, reduce[0*threads]);
             atomicAdd(out+ia*3+1, reduce[1*threads]);
             atomicAdd(out+ia*3+2, reduce[2*threads]);
