@@ -34,8 +34,7 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
                                 extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.pbc.df.ft_ao import (
-    libpbc, init_constant, most_diffuse_pgto, PBCIntEnvVars)
+from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, PBCIntEnvVars
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -268,7 +267,6 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     nao_cart, nao = coeff.shape
     out = cp.empty((bvk_ncells, nao_cart, nao_cart))
-    init_constant(cell)
     err = libpbc.fill_int2c2e(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
@@ -507,7 +505,6 @@ class SRInt3c2eOpt:
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
         self._int3c2e_envs = PBCIntEnvVars.new(
             pcell.natm, pcell.nbas, bvk_ncells, nimgs, _atm, _bas, _env, ao_loc, Ls)
-        init_constant(pcell)
         err = libpbc.PBCsr_int3c2e_latsum23_init(ctypes.c_int(SHM_SIZE))
         if err != 0:
             raise RuntimeError('CUDA kernel initialization')

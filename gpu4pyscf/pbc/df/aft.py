@@ -126,6 +126,7 @@ class AFTDFMixin:
             assert is_zero(q)
             kpts = self.kpts
 
+        # TODO: cache ft_opt
         ft_opt = FTOpt(cell, kpts, bvk_kmesh)
         ft_kern = ft_opt.gen_ft_kernel()
 

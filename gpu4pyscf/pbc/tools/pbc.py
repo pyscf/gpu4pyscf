@@ -207,7 +207,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             coulG[0] = np.pi / _omega**2
         return coulG
 
-    if abs(k).sum() > 1e-9:
+    is_gamma_point = k is None or abs(k).sum() < 1e-9
+    if not is_gamma_point:
         if wrap_around:
             kG = _Gv_wrap_around(cell, Gv, k, mesh)
         else:
@@ -217,7 +218,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
 
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0
-    if abs(k).sum() > 1e-9:
+    if not is_gamma_point:
         G0_idx = None
 
     # Ewald probe charge method to get the leading term of the finite size

@@ -120,6 +120,10 @@ class PBCJKmatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell
+        if self.mesh is None:
+            ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
+            self.mesh = cell.cutoff_to_mesh(ke_cutoff)
+
         cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
             cell, 1, group_size, sparse_coeff=True)
         cell.omega = -self.omega
@@ -128,9 +132,6 @@ class PBCJKmatrixOpt:
         self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
-        self.mesh = cell.cutoff_to_mesh(ke_cutoff)
 
         # FIXME: should the supmol be regrouped based on l?
         supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
@@ -698,6 +699,15 @@ class PBCJKmatrixOpt:
         if not is_gamma_point:
             ejk *= 1. / nkpts
         return ejk
+
+    def _get_ejk_lr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None, verbose=None):
+        raise NotImplementedError
+        cell = self.cell
+        assert cell.dimension == 3
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        self.kpts = kpts # get_coulG() might need to access the .kpts attribute
+        return get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv)
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

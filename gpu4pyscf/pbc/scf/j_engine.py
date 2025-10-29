@@ -45,7 +45,6 @@ __all__ = [
 ]
 
 libvhf_md.PBC_build_j.restype = ctypes.c_int
-libvhf_md.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
 
 def get_j(cell, dm, hermi=0, kpts=None, vhfopt=None, verbose=None):
     '''Compute K matrix
@@ -86,8 +85,9 @@ class PBCJmatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
-        self.mesh = cell.cutoff_to_mesh(ke_cutoff)
+        if self.mesh is None:
+            ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
+            self.mesh = cell.cutoff_to_mesh(ke_cutoff)
 
         cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
             cell, 1, group_size, sparse_coeff=True)

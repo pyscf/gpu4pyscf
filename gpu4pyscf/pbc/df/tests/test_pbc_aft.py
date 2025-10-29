@@ -17,7 +17,9 @@ import numpy as np
 from pyscf import lib
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import aft as aft_cpu, aft_jk as aft_jk_cpu
+from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
+from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 
@@ -205,6 +207,65 @@ class KnownValues(unittest.TestCase):
         kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
+
+    def test_ej_ip1_gamma_point(self):
+        cell = pgto.M(
+            atom = '''
+            O   0.000    0.    0.1174
+            H   1.757    0.    0.4696
+            H   0.757    0.    0.4696
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        np.random.seed(9)
+        nao = cell.nao
+        dm = np.random.rand(nao, nao)*.2
+        mydf = aft.AFTDF(cell)
+        ej = aft_jk.get_ej_ip1(mydf, dm).get()
+        assert abs(ej.sum(axis=0)).max() < 1e-8
+
+        cell.precision = 1e-10
+        cell.build(0, 0)
+        vj = fft_cpu.FFTDF(cell).get_j_e1(dm)
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xpq,qp->x', vj[:,p0:p1], dm[:,p0:p1])
+        assert abs(ej - ref).max() < 1e-8
+
+    def test_ej_ip1_kpts(self):
+        cell = pgto.M(
+            atom = '''
+            O   0.000    0.    0.1174
+            H   1.757    0.    0.4696
+            H   0.757    0.    0.4696
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        kpts = cell.make_kpts([3,2,1])
+        dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        mydf = aft.AFTDF(cell)
+        ej = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts).get()
+        assert abs(ej.sum(axis=0)).max() < 1e-8
+
+        cell.precision = 1e-10
+        cell.build(0, 0)
+        vj = fft_cpu.FFTDF(cell).get_j_e1(dm, kpts=kpts)
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
+        assert abs(ej - ref).max() < 1e-8
 
 if __name__ == '__main__':
     print("Full Tests for aft")

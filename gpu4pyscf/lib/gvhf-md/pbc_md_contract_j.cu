@@ -74,7 +74,7 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
 }
 
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
-__global__ static
+__global__
 void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
                   int threadsx, int threadsy, int tilex, int tiley,
                   uint16_t *pRt2_kl_ij, int8_t *efg_phase)
@@ -394,18 +394,6 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in MD_build_j: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
-int PBC_build_j_init(int shm_size)
-{
-    cudaFuncSetAttribute(pbc_md_j_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
-                cudaGetErrorString(err));
         return 1;
     }
     return 0;

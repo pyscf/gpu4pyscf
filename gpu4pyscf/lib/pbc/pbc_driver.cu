@@ -553,10 +553,6 @@ __constant__ int c_pair_offsets[L_AUX1*L_AUX1+1] = {
 extern __global__
 void ft_aopair_kernel(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                       int compressing);
-extern __global__
-void ft_ao_bdiv_kernel(double *out, PBCIntEnvVars envs, int nGv, double *grids);
-extern __global__
-void ft_aopair_bdiv_kernel(double *out, PBCIntEnvVars envs, BDivAFTBoundsInfo bounds);
 
 extern __global__
 void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds);
@@ -581,12 +577,11 @@ int build_ft_aopair(double *out, int compressing, PBCIntEnvVars *envs,
     int jprim = bas[NPRIM_OF + jsh0*BAS_SLOTS];
     int nfi = (li+1)*(li+2)/2;
     int nfj = (lj+1)*(lj+2)/2;
-    int nfij = nfi * nfj;
     int stride_i = 1;
     int stride_j = li + 1;
     // up to g functions
     int g_size = stride_j * (lj + 1);
-    AFTBoundsInfo bounds = {li, lj, nfij, g_size,
+    AFTBoundsInfo bounds = {li, lj, nfi, nfj, g_size,
         stride_i, stride_j, iprim, jprim,
         npairs_ij, ngrids, bas_ij, grids, img_offsets, img_idx};
 
@@ -605,23 +600,6 @@ int build_ft_aopair(double *out, int compressing, PBCIntEnvVars *envs,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
-int build_ft_ao(double *out, PBCIntEnvVars *envs, int ngrids, double *grids,
-                int *atm, int natm, int *bas, int nbas, double *env)
-{
-    int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
-    dim3 threads(NG_PER_BLOCK, nsh_per_block);
-    int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
-    int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
-    dim3 blocks(nbatches_shls, nbatches_grids);
-    ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in ft_aopair_bdiv_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

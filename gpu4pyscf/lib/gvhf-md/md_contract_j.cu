@@ -963,17 +963,4 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     }
     return 0;
 }
-
-int init_mdj_constant(int shm_size)
-{
-    cudaFuncSetAttribute(md_j_1dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(md_j_4dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
-                cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
 }

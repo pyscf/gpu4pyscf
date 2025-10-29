@@ -66,7 +66,7 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
         float xi = ri[0];
         float yi = ri[1];
         float zi = ri[2];
-        for (int jsh = jsh0; jsh < jsh1; jsh += blockDim.x) {
+        for (int jsh = jsh0; jsh < min(ish+1, jsh1); jsh += blockDim.x) {
             uint32_t bas_ij = ish * nbas + jsh;
             if (q_cond[bas_ij] < log_cutoff-8.f) {
                 continue;
