@@ -351,9 +351,6 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     log.info(get_memory_info('before int3c2e_bdiv_generator'))
 
-    
-    # for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
-        # 
     gen = int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size)
 
     if omega and omega != 1:
@@ -1711,7 +1708,7 @@ class RisBase(lib.StreamObject):
         if self._store_Tpq_K:
             log.info(f'will calc Tia_J (if full TDDFT) Tij_K Tab_K. In CPU RAM? {self._tensor_in_ram}')
         else:
-            log.info(f'will store K eri3c ')
+            log.info('will store K eri3c ')
 
 
 
