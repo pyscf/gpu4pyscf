@@ -71,8 +71,6 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     nvir = nmo - nocc
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
-    if getattr(mf, 'with_solvent', None) is not None:
-        raise NotImplementedError('With solvent is not supported yet')
 
     xI, yI = x_yI
     xI = cp.asarray(xI).reshape(nocc, nvir).T
@@ -86,7 +84,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
-    vresp = mf.gen_response(singlet=None, hermi=1)
+    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
@@ -121,6 +119,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
     dmz1doo = z1aoS
+    td_nac.dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
     if atmlst is None:
@@ -242,8 +241,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     nvir = nmo - nocc
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
-    if getattr(mf, 'with_solvent', None) is not None:
-        raise NotImplementedError('With solvent is not supported yet')
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
@@ -265,6 +262,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     xmyJ = (xJ - yJ)
     dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T)) 
     dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T)) 
+    td_nac.dmxpyI = dmxpyI
+    td_nac.dmxpyJ = dmxpyJ
 
     rIJoo =-contract('ai,aj->ij', xJ, xI) - contract('ai,aj->ij', yI, yJ)
     rIJvv = contract('ai,bi->ab', xI, xJ) + contract('ai,bi->ab', yJ, yI)
@@ -335,13 +334,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
             vk2J += vk2J_omega * (alpha - hyb)
 
         veff0doo = vj0IJ * 2 - vk0IJ + f1ooIJ[0] + k1aoIJ[0] * 2
+        veff0doo += td_nac.solvent_response(dmzooIJ)
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         veffI = vj1I * 2 - vk1I + f1voI[0] * 2
+        veffI += td_nac.solvent_response(dmxpyI + dmxpyI.T)
         veffI *= 0.5
         veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  
         wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
         veffJ = vj1J * 2 - vk1J + f1voJ[0] * 2
+        veffJ += td_nac.solvent_response(dmxpyJ + dmxpyJ.T)
         veffJ *= 0.5
         veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  
@@ -369,13 +371,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
             vj1J = cp.asarray(vj1J)
 
         veff0doo = vj0IJ * 2 + f1ooIJ[0] + k1aoIJ[0] * 2
+        veff0doo += td_nac.solvent_response(dmzooIJ)
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         veffI = vj1I * 2 + f1voI[0] * 2
+        veffI += td_nac.solvent_response(dmxpyI + dmxpyI.T)
         veffI *= 0.5
         veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  
         wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
         veffJ = vj1J * 2 + f1voJ[0] * 2
+        veffJ += td_nac.solvent_response(dmxpyJ + dmxpyJ.T)
         veffJ *= 0.5
         veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  
@@ -383,7 +388,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         veff0momI = cp.zeros((nmo, nmo))
         veff0momJ = cp.zeros((nmo, nmo))
 
-    vresp = mf.gen_response(singlet=None, hermi=1)
+    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
@@ -453,6 +458,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     s1 = mf_grad.get_ovlp(mol)
     z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
     dmz1doo = z1aoS + dmzooIJ  # P
+    td_nac.dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
 
     if atmlst is None:

@@ -222,8 +222,11 @@ class WithSolventTDSCFNacMethod:
     def get_nacv_ge(self, xy, EI, singlet=None, atmlst=None, verbose=logger.INFO):
         if self.base.with_solvent.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
+        print("In the solvent get_nacv_ge")
 
         de_tuple = super().get_nacv_ge(xy, EI, singlet, atmlst, verbose) 
+        print("de_tuple")
+        print(de_tuple)
         de, de_scaled, de_etf, de_etf_scaled = de_tuple
 
         dm = self.base._scf.make_rdm1(ao_repr=True)
