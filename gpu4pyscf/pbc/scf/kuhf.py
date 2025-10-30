@@ -124,8 +124,11 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
     assert isinstance(mo_energy_kpts, cp.ndarray)
 
     nocc_a, nocc_b = mf.nelec
-    nmo = mo_energy_kpts.shape[-1]
     mo_energy_a = cp.sort(mo_energy_kpts[0].ravel())
+    nmo = mo_energy.size
+    if nocc_a > nmo or nocc_b > nmo:
+        raise RuntimeError('Failed to assign mo_occ. '
+                           f'Nocc ({nocc_a}, {nocc_b}) > Nmo ({nmo})')
     fermi_a = mo_energy_a[nocc_a-1]
     mo_occ_kpts = cp.zeros_like(mo_energy_kpts)
     mo_occ_kpts[0] = (mo_energy_kpts[0] <= fermi_a).astype(np.float64)
