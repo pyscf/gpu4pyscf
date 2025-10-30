@@ -57,7 +57,10 @@ def diagonalize_tda(a, nroots=5):
 
 def get_mf(mol, mf, s, mo_coeff, method='CPCM'):
     if isinstance(mf, dft.rks.RKS):
-        mf_new = dft.RKS(mol).PCM().to_gpu()
+        mf_new = dft.RKS(mol).to_gpu()
+        if getattr(mf, 'with_df', None) is not None:
+            mf_new = mf_new.density_fit()
+        mf_new = mf_new.PCM()
         mf_new.xc = mf.xc
         if len(mf.grids.atom_grid) > 0:
             mf_new.grids.atom_grid = mf.grids.atom_grid
@@ -67,12 +70,13 @@ def get_mf(mol, mf, s, mo_coeff, method='CPCM'):
         mf_new.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf_new.with_solvent.eps = 78
     else:
-        mf_new = scf.RHF(mol).PCM().to_gpu()
+        mf_new = scf.RHF(mol).to_gpu()
+        if getattr(mf, 'with_df', None) is not None:
+            mf_new = mf_new.density_fit()
+        mf_new = mf_new.PCM()
         mf_new.with_solvent.method = method
         mf_new.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf_new.with_solvent.eps = 78
-    if getattr(mf, 'with_df', None) is not None:
-        mf_new = mf_new.density_fit()
     mf_new.conv_tol = mf.conv_tol
     mf_new.conv_tol_cpscf = mf.conv_tol_cpscf
     mf_new.max_cycle = mf.max_cycle
@@ -213,6 +217,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, singlet=True, atmlst=None, 
 class KnownValues(unittest.TestCase):
     def test_nac_tda_singlet_ge_ref_CPCM(self):
         """
+        Compared with the reference values.
         """
         mf = scf.RHF(mol).PCM().to_gpu()
         mf.with_solvent.method = 'CPCM'
@@ -244,6 +249,7 @@ class KnownValues(unittest.TestCase):
 
     def test_nac_tda_singlet_ee_ref_CPCM(self):
         """
+        Compared with the reference values.
         """
         mf = scf.RHF(mol).PCM().to_gpu()
         mf.with_solvent.method = 'CPCM'
@@ -273,8 +279,10 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
 
+    @pytest.mark.slow
     def test_nac_tda_singlet_ge_ref_IEFPCM(self):
         """
+        Compared with the reference values.
         """
         mf = scf.RHF(mol).PCM().to_gpu()
         mf.with_solvent.method = 'IEF-PCM'
@@ -304,8 +312,10 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
 
+    @pytest.mark.slow
     def test_nac_tda_singlet_ee_ref_IEFPCM(self):
         """
+        Compared with the reference values.
         """
         mf = scf.RHF(mol).PCM().to_gpu()
         mf.with_solvent.method = 'IEF-PCM'
@@ -337,6 +347,7 @@ class KnownValues(unittest.TestCase):
 
     def test_nac_tda_b3lyp_singlet_ge_ref_IEFPCM(self):
         """
+        Compared with the reference values.
         """
         mf = dft.RKS(mol, xc='B3LYP').PCM().to_gpu()
         mf.with_solvent.method = 'IEF-PCM'
@@ -368,6 +379,7 @@ class KnownValues(unittest.TestCase):
 
     def test_nac_tda_b3lyp_singlet_ee_ref_IEFPCM(self):
         """
+        Compared with the reference values.
         """
         mf = dft.RKS(mol, xc='B3LYP').PCM().to_gpu()
         mf.with_solvent.method = 'IEF-PCM'
@@ -392,6 +404,264 @@ class KnownValues(unittest.TestCase):
         ref_etf_scaled = np.array([[ 0.0000000000, 0.0000000000, 0.0000000000],
                                    [ 0.0114517433, 0.0000000000, 0.0000000000],
                                    [-0.0114517433, 0.0000000000, 0.0000000000]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    def test_nac_tda_df_singlet_ge_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = scf.RHF(mol).density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(0,1)
+        nac1.kernel()
+        ref = np.array([[-0.0169681226,  0.0000000000, 0.0000000000],
+                        [ 0.0465865958, -0.0000000000, 0.0000000000],
+                        [ 0.0465865958,  0.0000000000, 0.0000000000]])
+        ref_scaled = np.array([[-0.0448869136,  0.0000000000, 0.0000000000],
+                               [ 0.1232386489, -0.0000000000, 0.0000000000],
+                               [ 0.1232386489,  0.0000000000, 0.0000000000]])
+        ref_etf = np.array([[-0.1890906137,  0.0000000000, 0.0000000000],
+                            [ 0.0945453068, -0.0000000000, 0.0000000000],
+                            [ 0.0945453068,  0.0000000000, 0.0000000000]])
+        ref_etf_scaled = np.array([[-0.5002140924,  0.0000000000, 0.0000000000],
+                                   [ 0.2501070462, -0.0000000000, 0.0000000000],
+                                   [ 0.2501070462,  0.0000000000, 0.0000000000]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    def test_nac_tda_df_singlet_ee_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = scf.RHF(mol).density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(1,2)
+        nac1.kernel()
+        ref = np.array([[-0.0000000000, -0.1974929000,  0.0000000000],
+                        [ 0.0000000000,  0.1052307850, -0.0746525780],
+                        [ 0.0000000000,  0.1052307850,  0.0746525780]])
+        ref_scaled = np.array([[-0.0000000000, -2.8593682346,  0.0000000000],
+                               [ 0.0000000000,  1.5235664872, -1.0808449828],
+                               [ 0.0000000000,  1.5235664872,  1.0808449828]])
+        ref_etf = np.array([[-0.0000000000, -0.2048057004,  0.0000000000],
+                            [ 0.0000000000,  0.1024028502, -0.0756178747],
+                            [-0.0000000000,  0.1024028502,  0.0756178747]])
+        ref_etf_scaled = np.array([[-0.0000000000, -2.9652454034,  0.0000000000],
+                                   [ 0.0000000000,  1.4826227017, -1.0948208712],
+                                   [-0.0000000000,  1.4826227017,  1.0948208712]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    @pytest.mark.slow
+    def test_nac_tda_df_b3lyp_singlet_ge_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(0,1)
+        nac1.kernel()
+        ref = np.array([[-0.0256435589,  0.0000000000, 0.0000000000],
+                        [ 0.0419823862, -0.0000000000, 0.0000000000],
+                        [ 0.0419823862,  0.0000000000, 0.0000000000]])
+        ref_scaled = np.array([[-0.0813658125,  0.0000000000, 0.0000000000],
+                               [ 0.1332081469, -0.0000000000, 0.0000000000],
+                               [ 0.1332081469,  0.0000000000, 0.0000000000]])
+        ref_etf = np.array([[-0.1628922129,  0.0000000000, 0.0000000000],
+                            [ 0.0814463385, -0.0000000000, 0.0000000000],
+                            [ 0.0814463385,  0.0000000000, 0.0000000000]])
+        ref_etf_scaled = np.array([[-0.5168493691,  0.0000000000, 0.0000000000],
+                                   [ 0.2584254207, -0.0000000000, 0.0000000000],
+                                   [ 0.2584254207,  0.0000000000, 0.0000000000]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    @pytest.mark.slow
+    def test_nac_tda_df_b3lyp_singlet_ee_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(1,4)
+        nac1.kernel()
+        ref = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                        [-0.0021934952, 0.0000000000, 0.0000000000],
+                        [ 0.0021934952, 0.0000000000, 0.0000000000]])
+        ref_scaled = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                               [-0.0129286386, 0.0000000000, 0.0000000000],
+                               [ 0.0129286386, 0.0000000000, 0.0000000000]])
+        ref_etf = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                            [-0.0019302468, 0.0000000000, 0.0000000000],
+                            [ 0.0019302468, 0.0000000000, 0.0000000000]])
+        ref_etf_scaled = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                                   [-0.0113770312, 0.0000000000, 0.0000000000],
+                                   [ 0.0113770312, 0.0000000000, 0.0000000000]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    def test_nac_tda_df_camb3lyp_singlet_ge_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = dft.RKS(mol, xc='camb3lyp').density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(0,1)
+        nac1.kernel()
+        ref = np.array([[-0.0230996727,  0.0000000000, 0.0000000000],
+                        [ 0.0417184380, -0.0000000000, 0.0000000000],
+                        [ 0.0417184380,  0.0000000000, 0.0000000000]])
+        ref_scaled = np.array([[-0.0726231757,  0.0000000000, 0.0000000000],
+                               [ 0.1311588045, -0.0000000000, 0.0000000000],
+                               [ 0.1311588045,  0.0000000000, 0.0000000000]])
+        ref_etf = np.array([[-0.1629925985,  0.0000000000, 0.0000000000],
+                            [ 0.0814964926, -0.0000000000, 0.0000000000],
+                            [ 0.0814964926,  0.0000000000, 0.0000000000]])
+        ref_etf_scaled = np.array([[-0.5124332403,  0.0000000000, 0.0000000000],
+                                   [ 0.2562172279, -0.0000000000, 0.0000000000],
+                                   [ 0.2562172279,  0.0000000000, 0.0000000000]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    def test_nac_tda_df_camb3lyp_singlet_ee_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = dft.RKS(mol, xc='camb3lyp').density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(1,4)
+        nac1.kernel()
+        ref = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                        [ 0.0021378449, 0.0000000000, 0.0000000000],
+                        [-0.0021378449, 0.0000000000, 0.0000000000]])
+        ref_scaled = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                               [ 0.0124442494, 0.0000000000, 0.0000000000],
+                               [-0.0124442494, 0.0000000000, 0.0000000000]])
+        ref_etf = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                            [ 0.0018784309, 0.0000000000, 0.0000000000],
+                            [-0.0018784309, 0.0000000000, 0.0000000000]])
+        ref_etf_scaled = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                                   [ 0.0109342184, 0.0000000000, 0.0000000000],
+                                   [-0.0109342184, 0.0000000000, 0.0000000000]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    def test_nac_tda_df_tpss_singlet_ge_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = dft.RKS(mol, xc='tpss').density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(0,1)
+        nac1.kernel()
+        ref = np.array([[-0.0278102547,  0.0000000000, 0.0000000000],
+                        [ 0.0433664781, -0.0000000000, 0.0000000000],
+                        [ 0.0433664781,  0.0000000000, 0.0000000000]])
+        ref_scaled = np.array([[-0.0868864710,  0.0000000000, 0.0000000000],
+                               [ 0.1354881601, -0.0000000000, 0.0000000000],
+                               [ 0.1354881601,  0.0000000000, 0.0000000000]])
+        ref_etf = np.array([[-0.1670293601,  0.0000000000, 0.0000000000],
+                            [ 0.0835126330, -0.0000000000, 0.0000000000],
+                            [ 0.0835126330,  0.0000000000, 0.0000000000]])
+        ref_etf_scaled = np.array([[-0.5218431763,  0.0000000000, 0.0000000000],
+                                   [ 0.2609151925, -0.0000000000, 0.0000000000],
+                                   [ 0.2609151925,  0.0000000000, 0.0000000000]])
+        assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
+
+    def test_nac_tda_df_tpss_singlet_ee_ref_IEFPCM(self):
+        """
+        Compared with the reference values.
+        """
+        mf = dft.RKS(mol, xc='tpss').density_fit().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        td.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(1,4)
+        nac1.kernel()
+        ref = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                        [-0.0001376736, 0.0000000000, 0.0000000000],
+                        [ 0.0001376736, 0.0000000000, 0.0000000000]])
+        ref_scaled = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                               [-0.0007960973, 0.0000000000, 0.0000000000],
+                               [ 0.0007960973, 0.0000000000, 0.0000000000]])
+        ref_etf = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                            [-0.0002108306, 0.0000000000, 0.0000000000],
+                            [ 0.0002108306, 0.0000000000, 0.0000000000]])
+        ref_etf_scaled = np.array([[-0.0000000000, 0.0000000000, 0.0000000000],
+                                   [-0.0012191278, 0.0000000000, 0.0000000000],
+                                   [ 0.0012191278, 0.0000000000, 0.0000000000]])
         assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
         assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
@@ -548,6 +818,236 @@ class KnownValues(unittest.TestCase):
         """
         method = "IEF-PCM"
         mf = dft.RKS(mol, xc="b3lyp").PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstateI = 0
+        nstateJ = 3
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(1,4)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-4
+
+    def test_nac_tda_df_singlet_ge_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = scf.RHF(mol).density_fit().PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ge(nac1, (xI, xI*0.0), delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(0,1)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-5
+
+    @pytest.mark.slow
+    def test_nac_tda_df_singlet_ee_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = scf.RHF(mol).density_fit().PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstateI = 0
+        nstateJ = 1
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(1,2)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-4
+
+    @pytest.mark.slow
+    def test_nac_tda_df_b3lyp_singlet_ge_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = dft.RKS(mol, xc="b3lyp").density_fit().PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ge(nac1, (xI, xI*0.0), delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(0,1)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-5
+
+    @pytest.mark.slow
+    def test_nac_tda_df_b3lyp_singlet_ee_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = dft.RKS(mol, xc="b3lyp").density_fit().PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstateI = 0
+        nstateJ = 3
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(1,4)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-4
+
+    @pytest.mark.slow
+    def test_nac_tda_df_camb3lyp_singlet_ge_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = dft.RKS(mol, xc="camb3lyp").density_fit().PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ge(nac1, (xI, xI*0.0), delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(0,1)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-5
+
+    def test_nac_tda_df_camb3lyp_singlet_ee_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = dft.RKS(mol, xc="camb3lyp").density_fit().PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstateI = 0
+        nstateJ = 3
+        xI = xy_diag[:, nstateI]*np.sqrt(0.5)
+        xJ = xy_diag[:, nstateJ]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(1,4)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-4
+
+    @pytest.mark.slow
+    def test_nac_tda_df_tpss_singlet_ge_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = dft.RKS(mol, xc="tpss").density_fit().PCM().to_gpu()
+        mf.with_solvent.method = method
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf.kernel()
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=5)
+        nac1 = td.nac_method()
+        assert getattr(td, 'with_solvent', None) is not None
+
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        delta = 0.0005
+        fdiff_nac = get_nacv_ge(nac1, (xI, xI*0.0), delta=delta, method=method)
+
+        td.kernel()
+        nac1.states=(0,1)
+        nac1.kernel()
+        assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-5
+
+    @pytest.mark.slow
+    def test_nac_tda_df_tpss_singlet_ee_fdiff_IEFPCM(self):
+        """
+        compare with finite difference
+        """
+        method = "IEF-PCM"
+        mf = dft.RKS(mol, xc="tpss").density_fit().PCM().to_gpu()
         mf.with_solvent.method = method
         mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
         mf.with_solvent.eps = 78
