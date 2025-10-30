@@ -231,6 +231,8 @@ class WithSolventTDSCFNacMethod:
             dm = dm[0] + dm[1]
         dmP = self.dmz1doo  #1.0 * (self.dmz1doo + self.dmz1doo.T)
         pcmobj = self.base.with_solvent
+        assert pcmobj.equilibrium_solvation
+
         de_modify = 0
         q_sym_dm = pcmobj._get_qsym(dm, with_nuc = True)[0]
         qE_sym_dmP = pcmobj._get_qsym(dmP)[0]
@@ -240,9 +242,9 @@ class WithSolventTDSCFNacMethod:
         v_grids_l = pcmobj._get_vgrids(dmP, with_nuc = False)[0]
         de_modify += grad_solver(pcmobj, dm, v_grids_l = v_grids_l) * 2.0
 
-        de = de + de_modify
+        de += de_modify
         de_scaled = de/EI
-        de_etf = de_etf + de_modify
+        de_etf += de_modify
         de_etf_scaled = de_etf/EI
         
         return de, de_scaled, de_etf, de_etf_scaled
@@ -252,8 +254,6 @@ class WithSolventTDSCFNacMethod:
             raise RuntimeError('Frozen solvent model is not supported')
 
         de_tuple = super().get_nacv_ee(x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose) 
-        print("de_tuple")
-        print(de_tuple)
         de, de_scaled, de_etf, de_etf_scaled = de_tuple
 
         dm = self.base._scf.make_rdm1(ao_repr=True)
@@ -263,6 +263,7 @@ class WithSolventTDSCFNacMethod:
         dmxpyI = self.dmxpyI + self.dmxpyI.T
         dmxpyJ = self.dmxpyJ + self.dmxpyJ.T
         pcmobj = self.base.with_solvent
+        assert pcmobj.equilibrium_solvation
 
         de_modify = 0.0
         q_sym_dm = pcmobj._get_qsym(dm, with_nuc = True)[0]
@@ -284,19 +285,6 @@ class WithSolventTDSCFNacMethod:
         qJ = pcmobj._get_qsym(dmxpyJ, with_nuc = False)[1]
         de_modify += grad_solver(pcmobj, dmxpyJ, v_grids=v_gridsI, v_grids_l=v_gridsJ, q=qI)
         de_modify += grad_solver(pcmobj, dmxpyI, v_grids=v_gridsJ, v_grids_l=v_gridsI, q=qJ)
-
-        print("de_modify")
-        print(de_modify)
-        print("1")
-        print(de + de_modify, de - de_modify)
-        print("2")
-        print(de_etf + de_modify, de_etf - de_modify)
-        print("3")
-        print(de_scaled + de_modify, de_scaled - de_modify)
-        print("4")
-        print(de_etf_scaled + de_modify, de_etf_scaled - de_modify)
-        print("5")
-        print((de + de_modify)/(EJ-EI))
 
         de = de + de_modify
         de_scaled = de/(EJ-EI)
