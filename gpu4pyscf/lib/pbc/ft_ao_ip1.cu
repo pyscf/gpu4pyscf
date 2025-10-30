@@ -38,19 +38,11 @@ void multiply(double aR, double aI, double bR, double bI, double &cR, double &cI
     cI = outI;
 }
 
-//__global__
-//void ft_aopair_ek_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
-//                             PBCIntEnvVars envs, int nGv, int shm_size,
-//                             int *bas_ij_idx, int *bas_ij_img_idx,
-//                             int *shl_pair_offsets)
-//{
-//}
-
 __global__
-void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
-                             PBCIntEnvVars envs, int nGv, int shm_size,
-                             int *bas_ij_idx, int *bas_ij_img_idx,
-                             int *shl_pair_offsets)
+void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
+                              PBCIntEnvVars envs, int nGv, int shm_size,
+                              int *bas_ij_idx, int *bas_ij_img_idx,
+                              int *shl_pair_offsets)
 {
     constexpr int nGv_per_block = NGV_PER_BLOCK;
     constexpr int threads = NGV_PER_BLOCK * NSP_PER_BLOCK;
@@ -102,8 +94,6 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     double ky = Gv[nGv];
     double kz = Gv[nGv * 2];
     double kk = kx * kx + ky * ky + kz * kz;
-    double vGR = vG[Gv_id*OF_COMPLEX  ];
-    double vGI = vG[Gv_id*OF_COMPLEX+1];
 
     extern __shared__ double shared_memory[];
     double *gxR = shared_memory + g_size * nGv_per_block * sp_id + Gv_id_in_block;
@@ -147,7 +137,12 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
         int i0 = ao_loc[ish];
         int j0 = ao_loc[jsh];
         // Note the density matrix is assumed to be real in get_ej_ip1 function
-        double *dm_ij = dm + (j0*nao+i0);
+        double *dm_ij;
+        if (vG == NULL) {
+            dm_ij = dm + (Gv_id + (j0*nao+i0) * nGv) * OF_COMPLEX;
+        } else {
+            dm_ij = dm + (j0*nao+i0);
+        }
 
         double v_ix = 0;
         double v_iy = 0;
@@ -250,6 +245,16 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
             for (int ij = gout_id; ij < nfij; ij += gout_stride) {
                 int i = ij % nfi;
                 int j = ij / nfi;
+                double dm_vR, dm_vI;
+                if (vG == NULL) {
+                    int addr = (j*nao+i)*nGv * OF_COMPLEX;
+                    dm_vR = dm_ij[addr];
+                    dm_vI = dm_ij[addr+1];
+                } else {
+                    double tmp = dm_ij[j*nao+i];
+                    dm_vR = tmp * vG[Gv_id*OF_COMPLEX  ];
+                    dm_vI = tmp * vG[Gv_id*OF_COMPLEX+1];
+                }
                 int ix = idx_i[i*3+0];
                 int iy = idx_i[i*3+1];
                 int iz = idx_i[i*3+2];
@@ -259,9 +264,6 @@ void ft_aopair_ej_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 int addrx = (ix + jx*stride_j) * nGv_per_block;
                 int addry = (iy + jy*stride_j) * nGv_per_block;
                 int addrz = (iz + jz*stride_j) * nGv_per_block;
-                double tmp = dm_ij[j*nao+i];
-                double dm_vR = tmp * vGR;
-                double dm_vI = tmp * vGI;
                 double IxR = gxR[addrx];
                 double IxI = gxI[addrx];
                 double IyR = gyR[addry];
@@ -347,16 +349,36 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
                          int *atm, int natm, int *bas, int nbas, double *env)
 {
-    cudaFuncSetAttribute(ft_aopair_ej_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
     int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
     dim3 blocks(nbatches_shl_pair, Gv_batches);
-    ft_aopair_ej_ip1_kernel<<<blocks, threads, shm_size>>>(
+    ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm, vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in ft_aopair_ej_ip1_kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in ft_aopair_ej_ip1: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars *envs,
+                         int nbatches_shl_pair, int ngrids, int shm_size,
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
+                         int *atm, int natm, int *bas, int nbas, double *env)
+{
+    cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
+    int Gv_batches = (ngrids + NGV_PER_BLOCK - 1) / NGV_PER_BLOCK;
+    dim3 blocks(nbatches_shl_pair, Gv_batches);
+    ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
+            out, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in ft_aopair_ek_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
