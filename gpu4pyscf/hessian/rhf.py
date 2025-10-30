@@ -629,6 +629,9 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     e_ai = 1 / (e_a[:,None] + level_shift - e_i)
     nvir, nocc = e_ai.shape
 
+    if any(np.isinf(e_ai)) or any(np.isnan(e_ai)):
+        raise ValueError(f"e_ai = {e_ai} contains inf or nan, likely because HOMO-LUMO gap is zero.")
+
     mocc = mo_coeff[:,occidx]
     nao, nmo = mo_coeff.shape
     natm = mol.natm

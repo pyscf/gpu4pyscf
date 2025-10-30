@@ -181,6 +181,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol_minimal_two_atom, xc = "wB97X")
         mf.grids.atom_grid = (50,194)
         mf.conv_tol = 1e-10
+        mf.level_shift = 0.001
 
         mf.kernel()
         assert mf.converged
