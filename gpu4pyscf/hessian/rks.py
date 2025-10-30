@@ -726,6 +726,11 @@ def get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices):
     assert dmu_dr.shape == (3, nao, ngrids)
     assert dm0.shape == (nao, nao)
 
+    dm_dmT = dm0 + dm0.T
+    dm_dot_mu_and_nu = dm_dmT @ mu
+    dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm_dmT)
+    dm_dmT = None
+
     d2rho_dAdr = cupy.zeros([natm, 3, 3, ngrids])
     for i_atom in range(natm):
         p0, p1 = aoslices[i_atom][2:]
@@ -733,12 +738,12 @@ def get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices):
         # d2rho_dAdr[i_atom, :, :, :] += cupy.einsum('dDig,jg,ij->dDg', -d2mu_dr2[:, :, p0:p1, :], mu, dm0[:, p0:p1].T)
         # d2rho_dAdr[i_atom, :, :, :] += cupy.einsum('dig,Djg,ij->dDg', -dmu_dr[:, p0:p1, :], dmu_dr, dm0[p0:p1, :])
         # d2rho_dAdr[i_atom, :, :, :] += cupy.einsum('dig,Djg,ij->dDg', -dmu_dr[:, p0:p1, :], dmu_dr, dm0[:, p0:p1].T)
-        dm_dot_mu_and_nu = (dm0[p0:p1, :] + dm0[:, p0:p1].T) @ mu
-        d2rho_dAdr[i_atom, :, :, :] += contract('dDig,ig->dDg', -d2mu_dr2[:, :, p0:p1, :], dm_dot_mu_and_nu)
-        dm_dot_mu_and_nu = None
-        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm0[p0:p1, :] + dm0[:, p0:p1].T)
-        d2rho_dAdr[i_atom, :, :, :] += contract('dig,Dig->dDg', -dmu_dr[:, p0:p1, :], dm_dot_dmu_and_dnu)
-        dm_dot_dmu_and_dnu = None
+        dm_dot_mu_and_nu_i = dm_dot_mu_and_nu[p0:p1, :]
+        d2rho_dAdr[i_atom, :, :, :] += contract('dDig,ig->dDg', -d2mu_dr2[:, :, p0:p1, :], dm_dot_mu_and_nu_i)
+        dm_dot_mu_and_nu_i = None
+        dm_dot_dmu_and_dnu_i = dm_dot_dmu_and_dnu[:, p0:p1, :]
+        d2rho_dAdr[i_atom, :, :, :] += contract('dig,Dig->dDg', -dmu_dr[:, p0:p1, :], dm_dot_dmu_and_dnu_i)
+        dm_dot_dmu_and_dnu_i = None
     return d2rho_dAdr
 
 def get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_map = None, i_atom = None):
@@ -749,9 +754,15 @@ def get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_m
     assert dmu_dr.shape == (3, nao, ngrids)
     assert dm0.shape == (nao, nao)
 
+    dm_dmT = dm0 + dm0.T
+
     if i_atom is None:
         assert atom_to_grid_index_map is not None
         natm = len(atom_to_grid_index_map)
+
+        dm_dot_mu_and_nu = dm_dmT @ mu
+        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm_dmT)
+        dm_dmT = None
 
         d2rho_dAdr_grid_response = cupy.zeros([natm, 3, 3, ngrids])
         for i_atom in range(natm):
@@ -762,22 +773,22 @@ def get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_m
             # d2rho_dAdr_response += cupy.einsum('dDig,jg,ij->dDg', d2mu_dr2[:, :, :, associated_grid_index], mu[:, associated_grid_index], dm0.T)
             # d2rho_dAdr_response += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], dm0)
             # d2rho_dAdr_response += cupy.einsum('dig,Djg,ij->dDg', dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], dm0.T)
-            dm_dot_mu_and_nu = (dm0 + dm0.T) @ mu[:, associated_grid_index]
-            d2rho_dAdr_response  = contract('dDig,ig->dDg', d2mu_dr2[:, :, :, associated_grid_index], dm_dot_mu_and_nu)
-            dm_dot_mu_and_nu = None
-            dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr[:, :, associated_grid_index], dm0 + dm0.T)
-            d2rho_dAdr_response += contract('dig,Dig->dDg', dmu_dr[:, :, associated_grid_index], dm_dot_dmu_and_dnu)
-            dm_dot_dmu_and_dnu = None
+            dm_dot_mu_and_nu_i = dm_dot_mu_and_nu[:, associated_grid_index]
+            d2rho_dAdr_response  = contract('dDig,ig->dDg', d2mu_dr2[:, :, :, associated_grid_index], dm_dot_mu_and_nu_i)
+            dm_dot_mu_and_nu_i = None
+            dm_dot_dmu_and_dnu_i = dm_dot_dmu_and_dnu[:, :, associated_grid_index]
+            d2rho_dAdr_response += contract('dig,Dig->dDg', dmu_dr[:, :, associated_grid_index], dm_dot_dmu_and_dnu_i)
+            dm_dot_dmu_and_dnu_i = None
 
             d2rho_dAdr_grid_response[i_atom][:, :, associated_grid_index] = d2rho_dAdr_response
     else:
         assert atom_to_grid_index_map is None
 
         # Here we assume all grids belong to atom i
-        dm_dot_mu_and_nu = (dm0 + dm0.T) @ mu
+        dm_dot_mu_and_nu = dm_dmT @ mu
         d2rho_dAdr_grid_response  = contract('dDig,ig->dDg', d2mu_dr2, dm_dot_mu_and_nu)
         dm_dot_mu_and_nu = None
-        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm0 + dm0.T)
+        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm_dmT)
         d2rho_dAdr_grid_response += contract('dig,Dig->dDg', dmu_dr, dm_dot_dmu_and_dnu)
         dm_dot_dmu_and_dnu = None
 
@@ -793,7 +804,12 @@ def get_drhodA_dgammadA_orbital_response(d2mu_dr2, dmu_dr, mu, drho_dr, dm0, aos
     assert drho_dr.shape == (3, ngrids)
     assert dm0.shape == (nao, nao)
 
+    dm_dmT = dm0 + dm0.T
+    dm_dot_mu_and_nu = dm_dmT @ mu
     drhodr_dot_dmudr = contract('Djg,Dg->jg', dmu_dr, drho_dr)
+    drhodr_dot_dmu_dnu_dot_dm = dm_dmT @ drhodr_dot_dmudr
+    dm_dmT = None
+    drhodr_dot_dmudr = None
 
     drho_dA = cupy.zeros([natm, 3, ngrids])
     dgamma_dA = cupy.zeros([natm, 3, ngrids])
@@ -802,20 +818,20 @@ def get_drhodA_dgammadA_orbital_response(d2mu_dr2, dmu_dr, mu, drho_dr, dm0, aos
 
         # drho_dA[i_atom, :, :] += cupy.einsum('dig,jg,ij->dg', -dmu_dr[:, p0:p1, :], mu, dm0[p0:p1, :])
         # drho_dA[i_atom, :, :] += cupy.einsum('dig,jg,ij->dg', -dmu_dr[:, p0:p1, :], mu, dm0[:, p0:p1].T)
-        dm_dot_mu_and_nu = (dm0[p0:p1, :] + dm0[:, p0:p1].T) @ mu
-        drho_dA[i_atom, :, :] += contract('dig,ig->dg', -dmu_dr[:, p0:p1, :], dm_dot_mu_and_nu)
+        dm_dot_mu_and_nu_i = dm_dot_mu_and_nu[p0:p1, :]
+        drho_dA[i_atom, :, :] += contract('dig,ig->dg', -dmu_dr[:, p0:p1, :], dm_dot_mu_and_nu_i)
 
         # dgamma_dA[i_atom, :, :] += cupy.einsum('dDig,jg,Dg,ij->dg', -d2mu_dr2[:, :, p0:p1, :], mu, drho_dr, dm0[p0:p1, :])
         # dgamma_dA[i_atom, :, :] += cupy.einsum('dDig,jg,Dg,ij->dg', -d2mu_dr2[:, :, p0:p1, :], mu, drho_dr, dm0[:, p0:p1].T)
         # dgamma_dA[i_atom, :, :] += cupy.einsum('dig,Djg,Dg,ij->dg', -dmu_dr[:, p0:p1, :], dmu_dr, drho_dr, dm0[p0:p1, :])
         # dgamma_dA[i_atom, :, :] += cupy.einsum('dig,Djg,Dg,ij->dg', -dmu_dr[:, p0:p1, :], dmu_dr, drho_dr, dm0[:, p0:p1].T)
         d2mudAdr_dot_drhodr = contract('dDig,Dg->dig', -d2mu_dr2[:, :, p0:p1, :], drho_dr)
-        dgamma_dA[i_atom, :, :] += contract('dig,ig->dg', d2mudAdr_dot_drhodr, dm_dot_mu_and_nu)
+        dgamma_dA[i_atom, :, :] += contract('dig,ig->dg', d2mudAdr_dot_drhodr, dm_dot_mu_and_nu_i)
         d2mudAdr_dot_drhodr = None
-        dm_dot_mu_and_nu = None
-        drhodr_dot_dmu_dnu_dot_dm = (dm0[p0:p1, :] + dm0[:, p0:p1].T) @ drhodr_dot_dmudr
-        dgamma_dA[i_atom, :, :] += contract('dig,ig->dg', -dmu_dr[:, p0:p1, :], drhodr_dot_dmu_dnu_dot_dm)
-        drhodr_dot_dmu_dnu_dot_dm = None
+        dm_dot_mu_and_nu_i = None
+        drhodr_dot_dmu_dnu_dot_dm_i = drhodr_dot_dmu_dnu_dot_dm[p0:p1, :]
+        dgamma_dA[i_atom, :, :] += contract('dig,ig->dg', -dmu_dr[:, p0:p1, :], drhodr_dot_dmu_dnu_dot_dm_i)
+        drhodr_dot_dmu_dnu_dot_dm_i = None
     dgamma_dA *= 2
 
     return drho_dA, dgamma_dA
@@ -829,12 +845,19 @@ def get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, drho_dr, dm0, atom_t
     assert drho_dr.shape == (3, ngrids)
     assert dm0.shape == (nao, nao)
 
+    dm_dmT = dm0 + dm0.T
+
     if i_atom is None:
         assert atom_to_grid_index_map is not None
 
         natm = len(atom_to_grid_index_map)
         drho_dA_grid_response   = cupy.zeros([natm, 3, ngrids])
         dgamma_dA_grid_response = cupy.zeros([natm, 3, ngrids])
+
+        dm_dot_mu_and_nu = dm_dmT @ mu
+        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm_dmT)
+        dm_dmT = None
+
         for i_atom in range(natm):
             associated_grid_index = atom_to_grid_index_map[i_atom]
             if len(associated_grid_index) == 0:
@@ -842,8 +865,8 @@ def get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, drho_dr, dm0, atom_t
             # rho_response  = cupy.einsum('dig,jg,ij->dg', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index], dm0)
             # rho_response += cupy.einsum('dig,jg,ij->dg', dmu_dr[:, :, associated_grid_index], mu[:, associated_grid_index], dm0.T)
             dmu_dr_grid_i = dmu_dr[:, :, associated_grid_index]
-            dm_dot_mu_and_nu = (dm0 + dm0.T) @ mu[:, associated_grid_index]
-            rho_response = contract('dig,ig->dg', dmu_dr_grid_i, dm_dot_mu_and_nu)
+            dm_dot_mu_and_nu_i = dm_dot_mu_and_nu[:, associated_grid_index]
+            rho_response = contract('dig,ig->dg', dmu_dr_grid_i, dm_dot_mu_and_nu_i)
             drho_dA_grid_response[i_atom][:, associated_grid_index] = rho_response
             rho_response = None
 
@@ -856,29 +879,32 @@ def get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, drho_dr, dm0, atom_t
             # gamma_response += cupy.einsum('dig,Djg,Dg,ij->dg',
             #     dmu_dr[:, :, associated_grid_index], dmu_dr[:, :, associated_grid_index], drho_dr[:, associated_grid_index], dm0.T)
             d2mudr2_dot_drhodr = contract('dDig,Dg->dig', d2mu_dr2[:, :, :, associated_grid_index], drho_dr[:, associated_grid_index])
-            gamma_response  = contract('dig,ig->dg', d2mudr2_dot_drhodr, dm_dot_mu_and_nu)
+            gamma_response  = contract('dig,ig->dg', d2mudr2_dot_drhodr, dm_dot_mu_and_nu_i)
             d2mudr2_dot_drhodr = None
-            dm_dot_mu_and_nu = None
-            dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr_grid_i, dm0 + dm0.T)
+            dm_dot_mu_and_nu_i = None
+            dm_dot_dmu_and_dnu_i = dm_dot_dmu_and_dnu[:, :, associated_grid_index]
             dmudr_dot_drhodr = contract('dig,dg->ig', dmu_dr_grid_i, drho_dr[:, associated_grid_index])
             dmu_dr_grid_i = None
-            gamma_response += contract('dig,ig->dg', dm_dot_dmu_and_dnu, dmudr_dot_drhodr)
+            gamma_response += contract('dig,ig->dg', dm_dot_dmu_and_dnu_i, dmudr_dot_drhodr)
             dmudr_dot_drhodr = None
-            dm_dot_dmu_and_dnu = None
+            dm_dot_dmu_and_dnu_i = None
             dgamma_dA_grid_response[i_atom][:, associated_grid_index] = gamma_response
             gamma_response = None
+        dm_dot_mu_and_nu = None
+        dm_dot_dmu_and_dnu = None
+
     else:
         assert atom_to_grid_index_map is None
 
         # Here we assume all grids belong to atom i
-        dm_dot_mu_and_nu = (dm0 + dm0.T) @ mu
+        dm_dot_mu_and_nu = dm_dmT @ mu
         drho_dA_grid_response = contract('dig,ig->dg', dmu_dr, dm_dot_mu_and_nu)
 
         d2mudr2_dot_drhodr = contract('dDig,Dg->dig', d2mu_dr2, drho_dr)
         dgamma_dA_grid_response = contract('dig,ig->dg', d2mudr2_dot_drhodr, dm_dot_mu_and_nu)
         d2mudr2_dot_drhodr = None
         dm_dot_mu_and_nu = None
-        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm0 + dm0.T)
+        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm_dmT)
         dmudr_dot_drhodr = contract('dig,dg->ig', dmu_dr, drho_dr)
         dgamma_dA_grid_response += contract('dig,ig->dg', dm_dot_dmu_and_dnu, dmudr_dot_drhodr)
         dmudr_dot_drhodr = None
@@ -940,49 +966,42 @@ def contract_d2rhodAdB_d2gammadAdB(d3mu_dr3, d2mu_dr2, dmu_dr, mu, drho_dr, dm0,
     assert drho_dr.shape == (3, ngrids)
     assert dm0.shape == (nao, nao)
 
+    dm_dmT = dm0 + dm0.T
+    mu_dot_dm = dm_dmT @ mu
     drhodr_dot_dmudr = contract('djg,dg->jg', dmu_dr, drho_dr)
+    drhodr_dot_dmudr_dot_dm = dm_dmT @ drhodr_dot_dmudr
+    drhodr_dot_dmudr = None
 
     d2e_rho_dAdB = cupy.zeros([natm, natm, 3, 3])
     d2e_gamma_dAdB = cupy.zeros([natm, natm, 3, 3])
     for i_atom in range(natm):
         pi0, pi1 = aoslices[i_atom][2:]
 
-        nu_dot_dm = dm0[pi0:pi1, :] @ mu
-        d2rho_dA2  = contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], nu_dot_dm)
-        mu_dot_dm = dm0[:, pi0:pi1].T @ mu
-        d2rho_dA2 += contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], mu_dot_dm)
+        mu_dot_dm_i = mu_dot_dm[pi0:pi1, :]
+        d2rho_dA2  = contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], mu_dot_dm_i)
         d2e_rho_dAdB[i_atom, i_atom, :, :] += contract('dDg,g->dD', d2rho_dA2, fw_rho)
         d2rho_dA2 = None
 
         d3mudA2dr_dot_drhodr = contract('dDPig,Pg->dDig', d3mu_dr3[:, :, :, pi0:pi1, :], drho_dr)
-        d2gamma_dA2  = contract('dDig,ig->dDg', d3mudA2dr_dot_drhodr, nu_dot_dm)
-        d2gamma_dA2 += contract('dDig,ig->dDg', d3mudA2dr_dot_drhodr, mu_dot_dm)
+        d2gamma_dA2 = contract('dDig,ig->dDg', d3mudA2dr_dot_drhodr, mu_dot_dm_i)
         d3mudA2dr_dot_drhodr = None
-        nu_dot_dm = None
-        mu_dot_dm = None
-        drhodr_dot_dmudr_dot_dm = dm0[pi0:pi1, :] @ drhodr_dot_dmudr
-        d2gamma_dA2 += contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], drhodr_dot_dmudr_dot_dm)
-        drhodr_dot_dmudr_dot_dm = None
-        drhodr_dot_dnudr_dot_dm = dm0[:, pi0:pi1].T @ drhodr_dot_dmudr
-        d2gamma_dA2 += contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], drhodr_dot_dnudr_dot_dm)
-        drhodr_dot_dnudr_dot_dm = None
+        mu_dot_dm_i = None
+        drhodr_dot_dmudr_dot_dm_i = drhodr_dot_dmudr_dot_dm[pi0:pi1, :]
+        d2gamma_dA2 += contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], drhodr_dot_dmudr_dot_dm_i)
+        drhodr_dot_dmudr_dot_dm_i = None
         d2e_gamma_dAdB[i_atom, i_atom, :, :] += contract('dDg,g->dD', d2gamma_dA2, fw_gamma)
         d2gamma_dA2 = None
 
         for j_atom in range(natm):
             pj0, pj1 = aoslices[j_atom][2:]
-            dnudr_dot_dm = contract('djg,ij->dig', dmu_dr[:, pj0:pj1, :], dm0[pi0:pi1, pj0:pj1])
-            d2rho_dAdB  = contract('dig,Dig->dDg', dmu_dr[:, pi0:pi1, :], dnudr_dot_dm)
-            dmudr_dot_dm = contract('djg,ij->dig', dmu_dr[:, pj0:pj1, :], dm0[pj0:pj1, pi0:pi1].T)
-            d2rho_dAdB += contract('dig,Dig->dDg', dmu_dr[:, pi0:pi1, :], dmudr_dot_dm)
+            dmudr_dot_dm_ij = contract('djg,ij->dig', dmu_dr[:, pj0:pj1, :], dm_dmT[pi0:pi1, pj0:pj1])
+            d2rho_dAdB = contract('dig,Dig->dDg', dmu_dr[:, pi0:pi1, :], dmudr_dot_dm_ij)
             d2e_rho_dAdB[i_atom, j_atom, :, :] += contract('dDg,g->dD', d2rho_dAdB, fw_rho)
             d2rho_dAdB = None
 
             drhodr_dot_d2mudAdr = contract('dDig,Dg->dig', d2mu_dr2[:, :, pi0:pi1, :], drho_dr)
-            d2gamma_dAdB  = contract('dig,Dig->dDg', drhodr_dot_d2mudAdr, dnudr_dot_dm)
-            dnudr_dot_dm = None
-            d2gamma_dAdB += contract('dig,Dig->dDg', drhodr_dot_d2mudAdr, dmudr_dot_dm)
-            dmudr_dot_dm = None
+            d2gamma_dAdB = contract('dig,Dig->dDg', drhodr_dot_d2mudAdr, dmudr_dot_dm_ij)
+            dmudr_dot_dm_ij = None
             drhodr_dot_d2mudAdr = None
             d2gamma_dAdB = contract('dDg,g->dD', d2gamma_dAdB, fw_gamma)
             d2e_gamma_dAdB[i_atom, j_atom, :, :] += d2gamma_dAdB
@@ -1405,9 +1424,11 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         )
 
         # E_{w,gr}^{AB} in Eq 33, and its transpose
-        d2e += contract("Adg,BDg->ABdD", grids_weights_1, E_Bgr_i * rho_i)
-        d2e += contract("Adg,BDg->BADd", grids_weights_1, E_Bgr_i * rho_i)
+        E_wgr_AB_term = contract("Adg,BDg->ABdD", grids_weights_1, E_Bgr_i * rho_i)
+        d2e += E_wgr_AB_term
+        d2e += E_wgr_AB_term.transpose(1,0,3,2)
         grids_weights_1 = None
+        E_wgr_AB_term = None
 
         # First term in E_{G,gr}^{AB} in Eq 35, and its transpose
         E_Ggr_AB_term_1_right = (E_Bgr_i + (U_Bgr_i * dkappa_drho_i + W_Bgr_i * domega_drho_i) * rho_i) * grids_weights
@@ -1890,9 +1911,9 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                         drhodA_grid_response_fwxc_rho_term_mu = contract("dg,pg->dpg", drhodA_grid_response_fwxc[i_atom, :, 0, :], mu)
                         vmat[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_rho_term_mu, mu_occ)
                         drhodA_grid_response_fwxc_rho_term_mu = None
-                        drhodA_grid_response_fwxc_nablarho_term_mu = contract("dxg,pg->dpxg", drhodA_grid_response_fwxc[i_atom, :, 1:4, :], mu)
-                        vmat[i_atom, :, :, :] -= contract("dpxg,xgj->dpj", drhodA_grid_response_fwxc_nablarho_term_mu, dmudr_occ)
-                        drhodA_grid_response_fwxc_nablarho_term_mu = None
+                        drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = contract("dxg,xgj->dgj", drhodA_grid_response_fwxc[i_atom, :, 1:4, :], dmudr_occ)
+                        vmat[i_atom, :, :, :] -= contract("dgj,pg->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr_occ, mu)
+                        drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = None
                         drhodA_grid_response_fwxc_nablarho_term_dmudr = contract("dxg,xpg->dpg", drhodA_grid_response_fwxc[i_atom, :, 1:4, :], dmu_dr)
                         vmat[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr, mu_occ)
                         drhodA_grid_response_fwxc_nablarho_term_dmudr = None
@@ -2075,9 +2096,9 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
                         drhodA_grid_response_fwxc_rho_term_mu = contract("dg,pg->dpg", drhodA_grid_response_fwxc[i_atom, :, 0, :], mu)
                         vmat[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_rho_term_mu, mu_occ)
                         drhodA_grid_response_fwxc_rho_term_mu = None
-                        drhodA_grid_response_fwxc_nablarho_term_mu = contract("dxg,pg->dpxg", drhodA_grid_response_fwxc[i_atom, :, 1:4, :], mu)
-                        vmat[i_atom, :, :, :] -= contract("dpxg,xgj->dpj", drhodA_grid_response_fwxc_nablarho_term_mu, dmudr_occ)
-                        drhodA_grid_response_fwxc_nablarho_term_mu = None
+                        drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = contract("dxg,xgj->dgj", drhodA_grid_response_fwxc[i_atom, :, 1:4, :], dmudr_occ)
+                        vmat[i_atom, :, :, :] -= contract("dgj,pg->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr_occ, mu)
+                        drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = None
                         drhodA_grid_response_fwxc_nablarho_term_dmudr = contract("dxg,xpg->dpg", drhodA_grid_response_fwxc[i_atom, :, 1:4, :], dmu_dr)
                         vmat[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr, mu_occ)
                         drhodA_grid_response_fwxc_nablarho_term_dmudr = None
@@ -2861,6 +2882,11 @@ def get_drho_dA_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to_grid_in
     if with_grid_response:
         assert atom_to_grid_index_map is not None and len(atom_to_grid_index_map) == natm
 
+    dm_dmT = dm0 + dm0.T
+    dm_dot_mu_and_nu = dm_dmT @ mu
+    if with_nablarho:
+        dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm_dmT)
+
     drho_dA_orbital_response = None
     dnablarho_dA_orbital_response = None
     dtau_dA_orbital_response = None
@@ -2874,18 +2900,18 @@ def get_drho_dA_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to_grid_in
 
         for i_atom in range(natm):
             p0, p1 = aoslices[i_atom][2:]
-            dm_dot_mu_and_nu = (dm0[p0:p1, :] + dm0[:, p0:p1].T) @ mu
-            drho_dA_orbital_response[i_atom, :, :] += contract('dig,ig->dg', -dmu_dr[:, p0:p1, :], dm_dot_mu_and_nu)
+            dm_dot_mu_and_nu_i = dm_dot_mu_and_nu[p0:p1, :]
+            drho_dA_orbital_response[i_atom, :, :] += contract('dig,ig->dg', -dmu_dr[:, p0:p1, :], dm_dot_mu_and_nu_i)
 
             if with_nablarho:
-                dnablarho_dA_orbital_response[i_atom, :, :] += contract('dDig,ig->dDg', -d2mu_dr2[:, :, p0:p1, :], dm_dot_mu_and_nu)
-                dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr, dm0[p0:p1, :] + dm0[:, p0:p1].T)
-                dnablarho_dA_orbital_response[i_atom, :, :] += contract('dig,Dig->dDg', -dmu_dr[:, p0:p1, :], dm_dot_dmu_and_dnu)
-            dm_dot_mu_and_nu = None
+                dnablarho_dA_orbital_response[i_atom, :, :] += contract('dDig,ig->dDg', -d2mu_dr2[:, :, p0:p1, :], dm_dot_mu_and_nu_i)
+                dm_dot_dmu_and_dnu_i = dm_dot_dmu_and_dnu[:, p0:p1, :]
+                dnablarho_dA_orbital_response[i_atom, :, :] += contract('dig,Dig->dDg', -dmu_dr[:, p0:p1, :], dm_dot_dmu_and_dnu_i)
+            dm_dot_mu_and_nu_i = None
 
             if with_tau:
-                dtau_dA_orbital_response[i_atom, :, :] += 0.5 * contract('dDig,Dig->dg', -d2mu_dr2[:, :, p0:p1, :], dm_dot_dmu_and_dnu)
-            dm_dot_dmu_and_dnu = None
+                dtau_dA_orbital_response[i_atom, :, :] += 0.5 * contract('dDig,Dig->dg', -d2mu_dr2[:, :, p0:p1, :], dm_dot_dmu_and_dnu_i)
+            dm_dot_dmu_and_dnu_i = None
 
     drho_dA_grid_response = None
     dnablarho_dA_grid_response = None
@@ -2904,27 +2930,27 @@ def get_drho_dA_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to_grid_in
                 continue
             dmu_dr_grid_i = dmu_dr[:, :, associated_grid_index]
 
-            dm_dot_mu_and_nu = (dm0 + dm0.T) @ mu[:, associated_grid_index]
-            rho_response = contract('dig,ig->dg', dmu_dr_grid_i, dm_dot_mu_and_nu)
+            dm_dot_mu_and_nu_i = dm_dot_mu_and_nu[:, associated_grid_index]
+            rho_response = contract('dig,ig->dg', dmu_dr_grid_i, dm_dot_mu_and_nu_i)
             drho_dA_grid_response[i_atom][:, associated_grid_index] = rho_response
             rho_response = None
 
             if with_nablarho:
                 d2mu_dr2_grid_i = d2mu_dr2[:, :, :, associated_grid_index]
 
-                nablarho_response = contract('dDig,ig->dDg', d2mu_dr2_grid_i, dm_dot_mu_and_nu)
-                dm_dot_dmu_and_dnu = contract('djg,ij->dig', dmu_dr_grid_i, dm0 + dm0.T)
-                nablarho_response += contract('dig,Dig->dDg', dmu_dr_grid_i, dm_dot_dmu_and_dnu)
+                nablarho_response = contract('dDig,ig->dDg', d2mu_dr2_grid_i, dm_dot_mu_and_nu_i)
+                dm_dot_dmu_and_dnu_i = dm_dot_dmu_and_dnu[:, :, associated_grid_index]
+                nablarho_response += contract('dig,Dig->dDg', dmu_dr_grid_i, dm_dot_dmu_and_dnu_i)
                 dnablarho_dA_grid_response[i_atom][:, :, associated_grid_index] = nablarho_response
                 nablarho_response = None
-            dm_dot_mu_and_nu = None
+            dm_dot_mu_and_nu_i = None
             dmu_dr_grid_i = None
 
             if with_tau:
-                tau_reponse = 0.5 * contract('dDig,Dig->dg', d2mu_dr2_grid_i, dm_dot_dmu_and_dnu)
+                tau_reponse = 0.5 * contract('dDig,Dig->dg', d2mu_dr2_grid_i, dm_dot_dmu_and_dnu_i)
                 dtau_dA_grid_response[i_atom][:, associated_grid_index] = tau_reponse
                 tau_reponse = None
-            dm_dot_dmu_and_dnu = None
+            dm_dot_dmu_and_dnu_i = None
             d2mu_dr2_grid_i = None
 
     if (not with_nablarho) and (not with_tau):
