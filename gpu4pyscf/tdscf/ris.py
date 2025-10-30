@@ -105,9 +105,9 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=Fals
     for atom_index in auxmol_basis_keys:
         atom = ''.join([char for char in atom_index if char.isalpha()])
 
-        # if excludeHs:
-        #     if atom == 'H':
-        #         continue
+        if excludeHs:
+            if atom == 'H':
+                continue
         '''
         exponent_alpha = theta/R^2
         '''
@@ -144,7 +144,7 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
     '''
     auxmol = mol.copy()
     auxmol_basis_keys = mol._basis.keys()
-    auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis,excludeHs=False)
+    auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis,excludeHs=excludeHs)
     auxmol.build(dump_input=False, parse_arg=False)
     return auxmol
 
@@ -475,7 +475,7 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
     # gpu_memG_threshold = 0.5* get_avail_mem()/1024**3
     # if eri3c_mem < gpu_memG_threshold:
     eri3c = cp.empty((naopair, nauxao), dtype=int3c_dtype, order='F')
-    log.info(f' generate eri3c in GPU, download to CPU only at final step')
+    log.info(' generate eri3c in GPU, download to CPU only at final step')
     
     # for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
 
@@ -505,7 +505,7 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
             log.info(f' generate eri3c batch {p0}-{p1} / {nauxao} done')
             log.timer(' eri3c_batch to holder', *cpu2)
         except StopIteration:
-            log.info(f'All batches processed')
+            log.info('All batches processed')
             break
 
     cpu3 = log.init_timer()
@@ -626,7 +626,7 @@ def gen_hdiag_MVP(hdiag, n_occ, n_vir):
     return hdiag_MVP
 
 def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
-    nao, nao_orig = int3c2e_opt.coeff.shape
+    # nao, nao_orig = int3c2e_opt.coeff.shape
 
     C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
     C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
@@ -775,7 +775,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
             aopair, aux_batch_size = eri3c_batch.shape
             T_right[:,aux_offset:aux_offset+aux_batch_size] = dm_sparse.dot(eri3c_batch)   #  (nstate, npair)(npair|aux_batch_size)-> (nstate, aux_batch_size)
             aux_offset += aux_batch_size
-            # log.debug('eri3c_batch', *cpu1)
+            log.debug('eri3c_batch', *cpu1)
 
         # log.timer('T_right', *cpu0)
             
@@ -1356,14 +1356,14 @@ def gen_ibja_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q,  single, log=None):
             T_ib = T_ja
             T_ib_V = contract('Pib,mjb->mPij', T_ib, V)
 
-            # log.timer(' Pab,mjb->mPja', *cpu)
+            log.timer(' Pab,mjb->mPja', *cpu)
             cpu = log.init_timer()
 
             out -= a_x*contract('Pja,mPij->mia', T_ja, T_ib_V)
             del T_ib, T_ja, T_ib_V
             release_memory()
 
-            # log.timer(' Pij,mPja->mia', *cpu)
+            log.timer(' Pij,mPja->mia', *cpu)
 
             log.timer(f' ijab slice over nauxao {p1}/{nauxao}', *cpu0)
 
@@ -1542,7 +1542,7 @@ class TD_Scanner(lib.SinglePointScanner):
 
 class RisBase(lib.StreamObject):
     def __init__(self, mf,  
-                theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', 
+                theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
                 Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None, 
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
                 nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
@@ -1607,6 +1607,7 @@ class RisBase(lib.StreamObject):
         self.K_fit = K_fit
 
         self.Ktrunc = Ktrunc
+        self._excludeHs = excludeHs
         self._full_K_diag = full_K_diag
         self.a_x = a_x
         self.omega = omega
@@ -1707,7 +1708,7 @@ class RisBase(lib.StreamObject):
     
     def build(self):
         log = self.log
-        log.warn("TDA&TDDFT-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
+        # log.warn("TDA&TDDFT-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
 
         log.info(f'nstates: {self.nstates}')
         log.info(f'N atoms:{self._scf.mol.natm}')
@@ -1829,13 +1830,17 @@ class RisBase(lib.StreamObject):
                 rest_occ = cp.sum(occ_lumo_delta_ene <= trunc_tol_au)
                 rest_vir = cp.sum(homo_vir_delta_ene <= trunc_tol_au)
 
-                rest_occ = (rest_occ//2)*2
-                rest_vir = (rest_vir//2)*2
+                # rest_occ = (rest_occ//2)*2
+                # rest_vir = (rest_vir//2)*2
+                assert rest_occ > 0 
+                assert rest_vir > 0 
+
 
             elif self.Ktrunc == 0:
                 log.info('no MO truncation in K')
                 rest_occ = n_occ
                 rest_vir = n_vir
+
 
             log.info(f'rest_occ = {rest_occ}')
             log.info(f'rest_vir = {rest_vir}')
@@ -1888,7 +1893,7 @@ class RisBase(lib.StreamObject):
             # else:
             #     self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
 
-            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=True) 
+            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=self.self._excludeHs) 
 
             log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
             self.auxmol_K = auxmol_K
@@ -1923,8 +1928,6 @@ class RisBase(lib.StreamObject):
         log = self.log
         log.info('==================== RIK ====================')
         cpu1 = log.init_timer()
-
-
 
         T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K, 
                                 C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='K', 
@@ -1980,6 +1983,7 @@ class RisBase(lib.StreamObject):
         log.info('==================== build full K diag ====================')
         cpu0 = log.init_timer()
         if not hasattr(self, "K_diag"):
+            self.get_eri3c_K()
             K_diag = gen_K_diag(eri3c=self.eri3c_K, int3c2e_opt=self.int3c2e_opt_K, C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
             self.K_diag = K_diag
 
@@ -1993,10 +1997,11 @@ class RisBase(lib.StreamObject):
             rest_occ, rest_vir = true_K_diag.shape
             log.info(f'rest_occ, rest_vir = {rest_occ, rest_vir}')
             diff = true_K_diag - K_diag[self.n_occ - self.rest_occ:, :self.rest_vir]
-            log.info(f'true_K_diag - K_diag norm {cp.linalg.norm(diff)}')
+            print(f'true_K_diag - K_diag norm {cp.linalg.norm(diff)}')
+            assert cp.linalg.norm(diff) < 1e-3
 
         K_diag[self.n_occ - self.rest_occ:, :self.rest_vir] = 0
-        self.hKdiag = self.hdiag + K_diag.reshape(-1)
+        self.hKdiag = self.hdiag - self.a_x * K_diag.reshape(-1)
         log.timer('build full K diag', *cpu0)
         log.info(get_memory_info('after build build full K diag'))
         return self.hKdiag
@@ -2180,7 +2185,8 @@ class TDA(RisBase):
 
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies,
                                                  X=X/(2**0.5), Y=None, P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(),
-                                                 name=self.out_name+'_TDA_ris', RKS=self.RKS, spectra=self.spectra,
+                                                 name=self.out_name+'_TDA_ris' if self.out_name else 'TDA_ris', 
+                                                 RKS=self.RKS, spectra=self.spectra,
                                                  print_threshold = self.print_threshold, n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
         
         energies = energies*HARTREE2EV
@@ -2408,7 +2414,8 @@ class TDDFT(RisBase):
 
 
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, X=X/(2**0.5), Y=Y/(2**0.5),
-                                                    P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(), name=self.out_name+'_TDDFT_ris',
+                                                    P=self.transition_dipole(), mdpol=self.transition_magnetic_dipole(), 
+                                                    name=self.out_name+'_TDDFT_ris' if self.out_name else 'TDA_ris',
                                                     spectra=self.spectra, RKS=self.RKS, print_threshold = self.print_threshold,
                                                     n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
         energies = energies*HARTREE2EV
