@@ -394,9 +394,9 @@ def get_ej_ip1(mydf, dm, kpts=None):
             sorted_cell._env.ctypes)
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
-    return ej
+    return ej.get()
 
-def get_ek_ip1(mydf, dm, hermi=1, kpts=None, exxdiv=None):
+def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     '''The first order energy derivatives from exact exchange'''
     if kpts is None:
         kpts = np.zeros((1,3))
@@ -445,28 +445,6 @@ def get_ek_ip1(mydf, dm, hermi=1, kpts=None, exxdiv=None):
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
-    t_rev_pairs = group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
-    try:
-        t_rev_pairs = np.asarray(t_rev_pairs, dtype=np.int32, order='F')
-    except TypeError:
-        t_rev_pairs = [[k, k] if k_conj is None else [k, k_conj]
-                       for k, k_conj in t_rev_pairs]
-        t_rev_pairs = np.asarray(t_rev_pairs, dtype=np.int32, order='F')
-    log.debug1('Num time-reversal pairs %d', len(t_rev_pairs))
-
-    time_reversal_symmetry = mydf.time_reversal_symmetry
-    if time_reversal_symmetry:
-        for k, k_conj in t_rev_pairs:
-            if k != k_conj and abs(dms[:,k_conj] - dms[:,k].conj()).max() > 1e-6:
-                time_reversal_symmetry = False
-                log.debug2('Disable time_reversal_symmetry')
-                break
-    if time_reversal_symmetry:
-        k_to_compute = np.zeros(nkpts, dtype=np.int8)
-        k_to_compute[t_rev_pairs[:,0]] = 1
-    else:
-        k_to_compute = np.ones(nkpts, dtype=np.int8)
-
     kern = libpbc.PBC_ft_aopair_ek_ip1
     GvT = cp.zeros(3*blksize+256)
     ek = cp.zeros((cell.natm, 3))
@@ -487,8 +465,8 @@ def get_ek_ip1(mydf, dm, hermi=1, kpts=None, exxdiv=None):
             Gpq_conj = Gpq_conj.transpose(0,2,3,1)
 
             if is_gamma_point:
-                tmp = contract('ijg,sjk->sikg', Gpq[0], dms[:,0])
-                dm_vG = contract('sikg,sli->lkg', tmp, dms[:,0])
+                tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
+                dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
             else:
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
                 # apply derivatives to nlkG*
@@ -527,11 +505,11 @@ def get_ek_ip1(mydf, dm, hermi=1, kpts=None, exxdiv=None):
                 sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
                 sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
                 sorted_cell._env.ctypes)
-            Gpq = tmp = dm_vG = None
+            Gpq_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-    return ek
+    return ek.get()
 
 def _screen_shl_pairs(ft_opt):
     img_idx_cache = ft_opt.make_img_idx_cache(permutation_symmetry=True)

@@ -232,14 +232,15 @@ class KnownValues(unittest.TestCase):
         )
         np.random.seed(9)
         nao = cell.nao
-        dm = np.random.rand(nao, nao) * .5
-        dm = dm.dot(dm.T)
+        dm = np.random.rand(2, nao, nao) * .5
+        dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         mydf = aft.AFTDF(cell)
-        ej = aft_jk.get_ej_ip1(mydf, dm).get()
+        ej = aft_jk.get_ej_ip1(mydf, dm)
         assert abs(ej.sum(axis=0)).max() < 1e-8
 
         cell.precision = 1e-10
         cell.build(0, 0)
+        dm = dm[0] + dm[1]
         vj = fft_cpu.FFTDF(cell).get_j_e1(dm)
         aoslices = cell.aoslice_by_atom()
         ref = np.empty((cell.natm, 3))
@@ -264,7 +265,7 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([3,2,1])
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        ej = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts).get()
+        ej = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
         assert abs(ej.sum(axis=0)).max() < 1e-8
 
         cell.precision = 1e-10
@@ -293,14 +294,14 @@ class KnownValues(unittest.TestCase):
         )
         np.random.seed(9)
         nao = cell.nao
-        dm = np.random.rand(nao, nao) * .5
-        dm = dm.dot(dm.T)
+        dm = np.random.rand(2, nao, nao) * .5
+        dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         myaft = aft.AFTDF(cell)
-        ek = aft_jk.get_ek_ip1(myaft, dm).get()
+        ek = aft_jk.get_ek_ip1(myaft, dm)
         assert abs(ek.sum(axis=0)).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.10.0'):
-            ek_ewald = aft_jk.get_ek_ip1(myaft, dm, exxdiv='ewald').get()
+            ek_ewald = aft_jk.get_ek_ip1(myaft, dm, exxdiv='ewald')
             assert abs(ek_ewald.sum(axis=0)).max() < 1e-8
 
         cell.precision = 1e-10
@@ -311,14 +312,14 @@ class KnownValues(unittest.TestCase):
         ref = np.empty((cell.natm, 3))
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
-            ref[i] = np.einsum('xpq,qp->x', vk[:,p0:p1], dm[:,p0:p1])
+            ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
         assert abs(ek - ref).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.10.0'):
             vk = myfft.get_k_e1(dm, exxdiv='ewald')
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
-                ref[i] = np.einsum('xpq,qp->x', vk[:,p0:p1], dm[:,p0:p1])
+                ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
             assert abs(ek_ewald - ref).max() < 1e-8
 
     def test_ek_ip1_kpts(self):
@@ -337,11 +338,11 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([3,2,1])
         dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         myaft = aft.AFTDF(cell)
-        ek = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts).get()
+        ek = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts)
         assert abs(ek.sum(axis=0)).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.10.0'):
-            ek_ewald = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts, exxdiv='ewald').get()
+            ek_ewald = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts, exxdiv='ewald')
             assert abs(ek_ewald.sum(axis=0)).max() < 1e-8
 
         cell.precision = 1e-10
@@ -366,4 +367,47 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == '__main__':
     print("Full Tests for aft")
-    unittest.main()
+    #unittest.main()
+    if 1:
+        cell = pgto.M(
+            atom = '''
+            #O   0.000    0.    0.1174
+            #H   1.757    0.    0.4696
+            #H   0.757    0.    0.4696
+            #C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]]]#, [1, [.3, 1]]],
+        )
+        np.random.seed(9)
+        nao = cell.nao
+        dm = np.random.rand(2, nao, nao) * .5
+        dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
+        myaft = aft.AFTDF(cell)
+        ej = aft_jk.get_ej_ip1(myaft, dm)
+        ek = aft_jk.get_ek_ip1(myaft, dm)
+        print(ej)
+        print(ek)
+        assert abs(ek.sum(axis=0)).max() < 1e-8
+
+        cell.precision = 1e-10
+        cell.build(0, 0)
+        myfft = fft_cpu.FFTDF(cell)
+        vj = myfft.get_j_e1(dm)
+        vj = vj[:,0] + vj[:,1]
+        vk = myfft.get_k_e1(dm)
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xpq,nqp->x', vj[:,p0:p1], dm[:,:,p0:p1])
+        print(ref)
+        jref = ref.copy()
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
+        #print(ref)
+        print(jref-ref)
+        assert abs(ek - ref).max() < 1e-8

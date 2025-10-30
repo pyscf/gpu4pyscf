@@ -520,6 +520,10 @@ class PBCJKmatrixOpt:
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, remove_G0=False,
                         j_factor=1., k_factor=1., verbose=None):
+        '''Compute the derivatives of the short-range part of the aggregated
+        J/K contribution. The aggregated J/K contribution is given by
+        j_factor - k_factor / 2.
+        '''
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
@@ -690,24 +694,43 @@ class PBCJKmatrixOpt:
             j_dm = dms.sum(axis=0) * (j_factor * j_dm * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dms, s)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
-            k_dm *= .5 * k_factor * wcoulG_SR_at_G0
+            if n_dm == 1: # RHF
+                k_dm *= .5 * k_factor * wcoulG_SR_at_G0
+            else:
+                k_dm *= k_factor * wcoulG_SR_at_G0
             aoslices = cell.aoslice_by_atom()
             for i, (p0, p1) in enumerate(aoslices[:,2:]):
                 ejk[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
                 ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
 
         if not is_gamma_point:
-            ejk *= 1. / nkpts
-        return ejk
+            ejk *= 1. / nkpts**2
+        return ejk.get()
 
-    def _get_ejk_lr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None, verbose=None):
-        raise NotImplementedError
+    def _get_ejk_lr_ip1(self, dm, kpts=None, exxdiv=None,
+                        j_factor=1., k_factor=1., verbose=None):
+        '''Compute the derivatives of the long-range part of the aggregated
+        J/K contribution. The aggregated J/K contribution is given by
+        j_factor - k_factor / 2.
+        '''
+        from gpu4pyscf.pbc.df.aft_jk import get_ej_ip1, get_ek_ip1
         cell = self.cell
         assert cell.dimension == 3
         if kpts is None:
             kpts = np.zeros((1, 3))
         self.kpts = kpts # get_coulG() might need to access the .kpts attribute
-        return get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv)
+        ej = ek = 0
+        if j_factor != 0:
+            ej = get_ej_ip1(self, dm, kpts)
+        if k_factor != 0:
+            ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv)
+            # the exchange for RHF has a factor of 1/2
+            if kpts is None or is_zero(kpts):
+                if dm.ndim == 2: # RHF
+                    ek *= .5
+            elif dm.ndim == 3: # KRHF
+                ek *= .5
+        return ej - ek
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

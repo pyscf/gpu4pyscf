@@ -17,6 +17,7 @@ import numpy as cp
 import pyscf
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
+from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.pbc.scf import rsjk
 
@@ -273,8 +274,7 @@ def test_vk_hermi0_kpts_vs_fft():
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
-def test_ejk_ip1_per_atom_gamma_point():
-    from pyscf.pbc.df.fft import FFTDF
+def test_ejk_sr_ip1_per_atom_gamma_point():
     cell = pyscf.M(
         atom = '''
         H   1.757    0.    0.4696
@@ -291,13 +291,11 @@ def test_ejk_ip1_per_atom_gamma_point():
     nao = cell.nao
     dm = np.random.rand(nao, nao)
     dm = dm.dot(dm.T)
-    ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(dm, remove_G0=True).get()
+    ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(dm, remove_G0=True)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    cell.precision = 1e-10
-    cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
-    vj, vk = FFTDF(cell).get_jk_e1(dm, exxdiv=None)
+    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, exxdiv=None)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
@@ -307,8 +305,7 @@ def test_ejk_ip1_per_atom_gamma_point():
     # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
     assert abs(ejk - ref).max() < 1e-6
 
-def test_ejk_ip1_per_atom_kpts():
-    from pyscf.pbc.df.fft import FFTDF
+def test_ejk_sr_ip1_per_atom_kpts():
     cell = pyscf.M(
         atom = '''
         H   1.757    0.    0.4696
@@ -324,18 +321,89 @@ def test_ejk_ip1_per_atom_kpts():
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(
-        dm, kpts=kpts, remove_G0=True).get()
+        dm, kpts=kpts, remove_G0=True)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    cell.precision = 1e-10
-    cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
-    vj, vk = FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=None)
+    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=None)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
+    ref /= len(kpts)
     # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
+    assert abs(ejk - ref).max() < 5e-6
+
+def test_ejk_ip1_per_atom_gamma_point():
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+    )
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(2, nao, nao) * .5
+    dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
+
+    with_rsjk = rsjk.PBCJKmatrixOpt(cell).build()
+    ejk = with_rsjk._get_ejk_sr_ip1(dm[0], remove_G0=True)
+    ejk += with_rsjk._get_ejk_lr_ip1(dm[0])
+    assert abs(ejk.sum(axis=0)).max() < 1e-8
+
+    with_fft = fft_cpu.FFTDF(cell)
+    vj, vk = with_fft.get_jk_e1(dm[0], exxdiv=None)
+    vhf = vj - vk*.5
+    aoslices = cell.aoslice_by_atom()
+    ref = np.empty((cell.natm, 3))
+    for i in range(cell.natm):
+        p0, p1 = aoslices[i, 2:]
+        ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[0,:,p0:p1])
+    assert abs(ejk - ref).max() < 1e-6
+
+    ejk = with_rsjk._get_ejk_sr_ip1(dm, remove_G0=True)
+    ejk += with_rsjk._get_ejk_lr_ip1(dm)
+    assert abs(ejk.sum(axis=0)).max() < 1e-8
+
+    vj, vk = with_fft.get_jk_e1(dm, exxdiv=None)
+    vhf = vj[:,:1] + vj[:,1:] - vk
+    aoslices = cell.aoslice_by_atom()
+    ref = np.empty((cell.natm, 3))
+    for i in range(cell.natm):
+        p0, p1 = aoslices[i, 2:]
+        ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
+    assert abs(ejk - ref).max() < 1e-6
+
+def test_ejk_ip1_per_atom_kpts():
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+    )
+    kpts = cell.make_kpts([1,2,1])
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    with_rsjk = rsjk.PBCJKmatrixOpt(cell).build()
+    ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, remove_G0=True)
+    ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts)
+    assert abs(ejk.sum(axis=0)).max() < 1e-8
+
+    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=None)
+    vhf = vj - vk * .5
+    aoslices = cell.aoslice_by_atom()
+    ref = np.empty((cell.natm, 3))
+    for i in range(cell.natm):
+        p0, p1 = aoslices[i, 2:]
+        ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
+    ref /= len(kpts)
     assert abs(ejk - ref).max() < 5e-6
