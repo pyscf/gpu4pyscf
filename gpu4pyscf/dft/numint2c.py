@@ -19,9 +19,9 @@ Numerical integration functions for (2-component) GKS with real AO basis
 import functools
 import numpy as np
 import cupy as cp
-from gpu4pyscf import lib
+from pyscf import lib
 from gpu4pyscf.dft import numint
-from gpu4pyscf.dft.numint import _dot_ao_dm, _dot_ao_ao, _scale_ao, _tau_dot, BLKSIZE
+from gpu4pyscf.dft.numint import _dot_ao_dm, _dot_ao_ao, _scale_ao, _tau_dot
 from gpu4pyscf.dft import xc_deriv
 from pyscf import __config__
 
@@ -30,6 +30,8 @@ def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
              with_lapl=True, verbose=None):
     nao = ao.shape[-2]
     assert dm.ndim == 2 and nao * 2 == dm.shape[0]
+    if not isinstance(dm, cp.ndarray):
+        dm = cp.asarray(dm)
 
     nao, ngrids = ao.shape[-2:]
     xctype = xctype.upper()
@@ -451,7 +453,6 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     collinear_thrd = getattr(__config__, 'dft_numint_RnumInt_collinear_thrd', 0.99)
     collinear_samples = getattr(__config__, 'dft_numint_RnumInt_collinear_samples', 200)
 
-    make_mask = staticmethod(numint.make_mask)
     eval_ao = staticmethod(numint.eval_ao)
     eval_rho = staticmethod(eval_rho)
 
@@ -628,7 +629,6 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     mcfun_eval_xc_adapter = mcfun_eval_xc_adapter
 
     block_loop = numint.NumInt.block_loop
-    _gen_rho_evaluator = numint.NumInt._gen_rho_evaluator
 
     def _to_numint1c(self):
         '''Converts to the associated class to handle collinear systems'''
