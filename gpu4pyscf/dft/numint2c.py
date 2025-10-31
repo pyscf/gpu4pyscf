@@ -467,6 +467,10 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
         '''Calculate the electron density for LDA functional and the density
         derivatives for GGA functional in the framework of 2-component basis.
         '''
+        if not isinstance(mo_occ, cp.ndarray):
+            mo_occ = cp.asarray(mo_occ)
+        if not isinstance(mo_coeff, cp.ndarray):
+            mo_coeff = cp.asarray(mo_coeff)
         if self.collinear[0] in ('n', 'm'):
             # TODO:
             dm = cp.dot(mo_coeff * mo_occ, mo_coeff.conj().T)
