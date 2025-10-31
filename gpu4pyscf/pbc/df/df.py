@@ -54,7 +54,7 @@ class GDF(lib.StreamObject):
     '''
     blockdim = df_cpu.GDF.blockdim
 
-    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao'})
+    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh'})
 
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
@@ -263,6 +263,10 @@ class GDF(lib.StreamObject):
         if with_j:
             vj = df_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
+
+    get_j_e1 = NotImplemented
+    get_k_e1 = NotImplemented
+    get_jk_e1 = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented

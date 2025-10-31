@@ -104,13 +104,15 @@ class SCF(mol_hf.SCF):
             Default is the instance of FFTDF class (GPW method).
     '''
 
-    _keys = hf_cpu.SCF._keys
+    # Range separation JK builder
+    rsjk = None
+    j_engine = None
+
+    _keys = {'cell', 'exxdiv', 'with_df', 'rsjk', 'j_engine', 'kpt'}
 
     def __init__(self, cell, kpt=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
         self.with_df = df.FFTDF(cell)
-        # Range separation JK builder
-        self.rsjk = None
         self.exxdiv = exxdiv
         if kpt is not None:
             self.kpt = kpt
@@ -148,6 +150,8 @@ class SCF(mol_hf.SCF):
         self.with_df.reset(cell)
         if self.rsjk is not None:
             self.rsjk.reset(cell)
+        if self.j_engine is not None:
+            self.j_engine.reset(cell)
         return self
 
     kpts = hf_cpu.SCF.kpts
@@ -191,13 +195,19 @@ class SCF(mol_hf.SCF):
         '''
         if cell is None: cell = self.cell
         if dm is None: dm = self.make_rdm1()
-        if kpt is None: kpt = self.kpt
-
+        assert kpt is None
         cpu0 = logger.init_timer(self)
-        dm = cp.asarray(dm)
         nao = dm.shape[-1]
-        vj, vk = self.with_df.get_jk(dm.reshape(-1,nao,nao), hermi, kpt, kpts_band,
-                                     with_j, with_k, omega, exxdiv=self.exxdiv)
+        dm = dm.reshape(-1,nao,nao)
+        if self.rsjk or self.j_engine:
+            vj = vk = None
+            if with_j:
+                vj = self.get_j(cell, dm, hermi, kpt, kpts_band)
+            if with_k:
+                vk = self.get_k(cell, dm, hermi, kpt, kpts_band, omega)
+        else:
+            vj, vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j,
+                                         with_k, omega, exxdiv=self.exxdiv)
         if with_j:
             vj = _format_jks(vj, dm, kpts_band)
         if with_k:
@@ -205,8 +215,7 @@ class SCF(mol_hf.SCF):
         logger.timer(self, 'vj and vk', *cpu0)
         return vj, vk
 
-    def get_j(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
-              omega=None):
+    def get_j(self, cell, dm, hermi=1, kpt=None, kpts_band=None, omega=None):
         r'''Compute J matrix for the given density matrix and k-point (kpt).
         When kpts_band is given, the J matrices on kpts_band are evaluated.
 
@@ -215,17 +224,45 @@ class SCF(mol_hf.SCF):
         where r,s are orbitals on kpt. p and q are orbitals on kpts_band
         if kpts_band is given otherwise p and q are orbitals on kpt.
         '''
-        return self.get_jk(cell, dm, hermi, kpt, kpts_band, with_k=False,
-                           omega=omega)[0]
+        assert kpt is None
+        if self.j_engine:
+            from gpu4pyscf.pbc.scf.j_engine import get_j
+            vj = get_j(cell, dm, hermi, kpt, kpts_band, self.j_engine)
+        else:
+            vj = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_k=False)[0]
+        return vj
 
-    def get_k(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
-              omega=None):
+    def get_k(self, cell, dm, hermi=1, kpt=None, kpts_band=None, omega=None):
         '''Compute K matrix for the given density matrix.
         '''
-        return self.get_jk(cell, dm, hermi, kpt, kpts_band, with_j=False,
-                           omega=omega)[1]
+        assert kpt is None
+        if self.rsjk:
+            from gpu4pyscf.pbc.scf.rsjk import get_k
+            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega,
+                       self.rsjk, exxdiv=self.exxdiv)
+        else:
+            vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j=False,
+                                     omega=omega, exxdiv=self.exxdiv)[1]
+        return vk
 
-    get_veff = hf_cpu.SCF.get_veff
+    def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpt=None, kpts_band=None):
+        '''Hartree-Fock potential matrix for the given density matrix.
+        See :func:`scf.hf.get_veff` and :func:`scf.hf.RHF.get_veff`
+        '''
+        if dm is None:
+            dm = self.make_rdm1()
+        incremental_veff = False
+        if dm_last is not None and self.rsjk:
+            assert vhf_last is not None
+            dm = dm - dm_last
+            incremental_veff = True
+        vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
+        vhf = vj - vk * .5
+        if incremental_veff:
+            vhf += vhf_last
+        return vhf
+
     energy_nuc = hf_cpu.SCF.energy_nuc
     _finalize = hf_cpu.SCF._finalize
 

@@ -125,7 +125,7 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
 
     nocc_a, nocc_b = mf.nelec
     mo_energy_a = cp.sort(mo_energy_kpts[0].ravel())
-    nmo = mo_energy.size
+    nmo = mo_energy_a.size
     if nocc_a > nmo or nocc_b > nmo:
         raise RuntimeError('Failed to assign mo_occ. '
                            f'Nocc ({nocc_a}, {nocc_b}) > Nmo ({nmo})')
@@ -250,12 +250,19 @@ class KUHF(khf.KSCF):
             dm_kpts *= (nelec / ne).reshape(2,1,1,1)
         return dm_kpts
 
-    def get_veff(self, cell=None, dm_kpts=None, dm_last=0, vhf_last=0, hermi=1,
-                 kpts=None, kpts_band=None):
+    def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpts=None, kpts_band=None):
         if dm_kpts is None:
             dm_kpts = self.make_rdm1()
+        incremental_veff = False
+        if dm_last is not None and self.rsjk:
+            assert vhf_last is not None
+            dm_kpts = dm_kpts - dm_last
+            incremental_veff = True
         vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
         vhf = vj[0] + vj[1] - vk
+        if incremental_veff:
+            vhf += vhf_last
         return vhf
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):

@@ -46,13 +46,18 @@ __all__ = [
 
 libvhf_md.PBC_build_j.restype = ctypes.c_int
 
-def get_j(cell, dm, hermi=0, kpts=None, vhfopt=None, verbose=None):
+def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
+          verbose=None):
     '''Compute K matrix
     '''
     if vhfopt is None:
-        vhfopt = PBCJmatrixOpt(cell).build()
-    vj = vhfopt._get_j_sr(dm, hermi, kpts, verbose=verbose)
-    vj += vhfopt._get_j_lr(dm, hermi, kpts, verbose=verbose)
+        vhfopt = PBCJmatrixOpt(cell)
+    else:
+        assert isinstance(vhfopt, PBCJmatrixOpt)
+    if vhfopt.supmol is None:
+        vhfopt.build(verbose=verbose)
+    vj = vhfopt._get_j_sr(dm, hermi, kpts, kpts_band, verbose=verbose)
+    vj += vhfopt._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
     return vj
 
 class PBCJmatrixOpt:

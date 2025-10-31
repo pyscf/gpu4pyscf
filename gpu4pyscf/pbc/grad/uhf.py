@@ -69,9 +69,31 @@ class Gradients(rhf.GradientsBase):
         if atmlst is None:
             atmlst = range(cell.natm)
 
-        ni = mf._numint
-        assert hasattr(mf, 'xc'), 'HF gradients not supported'
-        de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
+        with_rsjk = mf.rsjk
+        if with_rsjk is not None:
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKmatrixOpt
+            assert isinstance(with_rsjk, PBCJKmatrixOpt)
+            if hasattr(mf, 'xc'):
+                ni = mf._numint
+                omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+                if omega != 0 and omega != with_rsjk.omega:
+                    with_rsjk = PBCJKmatrixOpt(cell, omega=omega).build()
+                de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
+                j_factor = 0
+            else:
+                ni = multigrid_v2.MultiGridNumInt(cell)
+                j_factor = k_sr = k_lr = 1
+                de = 0
+            remove_G0 = mf.exxdiv != 'ewald' and k_sr == k_lr
+            de += with_rsjk._get_ejk_sr_ip1(dm0, j_factor=j_factor, k_factor=k_sr,
+                                            remove_G0=remove_G0)
+            de += with_rsjk._get_ejk_lr_ip1(dm0, j_factor=j_factor, k_factor=k_lr,
+                                            exxdiv=mf.exxdiv)
+        else:
+            assert hasattr(mf, 'xc'), 'HF gradients not supported'
+            ni = mf._numint
+            de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
+
         s1 = int1e.int1e_ipovlp(cell)[0].get()
         de += _contract_vhf_dm(self, s1, dme0_sf) * 2
 

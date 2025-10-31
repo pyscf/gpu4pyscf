@@ -289,6 +289,8 @@ class FFTDF(lib.StreamObject):
         return vj, vk
 
     get_j_e1 = fft_jk.get_j_e1_kpts
+    get_k_e1 = NotImplemented
+    get_jk_e1 = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented

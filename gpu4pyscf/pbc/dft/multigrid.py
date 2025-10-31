@@ -525,7 +525,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     coulG = tools.get_coulG(cell, mesh=mesh)
     vG = rhoG[0] * coulG
-    ecoul = .5 * float(rhoG[0].conj().dot(vG).real) / vol
+    ecoul = .5 * float(rhoG[0].conj().dot(vG).real.get()) / vol
     log.debug('Multigrid Coulomb energy %s', ecoul)
 
     weight = vol / ngrids
@@ -533,13 +533,13 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
     rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
-    nelec = rhoR[0].sum().get()[()] * weight
+    nelec = float(rhoR[0].sum().real.get()) * weight
 
     if xctype == 'LDA':
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = rhoR[0].dot(exc[:,0]).get()[()] * weight
+    excsum = float(rhoR[0].dot(exc[:,0]).real.get()) * weight
     wv = weight * vxc
     wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -627,7 +627,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     coulG = tools.get_coulG(cell, mesh=mesh)
     rho_tot = rhoG[0,0] + rhoG[1,0]
     vG = rho_tot * coulG
-    ecoul = .5 * float(rho_tot.conj().dot(vG).real) / vol
+    ecoul = .5 * float(rho_tot.conj().dot(vG).real.get()) / vol
     log.debug('Multigrid Coulomb energy %s', ecoul)
 
     weight = vol / ngrids
@@ -641,7 +641,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = rhoR[:,0].dot(exc[:,0]).sum().get()[()] * weight
+    excsum = float(rhoR[:,0].dot(exc[:,0]).sum().real.get()) * weight
     wv = (weight * vxc).reshape(2*nvar,ngrids)
     wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None

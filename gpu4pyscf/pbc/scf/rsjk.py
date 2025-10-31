@@ -53,12 +53,20 @@ libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 OMEGA = 0.3
 
-def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None,
-          lr_factor=None, sr_factor=None, exxdiv=None, verbose=None):
+def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
+          sr_factor=None, lr_factor=None, exxdiv=None, verbose=None):
     '''Compute K matrix
     '''
     if vhfopt is None:
-        vhfopt = PBCJKmatrixOpt(cell, omega).build()
+        vhfopt = PBCJKmatrixOpt(cell, omega)
+    else:
+        assert isinstance(vhfopt, PBCJKmatrixOpt)
+    if vhfopt.supmol is None:
+        if omega != 0:
+            vhfopt.omega = omega
+        vhfopt.build(verbose=verbose)
+    else:
+        assert omega is None or omega == 0 or omega == vhfopt.omega
 
     if exxdiv == 'ewald':
         # In FFTDF.get_jk(), the SR integrals at G=0 are added back to K matrix
@@ -75,13 +83,15 @@ def get_k(cell, dm, hermi=0, kpts=None, omega=None, vhfopt=None,
         remove_G0 = sr_factor == lr_factor
 
     vk_sr = None
-    if sr_factor != 0:
-        vk_sr = vhfopt._get_k_sr(dm, hermi, kpts, remove_G0=remove_G0, verbose=verbose)
+    if sr_factor != 0 and (omega is not None or omega <= 0):
+        vk_sr = vhfopt._get_k_sr(dm, hermi, kpts, kpts_band,
+                                 remove_G0=remove_G0, verbose=verbose)
         if sr_factor is not None:
             vk_sr *= sr_factor
 
-    if lr_factor != 0:
-        vk_lr = vhfopt._get_k_lr(dm, hermi, kpts, exxdiv=exxdiv, verbose=verbose)
+    if lr_factor != 0 and (omega is not None or omega >= 0):
+        vk_lr = vhfopt._get_k_lr(dm, hermi, kpts, kpts_band,
+                                 exxdiv=exxdiv, verbose=verbose)
         if lr_factor is not None:
             vk_lr *= lr_factor
         if vk_sr is None:
@@ -726,7 +736,7 @@ class PBCJKmatrixOpt:
             ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv)
             # the exchange for RHF has a factor of 1/2
             if kpts is None or is_zero(kpts):
-                if dm.ndim == 2: # RHF
+                if dm.ndim == 2 or len(dm) == 1: # RHF
                     ek *= .5
             elif dm.ndim == 3: # KRHF
                 ek *= .5

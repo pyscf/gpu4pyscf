@@ -275,6 +275,8 @@ class GradientsBase(molgrad.GradientsBase):
     def get_jk(self, dm=None, kpts=None):
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
+        if self.base.rsjk is not None:
+            raise NotImplementedError
         exxdiv = self.base.exxdiv
         cpu0 = (logger.process_clock(), logger.perf_counter())
         ej, ek = self.base.with_df.get_jk_e1(dm, kpts, exxdiv=exxdiv)
@@ -285,7 +287,11 @@ class GradientsBase(molgrad.GradientsBase):
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
         cpu0 = (logger.process_clock(), logger.perf_counter())
-        ej = self.base.with_df.get_j_e1(dm, kpts)
+        if self.base.rsjk is not None:
+            ej = self.rsjk._get_ejk_sr_ip1(dm, kpts, k_factor=0)
+            ej += self.rsjk._get_ejk_lr_ip1(dm, kpts, k_factor=0)
+        else:
+            ej = self.base.with_df.get_j_e1(dm, kpts)
         logger.timer(self, 'ej', *cpu0)
         return ej
 
@@ -294,7 +300,20 @@ class GradientsBase(molgrad.GradientsBase):
         if dm is None: dm = self.base.make_rdm1()
         exxdiv = self.base.exxdiv
         cpu0 = (logger.process_clock(), logger.perf_counter())
-        ek = self.base.with_df.get_k_e1(dm, kpts, kpts_band, exxdiv)
+        if self.base.rsjk is not None:
+            remove_G0 = self.base.exxdiv != 'ewald'
+            ek = self.rsjk._get_ejk_sr_ip1(
+                dm, kpts, exxdiv=exxdiv, remove_G0=remove_G0, j_factor=0)
+            ek += self.rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
+            # The sign for ek have been included in the ejk kernel
+            if dm.ndim == 3: # KRHF
+                ek *= -2
+            elif dm.ndim == 4: # KUHF
+                ek *= -1
+            else:
+                raise RuntimeError('Illegal dm dimension')
+        else:
+            ek = self.base.with_df.get_k_e1(dm, kpts, kpts_band, exxdiv)
         logger.timer(self, 'ek', *cpu0)
         return ek
 
@@ -315,10 +334,18 @@ class GradientsBase(molgrad.GradientsBase):
 class Gradients(GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
-    def get_veff(self, dm=None, kpts=None):
-        ej, ek = self.get_jk(dm, kpts)
-        dvhf = ej - ek * .5
-        return dvhf
+    def get_veff(self, dm, kpts):
+        if self.base.rsjk is not None:
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKmatrixOpt
+            with_rsjk = self.base.rsjk
+            assert isinstance(with_rsjk, PBCJKmatrixOpt)
+            remove_G0 = self.base.exxdiv != 'ewald'
+            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, remove_G0=remove_G0)
+            ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
+        else:
+            ej, ek = self.get_jk(dm, kpts)
+            ejk = ej - ek * .5
+        return ejk
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''

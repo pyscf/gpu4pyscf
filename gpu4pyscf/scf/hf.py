@@ -776,10 +776,10 @@ class SCF(pyscf_lib.StreamObject):
     def get_j(self, mol, dm, hermi=1, omega=None):
         if omega is None:
             omega = mol.omega
-        if omega not in self._opt_jengine:
+        jopt = self._opt_jengine.get(omega)
+        if jopt is None:
             jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
             self._opt_jengine[omega] = jopt
-        jopt = self._opt_jengine[omega]
         vj = j_engine.get_j(mol, dm, hermi, jopt)
         if not isinstance(dm, cupy.ndarray):
             vj = vj.get()

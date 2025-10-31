@@ -220,6 +220,10 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
             vj = aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
 
+    get_j_e1 = NotImplemented
+    get_k_e1 = NotImplemented
+    get_jk_e1 = NotImplemented
+
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented
     ao2mo_7d = NotImplemented

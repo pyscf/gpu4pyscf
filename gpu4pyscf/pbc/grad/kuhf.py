@@ -74,11 +74,19 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 class Gradients(krhf_grad.GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
-    def get_veff(self, dm=None, kpts=None):
-        if dm is None: dm = self.base.make_rdm1()
-        ej = self.get_j(dm[0]+dm[1], kpts)
-        ek = self.get_k(dm, kpts)
-        return ej - ek
+    def get_veff(self, dm, kpts):
+        if self.base.rsjk is not None:
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKmatrixOpt
+            with_rsjk = self.base.rsjk
+            assert isinstance(with_rsjk, PBCJKmatrixOpt)
+            remove_G0 = self.base.exxdiv != 'ewald'
+            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, remove_G0=remove_G0)
+            ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
+        else:
+            ej = self.get_j(dm[0]+dm[1], kpts)
+            ek = self.get_k(dm, kpts)
+            ejk = ej - ek
+        return ejk
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''

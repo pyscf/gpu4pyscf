@@ -230,13 +230,15 @@ class KSCF(pbchf.SCF):
     '''
     conv_tol_grad = khf_cpu.KSCF.conv_tol_grad
 
-    _keys = khf_cpu.KSCF._keys
+    # Range separation JK builder
+    rsjk = None
+    j_engine = None
+
+    _keys = {'cell', 'exx_built', 'exxdiv', 'with_df', 'rsjk', 'j_engine', 'kpts'}
 
     def __init__(self, cell, kpts=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
         self.with_df = df.FFTDF(cell)
-        # Range separation JK builder
-        self.rsjk = None
         self.exxdiv = exxdiv
         if kpts is not None:
             self.kpts = kpts
@@ -271,15 +273,25 @@ class KSCF(pbchf.SCF):
         t = int1e.int1e_kin(cell, kpts)
         return nuc + t
 
-    def get_j(self, cell=None, dm_kpts=None, hermi=1, kpts=None,
-              kpts_band=None, omega=None):
-        return self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band,
-                           with_k=False, omega=omega)[0]
+    def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
+              omega=None):
+        if self.j_engine:
+            from gpu4pyscf.pbc.scf.j_engine import get_j
+            vj = get_j(cell, dm_kpts, hermi, kpts, kpts_band, self.j_engine)
+        else:
+            vj = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_k=False)[0]
+        return vj
 
-    def get_k(self, cell=None, dm_kpts=None, hermi=1, kpts=None,
-              kpts_band=None, omega=None):
-        return self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band,
-                           with_j=False, omega=omega)[1]
+    def get_k(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
+              omega=None):
+        if self.rsjk:
+            from gpu4pyscf.pbc.scf.rsjk import get_k
+            vk = get_k(cell, dm_kpts, hermi, kpts, kpts_band, omega,
+                       self.rsjk, exxdiv=self.exxdiv)
+        else:
+            vk = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_j=False,
+                                     omega=omega, exxdiv=self.exxdiv)[1]
+        return vk
 
     def get_jk(self, cell=None, dm_kpts=None, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):
@@ -287,20 +299,36 @@ class KSCF(pbchf.SCF):
         if kpts is None: kpts = self.kpts
         if dm_kpts is None: dm_kpts = self.make_rdm1()
         cpu0 = logger.init_timer(self)
-        vj, vk = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band,
-                                     with_j, with_k, omega=omega, exxdiv=self.exxdiv)
+        if self.rsjk or self.j_engine:
+            vj = vk = None
+            if with_j:
+                vj = self.get_j(cell, dm_kpts, hermi, kpts, kpts_band)
+            if with_k:
+                vk = self.get_k(cell, dm_kpts, hermi, kpts, kpts_band, omega)
+        else:
+            vj, vk = self.with_df.get_jk(
+                dm_kpts, hermi, kpts, kpts_band, with_j, with_k,
+                omega=omega, exxdiv=self.exxdiv)
         logger.timer(self, 'vj and vk', *cpu0)
         return vj, vk
 
-    def get_veff(self, cell=None, dm_kpts=None, dm_last=0, vhf_last=0, hermi=1,
-                 kpts=None, kpts_band=None):
+    def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpts=None, kpts_band=None):
         '''Hartree-Fock potential matrix for the given density matrix.
         See :func:`scf.hf.get_veff` and :func:`scf.hf.RHF.get_veff`
         '''
         if dm_kpts is None:
             dm_kpts = self.make_rdm1()
+        incremental_veff = False
+        if dm_last is not None and self.rsjk:
+            assert vhf_last is not None
+            dm_kpts = dm_kpts - dm_last
+            incremental_veff = True
         vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
-        return vj - vk * .5
+        vhf = vj - vk * .5
+        if incremental_veff:
+            vhf += vhf_last
+        return vhf
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
         '''
