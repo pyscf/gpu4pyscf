@@ -195,6 +195,19 @@ __device__ double switch_function_dsdmu_over_s(const double mu, const double a_f
     return dsdmu * inv(s);
 }
 
+__device__ double switch_function_dsdmu_over_s(const double mu, const double a_factor, double* inv_s)
+{
+    const double nu = mu + a_factor * (1 - mu * mu);
+    const double dnu_dmu = 1.0 - 2.0 * a_factor * mu;
+    const double f1 = (3.0 - nu * nu) * nu * 0.5;
+    const double f2 = (3.0 - f1 * f1) * f1 * 0.5;
+    const double f3 = (3.0 - f2 * f2) * f2 * 0.5;
+    const double s = 0.5 * (1.0 - f3);
+    (*inv_s) = inv(s);
+    const double dsdmu = -0.5 * 1.5 * (1 - f2 * f2) * 1.5 * (1 - f1 * f1) * 1.5 * (1 - nu * nu) * dnu_dmu;
+    return dsdmu * (*inv_s);
+}
+
 __global__
 void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* __restrict__ grid_coords, const double* __restrict__ grid_quadrature_weights,
                                        const double* __restrict__ atm_coords, const double* __restrict__ a_factor,
@@ -383,27 +396,38 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
         const double mu_BG = (norm_Br - norm_Gr) * norm_BG_1;
         const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
         const double a_factor_BG = a_factor[i_atom_B * natm + i_atom_G];
-        const double3 dsBG_dG = switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * dmuBG_dG;
+        double inv_sBG = NAN;
+        const double dsBG_dmuBG_over_sBG = switch_function_dsdmu_over_s(mu_BG, a_factor_BG, &inv_sBG);
+        const double3 dsBG_dG = dsBG_dmuBG_over_sBG * dmuBG_dG;
         const double3 dPB_dG = P_B * dsBG_dG;
         sum_dPB_dG += dPB_dG;
 
-        const double a_factor_GB = a_factor[i_atom_G * natm + i_atom_B];
         const double3 dmuGB_dG = -dmuBG_dG;
-        dPG_dG += switch_function_dsdmu_over_s(-mu_BG, a_factor_GB) * dmuGB_dG;
+        // const double a_factor_GB = a_factor[i_atom_G * natm + i_atom_B];
+        // const double dsGB_dmuGB_over_sGB = switch_function_dsdmu_over_s(-mu_BG, a_factor_GB);
+        // // Note: this requires a_factor_GB = - a_factor_BG
+        const double dsGB_dmuGB_over_sGB = dsBG_dmuBG_over_sBG * inv(inv_sBG - 1);
+        const double3 dsGB_dG = dsGB_dmuGB_over_sGB * dmuGB_dG;
+        dPG_dG += dsGB_dG;
 
         // dPB_dH part
         const double3 BH = atom_B - atom_H;
         const double norm_BH_1 = inv(norm(BH));
         const double mu_BH = (norm_Br - norm_Hr) * norm_BH_1;
-        const double3 dmuBH_dH = norm_BH_1 * (-norm_Hr_1 * Hr + mu_BH * norm_BH_1 * BH);
         const double a_factor_BH = a_factor[i_atom_B * natm + i_atom_H];
-        const double3 dsBH_dH = switch_function_dsdmu_over_s(mu_BH, a_factor_BH) * dmuBH_dH;
+        double inv_sBH = NAN;
+        const double dsBH_dmuBH_over_sBH = switch_function_dsdmu_over_s(mu_BH, a_factor_BH, &inv_sBH);
+        const double3 dmuBH_dH = norm_BH_1 * (-norm_Hr_1 * Hr + mu_BH * norm_BH_1 * BH);
+        const double3 dsBH_dH = dsBH_dmuBH_over_sBH * dmuBH_dH;
         const double3 dPB_dH = P_B * dsBH_dH;
         sum_dPB_dH += dPB_dH;
 
-        const double a_factor_HB = a_factor[i_atom_H * natm + i_atom_B];
         const double3 dmuHB_dH = -dmuBH_dH;
-        dPH_dH += switch_function_dsdmu_over_s(-mu_BH, a_factor_HB) * dmuHB_dH;
+        // const double a_factor_HB = a_factor[i_atom_H * natm + i_atom_B];
+        // const double dsHB_dmuHB_over_sHB = switch_function_dsdmu_over_s(-mu_BH, a_factor_HB);
+        // // Note: this requires a_factor_HB = - a_factor_BH
+        const double dsHB_dmuHB_over_sHB = dsBH_dmuBH_over_sBH * inv(inv_sBH - 1);
+        dPH_dH += dsHB_dmuHB_over_sHB * dmuHB_dH;
 
         // sum_d2PB_dGdH part
         sum_d2PB_dGdH += P_B * outer(dsBG_dG, dsBH_dH);
@@ -471,7 +495,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double3 dPA_dH = P_A * dsAH_dH;
 
     // d2PA_dGdH part
-   const double9 d2PA_dGdH = P_A * outer(dsAG_dG, dsAH_dH);
+    const double9 d2PA_dGdH = P_A * outer(dsAG_dG, dsAH_dH);
 
     const double sum_P_B_1 = invsumPB[i_grid];
     double9 d2wi_dGdH = { 0,0,0, 0,0,0, 0,0,0 };
