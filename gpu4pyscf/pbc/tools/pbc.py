@@ -14,9 +14,10 @@
 
 import numpy as np
 import cupy as cp
-import pyscf
+from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
+from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):
@@ -159,7 +160,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             range-separated JK builder and range-separated DF (and other
             range-separated integral methods if any).
     '''
-    from pyscf.pbc.tools.pbc import get_coulG, madelung
+    from pyscf.pbc.tools.pbc import get_coulG
     exxdiv = exx
     if isinstance(exx, str):
         exxdiv = exx
@@ -282,3 +283,15 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         else: # G=0 term should be handled separately in RSGDF and RSJK
             raise NotImplementedError(f'exx=ewald for omega={omega}')
     return coulG
+
+def probe_charge_sr_coulomb(cell, omega, kpts=None):
+    if kpts is None:
+        kmesh = np.array([1, 1, 1])
+    else:
+        kmesh = get_monkhorst_pack_size(cell, kpts)
+    rcut = (-np.log(cell.precision*1e-3)/omega**2)**.5
+    Ls = cell.get_lattice_Ls(rcut=rcut) * kmesh
+    r = np.linalg.norm(Ls, axis=1)
+    r = r[(r > 1e-10) & (omega * r < 7)]
+    ewovrl = .5 * (erfc(omega * r) / r).sum()
+    return 2 * ewovrl * np.prod(kmesh)

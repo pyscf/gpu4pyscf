@@ -240,11 +240,11 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
 def _check_kpts(mydf, kpts):
     '''Check if the argument kpts is a single k-point'''
-    if kpts is None:
-        kpts = getattr(mydf, 'kpts', None)
+    #if kpts is None:
+    #    kpts = getattr(mydf, 'kpts', None)
     if kpts is None:
         kpts = np.zeros((1, 3))
-        is_single_kpt = True
+        is_single_kpt = False
     else:
         kpts = np.asarray(kpts)
         is_single_kpt = kpts.ndim == 1

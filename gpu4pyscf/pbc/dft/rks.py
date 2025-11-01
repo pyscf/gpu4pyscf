@@ -55,7 +55,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     '''
     if cell is None: cell = ks.cell
     if dm is None: dm = ks.make_rdm1()
-    assert kpt is None
+    if kpt is None:
+        kpt = ks.kpt
     log = logger.new_logger(ks)
     t0 = log.init_timer()
     mem_avail = get_avail_mem()
@@ -106,7 +107,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     logger.timer(ks, 'veff', *t0)
     return vxc
 
-def _get_jk(mf, cell, dm, hermi, kpt=None, kpts_band=None, with_j=True,
+def _get_jk(mf, cell, dm, hermi, kpt, kpts_band=None, with_j=True,
             dm_last=None, vhf_last=None):
     '''J and Exx matrix. Note, Exx here is a scaled HF K term.'''
     ni = mf._numint
@@ -128,17 +129,31 @@ def _get_jk(mf, cell, dm, hermi, kpt=None, kpts_band=None, with_j=True,
     omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
     if mf.rsjk:
         from gpu4pyscf.pbc.scf.rsjk import get_k
-        if dm_last is not None:
-            assert vhf_last is not None
-            dm = dm - dm_last
-            incremental_veff = True
-        if with_j:
-            vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
-        vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
-                   sr_factor=sr_factor, lr_factor=lr_factor, exxdiv=mf.exxdiv)
-        if incremental_veff:
-            vj += vhf_last.vj
-            vk += vhf_last.vk
+        if lr_factor == sr_factor:
+            if dm_last is not None:
+                assert vhf_last is not None
+                dm = dm - dm_last
+                incremental_veff = True
+            if with_j:
+                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
+                       sr_factor, lr_factor, exxdiv=mf.exxdiv)
+            if incremental_veff:
+                vj += vhf_last.vj
+                vk += vhf_last.vk
+        else:
+            # TODO: compute vk_sr incrementally and vk_lr directly
+            #if dm_last is not None:
+            #    assert vhf_last is not None
+            #    dm = dm - dm_last
+            #    incremental_veff = True
+            if with_j:
+                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
+                       sr_factor, lr_factor, exxdiv=mf.exxdiv)
+            #if incremental_veff:
+            #    vj += vhf_last.vj
+            #    vk += vhf_last.vk
     else:
         #if getattr(mf.with_df, '_j_only', False):  # for GDF and MDF
         #    log.warn('df.j_only cannot be used with hybrid functional')
@@ -207,9 +222,6 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
             self.kpt = self.__dict__.pop('kpt')
 
         kpts = self.kpts
-        if self.rsjk:
-            raise NotImplementedError('RSJK')
-
         # for GDF and MDF
         with_df = self.with_df
         if (isinstance(with_df, GDF) and

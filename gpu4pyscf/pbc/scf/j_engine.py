@@ -37,7 +37,7 @@ from gpu4pyscf.scf.jk import (
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
-from gpu4pyscf.pbc.scf.rsjk import ExtendedMole, PBCJKmatrixOpt, OMEGA
+from gpu4pyscf.pbc.scf.rsjk import ExtendedMole, PBCJKMatrixOpt, OMEGA
 from gpu4pyscf.pbc.df import aft
 
 __all__ = [
@@ -51,21 +51,19 @@ def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
     '''Compute K matrix
     '''
     if vhfopt is None:
-        vhfopt = PBCJmatrixOpt(cell)
+        vhfopt = PBCJMatrixOpt(cell)
     else:
-        assert isinstance(vhfopt, PBCJmatrixOpt)
+        assert isinstance(vhfopt, PBCJMatrixOpt)
     if vhfopt.supmol is None:
         vhfopt.build(verbose=verbose)
     vj = vhfopt._get_j_sr(dm, hermi, kpts, kpts_band, verbose=verbose)
     vj += vhfopt._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
     return vj
 
-class PBCJmatrixOpt:
+class PBCJMatrixOpt:
 
     def __init__(self, cell, omega=None):
         self.cell = cell
-        if omega is None: # TODO: dynamically determine omega based on rcut?
-            omega = OMEGA
         self.verbose = cell.verbose
         self.stdout = cell.stdout
 
@@ -74,9 +72,10 @@ class PBCJmatrixOpt:
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
         self.supmol = None
+
         # Attributes required by AFTDF functions
-        self.time_reversal_symmetry = True
         self.kpts = None
+
         # Hold cache on GPU devices
         self._rys_envs = {}
         self._q_cond = {}
@@ -90,6 +89,8 @@ class PBCJmatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell
+        if self.omega is None: # TODO: dynamically determine omega based on rcut?
+            self.omega = OMEGA
         if self.mesh is None:
             ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
@@ -137,7 +138,7 @@ class PBCJmatrixOpt:
             diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
             supmol._atm.ctypes, ctypes.c_int(supmol.natm),
             supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
-        self.q_cond_cpu = PBCJKmatrixOpt._filter_q_cond(
+        self.q_cond_cpu = PBCJKMatrixOpt._filter_q_cond(
             self, supmol, q_cond, s_estimator, self.rys_envs,
             self.estimate_cutoff_with_penalty())[0]
         log.timer('Initialize q_cond', *cput0)
@@ -162,7 +163,7 @@ class PBCJmatrixOpt:
         ao_loc = asarray(supmol.ao_loc)
         return RysIntEnvVars.new(supmol.natm, supmol.nbas, atm, bas, env, ao_loc)
 
-    estimate_cutoff_with_penalty = PBCJKmatrixOpt.estimate_cutoff_with_penalty
+    estimate_cutoff_with_penalty = PBCJKMatrixOpt.estimate_cutoff_with_penalty
 
     def _get_j_sr(self, dm, hermi, kpts=None, kpts_band=None, verbose=None):
         '''
@@ -194,7 +195,11 @@ class PBCJmatrixOpt:
             dms *= .5
 
         p2c_mapping = asarray(self.prim_to_ctr_mapping)
-        is_gamma_point = kpts is None or is_zero(kpts)
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        else:
+            kpts = kpts.reshape(-1, 3)
+        is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
@@ -311,6 +316,8 @@ class PBCJmatrixOpt:
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm),
+                    ctypes.c_int(dm_xyz_size),
+                    ctypes.c_int(nimgs_uniq_pair),
                     rys_envs, (ctypes.c_int*6)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -332,9 +339,7 @@ class PBCJmatrixOpt:
                 if log.verbose >= logger.DEBUG1:
                     ntasks = pair_ij_mapping.size * pair_kl_mapping.size
                     t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
-                    if llll not in timing_collection:
-                        timing_collection[llll] = 0
-                    timing_collection[llll] += t1[1] - t1p[1]
+                    timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
                 if num_devices > 1:
                     stream.synchronize()

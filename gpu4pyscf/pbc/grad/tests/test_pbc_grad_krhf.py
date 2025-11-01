@@ -19,7 +19,8 @@ from pyscf.pbc import gto
 from pyscf.pbc.grad import krhf as krhf_cpu
 from gpu4pyscf.pbc.grad import krhf as krhf_gpu
 from gpu4pyscf.pbc.dft import numint
-import numpy as np
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
 disp = 1e-3
 
@@ -31,13 +32,11 @@ def setUpModule():
     0.000000000, 3.370137329, 3.370137329
     3.370137329, 0.000000000, 3.370137329
     3.370137329, 3.370137329, 0.000000000'''
-    cell.basis = [[0, [1.3, 1]], [1, [0.8, 1]]]
+    cell.basis = [[0, [3.3, 1]], [0, [1.1, 1]], [1, [0.8, 1]]]
     cell.verbose = 5
     cell.pseudo = 'gth-pade'
     cell.unit = 'bohr'
-    cell.mesh = [13] * 3
     cell.output = '/dev/null'
-    cell.precision = 1e-9
     cell.build()
 
     kpts = cell.make_kpts([1,1,2])
@@ -49,18 +48,62 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    @unittest.skip('get_jk of KRHF gradients not available')
     def test_krhf_grad(self):
-        mf = cell.KRHF(kpts=kpts, exxdiv=None).to_gpu()
+        mf = cell.KRHF(exxdiv=None).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
-        self.assertAlmostEqual(lib.fp(g), -0.9017171774435333, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
 
         mfs = g_scan.base.as_scanner()
-        e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391+disp/2.0]]])
-        e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391-disp/2.0]]])
+        e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680+disp/2.0]]])
+        e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
+        mf = cell.KRHF().to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.conv_tol = 1e-10
+        mf.conv_tol_grad = 1e-6
+        g_scan = mf.nuc_grad_method().as_scanner()
+        g = g_scan(cell)[1]
+        self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
+
+        mfs = g_scan.base.as_scanner()
+        e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680+disp/2.0]]])
+        e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
+    def test_krhf_grad1(self):
+        mf = cell.KRHF(kpts=kpts, exxdiv=None).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.conv_tol = 1e-10
+        mf.conv_tol_grad = 1e-6
+        g_scan = mf.nuc_grad_method().as_scanner()
+        g = g_scan(cell)[1]
+        self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
+
+        mfs = g_scan.base.as_scanner()
+        e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680+disp/2.0]]])
+        e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
+        mf = cell.KRHF(kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.conv_tol = 1e-10
+        mf.conv_tol_grad = 1e-6
+        g_scan = mf.nuc_grad_method().as_scanner()
+        g = g_scan(cell)[1]
+        self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
+
+        mfs = g_scan.base.as_scanner()
+        e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680+disp/2.0]]])
+        e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
 
     def test_hcore(self):

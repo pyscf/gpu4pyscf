@@ -265,7 +265,7 @@ class _VHFOpt(jk._VHFOpt):
             q_cond = cp.asarray(self.q_cond)
             t1 = log.timer_debug1(f'q_cond on Device {device_id}', *t0)
 
-            timing_collection = {}
+            timing_counter = Counter()
             kern_counts = 0
             kern = libvhf_md.MD_build_j
             rys_envs = self.rys_envs
@@ -307,9 +307,7 @@ class _VHFOpt(jk._VHFOpt):
                 if log.verbose >= logger.DEBUG1:
                     ntasks = pair_ij_mapping.size * pair_kl_mapping.size
                     t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
-                    if llll not in timing_collection:
-                        timing_collection[llll] = 0
-                    timing_collection[llll] += t1[1] - t1p[1]
+                    timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
                 if num_devices > 1:
                     stream.synchronize()

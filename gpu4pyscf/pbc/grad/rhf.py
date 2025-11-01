@@ -73,13 +73,13 @@ class Gradients(GradientsBase):
 
         with_rsjk = mf.rsjk
         if with_rsjk is not None:
-            from gpu4pyscf.pbc.scf.rsjk import PBCJKmatrixOpt
-            assert isinstance(with_rsjk, PBCJKmatrixOpt)
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
             if hasattr(mf, 'xc'):
                 ni = mf._numint
                 omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
                 if omega != 0 and omega != with_rsjk.omega:
-                    with_rsjk = PBCJKmatrixOpt(cell, omega=omega).build()
+                    with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
                 de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
                 j_factor = 0
             else:
@@ -87,9 +87,8 @@ class Gradients(GradientsBase):
                 ni = multigrid_v2.MultiGridNumInt(cell)
                 j_factor = k_sr = k_lr = 1
                 de = 0
-            remove_G0 = mf.exxdiv != 'ewald' and k_sr == k_lr
             de += with_rsjk._get_ejk_sr_ip1(dm0, j_factor=j_factor, k_factor=k_sr,
-                                            remove_G0=remove_G0)
+                                            exxdiv=mf.exxdiv)
             de += with_rsjk._get_ejk_lr_ip1(dm0, j_factor=j_factor, k_factor=k_lr,
                                             exxdiv=mf.exxdiv)
         else:

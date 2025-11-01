@@ -286,8 +286,15 @@ class KSCF(pbchf.SCF):
               omega=None):
         if self.rsjk:
             from gpu4pyscf.pbc.scf.rsjk import get_k
-            vk = get_k(cell, dm_kpts, hermi, kpts, kpts_band, omega,
-                       self.rsjk, exxdiv=self.exxdiv)
+            sr_factor = lr_factor = None
+            if omega is not None:
+                if omega > 0:
+                    sr_factor, lr_factor = 0, 1
+                elif omega < 0:
+                    omega = -omega
+                    sr_factor, lr_factor = 1, 0
+            vk = get_k(cell, dm_kpts, hermi, kpts, kpts_band, omega, self.rsjk,
+                       sr_factor, lr_factor, exxdiv=self.exxdiv)
         else:
             vk = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -435,6 +442,10 @@ class KRHF(KSCF):
     def density_fit(self, auxbasis=None, with_df=None):
         from gpu4pyscf.pbc.df.df_jk import density_fit
         return density_fit(self, auxbasis, with_df)
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.krhf import Gradients
+        return Gradients(self)
 
     def to_cpu(self):
         mf = khf_cpu.KRHF(self.cell)

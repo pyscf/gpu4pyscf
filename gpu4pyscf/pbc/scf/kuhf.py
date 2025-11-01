@@ -324,6 +324,10 @@ class KUHF(khf.KSCF):
 
     density_fit = khf.KRHF.density_fit
 
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.kuhf import Gradients
+        return Gradients(self)
+
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)
         utils.to_cpu(self, out=mf)

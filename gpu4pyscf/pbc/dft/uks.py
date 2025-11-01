@@ -40,7 +40,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     '''
     if cell is None: cell = ks.cell
     if dm is None: dm = ks.make_rdm1()
-    assert kpt is None
+    if kpt is None:
+        kpt = ks.kpt
     log = logger.new_logger(ks)
     t0 = log.init_timer()
     mem_avail = get_avail_mem()

@@ -20,6 +20,7 @@ from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.pbc.scf import rsjk
+from gpu4pyscf.pbc.tools.pbc import probe_charge_sr_coulomb
 
 def test_sr_vk_hermi1_gamma_point_vs_cpu():
     cell = pyscf.M(
@@ -38,7 +39,11 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, remove_G0=False).get()
+    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=1, exxdiv='ewald').get()
+    s = cell.pbc_intor('int1e_ovlp', hermi=1)
+    fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA)
+    vk += np.einsum('ij,jk,kl->il', s, dm, s) * fac
+
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell)
@@ -63,8 +68,12 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
 
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(
-        dm, hermi=1, kpts=kpts, remove_G0=False).get()
+    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(
+        dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
+    s = np.array(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
+    fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kpts) / len(kpts)
+    vk += np.einsum('Kij,Kjk,Kkl->Kil', s, dm, s) * fac
+
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell, kpts=kpts)
@@ -94,7 +103,7 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, remove_G0=True).get()
+    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=1).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -117,7 +126,7 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts, remove_G0=True).get()
+    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -141,7 +150,7 @@ def test_sr_vk_hermi0_gamma_point_vs_fft():
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.2
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, remove_G0=True).get()
+    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=0).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -168,7 +177,7 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm[4:6] = dm[2:4].conj()
-    vk = rsjk.PBCJKmatrixOpt(cell).build()._get_k_sr(dm, hermi=0, kpts=kpts, remove_G0=True).get()
+    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -291,7 +300,7 @@ def test_ejk_sr_ip1_per_atom_gamma_point():
     nao = cell.nao
     dm = np.random.rand(nao, nao)
     dm = dm.dot(dm.T)
-    ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(dm, remove_G0=True)
+    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -rsjk.OMEGA
@@ -320,8 +329,7 @@ def test_ejk_sr_ip1_per_atom_kpts():
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    ejk = rsjk.PBCJKmatrixOpt(cell).build()._get_ejk_sr_ip1(
-        dm, kpts=kpts, remove_G0=True)
+    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, kpts=kpts)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -rsjk.OMEGA
@@ -352,8 +360,8 @@ def test_ejk_ip1_per_atom_gamma_point():
     dm = np.random.rand(2, nao, nao) * .5
     dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
 
-    with_rsjk = rsjk.PBCJKmatrixOpt(cell).build()
-    ejk = with_rsjk._get_ejk_sr_ip1(dm[0], remove_G0=True)
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    ejk = with_rsjk._get_ejk_sr_ip1(dm[0])
     ejk += with_rsjk._get_ejk_lr_ip1(dm[0])
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
@@ -367,7 +375,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[0,:,p0:p1])
     assert abs(ejk - ref).max() < 1e-6
 
-    ejk = with_rsjk._get_ejk_sr_ip1(dm, remove_G0=True)
+    ejk = with_rsjk._get_ejk_sr_ip1(dm)
     ejk += with_rsjk._get_ejk_lr_ip1(dm)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
@@ -393,8 +401,8 @@ def test_ejk_ip1_per_atom_kpts():
     )
     kpts = cell.make_kpts([1,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    with_rsjk = rsjk.PBCJKmatrixOpt(cell).build()
-    ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, remove_G0=True)
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts)
     ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 

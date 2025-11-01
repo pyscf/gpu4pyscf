@@ -298,12 +298,10 @@ class GradientsBase(molgrad.GradientsBase):
     def get_k(self, dm=None, kpts=None, kpts_band=None):
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
-        exxdiv = self.base.exxdiv
         cpu0 = (logger.process_clock(), logger.perf_counter())
         if self.base.rsjk is not None:
-            remove_G0 = self.base.exxdiv != 'ewald'
-            ek = self.rsjk._get_ejk_sr_ip1(
-                dm, kpts, exxdiv=exxdiv, remove_G0=remove_G0, j_factor=0)
+            exxdiv = self.base.exxdiv
+            ek = self.rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
             ek += self.rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
             # The sign for ek have been included in the ejk kernel
             if dm.ndim == 3: # KRHF
@@ -336,11 +334,10 @@ class Gradients(GradientsBase):
 
     def get_veff(self, dm, kpts):
         if self.base.rsjk is not None:
-            from gpu4pyscf.pbc.scf.rsjk import PBCJKmatrixOpt
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
             with_rsjk = self.base.rsjk
-            assert isinstance(with_rsjk, PBCJKmatrixOpt)
-            remove_G0 = self.base.exxdiv != 'ewald'
-            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, remove_G0=remove_G0)
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
             ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
         else:
             ej, ek = self.get_jk(dm, kpts)

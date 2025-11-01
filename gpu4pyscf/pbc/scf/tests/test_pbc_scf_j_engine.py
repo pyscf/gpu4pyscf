@@ -37,7 +37,7 @@ def test_j_engine():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1).get()
+    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=1).get()
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell)
@@ -61,7 +61,7 @@ def test_sr_vj_hermi1_kpts_vs_cpu():
 
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
+    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
     cell.precision = 1e-10
     cell.build(0, 0)
     with_rsjk = RangeSeparationJKBuilder(cell, kpts=kpts)
@@ -89,9 +89,9 @@ def test_sr_vj_hermi1_gamma_point_vs_fft():
     )
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nao, nao)*.1 - .05
-    dm = dm.dot(dm.T)
-    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1).get()
+    dm = np.random.rand(2, nao, nao)*.5
+    dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
+    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=1).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -118,7 +118,7 @@ def test_sr_vj_hermi1_kpts_vs_fft():
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
+    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -146,7 +146,7 @@ def test_sr_vj_hermi0_gamma_point_vs_fft():
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.2
-    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=0).get()
+    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=0).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -173,7 +173,7 @@ def test_sr_vj_hermi0_kpts_vs_fft():
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    vj = j_engine.PBCJmatrixOpt(cell).build()._get_j_sr(dm, hermi=0, kpts=kpts).get()
+    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=0, kpts=kpts).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -203,8 +203,8 @@ def test_vj_hermi1_gamma_point_vs_fft():
     )
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nao, nao)*.1 - .05
-    dm = dm.dot(dm.T)
+    dm = np.random.rand(2, nao, nao)*.5
+    dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
     vj = j_engine.get_j(cell, dm, hermi=1).get()
 
     cell.precision = 1e-10
@@ -249,7 +249,8 @@ def test_vj_hermi0_gamma_point_vs_fft():
     )
     np.random.seed(9)
     nao = cell.nao
-    dm = np.random.rand(nao, nao)*.2
+    dm = np.random.rand(2, nao, nao)*.5
+    dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
     vj = j_engine.get_j(cell, dm, hermi=0).get()
 
     cell.precision = 1e-10

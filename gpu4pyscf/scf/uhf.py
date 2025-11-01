@@ -133,12 +133,12 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
     e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
              cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
-    e1 = e1.get()[()]
-    e_coul = e_coul.get()[()]
-    e_elec = (e1 + e_coul).real
+    e1 = float(e1.real.get())
+    e_coul = float(e_coul.real.get())
+    e_elec = e1 + e_coul
     mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['e2'] = e_coul.real
-    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul.real)
+    mf.scf_summary['e2'] = e_coul
+    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul)
     return e_elec, e_coul
 
 def canonicalize(mf, mo_coeff, mo_occ, fock=None):

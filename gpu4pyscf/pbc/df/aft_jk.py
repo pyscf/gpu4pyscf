@@ -42,6 +42,8 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     if kpts is None:
         kpts = np.zeros((1,3))
+    else:
+        kpts = kpts.reshape(-1, 3)
 
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -78,6 +80,8 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     raise NotImplementedError
     if kpts is None:
         kpts = np.zeros((1,3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     dm_kpts = lib.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
@@ -107,8 +111,11 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
+    is_single_kpt = kpts is not None and kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1,3))
+    else:
+        kpts = kpts.reshape(-1, 3)
 
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -165,15 +172,23 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         # mo_coeff, mo_occ may not be a list of aligned array if
         # remove_lin_dep was applied to scf object.
         # We assume they are of the same length in this version.
+        mo_coeff = cp.asarray(mo_coeff)
         mo_occ = cp.asarray(mo_occ)
+        if is_single_kpt:
+            if mo_coeff.ndim == 3:
+                mo_coeff = mo_coeff[:,None]
+                mo_occ = mo_occ[:,None]
+            else:
+                mo_coeff = mo_coeff[None]
+                mo_occ = mo_occ[None]
         nocc = cp.count_nonzero(mo_occ > 0, axis=-1).max()
-        if dm_kpts.ndim == 4:  # KUHF
-            mo_coeff = cp.asarray(mo_coeff)[:,:,:,:nocc]
+        if mo_coeff.ndim == 4:  # KUHF
+            mo_coeff = mo_coeff[:,:,:,:nocc]
             occs = cp.array(mo_occ[:,:,:nocc], dtype=np.double)
             dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
             dm_factor *= cp.sqrt(occs)[:,:,None,:]
         else:  # KRHF
-            mo_coeff = cp.asarray(mo_coeff)[None,:,:,:nocc]
+            mo_coeff = mo_coeff[None,:,:,:nocc]
             occs = cp.asarray(mo_occ[None,:,:nocc], dtype=np.double)
             dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
             dm_factor *= cp.sqrt(occs)[:,:,None,:]
@@ -306,10 +321,13 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
 
 def get_ej_ip1(mydf, dm, kpts=None):
     '''The first order energy derivatives from Coulomb matrix'''
-    if kpts is None:
-        kpts = np.zeros((1,3))
     log = logger.new_logger(mydf)
     cell = mydf.cell
+    if kpts is None:
+        kpts = np.zeros((1,3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+    is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
     assert nkpts == len(kpts)
@@ -324,7 +342,6 @@ def get_ej_ip1(mydf, dm, kpts=None):
     dms = cp.asarray(dms.reshape(-1,nao,nao))
     dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, ft_opt.uniq_l_ctr,
                                ft_opt.l_ctr_offsets, ft_opt.ao_idx)
-    is_gamma_point = kpts is None or is_zero(kpts)
     if is_gamma_point:
         dms_bvkcell = cp.asarray(dms.real, order='C')
     else:
@@ -398,10 +415,13 @@ def get_ej_ip1(mydf, dm, kpts=None):
 
 def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     '''The first order energy derivatives from exact exchange'''
-    if kpts is None:
-        kpts = np.zeros((1,3))
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
+    if kpts is None:
+        kpts = np.zeros((1,3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+    is_gamma_point = is_zero(kpts)
     cell = mydf.cell
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
@@ -418,7 +438,6 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     nao = dms.shape[-1]
     dms = dms.reshape(n_dm,nkpts,nao,nao)
 
-    is_gamma_point = kpts is None or is_zero(kpts)
     if not is_gamma_point:
         expLk = cp.exp(1j*cp.asarray(ft_opt.bvkmesh_Ls).dot(cp.asarray(kpts).T))
 

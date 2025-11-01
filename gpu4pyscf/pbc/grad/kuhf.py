@@ -76,11 +76,10 @@ class Gradients(krhf_grad.GradientsBase):
 
     def get_veff(self, dm, kpts):
         if self.base.rsjk is not None:
-            from gpu4pyscf.pbc.scf.rsjk import PBCJKmatrixOpt
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
             with_rsjk = self.base.rsjk
-            assert isinstance(with_rsjk, PBCJKmatrixOpt)
-            remove_G0 = self.base.exxdiv != 'ewald'
-            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, remove_G0=remove_G0)
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
             ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
         else:
             ej = self.get_j(dm[0]+dm[1], kpts)

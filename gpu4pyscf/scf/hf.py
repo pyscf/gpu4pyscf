@@ -173,8 +173,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if vhf is None: vhf = self.get_veff(self.mol, dm)
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
-    e1 = e1.get()[()]
-    e_coul = e_coul.get()[()]
+    e1 = float(e1.get())
+    e_coul = float(e_coul.get())
     self.scf_summary['e1'] = e1
     self.scf_summary['e2'] = e_coul
     logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
@@ -685,7 +685,7 @@ class SCF(pyscf_lib.StreamObject):
     from_chk                 = hf_cpu.SCF.from_chk
     get_init_guess           = return_cupy_array(hf_cpu.SCF.get_init_guess)
     make_rdm2                = NotImplemented
-    energy_elec              = energy_elec
+    energy_elec              = NotImplemented
     energy_tot               = energy_tot
     energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
@@ -825,20 +825,7 @@ class RHF(SCF):
                         'It is recommended to use the scf.LRHF or dft.LRKS class for this system.')
         return SCF.check_sanity(self)
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        '''
-        electronic energy
-        '''
-        if dm is None: dm = self.make_rdm1()
-        if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.mol, dm)
-        assert dm.dtype == np.float64
-        e1 = float(h1e.ravel().dot(dm.ravel()))
-        e_coul = float(vhf.ravel().dot(dm.ravel())) * .5
-        self.scf_summary['e1'] = e1
-        self.scf_summary['e2'] = e_coul
-        logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-        return e1+e_coul, e_coul
+    energy_elec = energy_elec
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf

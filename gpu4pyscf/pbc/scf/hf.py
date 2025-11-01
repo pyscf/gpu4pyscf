@@ -23,6 +23,7 @@ __all__ = [
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.scf import hf as hf_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
@@ -195,10 +196,7 @@ class SCF(mol_hf.SCF):
         '''
         if cell is None: cell = self.cell
         if dm is None: dm = self.make_rdm1()
-        assert kpt is None
         cpu0 = logger.init_timer(self)
-        nao = dm.shape[-1]
-        dm = dm.reshape(-1,nao,nao)
         if self.rsjk or self.j_engine:
             vj = vk = None
             if with_j:
@@ -208,10 +206,6 @@ class SCF(mol_hf.SCF):
         else:
             vj, vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j,
                                          with_k, omega, exxdiv=self.exxdiv)
-        if with_j:
-            vj = _format_jks(vj, dm, kpts_band)
-        if with_k:
-            vk = _format_jks(vk, dm, kpts_band)
         logger.timer(self, 'vj and vk', *cpu0)
         return vj, vk
 
@@ -224,8 +218,11 @@ class SCF(mol_hf.SCF):
         where r,s are orbitals on kpt. p and q are orbitals on kpts_band
         if kpts_band is given otherwise p and q are orbitals on kpt.
         '''
-        assert kpt is None
         if self.j_engine:
+            if kpt is None:
+                kpt = self.kpt
+            else:
+                assert is_zero(kpt)
             from gpu4pyscf.pbc.scf.j_engine import get_j
             vj = get_j(cell, dm, hermi, kpt, kpts_band, self.j_engine)
         else:
@@ -235,11 +232,21 @@ class SCF(mol_hf.SCF):
     def get_k(self, cell, dm, hermi=1, kpt=None, kpts_band=None, omega=None):
         '''Compute K matrix for the given density matrix.
         '''
-        assert kpt is None
         if self.rsjk:
             from gpu4pyscf.pbc.scf.rsjk import get_k
-            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega,
-                       self.rsjk, exxdiv=self.exxdiv)
+            if kpt is None:
+                kpt = self.kpt
+            else:
+                assert is_zero(kpt)
+            if omega is not None:
+                sr_factor = lr_factor = None
+                if omega > 0:
+                    sr_factor, lr_factor = 0, 1
+                elif omega < 0:
+                    omega = -omega
+                    sr_factor, lr_factor = 1, 0
+            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, self.rsjk,
+                       sr_factor, lr_factor, exxdiv=self.exxdiv)
         else:
             vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -252,6 +259,8 @@ class SCF(mol_hf.SCF):
         '''
         if dm is None:
             dm = self.make_rdm1()
+        if kpt is None:
+            kpt = self.kpt
         incremental_veff = False
         if dm_last is not None and self.rsjk:
             assert vhf_last is not None
@@ -263,14 +272,19 @@ class SCF(mol_hf.SCF):
             vhf += vhf_last
         return vhf
 
-    energy_nuc = hf_cpu.SCF.energy_nuc
-    _finalize = hf_cpu.SCF._finalize
+    def energy_nuc(self):
+        cell = self.cell
+        if cell.dimension == 0:
+            raise NotImplementedError
+        return cell.enuc
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         if cell is None: cell = self.cell
         dm = mol_hf.SCF.get_init_guess(self, cell, key)
         dm = normalize_dm_(self, dm, s1e)
         return dm
+
+    _finalize = hf_cpu.SCF._finalize
 
     init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
     init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile
@@ -315,6 +329,8 @@ class KohnShamDFT:
 
 class RHF(SCF):
 
+    energy_elec = mol_hf.RHF.energy_elec
+
     def density_fit(self, auxbasis=None, with_df=None):
         from gpu4pyscf.pbc.df.df_jk import density_fit
         mf = density_fit(self, auxbasis, with_df)
@@ -329,16 +345,6 @@ class RHF(SCF):
         mf = hf_cpu.RHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
-
-
-def _format_jks(vj, dm, kpts_band):
-    if kpts_band is None:
-        vj = vj.reshape(dm.shape)
-    elif kpts_band.ndim == 1:  # a single k-point on bands
-        vj = vj.reshape(dm.shape)
-    elif getattr(dm, "ndim", 0) == 2:
-        vj = vj[0]
-    return vj
 
 def normalize_dm_(mf, dm, s1e=None):
     '''
