@@ -78,7 +78,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         vxc += vj[0] + vj[1]
         ecoul = None
         if ground_state:
-            ecoul = float(cp.einsum('nKij,nKji->', dm, vj).real.get()) * .5 * weight
+            ecoul = float(cp.einsum('nKij,mKji->', dm, vj).real.get()) * .5 * weight
     if hybrid:
         vxc -= vk
         if ground_state:

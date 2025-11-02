@@ -53,15 +53,8 @@ class UHF(pbchf.SCF):
 
         if isinstance(dm, cp.ndarray) and dm.ndim == 2:
             dm = cp.repeat(dm[None]*.5, 2, axis=0)
-        incremental_veff = False
-        if dm_last is not None and self.rsjk:
-            assert vhf_last is not None
-            dm = dm - dm_last
-            incremental_veff = True
         vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
         vhf = vj[0] + vj[1] - vk
-        if incremental_veff:
-            vhf += vhf_last
         return vhf
 
     def get_bands(self, kpts_band, cell=None, dm=None, kpt=None):

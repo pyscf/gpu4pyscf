@@ -254,15 +254,8 @@ class KUHF(khf.KSCF):
                  hermi=1, kpts=None, kpts_band=None):
         if dm_kpts is None:
             dm_kpts = self.make_rdm1()
-        incremental_veff = False
-        if dm_last is not None and self.rsjk:
-            assert vhf_last is not None
-            dm_kpts = dm_kpts - dm_last
-            incremental_veff = True
         vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
         vhf = vj[0] + vj[1] - vk
-        if incremental_veff:
-            vhf += vhf_last
         return vhf
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):

@@ -129,31 +129,17 @@ def _get_jk(mf, cell, dm, hermi, kpt, kpts_band=None, with_j=True,
     omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
     if mf.rsjk:
         from gpu4pyscf.pbc.scf.rsjk import get_k
-        if lr_factor == sr_factor:
-            if dm_last is not None:
-                assert vhf_last is not None
-                dm = dm - dm_last
-                incremental_veff = True
-            if with_j:
-                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
-                       sr_factor, lr_factor, exxdiv=mf.exxdiv)
-            if incremental_veff:
-                vj += vhf_last.vj
-                vk += vhf_last.vk
-        else:
-            # TODO: compute vk_sr incrementally and vk_lr directly
-            #if dm_last is not None:
-            #    assert vhf_last is not None
-            #    dm = dm - dm_last
-            #    incremental_veff = True
-            if with_j:
-                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
-                       sr_factor, lr_factor, exxdiv=mf.exxdiv)
-            #if incremental_veff:
-            #    vj += vhf_last.vj
-            #    vk += vhf_last.vk
+        if lr_factor == 0 and dm_last is not None:
+            assert vhf_last is not None
+            dm = dm - dm_last
+            incremental_veff = True
+        if with_j:
+            vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+        vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
+                   sr_factor, lr_factor, exxdiv=mf.exxdiv)
+        if incremental_veff:
+            vj += vhf_last.vj
+            vk += vhf_last.vk
     else:
         #if getattr(mf.with_df, '_j_only', False):  # for GDF and MDF
         #    log.warn('df.j_only cannot be used with hybrid functional')

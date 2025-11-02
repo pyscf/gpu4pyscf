@@ -261,15 +261,8 @@ class SCF(mol_hf.SCF):
             dm = self.make_rdm1()
         if kpt is None:
             kpt = self.kpt
-        incremental_veff = False
-        if dm_last is not None and self.rsjk:
-            assert vhf_last is not None
-            dm = dm - dm_last
-            incremental_veff = True
         vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
         vhf = vj - vk * .5
-        if incremental_veff:
-            vhf += vhf_last
         return vhf
 
     def energy_nuc(self):

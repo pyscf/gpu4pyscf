@@ -107,7 +107,7 @@ def _get_jk(mf, cell, dm, hermi, kpts, kpts_band=None, with_j=True,
     omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
     if mf.rsjk:
         from gpu4pyscf.pbc.scf.rsjk import get_k
-        if dm_last is not None:
+        if lr_factor == 0 and dm_last is not None:
             assert vhf_last is not None
             dm = dm - dm_last
             incremental_veff = True

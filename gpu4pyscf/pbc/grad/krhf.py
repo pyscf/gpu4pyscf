@@ -22,13 +22,14 @@ import cupy as cp
 from pyscf import lib
 from pyscf.gto.mole import PTR_ENV_START, ANG_OF
 from pyscf.pbc.grad import krhf as krhf_cpu
+from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as molgrad
-from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft import UniformGrids
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.df.fft import get_SI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
@@ -156,7 +157,28 @@ def get_hcore(cell, kpts):
                         else:
                             h1[kn,:] += vnl
     else:
-        raise NotImplementedError
+        mesh = cell.mesh
+        charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
+        Gv = cell.get_Gv(mesh)
+        SI = get_SI(cell, mesh=mesh)
+        rhoG = charge.dot(SI)
+        coulG = tools.get_coulG(cell, mesh=mesh, Gv=Gv)
+        vneG = rhoG * coulG
+        vneR = tools.ifft(vneG, mesh).real
+        ni = pbc_numint.KNumInt()
+        grids = UniformGrids(cell)
+        # block_loop(sort_grids=True) would reorder the grids. Sorting vneR
+        # accordingly
+        vneR = vneR[grids.argsort()]
+        deriv = 1
+        grid0 = grid1 = 0
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, deriv, kpts,
+                                                   sort_grids=True):
+            ao_ks = ao_ks.transpose(0,1,3,2) # [nk,comp,nao,nGv]
+            grid0, grid1 = grid1, grid1 + len(weight)
+            aow = ao_ks[:,0] * vneR[grid0:grid1]
+            #:h1 += cp.einsum('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow)
+            contract('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow, beta=1, out=h1)
     return h1
 
 def hcore_generator(mf_grad, cell=None, kpts=None):
