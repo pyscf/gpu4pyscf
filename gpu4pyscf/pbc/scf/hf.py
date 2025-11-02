@@ -23,7 +23,6 @@ __all__ = [
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.scf import hf as hf_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
@@ -197,6 +196,8 @@ class SCF(mol_hf.SCF):
         if cell is None: cell = self.cell
         if dm is None: dm = self.make_rdm1()
         cpu0 = logger.init_timer(self)
+        if kpt is None:
+            kpt = self.kpt
         if self.rsjk or self.j_engine:
             vj = vk = None
             if with_j:
@@ -218,11 +219,9 @@ class SCF(mol_hf.SCF):
         where r,s are orbitals on kpt. p and q are orbitals on kpts_band
         if kpts_band is given otherwise p and q are orbitals on kpt.
         '''
+        if kpt is None:
+            kpt = self.kpt
         if self.j_engine:
-            if kpt is None:
-                kpt = self.kpt
-            else:
-                assert is_zero(kpt)
             from gpu4pyscf.pbc.scf.j_engine import get_j
             vj = get_j(cell, dm, hermi, kpt, kpts_band, self.j_engine)
         else:
@@ -232,14 +231,12 @@ class SCF(mol_hf.SCF):
     def get_k(self, cell, dm, hermi=1, kpt=None, kpts_band=None, omega=None):
         '''Compute K matrix for the given density matrix.
         '''
+        if kpt is None:
+            kpt = self.kpt
         if self.rsjk:
             from gpu4pyscf.pbc.scf.rsjk import get_k
-            if kpt is None:
-                kpt = self.kpt
-            else:
-                assert is_zero(kpt)
+            sr_factor = lr_factor = None
             if omega is not None:
-                sr_factor = lr_factor = None
                 if omega > 0:
                     sr_factor, lr_factor = 0, 1
                 elif omega < 0:
@@ -259,8 +256,6 @@ class SCF(mol_hf.SCF):
         '''
         if dm is None:
             dm = self.make_rdm1()
-        if kpt is None:
-            kpt = self.kpt
         vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
         vhf = vj - vk * .5
         return vhf

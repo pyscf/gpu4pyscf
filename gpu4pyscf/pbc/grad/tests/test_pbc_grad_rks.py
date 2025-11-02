@@ -19,6 +19,8 @@ import pyscf
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from pyscf.pbc.grad import krks as krks_cpu
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
 disp = 1e-5
 
@@ -87,7 +89,7 @@ class KnownValues(unittest.TestCase):
         ref = krks_cpu.Gradients(kmf).kernel()
         mf = cell_orth.RKS(xc='svwn').to_gpu()
         mf._numint = multigrid.MultiGridNumInt(cell_orth)
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
@@ -100,7 +102,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-10
         mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g = mf.nuc_grad_method().kernel()
+        g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skipIf(num_devices > 1, '')
@@ -109,7 +111,7 @@ class KnownValues(unittest.TestCase):
         ref = krks_cpu.Gradients(kmf).kernel()
         mf = cell_orth.RKS(xc='pbe').to_gpu()
         mf._numint = multigrid.MultiGridNumInt(cell_orth)
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
@@ -122,7 +124,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-10
         mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g = mf.nuc_grad_method().kernel()
+        g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skipIf(num_devices > 1, '')
@@ -133,7 +135,7 @@ class KnownValues(unittest.TestCase):
         mf = cell_orth.RKS(xc='r2scan').to_gpu()
         mf.conv_tol = 1e-10
         mf._numint = multigrid.MultiGridNumInt(cell_orth)
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -146,7 +148,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-10
         mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
-        g = mf.nuc_grad_method().kernel()
+        g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skip('gradients for hybrid functional not avaiable')
@@ -155,7 +157,7 @@ class KnownValues(unittest.TestCase):
         # TODO: save the ref
         mf = cell_orth.RKS(xc='b3lyp').to_gpu()
         mf.exxdiv = None
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -165,7 +167,7 @@ class KnownValues(unittest.TestCase):
         # TODO: save the ref
         mf = cell.RKS(xc='b3lyp').to_gpu()
         mf.exxdiv = None
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 

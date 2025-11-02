@@ -54,7 +54,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
 
@@ -68,7 +68,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
 
@@ -83,7 +83,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
 
@@ -97,7 +97,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
-        g_scan = mf.nuc_grad_method().as_scanner()
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(lib.fp(g), -0.00493036507528758, 6)
 

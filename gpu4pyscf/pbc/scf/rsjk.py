@@ -38,6 +38,7 @@ from gpu4pyscf.scf.jk import (
     _nearest_power2, apply_coeff_C_mat_CT, apply_coeff_CT_mat_C,
     PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
+from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
@@ -487,10 +488,11 @@ class PBCJKMatrixOpt:
         from gpu4pyscf.pbc.df.aft_jk import get_k_kpts
         cell = self.cell
         assert cell.dimension == 3
-        if kpts is None:
-            kpts = np.zeros((1, 3))
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         # get_coulG() might need to access the .kpts attribute
-        self.kpts = kpts.reshape(-1, 3)
+        self.kpts = kpts
+        if is_single_kpt:
+            kpts = kpts[0]
         return get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv)
 
     def weighted_coulG(self, kpt=np.zeros(3), exx=None, mesh=None):
@@ -724,22 +726,18 @@ class PBCJKMatrixOpt:
         from gpu4pyscf.pbc.df.aft_jk import get_ej_ip1, get_ek_ip1
         cell = self.cell
         assert cell.dimension == 3
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        self.kpts = kpts.reshape(-1, 3) # get_coulG() might need to access the .kpts attribute
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        self.kpts = kpts # get_coulG() might need to access the .kpts attribute
         ej = ek = 0
         if j_factor != 0:
             ej = get_ej_ip1(self, dm, kpts)
+            ej *= j_factor
         if k_factor != 0:
+            # RHF energy is computed as J - 1/2 K
+            if (is_single_kpt and dm.ndim == 2) or dm.ndim == 3:
+                k_factor *= .5
             ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv)
-            # the exchange for RHF has a factor of 1/2
-            if kpts.ndim == 1:
-                if dm.ndim == 2: # RHF
-                    ek *= .5
-                else: # UHF
-                    assert dm.ndim == 3 and len(dm) == 2
-            elif dm.ndim == 3: # KRHF
-                ek *= .5
+            ek *= k_factor
         return ej - ek
 
 class ExtendedMole(gto.Mole):

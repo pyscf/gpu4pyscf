@@ -37,7 +37,11 @@ from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 
 def get_nuc(mydf, kpts=None):
     from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _check_kpts(mydf, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -70,7 +74,11 @@ def get_pp(mydf, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
     '''
     from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _check_kpts(mydf, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1

@@ -27,7 +27,6 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft import UniformGrids
-from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.fft import get_SI
 from gpu4pyscf.pbc import tools
@@ -188,7 +187,11 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     dtype = h1.dtype
 
     mf = mf_grad.base
-    kpts, is_single_kpt = _check_kpts(mf, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
 
     aoslices = cell.aoslice_by_atom()
     SI = cp.asarray(cell.get_SI())

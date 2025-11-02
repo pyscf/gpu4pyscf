@@ -256,7 +256,7 @@ def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
         vk[:,idx] += contract('sngik,nglk->snil', tmp, Gpq_conj)
     else:
         # TODO: grouped gemm
-        tmp = contract('ngij,snjk->sngik', Gpq[kj], dms[kj])
+        tmp = contract('ngij,snjk->sngik', Gpq[kj], dms[:,kj])
         vk[:,ki] += contract('sngik,nglk->snil', tmp, Gpq_conj[kj])
 
     if swap_2e:

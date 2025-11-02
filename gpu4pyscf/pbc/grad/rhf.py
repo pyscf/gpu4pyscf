@@ -53,8 +53,6 @@ class Gradients(GradientsBase):
     ):
         mf = self.base
         cell = mf.cell
-        assert hasattr(mf, '_numint')
-        assert isinstance(mf._numint, multigrid_v2.MultiGridNumInt)
 
         if mo_energy is None:
             mo_energy = mf.mo_energy
@@ -77,6 +75,7 @@ class Gradients(GradientsBase):
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
             if hasattr(mf, 'xc'):
                 ni = mf._numint
+                assert isinstance(ni, multigrid_v2.MultiGridNumInt)
                 omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
                 if omega != 0 and omega != with_rsjk.omega:
                     with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
@@ -94,6 +93,7 @@ class Gradients(GradientsBase):
         else:
             assert hasattr(mf, 'xc'), 'HF gradients not supported'
             ni = mf._numint
+            assert isinstance(ni, multigrid_v2.MultiGridNumInt)
             de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
 
         s1 = int1e.int1e_ipovlp(cell)[0].get()

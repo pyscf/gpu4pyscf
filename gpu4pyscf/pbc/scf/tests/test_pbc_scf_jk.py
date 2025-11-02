@@ -15,6 +15,7 @@
 import numpy as np
 import numpy as cp
 import pyscf
+from packaging.version import Version
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from pyscf.pbc.df import fft as fft_cpu
@@ -300,7 +301,7 @@ def test_ejk_sr_ip1_per_atom_gamma_point():
     nao = cell.nao
     dm = np.random.rand(nao, nao)
     dm = dm.dot(dm.T)
-    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm)
+    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -rsjk.OMEGA
@@ -327,9 +328,9 @@ def test_ejk_sr_ip1_per_atom_kpts():
         basis={'H': [[0, [.35, 1]], [1, [.3, 1]]],
                'O': [[0, [.35, 1]], [2, [.3, 1]]]},
     )
-    kpts = cell.make_kpts([3,2,1])
+    kpts = cell.make_kpts([3,1,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, kpts=kpts)
+    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -rsjk.OMEGA
@@ -357,16 +358,17 @@ def test_ejk_ip1_per_atom_gamma_point():
     )
     np.random.seed(9)
     nao = cell.nao
+    kpt = np.zeros(3)
     dm = np.random.rand(2, nao, nao) * .5
     dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
 
     with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
-    ejk = with_rsjk._get_ejk_sr_ip1(dm[0])
-    ejk += with_rsjk._get_ejk_lr_ip1(dm[0])
+    ejk = with_rsjk._get_ejk_sr_ip1(dm[0], kpts=kpt)
+    ejk += with_rsjk._get_ejk_lr_ip1(dm[0], kpts=kpt)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     with_fft = fft_cpu.FFTDF(cell)
-    vj, vk = with_fft.get_jk_e1(dm[0], exxdiv=None)
+    vj, vk = with_fft.get_jk_e1(dm[0])
     vhf = vj - vk*.5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
@@ -375,18 +377,32 @@ def test_ejk_ip1_per_atom_gamma_point():
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[0,:,p0:p1])
     assert abs(ejk - ref).max() < 1e-6
 
-    ejk = with_rsjk._get_ejk_sr_ip1(dm)
-    ejk += with_rsjk._get_ejk_lr_ip1(dm)
-    assert abs(ejk.sum(axis=0)).max() < 1e-8
+    if Version(pyscf.__version__) > Version('2.11'):
+        ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv='ewald')
+        ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpt, exxdiv='ewald')
+        assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    vj, vk = with_fft.get_jk_e1(dm, exxdiv=None)
-    vhf = vj[:,:1] + vj[:,1:] - vk
-    aoslices = cell.aoslice_by_atom()
-    ref = np.empty((cell.natm, 3))
-    for i in range(cell.natm):
-        p0, p1 = aoslices[i, 2:]
-        ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-    assert abs(ejk - ref).max() < 1e-6
+        vj, vk = with_fft.get_jk_e1(dm, exxdiv='ewald')
+        vhf = vj[:,:1] + vj[:,1:] - vk
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
+        assert abs(ejk - ref).max() < 1e-6
+    else:
+        ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv=None)
+        ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpt, exxdiv=None)
+        assert abs(ejk.sum(axis=0)).max() < 1e-8
+
+        vj, vk = with_fft.get_jk_e1(dm, exxdiv=None)
+        vhf = vj[:,:1] + vj[:,1:] - vk
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
+        assert abs(ejk - ref).max() < 1e-6
 
 def test_ejk_ip1_per_atom_kpts():
     cell = pyscf.M(
@@ -399,11 +415,11 @@ def test_ejk_ip1_per_atom_kpts():
         a=np.eye(3)*4.,
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
-    kpts = cell.make_kpts([1,2,1])
+    kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
-    ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts)
-    ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts)
+    ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=None)
+    ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=None)
