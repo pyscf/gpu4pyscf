@@ -22,14 +22,14 @@ from gpu4pyscf.lib.multi_gpu import num_devices
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
-disp = 1e-5
+disp = 1e-4
 
 def setUpModule():
     global cell, cell_orth
     cell = pyscf.M(
         # The original geometry of second carbon is [1.685068664391,1.685068664391,1.685068664391]
         # Henry distorted it to make the gradient non-zero
-        atom = [['C', [0.0, 0.0, 0.0]], ['C', [1.885068664391,1.685068664391,1.585068664391]]],
+        atom = [['C', [0.0, 0.0, 0.0]], ['C', [1.885,1.685,1.585]]],
         a = '''
         0.000000000, 3.370137329, 3.370137329
         3.370137329, 0.000000000, 3.370137329
@@ -40,12 +40,11 @@ def setUpModule():
 
     cell_orth = pyscf.M(
         atom = 'H 0 0 0; H 1. 1. 1.',
-        a = np.eye(3) * 2.5,
+        a = np.eye(3) * 3.5,
         basis = [[0, [1.3, 1]], [1, [0.8, 1]]],
         verbose = 5,
         pseudo = 'gth-pade',
         unit = 'bohr',
-        mesh = [13] * 3,
         output = '/dev/null')
 
 def tearDownModule():
@@ -55,7 +54,7 @@ def tearDownModule():
 
 def numerical_gradient(cell, xc):
     def get_energy(cell):
-        mf = cell.RKS(xc=xc).to_gpu()
+        mf = cell.RKS(xc=xc)
         mf.conv_tol = 1e-10
         E = mf.kernel()
         assert mf.converged
@@ -70,13 +69,11 @@ def numerical_gradient(cell, xc):
             xyz_p = cell.atom_coords()
             xyz_p[i_atom, i_xyz] += disp
             cell_copy.set_geom_(xyz_p, unit='Bohr')
-            cell_copy.build()
             Ep = get_energy(cell_copy)
 
             xyz_m = cell.atom_coords()
             xyz_m[i_atom, i_xyz] -= disp
             cell_copy.set_geom_(xyz_m, unit='Bohr')
-            cell_copy.build()
             Em = get_energy(cell_copy)
 
             gradient[i_atom, i_xyz] = (Ep - Em) / (2 * disp)
@@ -94,10 +91,23 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
     @unittest.skipIf(num_devices > 1, '')
+    def test_rsjk_lda_grad(self):
+        # ref = numerical_gradient(cell_orth, xc='svwn')
+        ref = np.array([[-0.22454693, -0.22454693, -0.22454693],
+                        [ 0.22454697,  0.22454697,  0.22454697]])
+        mf = cell_orth.RKS().to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    @unittest.skipIf(num_devices > 1, '')
     def test_lda_grad_nonorth(self):
         # ref = numerical_gradient(cell, xc='lda,vwn')
-        ref = np.array([[-0.2574167 , -0.03094249,  0.12969496],
-                        [ 0.25741799,  0.03094078, -0.12969543]])
+        ref = np.array([[-0.25731923, -0.03086362,  0.1297622 ],
+                        [ 0.25732052,  0.0308619 , -0.12976267]])
         mf = cell.RKS(xc='lda,vwn').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
@@ -118,8 +128,8 @@ class KnownValues(unittest.TestCase):
     @unittest.skipIf(num_devices > 1, '')
     def test_gga_grad_nonorth(self):
         # ref = numerical_gradient(cell, xc='pbe,pbe')
-        ref = np.array([[-0.25588534, -0.03079455,  0.12893533],
-                        [ 0.25585186,  0.03078769, -0.12891839]])
+        ref = np.array([[-0.25578848, -0.03071615,  0.12900215],
+                        [ 0.25575498,  0.03070929, -0.12898519]])
         mf = cell.RKS(xc='pbe,pbe').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
@@ -130,8 +140,8 @@ class KnownValues(unittest.TestCase):
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad(self):
         # ref = numerical_gradient(cell_orth, xc='r2scan')
-        ref = np.array([[-0.01026366, -0.01026366, -0.01026366],
-                        [ 0.01026374,  0.01026374,  0.01026374]])
+        ref = np.array([[-0.22997619, -0.22997619, -0.22997619],
+                        [ 0.22997641,  0.22997641,  0.22997641]])
         mf = cell_orth.RKS(xc='r2scan').to_gpu()
         mf.conv_tol = 1e-10
         mf._numint = multigrid.MultiGridNumInt(cell_orth)
@@ -142,8 +152,8 @@ class KnownValues(unittest.TestCase):
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad_nonorth(self):
         # ref = numerical_gradient(cell, xc='r2scan')
-        ref = np.array([[-0.26574535, -0.03127805,  0.13378557],
-                        [ 0.265949  ,  0.03133622, -0.13367209]])
+        ref = np.array([[-0.26564486, -0.03119648,  0.13385543],
+                        [ 0.26584843,  0.03125564, -0.13374247]])
         mf = cell.RKS(xc='r2scan,r2scan').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
@@ -151,24 +161,53 @@ class KnownValues(unittest.TestCase):
         g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
-    @unittest.skip('gradients for hybrid functional not avaiable')
     def test_hybrid_grad(self):
-        ref = numerical_gradient(cell_orth, xc='b3lyp')
-        # TODO: save the ref
-        mf = cell_orth.RKS(xc='b3lyp').to_gpu()
-        mf.exxdiv = None
+        # ref = numerical_gradient(cell_orth, xc='pbe0')
+        ref = np.array([[-0.23059492, -0.23059492, -0.23059492],
+                        [ 0.23059768,  0.23059768,  0.23059768]])
+        mf = cell_orth.RKS(xc='pbe0').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
-    @unittest.skip('gradients for hybrid functional not avaiable')
-    def test_hybrid_grad_nonorth(self):
-        ref = numerical_gradient(cell, xc='b3lyp')
-        # TODO: save the ref
-        mf = cell.RKS(xc='b3lyp').to_gpu()
-        mf.exxdiv = None
+    @unittest.skip('Insufficient GPU memory for rsjk.q_cond')
+    def test_hse_grad(self):
+        # ref = numerical_gradient(cell_orth, xc='hse06')
+        ref = np.array([[-0.23039771, -0.23039771, -0.23039771],
+                        [ 0.23043268,  0.23043268,  0.23043268]])
+        mf = cell_orth.RKS(xc='hse06').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
-        g = g_scan(cell)[1]
+        g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    def test_wb97_grad(self):
+        # ref = numerical_gradient(cell_orth, xc='wb97')
+        ref = np.array([[-0.22096546, -0.22096546, -0.22096546],
+                        [ 0.22118384,  0.22118384,  0.22118384]])
+        mf = cell_orth.RKS(xc='wb97').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    def test_camb3lyp_grad(self):
+        # ref = numerical_gradient(cell_orth, xc='camb3lyp')
+        ref = np.array([[-0.22851045, -0.22851045, -0.22851045],
+                        [ 0.22850896,  0.22850896,  0.22850896]])
+        mf = cell_orth.RKS(xc='camb3lyp').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
 if __name__ == "__main__":

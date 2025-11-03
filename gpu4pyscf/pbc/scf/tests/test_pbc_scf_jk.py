@@ -297,10 +297,7 @@ def test_ejk_sr_ip1_per_atom_gamma_point():
         basis={'H': [[0, [.25, 1]], [1, [.3, 1]]],
                'O': [[0, [.3,  1]], [2, [.2, 1]]]},
     )
-    np.random.seed(9)
-    nao = cell.nao
-    dm = np.random.rand(nao, nao)
-    dm = dm.dot(dm.T)
+    dm = cell.pbc_intor('int1e_ovlp')
     ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
@@ -330,18 +327,21 @@ def test_ejk_sr_ip1_per_atom_kpts():
     )
     kpts = cell.make_kpts([3,1,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=None)
+    if Version(pyscf.__version__) > Version('2.11'):
+        exxdiv = 'ewald'
+    else:
+        exxdiv = None
+    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=exxdiv)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -rsjk.OMEGA
-    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=None)
+    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=exxdiv)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
-    ref /= len(kpts)
     # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
     assert abs(ejk - ref).max() < 5e-6
 
@@ -429,5 +429,4 @@ def test_ejk_ip1_per_atom_kpts():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
-    ref /= len(kpts)
     assert abs(ejk - ref).max() < 5e-6

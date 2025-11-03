@@ -31,6 +31,7 @@ from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.fft import get_SI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 
 __all__ = ['Gradients']
@@ -161,7 +162,7 @@ def get_hcore(cell, kpts):
         Gv = cell.get_Gv(mesh)
         SI = get_SI(cell, mesh=mesh)
         rhoG = charge.dot(SI)
-        coulG = tools.get_coulG(cell, mesh=mesh, Gv=Gv)
+        coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
         vneG = rhoG * coulG
         vneR = tools.ifft(vneG, mesh).real
         ni = pbc_numint.KNumInt()
@@ -199,23 +200,27 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     Gv_cpu = cell.Gv
     Gv = cp.asarray(Gv_cpu)
     ngrids = len(Gv)
-    vlocG = cp.asarray(get_vlocG(cell))
+    if cell._pseudo:
+        vlocG = cp.asarray(get_vlocG(cell))
+    else:
+        Z = cell.atom_charges()
+        coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
     ni = pbc_numint.KNumInt()
     grids = UniformGrids(cell)
     ptr = PTR_ENV_START
 
     def hcore_deriv(atm_id):
         hcore = cp.zeros_like(h1)
-        symb = cell.atom_symbol(atm_id)
-        if symb not in cell._pseudo:
-            return hcore
-        vloc_g = cp.einsum('ga,g,g->ag', Gv, 1j * SI[atm_id], vlocG[atm_id])
+        if cell._pseudo:
+            vloc_g = cp.einsum('ga,g,g->ag', Gv, 1j * SI[atm_id], vlocG[atm_id])
+        else:
+            vloc_g = cp.einsum('ga,g,g->ag', Gv, Z[atm_id]*1j * SI[atm_id], coulG)
         vloc_R = tools.ifft(vloc_g, mesh).real
-        # block_loop(sort_grids=True) would reorder the grids.
         vloc_R = vloc_R[:,grids.argsort()]
         vloc_g = None
         deriv = 0
         grid0 = grid1 = 0
+        # block_loop(sort_grids=True) would reorder the grids.
         for ao_ks, weight, coords in ni.block_loop(cell, grids, deriv, kpts,
                                                    sort_grids=True):
             ao_ks = ao_ks.transpose(0,2,1) # [nk,nao,nGv]
@@ -224,8 +229,14 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
             #:hcore += contract('kig,kxjg->kxij',ao_ks.conj(), aow)
             contract('kig,kxjg->kxij', ao_ks.conj(), aow, beta=1, out=hcore)
 
-        fakemol = krhf_cpu._make_fakemol()
+        symb = cell.atom_symbol(atm_id)
         shl0, shl1, p0, p1 = aoslices[atm_id]
+        if symb not in cell._pseudo:
+            hcore[:,:,p0:p1] -= h1[:,:,p0:p1]
+            hcore[:,:,:,p0:p1] -= h1[:,:,p0:p1].transpose(0,1,3,2).conj()
+            return hcore
+
+        fakemol = krhf_cpu._make_fakemol()
         ft_weight = 1. / cell.vol
         for kn, kpt in enumerate(kpts):
             # Compute aokG analytically. An error ~cell.precision may be
@@ -328,11 +339,10 @@ class GradientsBase(molgrad.GradientsBase):
             exxdiv = self.base.exxdiv
             ek = self.rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
             ek += self.rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
-            # The sign for ek have been included in the ejk kernel
             if dm.ndim == 3: # KRHF
-                ek *= -2
+                ek *= 2
             elif dm.ndim == 4: # KUHF
-                ek *= -1
+                pass
             else:
                 raise RuntimeError('Illegal dm dimension')
         else:
@@ -358,6 +368,11 @@ class Gradients(GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
     def get_veff(self, dm, kpts):
+        '''
+        The energy contribution from the effective potential
+
+        einsum('kxij,kji->x', veff, dm)
+        '''
         if self.base.rsjk is not None:
             from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
             with_rsjk = self.base.rsjk

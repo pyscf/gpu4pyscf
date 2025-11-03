@@ -362,8 +362,6 @@ def get_ej_ip1(mydf, dm, kpts=None):
 
     kpt_allow = np.zeros(3)
     coulG = mydf.weighted_coulG()
-    if nkpts != 1:
-        coulG /= nkpts**2
 
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _screen_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
@@ -411,6 +409,8 @@ def get_ej_ip1(mydf, dm, kpts=None):
             sorted_cell._env.ctypes)
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+    if nkpts != 1:
+        ej /= nkpts
     return ej.get()
 
 def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
@@ -470,9 +470,6 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     for group_id, (kpt, ki_idx, kj_idx, self_conj) \
             in enumerate(kk_adapted_iter(cell, kpts)):
         wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh)
-        if nkpts != 1:
-            wcoulG /= nkpts**2
-
         swap_2e = not self_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
@@ -528,6 +525,8 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
+    if nkpts != 1:
+        ek /= nkpts
     return ek.get()
 
 def _screen_shl_pairs(ft_opt):

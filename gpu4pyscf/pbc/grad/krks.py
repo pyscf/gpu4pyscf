@@ -57,13 +57,16 @@ def get_veff(ks_grad, dm=None, kpts=None):
     if not ni.libxc.is_hybrid_xc(mf.xc):
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
             exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
-            # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
+            # exc of multigrid_v2 is the full response of dE/dX. However,
+            # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
+            # They are differed by a factor of two. Scale exc to match the
+            # convention of molecular rhf/rks get_veff.
             exc /= 2
-            return exc
-        exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
-        t0 = log.timer('vxc', *t0)
-        ej = ks_grad.get_j(dm, kpts)
-        exc += ej
+        else:
+            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
+            t0 = log.timer('vxc', *t0)
+            ej = ks_grad.get_j(dm, kpts)
+            exc += ej
     else:
         from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
         with_rsjk = mf.rsjk
@@ -72,7 +75,10 @@ def get_veff(ks_grad, dm=None, kpts=None):
                                       'are only available via the rsjk method')
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
             exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
-            # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
+            # exc of multigrid_v2 is the full response of dE/dX. However,
+            # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
+            # They are differed by a factor of two. Scale exc to match the
+            # convention of molecular rhf/rks get_veff.
             exc /= 2
             j_factor = 0
         else:
@@ -81,6 +87,8 @@ def get_veff(ks_grad, dm=None, kpts=None):
         omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
         if omega != 0 and omega != with_rsjk.omega:
             with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
+        if with_rsjk.supmol is None:
+            with_rsjk.build()
         exc += with_rsjk._get_ejk_sr_ip1(dm, j_factor=j_factor, k_factor=k_sr,
                                          kpts=kpts, exxdiv=mf.exxdiv)
         exc += with_rsjk._get_ejk_lr_ip1(dm, j_factor=j_factor, k_factor=k_lr,

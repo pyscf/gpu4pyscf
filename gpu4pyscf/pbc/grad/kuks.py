@@ -80,6 +80,8 @@ def get_veff(ks_grad, dm=None, kpts=None):
         omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
         if omega != 0 and omega != with_rsjk.omega:
             with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
+        if with_rsjk.supmol is None:
+            with_rsjk.build()
         exc += with_rsjk._get_ejk_sr_ip1(dm, j_factor=j_factor, k_factor=k_sr,
                                          kpts=kpts, exxdiv=mf.exxdiv)
         exc += with_rsjk._get_ejk_lr_ip1(dm, j_factor=j_factor, k_factor=k_lr,

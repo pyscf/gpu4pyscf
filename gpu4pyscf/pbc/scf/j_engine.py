@@ -89,7 +89,8 @@ class PBCJMatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell
-        if self.omega is None: # TODO: dynamically determine omega based on rcut?
+        if self.omega is None or self.omega == 0:
+            # TODO: dynamically determine omega based on rcut
             self.omega = OMEGA
         if self.mesh is None:
             ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)

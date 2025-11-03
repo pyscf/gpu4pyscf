@@ -263,7 +263,7 @@ def _check_kpts(kpts, dm):
         if dm.ndim == 2:
             raise RuntimeError('dm.ndim == 2, incompatible with kpts')
         elif dm.ndim == 3: # KRHF
-            assert len(dm) == nkpts, 'KRHF dm incompatible with kpts'
+            assert len(dm) == nkpts, 'KRHF dm incompatible with kpts. Are you running UHF?'
         else: # KUHF
-            assert dm.shape == (2, nkpts), 'KUHF dm incompatible with kpts'
+            assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
     return kpts, is_single_kpt

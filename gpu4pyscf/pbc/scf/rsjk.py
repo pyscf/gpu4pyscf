@@ -118,7 +118,8 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell
-        if self.omega is None: # TODO: dynamically determine omega based on rcut?
+        if self.omega is None or self.omega == 0:
+            # TODO: dynamically determine omega based on rcut
             self.omega = OMEGA
         if self.mesh is None:
             ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
@@ -140,7 +141,6 @@ class PBCJKMatrixOpt:
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
 
-        # TODO: approx with overlap mask
         nbas = supmol.nbas
         ao_loc = supmol.ao_loc
         q_cond = np.empty((nbas,nbas))
@@ -464,14 +464,14 @@ class PBCJKMatrixOpt:
                 # This term rapidly decays to 0 for large k-mesh. In the
                 # FFTDF.get_jk based implementation, this contribution is
                 # included in the short-range part.
-                wcoulG_SR_at_G0 = -probe_charge_sr_coulomb(cell, omega, kpts)
+                wcoulG_SR_at_G0 = probe_charge_sr_coulomb(cell, omega, kpts)
             else:
                 # Remove the G=0 contribution to match the output of FFTDF.get_jk().
-                wcoulG_SR_at_G0 = -np.pi / omega**2 / cell.vol
+                wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
             s = int1e.int1e_ovlp(cell, kpts)
             for i in range(n_dm):
                 for k in range(nkpts):
-                    vk[i,k] += s[k].dot(dms[i,k]).dot(s[k]) * wcoulG_SR_at_G0
+                    vk[i,k] -= s[k].dot(dms[i,k]).dot(s[k]) * wcoulG_SR_at_G0
 
         if not is_gamma_point:
             weight = 1. / nkpts
@@ -693,10 +693,11 @@ class PBCJKMatrixOpt:
             # integrals and the AFT integrals
             dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
             omega = self.omega
+            wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
             if exxdiv == 'ewald':
-                wcoulG_SR_at_G0 = probe_charge_sr_coulomb(cell, omega, kpts)
+                wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
             else:
-                wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+                wcoulG_for_k = wcoulG_SR_at_G0
             int1e_opt = int1e._Int1eOpt(cell, kpts)
             s = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
             s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
@@ -705,16 +706,16 @@ class PBCJKMatrixOpt:
             k_dm = contract('nkpq,kqr->nkpr', dms, s)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
             if n_dm == 1: # RHF
-                k_dm *= .5 * k_factor * wcoulG_SR_at_G0
+                k_dm *= .5 * k_factor * wcoulG_for_k
             else:
-                k_dm *= k_factor * wcoulG_SR_at_G0
+                k_dm *= k_factor * wcoulG_for_k
             aoslices = cell.aoslice_by_atom()
             for i, (p0, p1) in enumerate(aoslices[:,2:]):
                 ejk[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
                 ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
 
         if not is_gamma_point:
-            ejk *= 1. / nkpts**2
+            ejk *= 1. / nkpts
         return ejk.get()
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, exxdiv=None,
@@ -734,7 +735,8 @@ class PBCJKMatrixOpt:
             ej *= j_factor
         if k_factor != 0:
             # RHF energy is computed as J - 1/2 K
-            if (is_single_kpt and dm.ndim == 2) or dm.ndim == 3:
+            if ((is_single_kpt and dm.ndim == 2) or # RHF
+                (not is_single_kpt and dm.ndim == 3)): # KRHF
                 k_factor *= .5
             ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv)
             ek *= k_factor
