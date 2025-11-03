@@ -89,7 +89,9 @@ class KnownValues(unittest.TestCase):
         np.random.seed(1)
         mo_coeff_test = np.random.random(mo_coeff.shape)
         ni_gpu = NumInt2C()
+        ni_gpu.collinear='m'
         ni_cpu = pyscf_numint2c()
+        ni_cpu.collinear='m'
         for xctype in ('LDA', 'GGA', 'MGGA'):
             deriv = 1
             if xctype == 'LDA':
@@ -97,12 +99,8 @@ class KnownValues(unittest.TestCase):
             ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
             ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
             
-            rho = ni_gpu.eval_rho2(mol, ao_gpu, mo_coeff_test, mo_occ, xctype=xctype, hermi=0, with_lapl=False)
-            ref = ni_cpu.eval_rho2(mol, ao_cpu, mo_coeff_test, mo_occ, xctype=xctype, hermi=0, with_lapl=False)
-            self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
-
-            rho = ni_gpu.eval_rho2(mol, ao_gpu, mo_coeff_test, mo_occ, xctype=xctype, hermi=1, with_lapl=False)
-            ref = ni_cpu.eval_rho2(mol, ao_cpu, mo_coeff_test, mo_occ, xctype=xctype, hermi=1, with_lapl=False)
+            rho = ni_gpu.eval_rho2(mol, ao_gpu, mo_coeff_test, mo_occ, xctype=xctype, with_lapl=False)
+            ref = ni_cpu.eval_rho2(mol, ao_cpu, mo_coeff_test, mo_occ, xctype=xctype, with_lapl=False)
             self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
 
 
