@@ -160,6 +160,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skip('Insufficient GPU memory for rsjk.q_cond')
     def test_hse_grad(self):

@@ -183,16 +183,12 @@ def get_hcore(cell, kpts):
 
 def hcore_generator(mf_grad, cell=None, kpts=None):
     if cell is None: cell = mf_grad.cell
-    if kpts is None: kpts = mf_grad.kpts
-    h1 = mf_grad.get_hcore(cell, kpts)
-    dtype = h1.dtype
-
-    mf = mf_grad.base
-    is_single_kpt = kpts is not None and kpts.ndim == 1
     if kpts is None:
-        kpts = np.zeros((1, 3))
+        kpts = mf_grad.kpts
     else:
         kpts = kpts.reshape(-1, 3)
+    h1 = mf_grad.get_hcore(cell, kpts)
+    dtype = h1.dtype
 
     aoslices = cell.aoslice_by_atom()
     SI = cp.asarray(cell.get_SI())

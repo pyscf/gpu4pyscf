@@ -209,6 +209,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot- -0.361911543087363, 8)
 
     def test_rsjk_with_df(self):
+        cell = self.cell
         mf = cell.RHF(exxdiv='ewald').to_gpu().density_fit()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)

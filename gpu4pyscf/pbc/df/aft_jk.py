@@ -527,6 +527,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
     if nkpts != 1:
         ek /= nkpts
+    log.timer_debug1('get_ek_ip1', *cpu0)
     return ek.get()
 
 def _screen_shl_pairs(ft_opt):
