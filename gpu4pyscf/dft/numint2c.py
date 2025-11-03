@@ -446,7 +446,7 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
 
     # collinear schemes:
     #   'col' (collinear, by default)
-    #   'ncol' (non-collinear)
+    #   'ncol' (non-collinear, also known as locally collinear)
     #   'mcol' (multi-collinear)
     collinear = getattr(__config__, 'dft_numint_RnumInt_collinear', 'col')
     spin_samples = getattr(__config__, 'dft_numint_RnumInt_spin_samples', 770)
