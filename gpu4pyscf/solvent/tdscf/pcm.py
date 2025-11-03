@@ -171,19 +171,21 @@ class WithSolventTDSCFGradient:
         return obj
 
     def solvent_response(self, dm):
-        return self.base.with_solvent._B_dot_x(dm)*2.0 
-        
-    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.INFO):
+        return self.base.with_solvent._B_dot_x(dm)*2.0
+
+    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.INFO,
+                  with_solvent=True):
         if self.base.with_solvent.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
 
-        de = super().grad_elec(xy, singlet, atmlst, verbose) 
+        # self._dmz1doo and self._dmxpy are initialized in super().grad_elec
+        de = super().grad_elec(xy, singlet, atmlst, verbose, with_solvent=True)
 
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
-        dmxpy = self.dmxpy + self.dmxpy.T
+        dmP = 0.5 * (self._dmz1doo + self._dmz1doo.T)
+        dmxpy = self._dmxpy + self._dmxpy.T
         pcmobj = self.base.with_solvent
         de += pcmobj.grad(dm)
 

@@ -26,7 +26,8 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
 
 
-def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
+              with_solvent=False):
     """
     Electronic part of TDA, TDHF nuclear gradients
 
@@ -36,6 +37,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         x_y : a two-element list of numpy arrays
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
+
+    Kwargs:
+        with_solvent :
+            Include the response of solvent in the gradients of the electronic
+            energy.
     """
     if singlet is not True and singlet is not None:
         raise NotImplementedError("Only for spin-conserving TDHF")
@@ -85,7 +91,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmzoob = reduce(cp.dot, (orbob, doob, orbob.T))
     dmzooa += reduce(cp.dot, (orbva, dvva, orbva.T))
     dmzoob += reduce(cp.dot, (orbvb, dvvb, orbvb.T))
-    td_grad.dmxpy = (dmxpya + dmxpyb)*0.5
+    dmxpy = (dmxpya + dmxpyb)*0.5
+    if with_solvent:
+        td_grad._dmxpy = dmxpy
 
     vj0, vk0 = mf.get_jk(mol, cp.stack((dmzooa, dmzoob)), hermi=0)
     vj1, vk1 = mf.get_jk(mol, cp.stack((dmxpya + dmxpya.T, dmxpyb + dmxpyb.T)), hermi=0)
@@ -108,11 +116,13 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     vk = vk.reshape(2, 3, nao, nao)
 
     veff0doo = vj[0, 0] + vj[1, 0] - vk[:, 0]
-    veff0doo += td_grad.solvent_response((dmzooa + dmzoob)*0.5)
+    if with_solvent:
+        veff0doo += td_grad.solvent_response((dmzooa + dmzoob)*0.5)
     wvoa = reduce(cp.dot, (orbva.T, veff0doo[0], orboa)) * 2
     wvob = reduce(cp.dot, (orbvb.T, veff0doo[1], orbob)) * 2
     veff = vj[0, 1] + vj[1, 1] - vk[:, 1]
-    veff += td_grad.solvent_response((td_grad.dmxpy + td_grad.dmxpy.T))
+    if with_solvent:
+        veff += td_grad.solvent_response((dmxpy + dmxpy.T))
     veff0mopa = reduce(cp.dot, (mo_coeff[0].T, veff[0], mo_coeff[0]))
     veff0mopb = reduce(cp.dot, (mo_coeff[1].T, veff[1], mo_coeff[1]))
     wvoa -= contract("ki,ai->ak", veff0mopa[:nocca, :nocca], xpya) * 2
@@ -195,7 +205,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     dmz1dooa = z1ao[0] + dmzooa
     dmz1doob = z1ao[1] + dmzoob
-    td_grad.dmz1doo = (dmz1dooa + dmz1doob)*0.5
+    if with_solvent:
+        td_grad._dmz1doo = (dmz1dooa + dmz1doob)*0.5
     oo0a = reduce(cp.dot, (orboa, orboa.T))
     oo0b = reduce(cp.dot, (orbob, orbob.T))
 
@@ -258,10 +269,7 @@ class Gradients(tdrhf.Gradients):
     to_cpu = utils.to_cpu
     to_gpu = utils.to_gpu
     device = utils.device
-
-    @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.info):
-        return grad_elec(self, xy, singlet, atmlst, self.verbose)
+    grad_elec = grad_elec
 
 
 Grad = Gradients
