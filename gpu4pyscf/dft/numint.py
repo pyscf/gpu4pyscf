@@ -1871,7 +1871,7 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         non0tab: dummy argument for compatibility with PySCF
         blksize: if not given, it will be estimated with avail GPU memory.
         buf: dummy argument for compatibility with PySCF
-        grid_range: loop [grid_start, grid_end] in grids only.
+        grid_range: loop [grid_start, grid_end] in grids only. TODO: Henry 20251006 believes these parameters are not respected.
     '''
     log = logger.new_logger(mol)
     if grids.coords is None:
