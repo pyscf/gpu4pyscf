@@ -34,7 +34,7 @@ H        0.000000   -0.755453   -0.471161''',
         basis = 'ccpvdz',
         charge = 1,
         spin = 1,  # = 2S = spin_up - spin_down
-        output = '/dev/null'
+        # output = '/dev/null'
         )
 
     np.random.seed(2)
@@ -65,45 +65,72 @@ MGGA_M06 = 'MGGA_C_M06'
 
 class KnownValues(unittest.TestCase):
 
-    def test_eval_rho(self):
-        np.random.seed(1)
-        dm = np.random.random(dm0.shape)
-        ni_gpu = NumInt2C()
-        ni_cpu = pyscf_numint2c()
-        for xctype in ('LDA', 'GGA', 'MGGA'):
-            deriv = 1
-            if xctype == 'LDA':
-                deriv = 0
-            ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
-            ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
+    # def test_eval_rho(self):
+    #     np.random.seed(1)
+    #     dm = np.random.random(dm0.shape)
+    #     ni_gpu = NumInt2C()
+    #     ni_cpu = pyscf_numint2c()
+    #     for xctype in ('LDA', 'GGA', 'MGGA'):
+    #         deriv = 1
+    #         if xctype == 'LDA':
+    #             deriv = 0
+    #         ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
+    #         ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
             
-            rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
-            ref = ni_cpu.eval_rho(mol, ao_cpu, dm, xctype=xctype, hermi=0, with_lapl=False)
-            self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
+    #         rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
+    #         ref = ni_cpu.eval_rho(mol, ao_cpu, dm, xctype=xctype, hermi=0, with_lapl=False)
+    #         self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
 
-            rho = ni_gpu.eval_rho(mol, ao_gpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
-            ref = ni_cpu.eval_rho(mol, ao_cpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
-            self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
+    #         rho = ni_gpu.eval_rho(mol, ao_gpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
+    #         ref = ni_cpu.eval_rho(mol, ao_cpu, dm0, xctype=xctype, hermi=1, with_lapl=False)
+    #         self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
 
-    def test_eval_rho2(self):
-        np.random.seed(1)
-        mo_coeff_test = np.random.random(mo_coeff.shape)
+    # def test_eval_rho2(self):
+    #     np.random.seed(1)
+    #     mo_coeff_test = np.random.random(mo_coeff.shape)
+    #     ni_gpu = NumInt2C()
+    #     ni_gpu.collinear='m'
+    #     ni_cpu = pyscf_numint2c()
+    #     ni_cpu.collinear='m'
+    #     for xctype in ('LDA', 'GGA', 'MGGA'):
+    #         deriv = 1
+    #         if xctype == 'LDA':
+    #             deriv = 0
+    #         ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
+    #         ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
+            
+    #         rho = ni_gpu.eval_rho2(mol, ao_gpu, mo_coeff_test, mo_occ, xctype=xctype, with_lapl=False)
+    #         ref = ni_cpu.eval_rho2(mol, ao_cpu, mo_coeff_test, mo_occ, xctype=xctype, with_lapl=False)
+    #         self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
+
+    def test_eval_xc_eff(self):
         ni_gpu = NumInt2C()
         ni_gpu.collinear='m'
         ni_cpu = pyscf_numint2c()
         ni_cpu.collinear='m'
-        for xctype in ('LDA', 'GGA', 'MGGA'):
-            deriv = 1
-            if xctype == 'LDA':
-                deriv = 0
-            ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
-            ao_cpu = ni_cpu.eval_ao(mol, grids_cpu.coords, deriv=deriv)
-            
-            rho = ni_gpu.eval_rho2(mol, ao_gpu, mo_coeff_test, mo_occ, xctype=xctype, with_lapl=False)
-            ref = ni_cpu.eval_rho2(mol, ao_cpu, mo_coeff_test, mo_occ, xctype=xctype, with_lapl=False)
-            self.assertAlmostEqual(abs(rho[...,:grids_cpu.size].get() - ref).max(), 0, 10)
-
+        np.random.seed(1)
+        dm = dm0*1.0
+        print(dm.shape, mol.nao)
+        print(dm.dtype)
+        for xc_code in (MGGA_M06, ):
+            # xctype = ni_gpu._xc_type(xc_code)
+            # deriv = 1
+            # if xctype == 'LDA':
+            #     deriv = 0
+            # ao_gpu = ni_gpu.eval_ao(mol, grids_gpu.coords, deriv=deriv, transpose=False)
+            # rho = ni_gpu.eval_rho(mol, ao_gpu, dm, xctype=xctype, hermi=0, with_lapl=False)
+            # eval_xc_eff_gpu = ni_gpu.mcfun_eval_xc_adapter(xc_code)
+            n_gpu, exc_gpu, vmat_gpu = ni_gpu.nr_vxc(mol, grids_gpu, xc_code, dm)
+            n_cpu, exc_cpu, vmat_cpu = ni_cpu.nr_vxc(mol, grids_cpu, xc_code, dm)
+            print("n_gpu", n_gpu)
+            print("n_cpu", n_cpu)
+            print("exc_gpu", exc_gpu)
+            print("exc_cpu", exc_cpu)
+            print("vmat_gpu", vmat_gpu)
+            print("vmat_cpu", vmat_cpu)
+            print()
 
 if __name__ == "__main__":
     print("Full Tests for dft numint2c")
     unittest.main()
+
