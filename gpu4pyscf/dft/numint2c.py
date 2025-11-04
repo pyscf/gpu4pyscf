@@ -29,8 +29,6 @@ from pyscf import __config__
 def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
              with_lapl=True, verbose=None):
     nao = ao.shape[-2]
-    print("in eval_rho")
-    print(ao.shape, dm.shape, nao, ao.shape)
     assert dm.ndim == 2 and nao * 2 == dm.shape[0]
     if not isinstance(dm, cp.ndarray):
         dm = cp.asarray(dm)
@@ -41,12 +39,9 @@ def eval_rho(mol, ao, dm, non0tab=None, xctype='LDA', hermi=0,
     ao_loc = mol.ao_loc
 
     if xctype == 'LDA':
-        print("debug 0", hermi)
         c0a = _dot_ao_dm(mol, ao, dm[:nao], non0tab, shls_slice, ao_loc)
         c0b = _dot_ao_dm(mol, ao, dm[nao:], non0tab, shls_slice, ao_loc)
         rho_m = _contract_rho_m((ao, ao), (c0a, c0b), hermi, True)
-        print(rho_m.shape)
-        print(rho_m)
     elif xctype == 'GGA':
         # first 4 ~ (rho, m), second 4 ~ (0th order, dx, dy, dz)
         if hermi:
@@ -126,14 +121,13 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
             eval_xc = ni.mcfun_eval_xc_adapter(xc_code)
         else:
             raise NotImplementedError('locally-collinear vxc is not implemented')
-            eval_xc = ni.eval_xc_eff
 
         for ao, mask, weight, coords \
                 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
-            rho = eval_rho(_sorted_mol, ao, dms, non0tab=None, xctype=xctype, hermi=hermi,
+            mask_2c = np.concatenate([mask, mask + nao])
+            dm_mask = dms[mask_2c[:,None],mask_2c]
+            rho = eval_rho(_sorted_mol, ao, dm_mask, non0tab=None, xctype=xctype, hermi=hermi,
                     with_lapl=False, verbose=None)
-            print(rho.shape)
-            print(rho)
             exc, vxc = eval_xc(xc_code, rho, deriv=1, xctype=xctype)[:2]
             if xctype == 'LDA':
                 den = rho[0] * weight
@@ -141,7 +135,7 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
                 den = rho[0,0] * weight
             nelec += den.sum()
             excsum += cp.dot(den, exc)
-            vmat += fmat(mol, ao, weight, rho, vxc, mask, shls_slice,
+            vmat += fmat(mol, ao, weight, rho, vxc, mask_2c, shls_slice,
                             ao_loc, hermi)
 
     elif xctype == 'HF':
@@ -196,69 +190,10 @@ def _ncol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi
     mat = cp.block([[mataa, matab], [matba, matbb]])
     return mat
 
-# def _eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
-#                  verbose=None, spin=None):
-#     r'''Returns the derivative tensor against the density parameters
-
-#     [[density_a, (nabla_x)_a, (nabla_y)_a, (nabla_z)_a, tau_a],
-#      [density_b, (nabla_x)_b, (nabla_y)_b, (nabla_z)_b, tau_b]].
-
-#     It differs from the eval_xc method in the derivatives of non-local part.
-#     The eval_xc method returns the XC functional derivatives to sigma
-#     (|\nabla \rho|^2)
-
-#     Args:
-#         rho: 2-dimensional or 3-dimensional array
-#             Total density and spin density (and their derivatives if GGA or MGGA
-#             functionals) on grids
-
-#     Kwargs:
-#         deriv: int
-#             derivative orders
-#         omega: float
-#             define the exponent in the attenuated Coulomb for RSH functional
-#     '''
-#     if omega is None: omega = ni.omega
-#     if xctype is None: xctype = ni._xc_type(xc_code)
-#     if ni.collinear[0] == 'c':  # collinear
-#         t = rho[0]
-#         s = rho[3]
-#     elif ni.collinear[0] == 'n':  # ncol
-#         t = rho[0]
-#         m = rho[1:4]
-#         s = lib.norm(m, axis=0)
-#     elif ni.collinear[0] == 'm':  # mcol
-#         # called by mcfun.eval_xc_eff which passes (rho, s) only
-#         t, s = rho
-#     else:
-#         raise RuntimeError(f'Unknown collinear scheme {ni.collinear}')
-
-#     rho = cp.stack([(t + s) * .5, (t - s) * .5])
-#     if xctype == 'MGGA' and rho.shape[1] == 6:
-#         rho = cp.asarray(rho[:,[0,1,2,3,5],:], order='C')
-
-#     assert spin is None or spin == 1
-#     spin = 1
-
-#     out = ni.libxc.eval_xc1(xc_code, rho, spin, deriv, omega)
-#     evfk = [out[0]]
-#     for order in range(1, deriv+1):
-#         evfk.append(xc_deriv.transform_xc(rho, out, xctype, spin, order))
-#     if deriv < 3:
-#         # The return has at least [e, v, f, k] terms
-#         evfk.extend([None] * (3 - deriv))
-#     return evfk
 
 # * Mcfun requires functional derivatives to total-density and spin-density.
 # * Make it a global function than a closure so as to be callable by multiprocessing
 def __mcfun_fn_eval_xc(ni, xc_code, xctype, rho, deriv):
-    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype)
-    for order in range(1, deriv+1):
-        if evfk[order] is not None:
-            evfk[order] = xc_deriv.ud2ts(evfk[order])
-    return evfk
-
-def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
     t, s = rho
     if not isinstance(t, cp.ndarray):
         t = cp.asarray(t)
@@ -277,7 +212,7 @@ def mcfun_eval_xc_adapter(ni, xc_code):
     '''Wrapper to generate the eval_xc function required by mcfun'''
 
     xctype = ni._xc_type(xc_code)
-    fn_eval_xc = functools.partial(__mcfun_fn_eval_xc2, ni, xc_code, xctype)
+    fn_eval_xc = functools.partial(__mcfun_fn_eval_xc, ni, xc_code, xctype)
     def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None,
                     verbose=None, spin=None):
         return mcfun_gpu.eval_xc_eff(
@@ -453,8 +388,6 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
         rbb = cp.einsum('ip,ip->p', bra_b.real, ket_b[nao:].real)
         rbb+= cp.einsum('ip,ip->p', bra_b.imag, ket_b[nao:].imag)
         rho_m = cp.empty((4, ngrids))
-        print("debug")
-        print(rho_m.dtype)
         rho_m[0,:] = raa + rbb     # rho
         rho_m[1,:] = rab.real      # mx
         rho_m[2,:] = rab.imag      # my
@@ -466,7 +399,6 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
             rba = cp.einsum('ip,ip->p', bra_b.conj(), ket_a[nao:])
             rho_m[1,:] += rba.real
             rho_m[2,:] -= rba.imag
-        print(rho_m.dtype)
     else:
         raa = cp.einsum('ip,ip->p', bra_a.conj(), ket_a[:nao])
         rba = cp.einsum('ip,ip->p', bra_b.conj(), ket_a[nao:])
@@ -529,12 +461,6 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
 
     def cache_xc_kernel(self, mol, grids, xc_code, mo_coeff, mo_occ, spin=0,
                         max_memory=2000):
-        '''Compute the 0th order density, Vxc and fxc.  They can be used in TDDFT,
-        DFT hessian module etc.
-        '''
-        raise NotImplementedError("Kxc calculation is not supported.")
-
-    def cache_xc_kernel1(self, mol, grids, xc_code, dm, spin=0, max_memory=2000):
         '''Compute the 0th order density, Vxc and fxc.  They can be used in TDDFT,
         DFT hessian module etc.
         '''
