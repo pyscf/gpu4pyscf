@@ -378,27 +378,3 @@ def _project_spin_paxis(rho_tm, sgridz=None):
             rho_ts = rho_ts.reshape(2, nvar, ngrids * nsg)
     return rho_ts
 
-def _project_spin_paxis2(rho_tm, sgridz=None):
-    # ToDo: be written into the function _project_spin_paxis().
-    # Because use mz rather than |mz| here
-    '''Projects spins onto the principal axis'''
-    rho = rho_tm[0]
-    mz = rho_tm[1]
-
-    if sgridz is None:
-        rho_ts = cp.stack([rho, mz])
-    else:
-        ngrids = rho.shape[-1]
-        nsg = sgridz.shape[0]
-        if rho_tm.ndim == 2:
-            rho_ts = cp.empty((2, ngrids, nsg))
-            rho_ts[0] = rho[:,cp.newaxis]
-            rho_ts[1] = mz[:,cp.newaxis] * sgridz
-            rho_ts = rho_ts.reshape(2, ngrids * nsg)
-        else:
-            nvar = rho_tm.shape[1]
-            rho_ts = cp.empty((2, nvar, ngrids, nsg))
-            rho_ts[0] = rho[:,:,cp.newaxis]
-            rho_ts[1] = mz[:,:,cp.newaxis] * sgridz
-            rho_ts = rho_ts.reshape(2, nvar, ngrids * nsg)
-    return rho_ts
