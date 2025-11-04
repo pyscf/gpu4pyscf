@@ -1498,8 +1498,6 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     charges = -cp.asarray(cell.atom_charges())
     if is_gamma_point:
         nuc = contract('pqr,r->pq', nuc, charges)
-        if not is_single_kpt:
-            nuc = nuc[np.newaxis]
     else:
         nuc = contract('kpqr,r->kpq', nuc, charges)
 
@@ -1615,8 +1613,10 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     nuc_raw = fill_triu_bvk_conj(nuc_raw, nao, bvk_kmesh)
     nuc_raw = sandwich_dot(nuc_raw, ft_opt.coeff)
 
-    if is_single_kpt:
+    if is_gamma_point:
         nuc += nuc_raw[0]
+        if not is_single_kpt:
+            nuc = nuc[np.newaxis]
     else:
         bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))

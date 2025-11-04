@@ -92,7 +92,7 @@ def test_sr_vj_hermi1_gamma_point_vs_fft():
     nao = cell.nao
     dm = np.random.rand(2, nao, nao)*.5
     dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
-    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=1).get()
+    vj = j_engine.PBCJMatrixOpt(cell).build()._get_j_sr(dm, hermi=1, kpts=kpt).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -100,8 +100,8 @@ def test_sr_vj_hermi1_gamma_point_vs_fft():
     ref = fft.FFTDF(cell).get_jk(dm, kpts=kpt, with_k=False)[0].get()
     s = cell.pbc_intor('int1e_ovlp')
     wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
-    wcoulG_SR_at_G0 *= np.einsum('ij,ji->', s, dm)
-    ref += wcoulG_SR_at_G0 * s
+    wcoulG_SR_at_G0 *= np.einsum('ij,nji->n', s, dm)
+    ref += wcoulG_SR_at_G0[:,None,None] * s
     assert abs(vj - ref).max() < 1e-8
 
 def test_sr_vj_hermi1_kpts_vs_fft():

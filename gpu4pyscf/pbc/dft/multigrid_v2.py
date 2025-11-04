@@ -29,7 +29,6 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_gamma_point
 from gpu4pyscf.dft import numint
-from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.pbc.tools import pbc as pbc_tools
@@ -1246,7 +1245,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
-    kpts, is_single_kpt = _check_kpts(kpts, dm_kpts)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
@@ -1353,7 +1351,6 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
-    kpts, is_single_kpt = _check_kpts(kpts, dm_kpts)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]

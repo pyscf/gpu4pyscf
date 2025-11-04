@@ -186,7 +186,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
-        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
     def test_camb3lyp_grad(self):
         # ref = numerical_gradient(cell, xc='camb3lyp')

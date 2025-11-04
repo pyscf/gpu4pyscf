@@ -270,7 +270,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.449887356407533, 8)
 
-        mf = cell.KUKS(xc='wb97x', kpts=kpts).to_gpu()
+        mf = cell.KUKS(xc='wb97', kpts=kpts).to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()

@@ -25,9 +25,9 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 disp = 1e-3
 
 def setUpModule():
-    global cell, kpts
+    global cell
     cell = gto.Cell()
-    cell.atom= [['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391]]]
+    cell.atom= [['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680]]]
     cell.a = '''
     0.000000000, 3.370137329, 3.370137329
     3.370137329, 0.000000000, 3.370137329
@@ -38,8 +38,6 @@ def setUpModule():
     cell.unit = 'bohr'
     cell.output = '/dev/null'
     cell.build()
-
-    kpts = cell.make_kpts([1,1,2])
 
 def tearDownModule():
     global cell
@@ -139,6 +137,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
 
     def test_hcore(self):
+        kpts = cell.make_kpts([1,1,3])
         with lib.temporary_env(numint, MIN_BLK_SIZE=1024):
             dat = krhf_gpu.get_hcore(cell, kpts)
             ref = krhf_cpu.get_hcore(cell, kpts)

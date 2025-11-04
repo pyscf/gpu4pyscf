@@ -259,7 +259,7 @@ class PBCJMatrixOpt:
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
-            ctypes.c_int(is_gamma_point),
+            ctypes.c_int(int(is_gamma_point)),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
 
@@ -376,7 +376,7 @@ class PBCJMatrixOpt:
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
-            ctypes.c_int(is_gamma_point),
+            ctypes.c_int(int(is_gamma_point)),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
 

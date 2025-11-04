@@ -206,7 +206,7 @@ class KnownValues(unittest.TestCase):
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         # small discrepancy due to J, which is computed with DF
-        self.assertAlmostEqual(mf.e_tot- -0.361911543087363, 8)
+        self.assertAlmostEqual(mf.e_tot, -0.361911543087363, 8)
 
     def test_rsjk_with_df(self):
         cell = self.cell
