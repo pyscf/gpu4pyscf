@@ -356,9 +356,9 @@ def test_ejk_ip1_per_atom_gamma_point():
         a=np.eye(3)*4.,
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
+    kpt = np.zeros(3)
     np.random.seed(9)
     nao = cell.nao
-    kpt = np.zeros(3)
     dm = np.random.rand(2, nao, nao) * .5
     dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
 

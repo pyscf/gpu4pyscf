@@ -212,18 +212,10 @@ class GDF(lib.StreamObject):
                 yield k_aux, out, -1
 
     def get_pp(self, kpts=None):
-        is_single_kpt = kpts is not None and kpts.ndim == 1
-        vpp = rsdf_builder.get_pp(self.cell, kpts)
-        if is_single_kpt:
-            vpp = vpp[0]
-        return vpp
+        return rsdf_builder.get_pp(self.cell, kpts)
 
     def get_nuc(self, kpts=None):
-        is_single_kpt = kpts is not None and kpts.ndim == 1
-        nuc = rsdf_builder.get_nuc(self.cell, kpts)
-        if is_single_kpt:
-            nuc = nuc[0]
-        return nuc
+        return rsdf_builder.get_nuc(self.cell, kpts)
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular
@@ -247,7 +239,7 @@ class GDF(lib.StreamObject):
         if self.is_gamma_point:
             return df_jk_real.get_jk(self, dm, hermi, with_j, with_k, exxdiv)
         else:
-            kpts, is_single_kpt = _check_kpts(self, dm)
+            kpts, is_single_kpt = _check_kpts(kpts, dm)
             if is_single_kpt:
                 return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                     with_k, exxdiv)

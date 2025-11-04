@@ -406,8 +406,6 @@ class PBCJMatrixOpt:
         from gpu4pyscf.pbc.df.aft_jk import get_j_kpts
         cell = self.cell
         assert cell.dimension == 3
-        if kpts is None:
-            kpts = np.zeros((1, 3))
         return get_j_kpts(self, dm, hermi, kpts, kpts_band)
 
     def weighted_coulG(self, kpt=np.zeros(3), exx=None, mesh=None):

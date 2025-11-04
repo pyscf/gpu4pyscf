@@ -215,7 +215,7 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(self, dm)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                   with_k, exxdiv)

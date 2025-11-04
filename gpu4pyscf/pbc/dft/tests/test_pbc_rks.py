@@ -20,9 +20,26 @@ from pyscf.pbc import gto as pbcgto
 from pyscf.pbc.dft import UniformGrids
 from pyscf.lib import unpack_tril
 from gpu4pyscf.pbc import dft as pbcdft
+from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
+def setUpModule():
+    global cell
+    L = 4.
+    cell = pbcgto.Cell()
+    cell.a = np.eye(3)*L
+    cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+    cell.basis = [[0, (3.0, 1.0)], [0, (1.0, 1.0)]]
+    cell.verbose = 6
+    cell.output = '/dev/null'
+    cell.build()
+
+def tearDownModule():
+    global cell
+    cell.stdout.close()
+    del cell
 
 class KnownValues(unittest.TestCase):
     @classmethod
@@ -279,16 +296,7 @@ class KnownValues(unittest.TestCase):
         mf.reset(cell1)
         assert abs(mf.kpt - kpt0).sum() > 0.01
 
-    def test_rsjk(self):
-        from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
-        L = 4.
-        cell = pbcgto.Cell()
-        cell.a = np.eye(3)*L
-        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
-                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
-        cell.basis = [[0, (3.0, 1.0)], [0, (1.0, 1.0)]]
-        cell.build()
-
+    def test_lda_rsjk(self):
         ref = cell.RKS().run()
         mf = cell.RKS().to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell)
@@ -297,6 +305,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.40889872799664, 8)
 
+    def test_pbe_rsjk(self):
         ref = cell.RKS(xc='pbe0').run()
         mf = cell.RKS(xc='pbe0').to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -306,6 +315,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.453945026971869, 8)
 
+    def test_wb97_rsjk(self):
         ref = cell.RKS(xc='wb97', exxdiv=None).run()
         mf = cell.RKS(xc='wb97', exxdiv=None).to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -323,6 +333,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.475660452630126, 8)
 
+    def test_hse06_rsjk(self):
         ref = cell.RKS(xc='hse06', exxdiv=None).run()
         mf = cell.RKS(xc='hse06', exxdiv=None).to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -340,6 +351,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.453371384843629, 8)
 
+    def test_camb3lyp_rsjk(self):
         ref = cell.RKS(xc='camb3lyp', exxdiv=None).run()
         mf = cell.RKS(xc='camb3lyp', exxdiv=None).to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -357,17 +369,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.442283740471709, 8)
 
-    def test_rsjk_krks(self):
-        from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
-        L = 4.
-        cell = pbcgto.Cell()
-        cell.a = np.eye(3)*L
-        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
-                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
-        cell.basis = [[0, (3.0, 1.0)], [0, (1.0, 1.0)]]
-        cell.build()
+    def test_lda_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
-
         ref = cell.KRKS(kpts=kpts).run()
         mf = cell.KRKS(kpts=kpts).to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell)
@@ -376,6 +379,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.408895805671884, 8)
 
+    def test_pbe_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
         ref = cell.KRKS(xc='pbe0', kpts=kpts).run()
         mf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -385,6 +390,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.449887356407533, 8)
 
+    def test_wb97_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
         ref = cell.KRKS(xc='wb97', exxdiv=None, kpts=kpts).run()
         mf = cell.KRKS(xc='wb97', exxdiv=None, kpts=kpts).to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -402,6 +409,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.459652873123233, 8)
 
+    def test_hse06_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
         ref = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).run()
         mf = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -419,6 +428,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.449507864648219, 8)
 
+    def test_cambl3yp_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
         ref = cell.KRKS(xc='camb3lyp', exxdiv=None, kpts=kpts).run()
         mf = cell.KRKS(xc='camb3lyp', exxdiv=None, kpts=kpts).to_gpu()
         mf._numint = MultiGridNumInt(cell)

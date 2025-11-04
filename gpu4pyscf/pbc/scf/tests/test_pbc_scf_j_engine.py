@@ -87,6 +87,7 @@ def test_sr_vj_hermi1_gamma_point_vs_fft():
         a=np.eye(3)*4.,
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
+    kpt = np.zeros(3)
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(2, nao, nao)*.5
@@ -96,7 +97,7 @@ def test_sr_vj_hermi1_gamma_point_vs_fft():
     cell.precision = 1e-10
     cell.build(0, 0)
     omega = cell.omega = -j_engine.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, with_k=False)[0].get()
+    ref = fft.FFTDF(cell).get_jk(dm, kpts=kpt, with_k=False)[0].get()
     s = cell.pbc_intor('int1e_ovlp')
     wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
     wcoulG_SR_at_G0 *= np.einsum('ij,ji->', s, dm)
@@ -201,6 +202,7 @@ def test_vj_hermi1_gamma_point_vs_fft():
         a=np.eye(3)*4.,
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
+    kpt = np.zeros(3)
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(2, nao, nao)*.5
@@ -209,7 +211,7 @@ def test_vj_hermi1_gamma_point_vs_fft():
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, with_k=False)[0].get()
+    ref = fft.FFTDF(cell).get_jk(dm, kpts=kpt, with_k=False)[0].get()
     assert abs(vj - ref).max() < 1e-8
 
 def test_vj_hermi1_kpts_vs_fft():
@@ -247,6 +249,7 @@ def test_vj_hermi0_gamma_point_vs_fft():
         a=np.eye(3)*4.,
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
+    kpt = np.zeros(3)
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(2, nao, nao)*.5
@@ -255,7 +258,7 @@ def test_vj_hermi0_gamma_point_vs_fft():
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_k=False)[0].get()
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpt, with_k=False)[0].get()
     assert abs(vj - ref).max() < 1e-8
 
 def test_vj_hermi0_kpts_vs_fft():
