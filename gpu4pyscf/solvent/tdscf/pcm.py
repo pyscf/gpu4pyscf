@@ -70,11 +70,11 @@ def make_tdscf_nac_object(td_base_method):
     # the zeroth order TDDFT, the wavefunction should be comptued using the
     # same dielectric constant as the ground state (the zero-frequency eps).
     with_solvent = td_base_method.with_solvent
-    # if not with_solvent.equilibrium_solvation:
-    #     raise RuntimeError(
-    #         'When computing gradients of PCM-TDDFT, equilibrium solvation should '
-    #         'be employed. The PCM TDDFT should be initialized as\n'
-    #         '    mf.TDDFT(equilibrium_solvation=True)')
+    if not with_solvent.equilibrium_solvation:
+        raise RuntimeError(
+            'When computing derivative couplings of PCM-TDDFT, equilibrium solvation should '
+            'be employed. The PCM TDDFT should be initialized as\n'
+            '    mf.TDDFT(equilibrium_solvation=True)')
     td_nac = td_base_method.undo_solvent().nac_method()
     td_nac.base = td_base_method
     name = with_solvent.__class__.__name__ + td_nac.__class__.__name__
@@ -222,11 +222,8 @@ class WithSolventTDSCFNacMethod:
     def get_nacv_ge(self, xy, EI, singlet=None, atmlst=None, verbose=logger.INFO):
         if self.base.with_solvent.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
-        print("In the solvent get_nacv_ge")
 
         de_tuple = super().get_nacv_ge(xy, EI, singlet, atmlst, verbose) 
-        print("de_tuple")
-        print(de_tuple)
         de, de_scaled, de_etf, de_etf_scaled = de_tuple
 
         dm = self.base._scf.make_rdm1(ao_repr=True)

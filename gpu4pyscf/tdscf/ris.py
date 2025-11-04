@@ -1265,15 +1265,6 @@ class TDA(RisBase):
             raise NotImplementedError('Does not support UKS method yet')
         return TDA_MVP, hdiag
 
-    def gen_response(self, singlet=True, hermi=0):
-        '''Generate function to compute A x'''
-        if (self.exclude_nlc and
-            isinstance(self._scf, scf.hf.KohnShamDFT) and self._scf.do_nlc()):
-            logger.warn(self, 'NLC functional found in the DFT object. Its contribution is '
-                        'not included in the TDDFT response function.')
-        return self._scf.gen_response(singlet=singlet, hermi=hermi,
-                                      with_nlc=not self.exclude_nlc)
-
     def kernel(self):
 
         '''for TDA, pure and hybrid share the same form of
@@ -1434,15 +1425,6 @@ class TDDFT(RisBase):
         else:
             raise NotImplementedError('Does not support UKS method yet')
         return TDDFT_MVP, hdiag
-
-    def gen_response(self, singlet=True, hermi=0):
-        '''Generate function to compute A x'''
-        if (self.exclude_nlc and
-            isinstance(self._scf, scf.hf.KohnShamDFT) and self._scf.do_nlc()):
-            logger.warn(self, 'NLC functional found in the DFT object. Its contribution is '
-                        'not included in the TDDFT response function.')
-        return self._scf.gen_response(singlet=singlet, hermi=hermi,
-                                      with_nlc=not self.exclude_nlc)
     
     #  TODO: UKS 
     def kernel(self):
