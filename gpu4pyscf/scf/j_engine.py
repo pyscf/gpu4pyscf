@@ -311,7 +311,7 @@ class _VHFOpt(jk._VHFOpt):
                     kern_counts += 1
                 if num_devices > 1:
                     stream.synchronize()
-            return vj_xyz, kern_counts, timing_collection
+            return vj_xyz, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dm_xyz,), non_blocking=True)
         kern_counts = 0
