@@ -214,7 +214,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, nJ, delta=0.001, with_ris=False, singlet=Tru
     s = cp.asarray(s)
     for iatm in range(natm):
         for icart in range(3):
-            print(f"iatm, icart, {iatm} {icart}")
             mol_add = get_new_mol(mol, coords, delta, iatm, icart)
             mf_add, xy_diag_add = get_mf_td(mol_add, mf, s, mo_coeff, with_ris)
             mol_minus = get_new_mol(mol, coords, -delta, iatm, icart)
