@@ -68,7 +68,9 @@ class FSSH:
     
     def __init__(self, 
                  tddft, 
-                 states:list[int], 
+                 states:list[int],
+                 decoherence:bool=False,
+                 alpha:float=0.1,
                  **kwargs):
         """
         Initialize the FSSH simulation with comprehensive parameter validation.
@@ -107,6 +109,9 @@ class FSSH:
         self.nac_idx = [(i, j) for i in range(self.Nstates-1) 
                         for j in range(i+1, self.Nstates)]
         
+        self.decoh = decoherence
+        self.alpha = alpha
+                     
         # Set default simulation parameters
         self.dt = 0.5 * FS2AUTIME  # Default: 0.5 fs in atomic units
         self.nsteps = 1
@@ -426,29 +431,30 @@ class FSSH:
             return False, velocity
     
     # NOT TESTED YET!!!!
-    # def decoherence(self,
-    #                 coeffs: np.ndarray,
-    #                 velocity: np.ndarray,
-    #                 energy: np.ndarray) -> np.ndarray:
-    #     """
-    #     Decoherence.
+    def decoherence(self,
+                    coeffs: np.ndarray,
+                    velocity: np.ndarray,
+                    energy: np.ndarray) -> np.ndarray:
+        """
+        Decoherence.
 
-    #     c_j = c_j * exp(-dt / tau_ji)
-    #     c_i = c_i * sqrt((1 - sum_j(j!=i) |c_j|**2) / |c_i|**2)
-    #     tau_ji = ħ / |E_jj - E_ii| * (1 + a / E_kin)
-    #     """
+        c_j = c_j * exp(-dt / tau_ji)
+        c_i = c_i * sqrt((1 - sum_j(j!=i) |c_j|**2) / |c_i|**2)
+        tau_ji = ħ / |E_jj - E_ii| * (1 + a / E_kin)
+        """
 
-    #     E_kin = 0.5 * self.mass * np.sum(velocity ** 2)
-    #     cumu_sum = 0
+        E_kin = (0.5 * self.mass * np.sum(velocity ** 2)).sum()
+        cumu_sum = 0
+        cur_idx = self.states.index(self.cur_state)
         
-    #     for i in range(len(coeffs)):
-    #         if i != self.cur_state:
-    #             tau_ji = 1 / np.abs(energy[i] - energy[self.cur_state]) * (1 + self.alpha / E_kin)
-    #             coeffs[i] = coeffs[i] * np.exp(-self.dt / tau_ji)
-    #             cumu_sum += np.abs(coeffs[i]) ** 2
+        for i in range(len(coeffs)):
+            if i != cur_idx:
+                tau_ji = 1 / np.abs(energy[i] - energy[cur_idx]) * (1 + self.alpha / E_kin)
+                coeffs[i] = coeffs[i] * np.exp(-self.dt / tau_ji)
+                cumu_sum += np.abs(coeffs[i]) ** 2
         
-    #     coeffs[self.cur_state] = np.sqrt((1 - cumu_sum) / np.abs(coeffs[self.cur_state]) ** 2) * coeffs[self.cur_state]
-    #     return coeffs
+        coeffs[cur_idx] = np.sqrt((1 - cumu_sum) / np.abs(coeffs[cur_idx]) ** 2) * coeffs[cur_idx]
+        return coeffs
 
     def write_trajectory(self, 
                          step: int, 
@@ -666,7 +672,8 @@ class FSSH:
             total_time += self.dt / FS2AUTIME
 
             # 9. decoherence
-            # coefficient = self.decoherence(coefficient, velocity, energy)
+            if self.decoh:
+                coefficient = self.decoherence(coefficient, velocity, energy)
             
             self.write_trajectory(i + 1, position, velocity, energy, coefficient)   
             self.write_restart(i + 1, position, velocity, energy, coefficient)
