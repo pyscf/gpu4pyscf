@@ -1245,6 +1245,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
@@ -1351,6 +1355,10 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
