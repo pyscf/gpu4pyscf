@@ -27,8 +27,13 @@ References:
     
     2. Nonadiabatic Field on Quantum Phase Space: A Century after Ehrenfest
        Baihua Wu, Xin He, and Jian Liu
-       J. Phys. Chem. Lett. 15, 644 (2024)
+       J. Phys. Chem. Lett. 15, 644 (2024).
        DOI: 10.1021/acs.jpclett.3c03385
+    
+    3. Critical appraisal of the fewest switches algorithm for surface hopping
+       Giovanni Granucci, Maurizio Persico
+       J. Chem. Phys. 126 (13): 134114 (2007).
+       DOI: 10.1063/1.2715585
 """
 
 import numpy as np
@@ -69,7 +74,7 @@ class FSSH:
     def __init__(self, 
                  tddft, 
                  states:list[int],
-                 decoherence:bool=False,
+                 decoherence:bool=True,
                  alpha:float=0.1,
                  **kwargs):
         """
