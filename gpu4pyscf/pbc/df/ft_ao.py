@@ -46,7 +46,7 @@ __all__ = [
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
 libpbc.build_ft_aopair.restype = ctypes.c_int
-libpbc.init_constant.restype = ctypes.c_int
+libpbc.init_constant(ctypes.c_int(SHM_SIZE))
 
 LMAX = 4
 GOUT_WIDTH = 19
@@ -148,12 +148,14 @@ class FTOpt:
         self.kpts = kpts
 
         self._aft_envs = None
-        self.bvk_cell = None
+        self.bvkcell = None
+        self._img_idx_cache = {}
 
     def build(self, verbose=None):
         log = logger.new_logger(self.cell, verbose)
         cell = self.sorted_cell
         bvk_kmesh = self.bvk_kmesh
+        self.bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         if np.prod(bvk_kmesh) == 1:
             bvkcell = cell
         else:
@@ -176,7 +178,14 @@ class FTOpt:
         ao_loc = cp.array(bvkcell.ao_loc)
         self._aft_envs = PBCIntEnvVars.new(
             cell.natm, cell.nbas, bvk_ncells, nimgs, _atm, _bas, _env, ao_loc, Ls)
-        init_constant(cell)
+        return self
+
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
+        self._aft_envs = None
+        self.bvkcell = None
+        self._img_idx_cache = {}
         return self
 
     @property
@@ -211,7 +220,9 @@ class FTOpt:
     @property
     def aft_envs(self):
         _aft_envs = self._aft_envs
-        if _aft_envs is None or cp.cuda.device.get_device_id() == _aft_envs._device:
+        if _aft_envs is None:
+            raise RuntimeError('FTOpt not initialized')
+        if cp.cuda.device.get_device_id() == _aft_envs._device:
             return self._aft_envs
         return _aft_envs.copy()
 
@@ -230,6 +241,9 @@ class FTOpt:
 
     def make_img_idx_cache(self, permutation_symmetry, verbose=None):
         '''Cache significant orbital-pairs and their lattice sum images'''
+        if permutation_symmetry in self._img_idx_cache:
+            return self._img_idx_cache[permutation_symmetry]
+
         log = logger.new_logger(self.cell, verbose)
         if self._aft_envs is None:
             self.build(verbose)
@@ -260,6 +274,7 @@ class FTOpt:
         else:
             ij_tasks = itertools.product(range(n_groups), range(n_groups))
 
+        aft_envs = self.aft_envs
         bas_ij_cache = {}
         for i, j in ij_tasks:
             ll_pattern = f'{l_symb[i]}{l_symb[j]}'
@@ -271,7 +286,7 @@ class FTOpt:
             err = libpbc.overlap_img_counts(
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                ctypes.byref(self.aft_envs),
+                ctypes.byref(aft_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff),
@@ -301,7 +316,7 @@ class FTOpt:
                 ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(n_pairs),
                 (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
-                ctypes.byref(self.aft_envs),
+                ctypes.byref(aft_envs),
                 ctypes.cast(exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff))
@@ -317,6 +332,8 @@ class FTOpt:
             bas_ij = cp.asarray(bas_ij, dtype=np.int32)
             bas_ij_cache[i, j] = (bas_ij, img_offsets, img_idx)
             log.debug1('task (%d, %d), n_pairs=%d', i, j, n_pairs)
+
+            self._img_idx_cache[permutation_symmetry] = bas_ij_cache
         return bas_ij_cache
 
     def gen_ft_kernel(self, verbose=None):
@@ -360,7 +377,7 @@ class FTOpt:
             # Padding zeros, allowing idle threads to access these data
             GvT = cp.asarray(Gv.T) + cp.asarray(q)[:,None]
             GvT = cp.append(GvT.ravel(), cp.zeros(THREADS))
-
+            aft_envs = self.aft_envs
             nGv = len(Gv)
             out = cp.zeros((bvk_ncells, nao, nao, nGv), dtype=np.complex128)
 
@@ -380,7 +397,7 @@ class FTOpt:
                 err = kern(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(0), # Do not remove zero elements
-                    ctypes.byref(self.aft_envs), (ctypes.c_int*3)(*scheme),
+                    ctypes.byref(aft_envs), (ctypes.c_int*3)(*scheme),
                     (ctypes.c_int*4)(ish0, ish1, jsh0, jsh1),
                     ctypes.c_int(npairs), ctypes.c_int(nGv),
                     ctypes.cast(bas_ij.data.ptr, ctypes.c_void_p),
@@ -521,11 +538,6 @@ class PBCIntEnvVars(ctypes.Structure):
     @property
     def device(self):
         return self._device
-
-def init_constant(cell):
-    err = libpbc.init_constant(ctypes.c_int(SHM_SIZE))
-    if err != 0:
-        raise RuntimeError('CUDA kernel initialization')
 
 def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
     nfi = (li + 1) * (li + 2) // 2

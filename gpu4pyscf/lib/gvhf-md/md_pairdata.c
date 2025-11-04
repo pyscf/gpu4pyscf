@@ -283,8 +283,9 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                 int nfj = (lj + 1) * (lj + 2) / 2;
                 int Et_len = (lij + 1) * (lij + 2) * (lij + 3) / 6;
                 double cc = ci * cj;
+                // Be careful with the transpose of dm. Here, dm is not symmetric.
                 double *Et_dm_ij = Et_dm + pair_loc[bas_ij];
-                double *dm_ij = dm + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
+                double *dm_ij = dm + ao_loc[ctr_jsh] * nao + ao_loc[ctr_ish];
                 for (int img = 0; img < nimgs_uniq_pair; img++) {
                         double cc_with_img = cc;
                         // The diagonal elements of the AO-pairs within the
@@ -306,7 +307,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                                         double rho_t = 0.;
                                         for (int i = 0; i < nfi; i++) {
                                         for (int j = 0; j < nfj; j++, n++) {
-                                                rho_t += Et[n] * cc_with_img * pdm[i*nao+j];
+                                                rho_t += Et[n] * cc_with_img * pdm[j*nao+i];
                                         } }
                                         rho[t] = rho_t;
                                 }

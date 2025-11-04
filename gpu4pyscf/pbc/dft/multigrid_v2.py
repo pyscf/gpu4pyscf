@@ -29,7 +29,6 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_gamma_point
 from gpu4pyscf.dft import numint
-from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.pbc.tools import pbc as pbc_tools
@@ -1117,7 +1116,11 @@ def convert_xc_on_g_mesh_to_fock_gradient(
 def get_nuc(ni, kpts=None):
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    kpts, is_single_kpt = _check_kpts(ni, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     cell = ni.cell
     mesh = ni.mesh
     vneG = multigrid_v1.eval_nucG(cell, mesh)
@@ -1132,8 +1135,11 @@ def get_pp(ni, kpts=None):
     """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
     if ni.sorted_gaussian_pairs is None:
         ni.build()
-    kpts, is_single_kpt = _check_kpts(ni, kpts)
-
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -1177,6 +1183,8 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''
     if kpts is None:
         kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     cell = ni.cell
     log = logger.new_logger(cell)
     t0 = log.init_timer()
@@ -1237,7 +1245,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
-    kpts, is_single_kpt = _check_kpts(ni, kpts)
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
@@ -1253,14 +1264,15 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     Gv = pbc_tools._get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
     coulomb_on_g_mesh = rho_sf * coulomb_kernel_on_g_mesh
-    coulomb_energy = 0.5 * rho_sf.conj().dot(coulomb_on_g_mesh).real
+    coulomb_energy = rho_sf.conj().dot(coulomb_on_g_mesh).real
+    coulomb_energy = 0.5 * float(coulomb_energy.get())
     coulomb_energy /= cell.vol
     log.debug("Multigrid Coulomb energy %s", coulomb_energy)
     t0 = log.timer("coulomb", *t0)
     weight = cell.vol / ngrids
 
     density = ifft_in_place(density.reshape(-1, *mesh)).real.reshape(-1, ngrids)
-    n_electrons = density[0].sum().get()[()]
+    n_electrons = float(density[0].sum().real.get())
     density /= weight
 
     # eval_xc_eff supports float64 only
@@ -1277,7 +1289,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     rho_sf = density[0].real
-    xc_energy_sum = rho_sf.dot(xc_for_energy.ravel()).get()[()] * weight
+    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).real.get()) * weight
 
     # To reduce the memory usage, we reuse the xc_for_fock name.
     # Now xc_for_fock represents xc on G space
@@ -1343,7 +1355,10 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if ni.sorted_gaussian_pairs is None:
         ni.build(xc_type)
 
-    kpts, is_single_kpt = _check_kpts(ni, kpts)
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     dm_kpts = cp.asarray(dm_kpts, order="C")
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
@@ -1359,7 +1374,8 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     Gv = pbc_tools._get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
     coulomb_on_g_mesh = rho_sf * coulomb_kernel_on_g_mesh
-    coulomb_energy = 0.5 * rho_sf.conj().dot(coulomb_on_g_mesh).real
+    coulomb_energy = rho_sf.conj().dot(coulomb_on_g_mesh).real
+    coulomb_energy = 0.5 * float(coulomb_energy.get())
     coulomb_energy /= cell.vol
     log.debug("Multigrid Coulomb energy %s", coulomb_energy)
     t0 = log.timer("coulomb", *t0)
@@ -1384,7 +1400,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     rho_sf = (density[0, 0] + density[1, 0]).real
-    xc_energy_sum = rho_sf.dot(xc_for_energy.ravel()).get()[()] * weight
+    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).real.get()) * weight
 
     # To reduce the memory usage, we reuse the xc_for_fock name.
     # Now xc_for_fock represents xc on G space
@@ -1445,6 +1461,8 @@ def get_veff_ip1(
 ):
     if kpts is None:
         kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     log = logger.new_logger(ni, verbose)
     t0 = log.init_timer()
     cell = ni.cell

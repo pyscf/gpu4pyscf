@@ -52,6 +52,7 @@ class GHF(hf.SCF):
     #_finalize = ghf_cpu.GHF._finalize
 
     get_grad = return_cupy_array(ghf_cpu.GHF.get_grad)
+    energy_elec = hf.energy_elec
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         dma = hf.RHF.get_init_guess(self, mol, key, **kwargs)

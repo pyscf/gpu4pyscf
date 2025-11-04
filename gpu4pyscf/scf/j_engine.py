@@ -44,7 +44,6 @@ THREADS = 256
 
 libvhf_md = load_library('libgvhf_md')
 libvhf_md.MD_build_j.restype = ctypes.c_int
-
 libvhf_md.init_mdj_constant(ctypes.c_int(SHM_SIZE))
 
 def get_j(mol, dm, hermi=1, vhfopt=None, verbose=None):
@@ -266,7 +265,7 @@ class _VHFOpt(jk._VHFOpt):
             q_cond = cp.asarray(self.q_cond)
             t1 = log.timer_debug1(f'q_cond on Device {device_id}', *t0)
 
-            timing_collection = {}
+            timing_counter = Counter()
             kern_counts = 0
             kern = libvhf_md.MD_build_j
             rys_envs = self.rys_envs
@@ -308,13 +307,11 @@ class _VHFOpt(jk._VHFOpt):
                 if log.verbose >= logger.DEBUG1:
                     ntasks = pair_ij_mapping.size * pair_kl_mapping.size
                     t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
-                    if llll not in timing_collection:
-                        timing_collection[llll] = 0
-                    timing_collection[llll] += t1[1] - t1p[1]
+                    timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
                 if num_devices > 1:
                     stream.synchronize()
-            return vj_xyz, kern_counts, timing_collection
+            return vj_xyz, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dm_xyz,), non_blocking=True)
         kern_counts = 0

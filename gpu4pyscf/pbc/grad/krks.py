@@ -41,14 +41,10 @@ def get_veff(ks_grad, dm=None, kpts=None):
 
     ni = mf._numint
 
-    if isinstance(mf._numint, multigrid.MultiGridNumInt):
-        raise NotImplementedError("Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
-                                  "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
-    if isinstance(mf._numint, multigrid_v2.MultiGridNumInt):
-        de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
-        # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
-        de /= 2
-        return de
+    if isinstance(ni, multigrid.MultiGridNumInt):
+        raise NotImplementedError(
+            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
+            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
 
     if ks_grad.grids is not None:
         grids = ks_grad.grids
@@ -58,20 +54,45 @@ def get_veff(ks_grad, dm=None, kpts=None):
     if grids.coords is None:
         grids.build()
 
-    exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
-    t0 = log.timer('vxc', *t0)
     if not ni.libxc.is_hybrid_xc(mf.xc):
-        ej = ks_grad.get_j(dm, kpts)
-        exc += ej
+        if isinstance(ni, multigrid_v2.MultiGridNumInt):
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
+            # exc of multigrid_v2 is the full response of dE/dX. However,
+            # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
+            # They are differed by a factor of two. Scale exc to match the
+            # convention of molecular rhf/rks get_veff.
+            exc /= 2
+        else:
+            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
+            t0 = log.timer('vxc', *t0)
+            ej = ks_grad.get_j(dm, kpts)
+            exc += ej
     else:
-        raise NotImplementedError
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=cell.spin)
-        ej, ek = ks_grad.get_jk(dm, kpts)
-        ek *= hyb
-        if omega != 0:
-            with cell.with_range_coulomb(omega):
-                ek += ks_grad.get_k(dm, kpts) * (alpha - hyb)
-        exc += ej - ek * .5
+        from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+        with_rsjk = mf.rsjk
+        if with_rsjk is None:
+            raise NotImplementedError('Nuclear gradients for hybrid functional '
+                                      'are only available via the rsjk method')
+        if isinstance(ni, multigrid_v2.MultiGridNumInt):
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
+            # exc of multigrid_v2 is the full response of dE/dX. However,
+            # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
+            # They are differed by a factor of two. Scale exc to match the
+            # convention of molecular rhf/rks get_veff.
+            exc /= 2
+            j_factor = 0
+        else:
+            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
+            j_factor = 1
+        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        if omega != 0 and omega != with_rsjk.omega:
+            with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
+        if with_rsjk.supmol is None:
+            with_rsjk.build()
+        exc += with_rsjk._get_ejk_sr_ip1(dm, j_factor=j_factor, k_factor=k_sr,
+                                         kpts=kpts, exxdiv=mf.exxdiv)
+        exc += with_rsjk._get_ejk_lr_ip1(dm, j_factor=j_factor, k_factor=k_lr,
+                                         kpts=kpts, exxdiv=mf.exxdiv)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):

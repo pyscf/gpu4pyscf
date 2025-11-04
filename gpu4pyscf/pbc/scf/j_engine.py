@@ -22,7 +22,7 @@ import numpy as np
 import cupy as cp
 from collections import Counter
 from pyscf import lib
-from pyscf.gto import ANG_OF
+from pyscf.gto import ANG_OF, gto_norm
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
 from gpu4pyscf.__config__ import num_devices
@@ -30,14 +30,14 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, contract, asarray)
-from gpu4pyscf.gto.mole import group_basis
+from gpu4pyscf.gto.mole import group_basis, extract_pgto_params
 from gpu4pyscf.scf.jk import (
-    _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
+    libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
     apply_coeff_C_mat_CT, apply_coeff_CT_mat_C)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
-from gpu4pyscf.pbc.scf.rsjk import ExtendedMole, PBCJKmatrixOpt, OMEGA
+from gpu4pyscf.pbc.scf.rsjk import ExtendedMole, PBCJKMatrixOpt, OMEGA
 from gpu4pyscf.pbc.df import aft
 
 __all__ = [
@@ -45,23 +45,25 @@ __all__ = [
 ]
 
 libvhf_md.PBC_build_j.restype = ctypes.c_int
-libvhf_md.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
 
-def get_j(cell, dm, hermi=0, kpts=None, vhfopt=None, verbose=None):
+def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
+          verbose=None):
     '''Compute K matrix
     '''
     if vhfopt is None:
-        vhfopt = PBCJmatrixOpt(cell).build()
-    vj = vhfopt._get_j_sr(dm, hermi, kpts, verbose=verbose)
-    vj += vhfopt._get_j_lr(dm, hermi, kpts, verbose=verbose)
+        vhfopt = PBCJMatrixOpt(cell)
+    else:
+        assert isinstance(vhfopt, PBCJMatrixOpt)
+    if vhfopt.supmol is None:
+        vhfopt.build(verbose=verbose)
+    vj = vhfopt._get_j_sr(dm, hermi, kpts, kpts_band, verbose=verbose)
+    vj += vhfopt._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
     return vj
 
-class PBCJmatrixOpt:
+class PBCJMatrixOpt:
 
     def __init__(self, cell, omega=None):
         self.cell = cell
-        if omega is None: # TODO: dynamically determine omega based on rcut?
-            omega = OMEGA
         self.verbose = cell.verbose
         self.stdout = cell.stdout
 
@@ -70,9 +72,10 @@ class PBCJmatrixOpt:
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
         self.supmol = None
+
         # Attributes required by AFTDF functions
-        self.time_reversal_symmetry = True
         self.kpts = None
+
         # Hold cache on GPU devices
         self._rys_envs = {}
         self._q_cond = {}
@@ -86,11 +89,16 @@ class PBCJmatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
-        self.mesh = cell.cutoff_to_mesh(ke_cutoff)
+        if self.omega is None or self.omega == 0:
+            # TODO: dynamically determine omega based on rcut
+            self.omega = OMEGA
+        if self.mesh is None:
+            ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
+            self.mesh = cell.cutoff_to_mesh(ke_cutoff)
 
         cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
             cell, 1, group_size, sparse_coeff=True)
+        cell.omega = -self.omega
         self.sorted_cell = cell
         self.ao_idx = ao_idx
         self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
@@ -119,6 +127,21 @@ class PBCJmatrixOpt:
                 supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
         q_cond = np.log(q_cond + 1e-300).astype(np.float32)
         self.q_cond_cpu = q_cond
+
+        diffuse_exps = np.hstack(supmol.bas_exps(), dtype=np.float32)
+        diffuse_ctr_coef = gto_norm(supmol._bas[:,ANG_OF], diffuse_exps)
+        diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
+        s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
+        s_estimator[nbas] = diffuse_exps
+        s_estimator[nbas+1] = diffuse_ctr_coef
+        libvhf_rys.sr_eri_s_estimator(
+            s_estimator.ctypes, ctypes.c_float(supmol.omega),
+            diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
+            supmol._atm.ctypes, ctypes.c_int(supmol.natm),
+            supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
+        self.q_cond_cpu = PBCJKMatrixOpt._filter_q_cond(
+            self, supmol, q_cond, s_estimator, self.rys_envs,
+            self.estimate_cutoff_with_penalty())[0]
         log.timer('Initialize q_cond', *cput0)
         return self
 
@@ -141,7 +164,7 @@ class PBCJmatrixOpt:
         ao_loc = asarray(supmol.ao_loc)
         return RysIntEnvVars.new(supmol.natm, supmol.nbas, atm, bas, env, ao_loc)
 
-    estimate_cutoff_with_penalty = PBCJKmatrixOpt.estimate_cutoff_with_penalty
+    estimate_cutoff_with_penalty = PBCJKMatrixOpt.estimate_cutoff_with_penalty
 
     def _get_j_sr(self, dm, hermi, kpts=None, kpts_band=None, verbose=None):
         '''
@@ -173,7 +196,11 @@ class PBCJmatrixOpt:
             dms *= .5
 
         p2c_mapping = asarray(self.prim_to_ctr_mapping)
-        is_gamma_point = kpts is None or is_zero(kpts)
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        else:
+            kpts = kpts.reshape(-1, 3)
+        is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
@@ -232,7 +259,7 @@ class PBCJmatrixOpt:
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
-            ctypes.c_int(is_gamma_point),
+            ctypes.c_int(int(is_gamma_point)),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
 
@@ -245,6 +272,7 @@ class PBCJmatrixOpt:
             pair_loc_in_cell0)
         dm_cond = None
 
+        # TODO: 8-fold symmetry
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
                  for j in range(i+1)
@@ -289,6 +317,8 @@ class PBCJmatrixOpt:
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm),
+                    ctypes.c_int(dm_xyz_size),
+                    ctypes.c_int(nimgs_uniq_pair),
                     rys_envs, (ctypes.c_int*6)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -310,9 +340,7 @@ class PBCJmatrixOpt:
                 if log.verbose >= logger.DEBUG1:
                     ntasks = pair_ij_mapping.size * pair_kl_mapping.size
                     t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
-                    if llll not in timing_collection:
-                        timing_collection[llll] = 0
-                    timing_collection[llll] += t1[1] - t1p[1]
+                    timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
                 if num_devices > 1:
                     stream.synchronize()
@@ -348,7 +376,7 @@ class PBCJmatrixOpt:
             self.prim_to_ctr_mapping.ctypes,
             double_latsum_Ls.ctypes,
             ctypes.c_int(nimgs_uniq_pair),
-            ctypes.c_int(is_gamma_point),
+            ctypes.c_int(int(is_gamma_point)),
             ctypes.c_int(prim_cell.nbas), ctypes.c_int(sorted_cell.nbas),
             prim_cell._bas.ctypes, prim_cell_env.ctypes)
 
@@ -378,8 +406,6 @@ class PBCJmatrixOpt:
         from gpu4pyscf.pbc.df.aft_jk import get_j_kpts
         cell = self.cell
         assert cell.dimension == 3
-        if kpts is None:
-            kpts = np.zeros((1, 3))
         return get_j_kpts(self, dm, hermi, kpts, kpts_band)
 
     def weighted_coulG(self, kpt=np.zeros(3), exx=None, mesh=None):
@@ -415,6 +441,7 @@ def _dm_cond_from_compressed_dm(supmol, dms, cell, p2c_mapping):
 
     nbas = prim_cell.nbas
     img_idx, ish_cell0 = divmod(cp.asarray(supmol.bas_mask_idx), nbas)
+    # Note the transpose for T_in_pair. dms is stored as [T, ket, bra]
     T_in_pair = cp.asarray(supmol.Ts_ji_lookup)[img_idx,img_idx[:,None]]
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
     return dm_cond
@@ -466,7 +493,6 @@ def _make_pair_qd_cond(supmol, l_ctr_bas_loc, q_cond, dm_cond, cutoff,
             pair_kl = cp.asarray(pair_kl[q_cond[pair_kl] > cutoff], dtype=np.uint32)
             pair_ij = pair_ij[cp.argsort(q_cond[pair_ij])[::-1]]
             pair_kl = pair_kl[cp.argsort(q_cond[pair_kl])[::-1]]
-            # TODO: filter pair_kl based on its distance to pair_ij
 
             bas_i, bas_j = divmod(pair_ij, nbas)
             bas_k, bas_l = divmod(pair_kl, nbas)

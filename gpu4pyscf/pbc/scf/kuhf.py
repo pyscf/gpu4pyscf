@@ -124,8 +124,11 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
     assert isinstance(mo_energy_kpts, cp.ndarray)
 
     nocc_a, nocc_b = mf.nelec
-    nmo = mo_energy_kpts.shape[-1]
     mo_energy_a = cp.sort(mo_energy_kpts[0].ravel())
+    nmo = mo_energy_a.size
+    if nocc_a > nmo or nocc_b > nmo:
+        raise RuntimeError('Failed to assign mo_occ. '
+                           f'Nocc ({nocc_a}, {nocc_b}) > Nmo ({nmo})')
     fermi_a = mo_energy_a[nocc_a-1]
     mo_occ_kpts = cp.zeros_like(mo_energy_kpts)
     mo_occ_kpts[0] = (mo_energy_kpts[0] <= fermi_a).astype(np.float64)
@@ -247,8 +250,8 @@ class KUHF(khf.KSCF):
             dm_kpts *= (nelec / ne).reshape(2,1,1,1)
         return dm_kpts
 
-    def get_veff(self, cell=None, dm_kpts=None, dm_last=0, vhf_last=0, hermi=1,
-                 kpts=None, kpts_band=None):
+    def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpts=None, kpts_band=None):
         if dm_kpts is None:
             dm_kpts = self.make_rdm1()
         vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
@@ -313,6 +316,10 @@ class KUHF(khf.KSCF):
     convert_from_ = NotImplemented
 
     density_fit = khf.KRHF.density_fit
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.kuhf import Gradients
+        return Gradients(self)
 
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)

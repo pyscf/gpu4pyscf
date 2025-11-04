@@ -36,9 +36,7 @@ class Gradients(rhf.GradientsBase):
     make_rdm1e = mol_uhf.Gradients.make_rdm1e
 
     def get_veff(self, mol=None, dm=None, kpt=None, verbose=None):
-        mf = self.base
-        xc_code = getattr(mf, "xc", None)
-        return mf.with_df.get_veff_ip1(dm, xc_code=xc_code, kpt=kpt)
+        raise NotImplementedError
 
     def grad_elec(
         self,
@@ -49,9 +47,7 @@ class Gradients(rhf.GradientsBase):
     ):
         mf = self.base
         cell = mf.cell
-        assert hasattr(mf, '_numint')
-        assert isinstance(mf._numint, multigrid_v2.MultiGridNumInt)
-
+        kpt = mf.kpt
         if mo_energy is None:
             mo_energy = mf.mo_energy
         if mo_coeff is None:
@@ -69,9 +65,42 @@ class Gradients(rhf.GradientsBase):
         if atmlst is None:
             atmlst = range(cell.natm)
 
-        ni = mf._numint
-        assert hasattr(mf, 'xc'), 'HF gradients not supported'
-        de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
+        with_rsjk = mf.rsjk
+        if with_rsjk is not None:
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if hasattr(mf, 'xc'):
+                ni = mf._numint
+                assert isinstance(mf._numint, multigrid_v2.MultiGridNumInt)
+                omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+                if omega != 0 and omega != with_rsjk.omega:
+                    with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
+                if with_rsjk.supmol is None:
+                    with_rsjk.build()
+                de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
+                j_factor = 0
+            else:
+                ni = multigrid_v2.MultiGridNumInt(cell).build()
+                j_factor = k_sr = k_lr = 1
+                de = 0
+                if cell._pseudo:
+                    import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
+                    vpplocG = multigrid_v1.eval_vpplocG_part1(ni.cell, ni.mesh)
+                    de = multigrid_v2.convert_xc_on_g_mesh_to_fock_gradient(
+                        ni, vpplocG.reshape(1,1,-1), dm0[0]+dm0[1]).get()
+                else:
+                    raise NotImplementedError
+            ejk  = with_rsjk._get_ejk_sr_ip1(dm0, kpts=kpt, exxdiv=mf.exxdiv,
+                                             j_factor=j_factor, k_factor=k_sr)
+            ejk += with_rsjk._get_ejk_lr_ip1(dm0, kpts=kpt, exxdiv=mf.exxdiv,
+                                             j_factor=j_factor, k_factor=k_lr)
+            de += ejk*2
+        else:
+            assert hasattr(mf, 'xc'), 'HF gradients not supported'
+            ni = mf._numint
+            assert isinstance(mf._numint, multigrid_v2.MultiGridNumInt)
+            de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
+
         s1 = int1e.int1e_ipovlp(cell)[0].get()
         de += _contract_vhf_dm(self, s1, dme0_sf) * 2
 

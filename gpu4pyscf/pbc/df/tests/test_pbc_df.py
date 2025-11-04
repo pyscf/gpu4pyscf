@@ -48,8 +48,8 @@ class KnownValues(unittest.TestCase):
         assert abs(v1 - ref).max() < 1e-8
 
         kpts4 = cell.make_kpts([4,1,1])
-        ref = df_cpu.GDF(cell, kpts4).get_pp()
-        v1 = GDF(cell, kpts4).get_pp().get()
+        ref = df_cpu.GDF(cell, kpts4).get_pp(kpts=kpts4)
+        v1 = GDF(cell, kpts4).get_pp(kpts=kpts4).get()
         assert abs(v1 - ref).max() < 1e-8
 
     def test_get_nuc(self):
@@ -70,8 +70,8 @@ class KnownValues(unittest.TestCase):
         assert abs(v1 - ref).max() < 1e-8
 
         kpts4 = cell1.make_kpts([4,1,1])
-        ref = df_cpu.GDF(cell1, kpts4).get_nuc()
-        v1 = GDF(cell1, kpts4).get_nuc().get()
+        ref = df_cpu.GDF(cell1, kpts4).get_nuc(kpts=kpts4)
+        v1 = GDF(cell1, kpts4).get_nuc(kpts=kpts4).get()
         assert abs(v1 - ref).max() < 1e-8
 
     def test_jk(self):
@@ -121,14 +121,14 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12)
         dm = (np.random.random((nkpts, nao, nao)) +
               np.random.random((nkpts, nao, nao))*1j)
-        jref, kref = mydf0.get_jk(dm, hermi=0, exxdiv='ewald')
-        vj, vk = mydf.get_jk(dm, hermi=0, exxdiv='ewald')
+        jref, kref = mydf0.get_jk(dm, hermi=0, kpts=kpts, exxdiv='ewald')
+        vj, vk = mydf.get_jk(dm, hermi=0, kpts=kpts, exxdiv='ewald')
         assert abs(vj.get() - jref).max() < 1e-8
         assert abs(vk.get() - kref).max() < 1e-8
 
         dm = dm + dm.conj().transpose(0,2,1)
-        jref, kref = mydf0.get_jk(dm, hermi=1, exxdiv='ewald')
-        vj, vk = mydf.get_jk(dm, hermi=1, exxdiv='ewald')
+        jref, kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, exxdiv='ewald')
+        vj, vk = mydf.get_jk(dm, hermi=1, kpts=kpts, exxdiv='ewald')
         assert abs(vj.get() - jref).max() < 1e-8
         assert abs(vk.get() - kref).max() < 1e-8
 
@@ -226,8 +226,8 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('kpi,kqi->kpq', mo, mo.conj())
         dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
 
-        kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-8
 
     def test_get_k3(self):
@@ -246,8 +246,8 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('kpi,kqi->kpq', mo, mo.conj())
         dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
 
-        kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-8
 
     @unittest.skip('pbc-gdf does not support different k-mesh in get_jk and build')

@@ -54,7 +54,7 @@ class GDF(lib.StreamObject):
     '''
     blockdim = df_cpu.GDF.blockdim
 
-    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao'})
+    _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh'})
 
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
@@ -74,7 +74,7 @@ class GDF(lib.StreamObject):
         if isinstance(self._kpts, KPoints):
             return self._kpts
         else:
-            return self.cell.get_abs_kpts(self._kpts)
+            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
 
     @kpts.setter
     def kpts(self, val):
@@ -212,24 +212,10 @@ class GDF(lib.StreamObject):
                 yield k_aux, out, -1
 
     def get_pp(self, kpts=None):
-        kpts, is_single_kpt = _check_kpts(self, kpts)
-        if is_single_kpt and is_zero(kpts):
-            vpp = rsdf_builder.get_pp(self.cell)
-        else:
-            vpp = rsdf_builder.get_pp(self.cell, kpts)
-            if is_single_kpt:
-                vpp = vpp[0]
-        return vpp
+        return rsdf_builder.get_pp(self.cell, kpts)
 
     def get_nuc(self, kpts=None):
-        kpts, is_single_kpt = _check_kpts(self, kpts)
-        if is_single_kpt and is_zero(kpts):
-            nuc = rsdf_builder.get_nuc(self.cell)
-        else:
-            nuc = rsdf_builder.get_nuc(self.cell, kpts)
-            if is_single_kpt:
-                nuc = nuc[0]
-        return nuc
+        return rsdf_builder.get_nuc(self.cell, kpts)
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular
@@ -253,7 +239,7 @@ class GDF(lib.StreamObject):
         if self.is_gamma_point:
             return df_jk_real.get_jk(self, dm, hermi, with_j, with_k, exxdiv)
         else:
-            kpts, is_single_kpt = _check_kpts(self, kpts)
+            kpts, is_single_kpt = _check_kpts(kpts, dm)
             if is_single_kpt:
                 return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                     with_k, exxdiv)
@@ -263,6 +249,10 @@ class GDF(lib.StreamObject):
         if with_j:
             vj = df_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
+
+    get_j_e1 = NotImplemented
+    get_k_e1 = NotImplemented
+    get_jk_e1 = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented

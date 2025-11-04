@@ -40,11 +40,14 @@ from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
 KE_SCALING = aft_cpu.KE_SCALING
 
 def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
-    kpts, is_single_kpt = _check_kpts(mydf, kpts)
     log = logger.new_logger(mydf)
     cell = mydf.cell
     mesh = np.asarray(mydf.mesh)
-
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     kpt_allow = np.zeros(3)
     if cell.dimension > 0:
         ke_guess = aft_cpu.estimate_ke_cutoff(cell, cell.precision)
@@ -88,7 +91,11 @@ def get_pp(mydf, kpts=None):
         function _guess_eta from module pbc.df.gdf_builder.
     '''
     cell = mydf.cell
-    kpts, is_single_kpt = aft_cpu._check_kpts(mydf, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     vpp = _get_pp_loc_part1(mydf, kpts, with_pseudo=True)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp += cp.asarray(pp2builder.get_pp_loc_part2())
@@ -126,6 +133,7 @@ class AFTDFMixin:
             assert is_zero(q)
             kpts = self.kpts
 
+        # TODO: cache ft_opt
         ft_opt = FTOpt(cell, kpts, bvk_kmesh)
         ft_kern = ft_opt.gen_ft_kernel()
 
@@ -176,7 +184,7 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
         if isinstance(self._kpts, KPoints):
             return self._kpts
         else:
-            return self.cell.get_abs_kpts(self._kpts)
+            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
 
     @kpts.setter
     def kpts(self, val):
@@ -207,7 +215,7 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(self, kpts)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                   with_k, exxdiv)
@@ -218,6 +226,10 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
         if with_j:
             vj = aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
+
+    get_j_e1 = NotImplemented
+    get_k_e1 = NotImplemented
+    get_jk_e1 = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented
@@ -233,15 +245,25 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
         out = AFTDF(self.cell, kpts=self.kpts)
         return utils.to_cpu(self, out=out)
 
-def _check_kpts(mydf, kpts):
+def _check_kpts(kpts, dm):
     '''Check if the argument kpts is a single k-point'''
     if kpts is None:
-        kpts = getattr(mydf, 'kpts', None)
-    if kpts is None:
-        kpts = np.zeros((1, 3))
+        if dm.ndim == 2: # RHF
+            kpts = np.zeros(3)
+        else:
+            kpts = np.zeros((1, 3))
+    if kpts.ndim == 1:
+        kpts = kpts.reshape(1, 3)
         is_single_kpt = True
+        assert (dm.ndim == 2 or # RHF
+                (dm.ndim == 3 and len(dm) == 2)) # UHF
     else:
-        kpts = np.asarray(kpts)
-        is_single_kpt = kpts.ndim == 1
-    kpts = kpts.reshape(-1,3)
+        is_single_kpt = False
+        nkpts = len(kpts)
+        if dm.ndim == 2:
+            raise RuntimeError('dm.ndim == 2, incompatible with kpts')
+        elif dm.ndim == 3: # KRHF
+            assert len(dm) == nkpts, 'KRHF dm incompatible with kpts. Are you running UHF?'
+        else: # KUHF
+            assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
     return kpts, is_single_kpt

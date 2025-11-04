@@ -22,15 +22,16 @@ import cupy as cp
 from pyscf import lib
 from pyscf.gto.mole import PTR_ENV_START, ANG_OF
 from pyscf.pbc.grad import krhf as krhf_cpu
+from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as molgrad
-from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft import UniformGrids
-from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.df.fft import get_SI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 
 __all__ = ['Gradients']
@@ -156,17 +157,38 @@ def get_hcore(cell, kpts):
                         else:
                             h1[kn,:] += vnl
     else:
-        raise NotImplementedError
+        mesh = cell.mesh
+        charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
+        Gv = cell.get_Gv(mesh)
+        SI = get_SI(cell, mesh=mesh)
+        rhoG = charge.dot(SI)
+        coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
+        vneG = rhoG * coulG
+        vneR = tools.ifft(vneG, mesh).real
+        ni = pbc_numint.KNumInt()
+        grids = UniformGrids(cell)
+        # block_loop(sort_grids=True) would reorder the grids. Sorting vneR
+        # accordingly
+        vneR = vneR[grids.argsort()]
+        deriv = 1
+        grid0 = grid1 = 0
+        for ao_ks, weight, coords in ni.block_loop(cell, grids, deriv, kpts,
+                                                   sort_grids=True):
+            ao_ks = ao_ks.transpose(0,1,3,2) # [nk,comp,nao,nGv]
+            grid0, grid1 = grid1, grid1 + len(weight)
+            aow = ao_ks[:,0] * vneR[grid0:grid1]
+            #:h1 += cp.einsum('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow)
+            contract('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow, beta=1, out=h1)
     return h1
 
 def hcore_generator(mf_grad, cell=None, kpts=None):
     if cell is None: cell = mf_grad.cell
-    if kpts is None: kpts = mf_grad.kpts
+    if kpts is None:
+        kpts = mf_grad.kpts
+    else:
+        kpts = kpts.reshape(-1, 3)
     h1 = mf_grad.get_hcore(cell, kpts)
     dtype = h1.dtype
-
-    mf = mf_grad.base
-    kpts, is_single_kpt = _check_kpts(mf, kpts)
 
     aoslices = cell.aoslice_by_atom()
     SI = cp.asarray(cell.get_SI())
@@ -174,23 +196,27 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     Gv_cpu = cell.Gv
     Gv = cp.asarray(Gv_cpu)
     ngrids = len(Gv)
-    vlocG = cp.asarray(get_vlocG(cell))
+    if cell._pseudo:
+        vlocG = cp.asarray(get_vlocG(cell))
+    else:
+        Z = cell.atom_charges()
+        coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
     ni = pbc_numint.KNumInt()
     grids = UniformGrids(cell)
     ptr = PTR_ENV_START
 
     def hcore_deriv(atm_id):
         hcore = cp.zeros_like(h1)
-        symb = cell.atom_symbol(atm_id)
-        if symb not in cell._pseudo:
-            return hcore
-        vloc_g = cp.einsum('ga,g,g->ag', Gv, 1j * SI[atm_id], vlocG[atm_id])
+        if cell._pseudo:
+            vloc_g = cp.einsum('ga,g,g->ag', Gv, 1j * SI[atm_id], vlocG[atm_id])
+        else:
+            vloc_g = cp.einsum('ga,g,g->ag', Gv, Z[atm_id]*1j * SI[atm_id], coulG)
         vloc_R = tools.ifft(vloc_g, mesh).real
-        # block_loop(sort_grids=True) would reorder the grids.
         vloc_R = vloc_R[:,grids.argsort()]
         vloc_g = None
         deriv = 0
         grid0 = grid1 = 0
+        # block_loop(sort_grids=True) would reorder the grids.
         for ao_ks, weight, coords in ni.block_loop(cell, grids, deriv, kpts,
                                                    sort_grids=True):
             ao_ks = ao_ks.transpose(0,2,1) # [nk,nao,nGv]
@@ -199,8 +225,14 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
             #:hcore += contract('kig,kxjg->kxij',ao_ks.conj(), aow)
             contract('kig,kxjg->kxij', ao_ks.conj(), aow, beta=1, out=hcore)
 
-        fakemol = krhf_cpu._make_fakemol()
+        symb = cell.atom_symbol(atm_id)
         shl0, shl1, p0, p1 = aoslices[atm_id]
+        if symb not in cell._pseudo:
+            hcore[:,:,p0:p1] -= h1[:,:,p0:p1]
+            hcore[:,:,:,p0:p1] -= h1[:,:,p0:p1].transpose(0,1,3,2).conj()
+            return hcore
+
+        fakemol = krhf_cpu._make_fakemol()
         ft_weight = 1. / cell.vol
         for kn, kpt in enumerate(kpts):
             # Compute aokG analytically. An error ~cell.precision may be
@@ -275,6 +307,8 @@ class GradientsBase(molgrad.GradientsBase):
     def get_jk(self, dm=None, kpts=None):
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
+        if self.base.rsjk is not None:
+            raise NotImplementedError
         exxdiv = self.base.exxdiv
         cpu0 = (logger.process_clock(), logger.perf_counter())
         ej, ek = self.base.with_df.get_jk_e1(dm, kpts, exxdiv=exxdiv)
@@ -285,16 +319,30 @@ class GradientsBase(molgrad.GradientsBase):
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
         cpu0 = (logger.process_clock(), logger.perf_counter())
-        ej = self.base.with_df.get_j_e1(dm, kpts)
+        if self.base.rsjk is not None:
+            ej = self.rsjk._get_ejk_sr_ip1(dm, kpts, k_factor=0)
+            ej += self.rsjk._get_ejk_lr_ip1(dm, kpts, k_factor=0)
+        else:
+            ej = self.base.with_df.get_j_e1(dm, kpts)
         logger.timer(self, 'ej', *cpu0)
         return ej
 
     def get_k(self, dm=None, kpts=None, kpts_band=None):
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
-        exxdiv = self.base.exxdiv
         cpu0 = (logger.process_clock(), logger.perf_counter())
-        ek = self.base.with_df.get_k_e1(dm, kpts, kpts_band, exxdiv)
+        if self.base.rsjk is not None:
+            exxdiv = self.base.exxdiv
+            ek = self.rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
+            ek += self.rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
+            if dm.ndim == 3: # KRHF
+                ek *= 2
+            elif dm.ndim == 4: # KUHF
+                pass
+            else:
+                raise RuntimeError('Illegal dm dimension')
+        else:
+            ek = self.base.with_df.get_k_e1(dm, kpts, kpts_band, exxdiv)
         logger.timer(self, 'ek', *cpu0)
         return ek
 
@@ -315,10 +363,22 @@ class GradientsBase(molgrad.GradientsBase):
 class Gradients(GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
-    def get_veff(self, dm=None, kpts=None):
-        ej, ek = self.get_jk(dm, kpts)
-        dvhf = ej - ek * .5
-        return dvhf
+    def get_veff(self, dm, kpts):
+        '''
+        The energy contribution from the effective potential
+
+        einsum('kxij,kji->x', veff, dm)
+        '''
+        if self.base.rsjk is not None:
+            from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+            with_rsjk = self.base.rsjk
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
+            ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
+        else:
+            ej, ek = self.get_jk(dm, kpts)
+            ejk = ej - ek * .5
+        return ejk
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''

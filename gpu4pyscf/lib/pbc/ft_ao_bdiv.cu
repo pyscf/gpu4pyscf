@@ -29,7 +29,7 @@
 #define AUXL            6
 #define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
-__global__
+__global__ static
 void ft_ao_bdiv_kernel(double *out, PBCIntEnvVars envs, int nGv, double *grids)
 {
     int sh_block_id = gridDim.x - blockIdx.x - 1;
@@ -184,4 +184,23 @@ void ft_ao_bdiv_kernel(double *out, PBCIntEnvVars envs, int nGv, double *grids)
             aft_tensor[n*stride+1] = goutI[n];
         }
     }
+}
+
+extern "C" {
+int build_ft_ao(double *out, PBCIntEnvVars *envs, int ngrids, double *grids,
+                int *atm, int natm, int *bas, int nbas, double *env)
+{
+    int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
+    dim3 threads(NG_PER_BLOCK, nsh_per_block);
+    int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
+    int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
+    dim3 blocks(nbatches_shls, nbatches_grids);
+    ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in ft_aopair_bdiv_kernel: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
 }

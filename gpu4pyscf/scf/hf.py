@@ -74,6 +74,9 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     nmo = mo_energy.size
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
+    if nocc > nmo:
+        raise RuntimeError('Failed to assign occupancies. '
+                           f'Nocc ({nocc}) > Nmo ({nmo})')
     mo_occ[e_idx[:nocc]] = 2
     if mf.verbose >= logger.INFO and nocc < nmo:
         homo = float(mo_energy[e_idx[nocc-1]])
@@ -170,8 +173,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if vhf is None: vhf = self.get_veff(self.mol, dm)
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
-    e1 = e1.get()[()]
-    e_coul = e_coul.get()[()]
+    e1 = float(e1.get())
+    e_coul = float(e_coul.get())
     self.scf_summary['e1'] = e1
     self.scf_summary['e2'] = e_coul
     logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
@@ -682,7 +685,7 @@ class SCF(pyscf_lib.StreamObject):
     from_chk                 = hf_cpu.SCF.from_chk
     get_init_guess           = return_cupy_array(hf_cpu.SCF.get_init_guess)
     make_rdm2                = NotImplemented
-    energy_elec              = energy_elec
+    energy_elec              = NotImplemented
     energy_tot               = energy_tot
     energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
@@ -773,10 +776,10 @@ class SCF(pyscf_lib.StreamObject):
     def get_j(self, mol, dm, hermi=1, omega=None):
         if omega is None:
             omega = mol.omega
-        if omega not in self._opt_jengine:
+        jopt = self._opt_jengine.get(omega)
+        if jopt is None:
             jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
             self._opt_jengine[omega] = jopt
-        jopt = self._opt_jengine[omega]
         vj = j_engine.get_j(mol, dm, hermi, jopt)
         if not isinstance(dm, cupy.ndarray):
             vj = vj.get()
@@ -822,20 +825,7 @@ class RHF(SCF):
                         'It is recommended to use the scf.LRHF or dft.LRKS class for this system.')
         return SCF.check_sanity(self)
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        '''
-        electronic energy
-        '''
-        if dm is None: dm = self.make_rdm1()
-        if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.mol, dm)
-        assert dm.dtype == np.float64
-        e1 = float(h1e.ravel().dot(dm.ravel()))
-        e_coul = float(vhf.ravel().dot(dm.ravel())) * .5
-        self.scf_summary['e1'] = e1
-        self.scf_summary['e2'] = e_coul
-        logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-        return e1+e_coul, e_coul
+    energy_elec = energy_elec
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf

@@ -34,8 +34,7 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.gto.mole import (cart2sph_by_l, group_basis, PTR_BAS_COORD,
                                 extract_pgto_params)
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE
-from gpu4pyscf.pbc.df.ft_ao import (
-    libpbc, init_constant, most_diffuse_pgto, PBCIntEnvVars)
+from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, PBCIntEnvVars
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -78,8 +77,10 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     nao = cell.nao
     naux = int3c2e_opt.aux_coeff.shape[1]
 
-    gamma_point = kpts is None or (kpts.ndim == 1 and is_zero(kpts))
-    if gamma_point:
+    is_gamma_point = kpts is None or is_zero(kpts)
+    if kpts is not None and kpts.ndim == 1: # single k-point
+        assert is_gamma_point
+    if is_gamma_point:
         out = cp.zeros((nao, nao, naux))
         nL = nkpts = 1
     else:
@@ -135,7 +136,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
 
         i = int3c2e_opt.ao_idx[i0:i1]
         j = int3c2e_opt.ao_idx[j0:j1]
-        if gamma_point:
+        if is_gamma_point:
             eri3c = eri3c.reshape(ni,nj,naux)
             out[i[:,None],j] = eri3c
             if i0 != j0:
@@ -268,7 +269,6 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     nao_cart, nao = coeff.shape
     out = cp.empty((bvk_ncells, nao_cart, nao_cart))
-    init_constant(cell)
     err = libpbc.fill_int2c2e(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
@@ -457,7 +457,7 @@ class SRInt3c2eOpt:
 
         self.rcut = None
         self._int3c2e_envs = None
-        self.bvk_cell = None
+        self.bvkcell = None
         self.bvkmesh_Ls = None
 
     def build(self, verbose=None):
@@ -507,7 +507,6 @@ class SRInt3c2eOpt:
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
         self._int3c2e_envs = PBCIntEnvVars.new(
             pcell.natm, pcell.nbas, bvk_ncells, nimgs, _atm, _bas, _env, ao_loc, Ls)
-        init_constant(pcell)
         err = libpbc.PBCsr_int3c2e_latsum23_init(ctypes.c_int(SHM_SIZE))
         if err != 0:
             raise RuntimeError('CUDA kernel initialization')

@@ -706,7 +706,8 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux)))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
-    log.debug1('ngrids = %d Gblksize = %d', ngrids, Gblksize)
+    log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
+               ngrids, Gblksize, naux, max_pair_size)
 
     buf = empty_mapped(naux*max_pair_size)
     kern = libpbc.build_ft_aopair
@@ -1483,8 +1484,9 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     omega = 0.2
     log.debug('omega guess in get_pp_loc_part1 = %g', omega)
 
-    if kpts is None or is_zero(kpts):
-        kpts = None
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    is_gamma_point = kpts is None or is_zero(kpts)
+    if is_gamma_point:
         bvk_kmesh = np.ones(3, dtype=int)
         bvk_ncells = 1
     else:
@@ -1494,7 +1496,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     nuc = sr_aux_e2(cell, fakenuc, -omega, kpts, bvk_kmesh, j_only=True)
     charges = -cp.asarray(cell.atom_charges())
-    if kpts is None:
+    if is_gamma_point:
         nuc = contract('pqr,r->pq', nuc, charges)
     else:
         nuc = contract('kpqr,r->kpq', nuc, charges)
@@ -1611,8 +1613,10 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     nuc_raw = fill_triu_bvk_conj(nuc_raw, nao, bvk_kmesh)
     nuc_raw = sandwich_dot(nuc_raw, ft_opt.coeff)
 
-    if kpts is None:
+    if is_gamma_point:
         nuc += nuc_raw[0]
+        if not is_single_kpt:
+            nuc = nuc[np.newaxis]
     else:
         bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
@@ -1634,6 +1638,7 @@ def get_pp(cell, kpts=None):
     from pyscf.pbc.gto import pseudo
     log = logger.new_logger(cell)
     t0 = log.init_timer()
+    is_single_kpt = kpts is not None and kpts.ndim == 1
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp  = cp.asarray(pp2builder.get_pp_loc_part2())
     t1 = log.timer_debug1('get_pp_loc_part2', *t0)
@@ -1641,6 +1646,8 @@ def get_pp(cell, kpts=None):
     t1 = log.timer_debug1('get_pp_nl', *t1)
 
     vpp += get_pp_loc_part1(cell, kpts, with_pseudo=True, verbose=log)
+    if is_single_kpt and vpp.ndim == 3:
+        vpp = vpp[0]
     t1 = log.timer_debug1('get_pp_loc_part1', *t1)
     log.timer('get_pp', *t0)
     return vpp

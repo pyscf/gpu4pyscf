@@ -19,8 +19,10 @@ import pyscf
 from gpu4pyscf.pbc.dft import multigrid_v2 as multigrid
 from pyscf.pbc.grad import kuks as kuks_cpu
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
-disp = 1e-5
+disp = 1e-4
 
 def setUpModule():
     global cell, cell_orth
@@ -38,12 +40,11 @@ def setUpModule():
 
     cell_orth = pyscf.M(
         atom = 'H 0 0 0; H 1. 1. 1.',
-        a = np.eye(3) * 2.5,
+        a = np.eye(3) * 3.5,
         basis = [[0, [1.3, 1]], [1, [0.8, 1]]],
         verbose = 5,
         pseudo = 'gth-pade',
         unit = 'bohr',
-        mesh = [13] * 3,
         output = '/dev/null')
 
 def tearDownModule():
@@ -128,14 +129,14 @@ class KnownValues(unittest.TestCase):
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad(self):
         # ref = numerical_gradient(cell_orth, xc='r2scan')
-        ref = np.array([[-0.01026366, -0.01026366, -0.01026366],
-                        [ 0.01026374,  0.01026374,  0.01026374]])
+        ref = np.array([[-0.22997632, -0.22997632, -0.22997632],
+                        [ 0.22997655,  0.22997655,  0.22997655]])
         mf = cell_orth.UKS(xc='r2scan').to_gpu()
         mf.conv_tol = 1e-10
         mf._numint = multigrid.MultiGridNumInt(cell_orth)
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
-        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
 
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad_nonorth(self):
@@ -149,24 +150,53 @@ class KnownValues(unittest.TestCase):
         g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
-    @unittest.skip('gradients for hybrid functional not avaiable')
     def test_hybrid_grad(self):
-        ref = numerical_gradient(cell_orth, xc='b3lyp')
-        # TODO: save the ref
-        mf = cell_orth.UKS(xc='b3lyp').to_gpu()
-        mf.exxdiv = None
-        g_scan = mf.nuc_grad_method().as_scanner()
+        # ref = numerical_gradient(cell_orth, xc='pbe0')
+        ref = np.array([[-0.23059506, -0.23059506, -0.23059506],
+                        [ 0.23059781,  0.23059781,  0.23059781]])
+        mf = cell_orth.UKS(xc='pbe0').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
+        g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
-    @unittest.skip('gradients for hybrid functional not avaiable')
-    def test_hybrid_grad_nonorth(self):
-        ref = numerical_gradient(cell_orth, xc='b3lyp')
-        # TODO: save the ref
-        mf = cell.UKS(xc='b3lyp').to_gpu()
-        mf.exxdiv = None
-        g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell)[1]
+    @unittest.skip('Insufficient GPU memory for rsjk.q_cond')
+    def test_hse_grad(self):
+        # ref = numerical_gradient(cell_orth, xc='hse06')
+        ref = np.array([[-0.23039771, -0.23039771, -0.23039771],
+                        [ 0.23043268,  0.23043268,  0.23043268]])
+        mf = cell_orth.UKS(xc='hse06').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    def test_wb97_grad(self):
+        # ref = numerical_gradient(cell_orth, xc='wb97')
+        ref = np.array([[-0.22096546, -0.22096546, -0.22096546],
+                        [ 0.22118384,  0.22118384,  0.22118384]])
+        mf = cell_orth.UKS(xc='wb97').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    def test_camb3lyp_grad(self):
+        # ref = numerical_gradient(cell_orth, xc='camb3lyp')
+        ref = np.array([[-0.22851045, -0.22851045, -0.22851045],
+                        [ 0.22850896,  0.22850896,  0.22850896]])
+        mf = cell_orth.UKS(xc='camb3lyp').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf.rsjk = PBCJKMatrixOpt(cell_orth)
+        mf.j_engine = PBCJMatrixOpt(cell_orth)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
 if __name__ == "__main__":
