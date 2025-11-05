@@ -803,7 +803,16 @@ def eval_vpplocG(cell, mesh):
             '''
             _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
         kernel = _kernel_registery[fn_name]
+
         ngrids = G2.shape[0]
+        assert G2.shape == (ngrids,) and G2.dtype == cp.float64
+        assert coulG.shape == (ngrids,) and coulG.dtype == cp.float64
+        assert SIx.shape == (cell.natm, mesh[0]) and SIx.dtype == cp.complex128 and SIx.flags.c_contiguous
+        assert SIy.shape == (cell.natm, mesh[1]) and SIy.dtype == cp.complex128 and SIy.flags.c_contiguous
+        assert SIz.shape == (cell.natm, mesh[2]) and SIz.dtype == cp.complex128 and SIz.flags.c_contiguous
+        assert vlocG.shape == (ngrids,) and vlocG.dtype == cp.complex128
+        assert ngrids < np.iinfo(np.int32).max
+
         kernel_parameters = [G2, coulG, SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
                              cp.int32(ia), cp.float64(charges[ia]), cp.float64(rloc)]
         if nexp >= 1:
