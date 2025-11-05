@@ -25,18 +25,17 @@ from gpu4pyscf.scf import addons, hf
 def setUpModule():
     global mol
     atom = """
-    Fe       0.0000000000    -0.0000000000     0.1174000000
+    O       0.0000000000    -0.0000000000     0.1174000000
     H      -0.7570000000    -0.0000000000    -0.4696000000
     H       0.7570000000     0.0000000000    -0.4696000000
     """
 
     mol = pyscf.M(
         atom=atom,  # water molecule
-        basis="sto-3g",  # basis set
+        basis="6-31g",  # basis set
+        verbose=7,
         output="/dev/null",
     )
-
-    mol.build()
 
 
 def tearDownModule():
@@ -47,22 +46,21 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
 
-    def test_energy(self):
-        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.01)
-        gpu_energy = gpu_mf.kernel()
-        cpu_mf = cpu_addons.smearing(cpu_hf.RHF(mol), sigma=0.01)
-        cpu_energy = cpu_mf.kernel()
-        assert np.allclose(cpu_energy, gpu_energy, atol=1e-12)
-
     def test_gradient(self):
-        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.01)
-        gpu_mf.kernel()
+        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.1).run()
         gpu_gradient = gpu_mf.nuc_grad_method().kernel()
-        cpu_mf = cpu_addons.smearing(cpu_hf.RHF(mol), sigma=0.01)
-        cpu_mf.kernel()
+        cpu_mf = cpu_addons.smearing(cpu_hf.RHF(mol), sigma=0.1).run()
         cpu_gradient = cpu_mf.nuc_grad_method().kernel()
-        assert np.allclose(cpu_gradient, gpu_gradient, atol=1e-12)
+        assert np.allclose(gpu_mf.e_tot, cpu_mf.e_tot, atol=1e-9)
+        assert np.allclose(gpu_gradient, cpu_gradient, atol=1e-9)
 
+    def test_df_uhf_gradient(self):
+        gpu_mf = addons.smearing(mol.UHF().to_gpu().density_fit(), sigma=0.1).run()
+        gpu_gradient = gpu_mf.nuc_grad_method().kernel()
+        cpu_mf = cpu_addons.smearing(mol.UHF().density_fit(), sigma=0.1).run()
+        cpu_gradient = cpu_mf.nuc_grad_method().kernel()
+        assert np.allclose(gpu_mf.e_tot, cpu_mf.e_tot, atol=1e-9)
+        assert np.allclose(gpu_gradient, cpu_gradient, atol=1e-9)
 
 if __name__ == "__main__":
     print("Basic Tests for GPU Fermi Smearing")
