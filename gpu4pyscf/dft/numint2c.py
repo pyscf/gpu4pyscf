@@ -21,7 +21,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.dft import numint, mcfun_gpu
-from gpu4pyscf.dft.numint import _dot_ao_dm, _dot_ao_ao, _scale_ao, _tau_dot
+from gpu4pyscf.dft.numint import _dot_ao_dm, _dot_ao_ao, _scale_ao
 from gpu4pyscf.dft import xc_deriv
 from pyscf import __config__
 
