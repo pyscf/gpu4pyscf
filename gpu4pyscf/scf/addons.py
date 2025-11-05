@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from gpu4pyscf.scf.smearing import *
+from gpu4pyscf.scf.smearing import * # noqa: F403
 
 warnings.warn(
     'smearing functions have been moved to the gpu4pyscf.scf.smearing module.',
