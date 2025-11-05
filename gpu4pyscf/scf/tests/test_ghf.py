@@ -55,7 +55,7 @@ class KnownValues(unittest.TestCase):
         e_ref = mf.to_cpu().kernel()
         assert abs(e_tot - e_ref) < 1e-5
 
-    def test_ghf_scf(self):
+    def test_ghf_scf_complex_dm(self):
         mf = mol.GHF().to_gpu()
         assert mf.device == 'gpu'
         e_tot = mf.kernel()
@@ -77,7 +77,6 @@ class KnownValues(unittest.TestCase):
         d1 = numpy.random.random((nao,nao)) + 1j*numpy.random.random((nao,nao))
         d = d1 + d1.T.conj()
         d_real = d.real
-        d_imag = d.imag
         vj_gpu = mf.get_j(mol, d_real)
         vk_gpu = mf.get_k(mol, d)
 
@@ -96,7 +95,6 @@ class KnownValues(unittest.TestCase):
         d1 = numpy.random.random((nao,nao))
         d = d1 + d1.T.conj()
         d_real = d.real
-        d_imag = d.imag
         vj_gpu = mf.get_j(mol, d_real)
         vk_gpu = mf.get_k(mol, d)
         print("vj_gpu", vj_gpu)
