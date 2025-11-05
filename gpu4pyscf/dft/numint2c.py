@@ -135,7 +135,7 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
                 den = rho[0,0] * weight
             nelec += den.sum()
             excsum += cp.dot(den, exc)
-            vmat += fmat(mol, ao, weight, rho, vxc, mask_2c, shls_slice,
+            vmat += fmat(mol, ao, weight, rho, vxc, mask, shls_slice,
                             ao_loc, hermi)
 
     elif xctype == 'HF':
@@ -155,40 +155,7 @@ def _gks_mcol_fxc(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
 def _ncol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi):
     '''Vxc matrix of non-collinear LDA'''
     # NOTE vxc in u/d representation
-    r, mx, my, mz = rho
-    vxc = xc_deriv.ud2ts(vxc)
-    vr, vs = vxc[:,0]
-    s = lib.norm(rho[1:4], axis=0)
-
-    wv = weight * vr
-    with cp.errstate(divide='ignore',invalid='ignore'):
-        ws = vs * weight / s
-    ws[s < 1e-20] = 0
-
-    # * .5 because of v+v.conj().T in r_vxc
-    if hermi:
-        wv *= .5
-        ws *= .5
-    aow = None
-    aow = _scale_ao(ao, ws*mx, out=aow)  # Mx
-    tmpx = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
-    aow = _scale_ao(ao, ws*my, out=aow)  # My
-    tmpy = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
-    if hermi:
-        # conj(mx+my*1j) == mx-my*1j, tmpx and tmpy should be real
-        matba = (tmpx + tmpx.T) + (tmpy + tmpy.T) * 1j
-        matab = cp.zeros_like(matba)
-    else:
-        # conj(mx+my*1j) != mx-my*1j, tmpx and tmpy should be complex
-        matba = tmpx + tmpy * 1j
-        matab = tmpx - tmpy * 1j
-    tmpx = tmpy = None
-    aow = _scale_ao(ao, wv+ws*mz, out=aow)  # Mz
-    mataa = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
-    aow = _scale_ao(ao, wv-ws*mz, out=aow)  # Mz
-    matbb = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
-    mat = cp.block([[mataa, matab], [matba, matbb]])
-    return mat
+    raise NotImplementedError('non-collinear lda vxc mat')
 
 
 # * Mcfun requires functional derivatives to total-density and spin-density.
@@ -526,6 +493,7 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     mcfun_eval_xc_adapter = mcfun_eval_xc_adapter
 
     block_loop = numint.NumInt.block_loop
+    reset = numint.NumInt.reset
 
     def _to_numint1c(self):
         '''Converts to the associated class to handle collinear systems'''
