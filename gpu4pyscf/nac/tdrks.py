@@ -121,7 +121,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
     dmz1doo = z1aoS
-    td_nac.dmz1doo = dmz1doo
+    td_nac._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
     if atmlst is None:
@@ -264,8 +264,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     xmyJ = (xJ - yJ)
     dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T)) 
     dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T)) 
-    td_nac.dmxpyI = dmxpyI
-    td_nac.dmxpyJ = dmxpyJ
+    td_nac._dmxpyI = dmxpyI
+    td_nac._dmxpyJ = dmxpyJ
 
     rIJoo =-contract('ai,aj->ij', xJ, xI) - contract('ai,aj->ij', yI, yJ)
     rIJvv = contract('ai,bi->ab', xI, xJ) + contract('ai,bi->ab', yJ, yI)
@@ -460,7 +460,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     s1 = mf_grad.get_ovlp(mol)
     z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
     dmz1doo = z1aoS + dmzooIJ  # P
-    td_nac.dmz1doo = dmz1doo
+    td_nac._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
 
     if atmlst is None:
@@ -621,5 +621,14 @@ class NAC(tdrhf.NAC):
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
-
-
+    @classmethod
+    def from_cpu(cls, method):
+        out = cls(method.base.to_gpu())
+        out.cphf_max_cycle = method.cphf_max_cycle
+        out.cphf_conv_tol = method.cphf_conv_tol
+        out.state = method.state
+        out.de = method.de
+        out.de_scaled = method.de_scaled
+        out.de_etf = method.de_etf
+        out.de_etf_scaled = method.de_etf_scaled
+        return out

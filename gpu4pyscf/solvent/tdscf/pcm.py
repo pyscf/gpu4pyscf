@@ -231,7 +231,7 @@ class WithSolventTDSCFNacMethod:
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        dmP = self.dmz1doo  #1.0 * (self.dmz1doo + self.dmz1doo.T)
+        dmP = self._dmz1doo  #1.0 * (self._dmz1doo + self._dmz1doo.T)
         pcmobj = self.base.with_solvent
         assert pcmobj.equilibrium_solvation
 
@@ -261,9 +261,9 @@ class WithSolventTDSCFNacMethod:
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
-        dmxpyI = self.dmxpyI + self.dmxpyI.T
-        dmxpyJ = self.dmxpyJ + self.dmxpyJ.T
+        dmP = 0.5 * (self._dmz1doo + self._dmz1doo.T)
+        dmxpyI = self._dmxpyI + self._dmxpyI.T
+        dmxpyJ = self._dmxpyJ + self._dmxpyJ.T
         pcmobj = self.base.with_solvent
         assert pcmobj.equilibrium_solvation
 

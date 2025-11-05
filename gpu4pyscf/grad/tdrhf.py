@@ -298,7 +298,6 @@ class Gradients(rhf_grad.GradientsBase):
         "cphf_conv_tol",
         "mol",
         "base",
-        "chkfile",
         "state",
         "atmlst",
         "de",
@@ -310,7 +309,6 @@ class Gradients(rhf_grad.GradientsBase):
         self.stdout = td.stdout
         self.mol = td.mol
         self.base = td
-        self.chkfile = td.chkfile
         self.state = 1  # of which the gradients to be computed.
         self.atmlst = None
         self.de = None
@@ -417,5 +415,13 @@ class Gradients(rhf_grad.GradientsBase):
 
     to_gpu = lib.to_gpu
 
+    @classmethod
+    def from_cpu(cls, method):
+        out = cls(method.base.to_gpu())
+        out.cphf_max_cycle = method.cphf_max_cycle
+        out.cphf_conv_tol = method.cphf_conv_tol
+        out.state = method.state
+        out.de = method.de
+        return out
 
 Grad = Gradients
