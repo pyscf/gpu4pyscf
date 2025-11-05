@@ -64,12 +64,10 @@ class KnownValues(unittest.TestCase):
 
         mf.smearing_method = 'gauss'
         mf.mu0 = 0.3
-        mf.get_occ(mo_energy_kpts)
+        occ = mf.get_occ(mo_energy_kpts)
         self.assertAlmostEqual(mf.entropy, 0.5066105772152231, 9)
 
-        mf = cell.KUHF(kpts=cell.make_kpts([2,1,1]))
-        mf = cpu_addons.smearing(mf, 0.1, 'gauss')
-        mf.mu0 = 0.3
+        mf = mf.to_cpu()
         ref = np.array(mf.get_occ(mo_energy_kpts.get()))
         self.assertAlmostEqual(abs(occ.get() - ref).max(), 0, 9)
 
