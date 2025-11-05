@@ -147,6 +147,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if dm is None: dm = mf.make_rdm1()
     s1e = cupy.asarray(s1e)
     dm = cupy.asarray(dm)
+    if dm.dtype == cupy.complex128:
+        s1e = s1e.astype(cupy.complex128)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
     if damp_factor is None:
@@ -665,6 +667,8 @@ class SCF(pyscf_lib.StreamObject):
         x = None
         if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
             x = cupy.asarray(self.overlap_canonical_decomposed_x)
+        if fock.dtype == cupy.complex128:
+            s = s.astype(cupy.complex128)
         if x is None:
             mo_energy, mo_coeff = eigh(fock, s)
             return mo_energy, mo_coeff

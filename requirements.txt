@@ -5,3 +5,4 @@ pyscf==2.8.0
 basis-set-exchange==0.11
 pyscf-dispersion==1.3.0
 geometric==1.1.0
+MCfun==0.2.5
