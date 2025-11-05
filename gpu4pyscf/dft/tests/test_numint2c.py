@@ -38,7 +38,7 @@ H        0.000000   -0.755453   -0.471161''',
         basis = 'ccpvdz',
         charge = 1,
         spin = 1,  # = 2S = spin_up - spin_down
-        # output = '/dev/null'
+        output = '/dev/null'
         )
 
     np.random.seed(2)
