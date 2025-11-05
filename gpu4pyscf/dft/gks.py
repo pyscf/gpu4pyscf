@@ -15,7 +15,7 @@
 import cupy as cp
 from pyscf import lib
 from pyscf.dft import gks
-from gpu4pyscf.dft import numint
+from gpu4pyscf.dft import numint2c
 from gpu4pyscf.dft import rks
 from gpu4pyscf.scf.ghf import GHF
 from gpu4pyscf.lib import logger
@@ -129,16 +129,42 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     return vxc
 
 
-class GKS(gks.GKS, GHF):
+class GKS(rks.KohnShamDFT, GHF):
     from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
 
     def __init__(self, mol, xc='LDA,VWN'):
+        raise NotImplementedError("GKS is not implemented")
         GHF.__init__(self, mol)
         rks.KohnShamDFT.__init__(self, xc)
-        # self._numint = NumInt2C()
+        self._numint = numint2c.NumInt2C()
+
+    def dump_flags(self, verbose=None):
+        GHF.dump_flags(self, verbose)
+        rks.KohnShamDFT.dump_flags(self, verbose)
+        logger.info(self, 'collinear = %s', self._numint.collinear)
+        if self._numint.collinear[0] == 'm':
+            logger.info(self, 'mcfun spin_samples = %s', self._numint.spin_samples)
+            logger.info(self, 'mcfun collinear_thrd = %s', self._numint.collinear_thrd)
+            logger.info(self, 'mcfun collinear_samples = %s', self._numint.collinear_samples)
+        return self
+
+    @property
+    def collinear(self):
+        return self._numint.collinear
+    @collinear.setter
+    def collinear(self, val):
+        self._numint.collinear = val
+
+    @property
+    def spin_samples(self):
+        return self._numint.spin_samples
+    @spin_samples.setter
+    def spin_samples(self, val):
+        self._numint.spin_samples = val
     
     get_veff = get_veff
     reset = rks.RKS.reset
     energy_elec = rks.RKS.energy_elec
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
+
