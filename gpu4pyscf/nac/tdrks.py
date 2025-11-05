@@ -620,15 +620,3 @@ class NAC(tdrhf.NAC):
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
-
-    @classmethod
-    def from_cpu(cls, method):
-        out = cls(method.base.to_gpu())
-        out.cphf_max_cycle = method.cphf_max_cycle
-        out.cphf_conv_tol = method.cphf_conv_tol
-        out.state = method.state
-        out.de = method.de
-        out.de_scaled = method.de_scaled
-        out.de_etf = method.de_etf
-        out.de_etf_scaled = method.de_etf_scaled
-        return out

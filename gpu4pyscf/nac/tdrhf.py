@@ -654,6 +654,19 @@ class NAC(lib.StreamObject):
         return lib.set_class(NAC_Scanner(nacv_instance, states),
                             (NAC_Scanner, nacv_instance.__class__), name)
 
+    @classmethod
+    def from_cpu(cls, method):
+        td = method.base.to_gpu()
+        out = cls(td)
+        out.cphf_max_cycle = method.cphf_max_cycle
+        out.cphf_conv_tol = method.cphf_conv_tol
+        out.state = method.state
+        out.de = method.de
+        out.de_scaled = method.de_scaled
+        out.de_etf = method.de_etf
+        out.de_etf_scaled = method.de_etf_scaled
+        return out
+
 
 def check_phase_modified(mol0, mo_coeff0, mo1_reordered, xy0, xy1, nocc, s):
     nao = mol0.nao

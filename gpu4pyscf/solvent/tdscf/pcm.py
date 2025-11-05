@@ -294,3 +294,15 @@ class WithSolventTDSCFNacMethod:
         de_etf_scaled = de_etf/(EJ-EI)
         
         return de, de_scaled, de_etf, de_etf_scaled
+
+def from_cpu(method):
+    from pyscf.solvent.tdscf import pcm as pcm_cpu
+    if isinstance(method, pcm_cpu.WithSolventTDSCF):
+        return make_tdscf_object(method.undo_solvent().to_gpu(),
+                                 equilibrium_solvation=method.equilibrium_solvation)
+    elif isinstance(method, pcm_cpu.WithSolventTDSCFGradient):
+        return make_tdscf_gradient_object(method.base.to_gpu())
+    elif isinstance(method, pcm_cpu.WithSolventTDSCFNacMethod):
+        return make_tdscf_nac_object(method.base.to_gpu())
+    else:
+        raise RuntimeError(f'{method} must be a PCM-TDDFT instance')

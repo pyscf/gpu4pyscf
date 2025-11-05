@@ -417,7 +417,8 @@ class Gradients(rhf_grad.GradientsBase):
 
     @classmethod
     def from_cpu(cls, method):
-        out = cls(method.base.to_gpu())
+        td = method.base.to_gpu()
+        out = cls(td)
         out.cphf_max_cycle = method.cphf_max_cycle
         out.cphf_conv_tol = method.cphf_conv_tol
         out.state = method.state
