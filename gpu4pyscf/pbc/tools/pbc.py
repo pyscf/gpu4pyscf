@@ -100,6 +100,7 @@ def ifftk(g, mesh, expikr):
     return ifft(g, mesh) * expikr
 
 def _get_Gv(cell, mesh):
+    assert cell.dimension == 3
     # Default, the 3D uniform grids
     rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
     ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
@@ -110,6 +111,19 @@ def _get_Gv(cell, mesh):
           ry[:,None,None] * b[1] +
           rz[:,None] * b[2])
     return Gv.reshape(-1, 3)
+
+def _get_Gv_with_base(cell, mesh):
+    assert cell.dimension == 3
+    # Default, the 3D uniform grids
+    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
+    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
+    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
+    b = cp.asarray(cell.reciprocal_vectors())
+    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
+    Gv = (rx[:,None,None,None] * b[0] +
+          ry[:,None,None] * b[1] +
+          rz[:,None] * b[2])
+    return Gv.reshape(-1, 3), (rx, ry, rz)
 
 def _Gv_wrap_around(cell, Gv, k, mesh):
     '''wrap around the high frequency k+G vectors into their lower frequency

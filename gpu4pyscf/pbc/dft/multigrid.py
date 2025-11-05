@@ -804,7 +804,8 @@ def eval_vpplocG(cell, mesh):
             _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
         kernel = _kernel_registery[fn_name]
         ngrids = G2.shape[0]
-        kernel_parameters = [G2, coulG, SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]), cp.int32(ia), cp.float64(charges[ia]), cp.float64(rloc)]
+        kernel_parameters = [G2, coulG, SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
+                             cp.int32(ia), cp.float64(charges[ia]), cp.float64(rloc)]
         if nexp >= 1:
             kernel_parameters.append(cp.float64(cexp[0]))
         if nexp >= 2:
