@@ -18,8 +18,7 @@ import numpy as np
 import pyscf
 from pyscf.scf import addons as cpu_addons
 from pyscf.scf import hf as cpu_hf
-
-from gpu4pyscf.scf import addons, hf
+from gpu4pyscf.scf import hf
 
 
 def setUpModule():
@@ -47,7 +46,7 @@ def tearDownModule():
 class KnownValues(unittest.TestCase):
 
     def test_gradient(self):
-        gpu_mf = addons.smearing(hf.RHF(mol), sigma=0.1).run()
+        gpu_mf = hf.RHF(mol).smearing(sigma=0.1).run()
         gpu_gradient = gpu_mf.nuc_grad_method().kernel()
         cpu_mf = cpu_addons.smearing(cpu_hf.RHF(mol), sigma=0.1).run()
         cpu_gradient = cpu_mf.nuc_grad_method().kernel()
@@ -55,7 +54,7 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(gpu_gradient, cpu_gradient, atol=1e-9)
 
     def test_df_uhf_gradient(self):
-        gpu_mf = addons.smearing(mol.UHF().to_gpu().density_fit(), sigma=0.1).run()
+        gpu_mf = mol.UHF().to_gpu().density_fit().smearing(sigma=0.1).run()
         gpu_gradient = gpu_mf.nuc_grad_method().kernel()
         cpu_mf = cpu_addons.smearing(mol.UHF().density_fit(), sigma=0.1).run()
         cpu_gradient = cpu_mf.nuc_grad_method().kernel()

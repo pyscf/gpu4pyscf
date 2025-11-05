@@ -397,6 +397,8 @@ class KSCF(pbchf.SCF):
     to_ks = NotImplemented
     convert_from_ = NotImplemented
 
+    smearing = pbchf.SCF.smearing
+
     def dump_chk(self, envs):
         mol_hf.SCF.dump_chk(self, envs)
         if self.chkfile:

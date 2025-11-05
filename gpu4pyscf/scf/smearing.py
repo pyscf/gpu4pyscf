@@ -20,7 +20,6 @@ from pyscf.scf import addons as cpu_addons
 from pyscf.scf.addons import (_fermi_smearing_occ, _gaussian_smearing_occ,
                               _get_fermi, _smearing_optimize)
 from pyscf.pbc.tools import print_mo_energy_occ
-from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 
 SMEARING_METHOD = getattr(__config__, "pbc_scf_addons_smearing_method", "fermi")
@@ -101,7 +100,7 @@ class _SmearingSCF:
 
     def get_occ(self, mo_energy=None, mo_coeff=None):
         """Label the occupancies for each orbital"""
-
+        from gpu4pyscf import scf
         if (self.sigma == 0) or (not self.sigma) or (not self.smearing_method):
             mo_occ = super().get_occ(mo_energy, mo_coeff)
             return mo_occ
@@ -243,3 +242,8 @@ class _SmearingSCF:
                 self.e_zero,
             )
         return e_tot
+
+    def to_cpu(self):
+        from pyscf.scf.addons import smearing
+        return smearing(self.undo_smearing().to_cpu(), self.sigma,
+                        self.smearing_method, self.mu0, self.fix_spin,

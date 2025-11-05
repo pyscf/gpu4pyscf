@@ -28,6 +28,7 @@ from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot)
 from gpu4pyscf.scf import diis, jk, j_engine
+from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 
@@ -718,6 +719,8 @@ class SCF(pyscf_lib.StreamObject):
     canonicalize             = NotImplemented
     mulliken_pop             = NotImplemented
     mulliken_meta            = NotImplemented
+
+    smearing = smearing
 
     def init_guess_by_minao(self, mol=None):
         if mol is None: mol = self.mol

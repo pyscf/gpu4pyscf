@@ -18,18 +18,18 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger
-from gpu4pyscf.scf import addons as mol_addons
+from gpu4pyscf.scf import smearing as mol_smearing
 from gpu4pyscf.lib.cupy_helper import contract
 
-SMEARING_METHOD = mol_addons.SMEARING_METHOD
+SMEARING_METHOD = mol_smearing.SMEARING_METHOD
 
-def smearing(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
+def smearing(mf, sigma=None, method=None, mu0=None, fix_spin=False):
     '''Fermi-Dirac or Gaussian smearing'''
     from gpu4pyscf.pbc.scf import khf
     if not isinstance(mf, khf.KSCF):
-        return mol_addons.smearing(mf, sigma, method, mu0, fix_spin)
+        return mol_smearing.smearing(mf, sigma, method, mu0, fix_spin)
 
-    if isinstance(mf, mol_addons._SmearingSCF):
+    if isinstance(mf, mol_smearing._SmearingSCF):
         mf.sigma = sigma
         mf.smearing_method = method
         mf.mu0 = mu0
@@ -38,12 +38,6 @@ def smearing(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
 
     return lib.set_class(_SmearingKSCF(mf, sigma, method, mu0, fix_spin),
                          (_SmearingKSCF, mf.__class__))
-
-def smearing_(mf, *args, **kwargs):
-    mf1 = smearing(mf, *args, **kwargs)
-    mf.__class__ = mf1.__class__
-    mf.__dict__ = mf1.__dict__
-    return mf
 
 def _partition_occ(mo_occ, mo_energy_kpts):
     dims = [e.size for e in mo_energy_kpts]
@@ -58,7 +52,7 @@ def _get_grad_tril(mo_coeff_kpts, mo_occ_kpts, fock):
     grad_kpts = contract('kpi,kpj->kij', mo_coeff_kpts.conj(), fc)
     return grad_kpts[:,i,j].ravel()
 
-class _SmearingKSCF(mol_addons._SmearingSCF):
+class _SmearingKSCF(mol_smearing._SmearingSCF):
     def get_occ(self, mo_energy_kpts=None, mo_coeff_kpts=None):
         '''Label the occupancies for each orbital for sampled k-points.
 
@@ -74,9 +68,9 @@ class _SmearingKSCF(mol_addons._SmearingSCF):
 
         sigma = self.sigma
         if self.smearing_method.lower() == 'fermi':
-            f_occ = mol_addons._fermi_smearing_occ
+            f_occ = mol_smearing._fermi_smearing_occ
         else:
-            f_occ = mol_addons._gaussian_smearing_occ
+            f_occ = mol_smearing._gaussian_smearing_occ
 
         kpts = getattr(self, 'kpts', None)
         if isinstance(kpts, KPoints):
@@ -89,8 +83,8 @@ class _SmearingKSCF(mol_addons._SmearingSCF):
             mo_es = mo_energy_kpts.reshape(2, -1)
             nocc = self.nelec
             if self.mu0 is None:
-                mu_a, occa = mol_addons._smearing_optimize(f_occ, mo_es[0], nocc[0], sigma)
-                mu_b, occb = mol_addons._smearing_optimize(f_occ, mo_es[1], nocc[1], sigma)
+                mu_a, occa = mol_smearing._smearing_optimize(f_occ, mo_es[0], nocc[0], sigma)
+                mu_b, occb = mol_smearing._smearing_optimize(f_occ, mo_es[1], nocc[1], sigma)
             else:
                 if np.isscalar(self.mu0):
                     mu_a = mu_b = self.mu0
@@ -107,8 +101,8 @@ class _SmearingKSCF(mol_addons._SmearingSCF):
             self.entropy /= nkpts
 
             if self.verbose >= logger.INFO:
-                fermi = (mol_addons._get_fermi(mo_es[0], nocc[0]),
-                         mol_addons._get_fermi(mo_es[1], nocc[1]))
+                fermi = (mol_smearing._get_fermi(mo_es[0], nocc[0]),
+                         mol_smearing._get_fermi(mo_es[1], nocc[1]))
                 logger.debug(self, '    Alpha-spin Fermi level %g  Sum mo_occ_kpts = %s  should equal nelec = %s',
                              fermi[0], mo_occs[0].sum(), nocc[0])
                 logger.debug(self, '    Beta-spin  Fermi level %g  Sum mo_occ_kpts = %s  should equal nelec = %s',
@@ -127,7 +121,7 @@ class _SmearingKSCF(mol_addons._SmearingSCF):
                 nocc = (nelectron + 1) // 2
 
             if self.mu0 is None:
-                mu, mo_occs = mol_addons._smearing_optimize(f_occ, mo_es, nocc, sigma)
+                mu, mo_occs = mol_smearing._smearing_optimize(f_occ, mo_es, nocc, sigma)
             else:
                 # If mu0 is given, fix mu instead of electron number. XXX -Chong Sun
                 mu = self.mu0
@@ -139,7 +133,7 @@ class _SmearingKSCF(mol_addons._SmearingSCF):
                 self.entropy *= 2
 
             if self.verbose >= logger.INFO:
-                fermi = mol_addons._get_fermi(mo_es, nocc)
+                fermi = mol_smearing._get_fermi(mo_es, nocc)
                 logger.debug(self, '    Fermi level %g  Sum mo_occ_kpts = %s  should equal nelec = %s',
                              fermi, mo_occs.sum(), nelectron)
                 logger.info(self, '    sigma = %g  Optimized mu = %.12g  entropy = %.12g',
@@ -168,3 +162,8 @@ class _SmearingKSCF(mol_addons._SmearingSCF):
             return cp.hstack((ga, gb))
         else: # rhf and ghf
             return _get_grad_tril(mo_coeff_kpts, mo_occ_kpts, fock)
+
+    def to_cpu(self):
+        from pyscf.pbc.scf.addons import smearing
+        return smearing(self.undo_smearing().to_cpu(), self.sigma,
+                        self.smearing_method, self.mu0, self.fix_spin,
