@@ -29,6 +29,7 @@ from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.scf.smearing import smearing
 
 def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     '''Get energy bands at the given (arbitrary) 'band' k-points.
@@ -285,6 +286,7 @@ class SCF(mol_hf.SCF):
     spin_square = NotImplemented
     dip_moment = NotImplemented
     Gradients = NotImplemented
+    smearing = smearing
 
     def nuc_grad_method(self):
         return self.Gradients()

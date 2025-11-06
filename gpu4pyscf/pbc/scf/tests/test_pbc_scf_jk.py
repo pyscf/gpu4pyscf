@@ -14,8 +14,8 @@
 
 import numpy as np
 import numpy as cp
-import pyscf
 from packaging.version import Version
+import pyscf
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from pyscf.pbc.df import fft as fft_cpu

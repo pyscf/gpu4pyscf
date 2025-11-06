@@ -28,6 +28,7 @@ from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot)
 from gpu4pyscf.scf import diis, jk, j_engine
+from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 
@@ -260,8 +261,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('veff', *t1)
 
         fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         e_tot = mf.energy_tot(dm, h1e, vhf)
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer(f'cycle={cycle+1}', *t0)
@@ -718,6 +719,8 @@ class SCF(pyscf_lib.StreamObject):
     canonicalize             = NotImplemented
     mulliken_pop             = NotImplemented
     mulliken_meta            = NotImplemented
+
+    smearing = smearing
 
     def init_guess_by_minao(self, mol=None):
         if mol is None: mol = self.mol
