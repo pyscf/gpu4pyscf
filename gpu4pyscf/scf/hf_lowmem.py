@@ -146,7 +146,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     else:
         log.warn("SCF failed to converge")
 
-    if scf_conv and abs(mf.level_shift) > 0:
+    if scf_conv and mf.level_shift is not None:
         # An extra diagonalization, to remove level shift
         s1e = asarray(mf.get_ovlp(mol))
         fock = mf.get_fock(h1e, s1e, vhf)
@@ -348,7 +348,7 @@ class RHF(hf.RHF):
             f = diis.update(s1e, dm, f)
             cp.get_default_memory_pool().free_all_blocks()
 
-        if abs(level_shift_factor) > 1e-4:
+        if level_shift_factor is not None:
             dm_vir, dm = dm, None
             #:f = hf.level_shift(s1e, dm*.5, f, level_shift_factor)
             dm_vir = s1e.dot(dm_vir)

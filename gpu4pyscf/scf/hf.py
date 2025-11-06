@@ -161,7 +161,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if diis is not None and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f)
 
-    if abs(level_shift_factor) > 1e-4:
+    if level_shift_factor is not None:
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
     return f
 
@@ -280,7 +280,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     else:
         log.warn("SCF failed to converge")
 
-    if scf_conv and abs(mf.level_shift) > 0:
+    if scf_conv and mf.level_shift is not None:
         # An extra diagonalization, to remove level shift
         mo_energy, mo_coeff = mf.eig(fock, s1e)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
@@ -580,7 +580,7 @@ class SCF(pyscf_lib.StreamObject):
     diis_file           = hf_cpu.SCF.diis_file
     diis_space_rollback = hf_cpu.SCF.diis_space_rollback
     damp                = hf_cpu.SCF.damp
-    level_shift         = hf_cpu.SCF.level_shift
+    level_shift         = None
     direct_scf          = hf_cpu.SCF.direct_scf
     direct_scf_tol      = hf_cpu.SCF.direct_scf_tol
     conv_check          = hf_cpu.SCF.conv_check
