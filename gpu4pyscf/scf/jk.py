@@ -543,6 +543,7 @@ class _VHFOpt:
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms) # transfer to current device
@@ -707,6 +708,7 @@ class _VHFOpt:
 
         def proc(dm_xyz, dm_cond):
             device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dm_xyz = asarray(dm_xyz) # transfer to current device
