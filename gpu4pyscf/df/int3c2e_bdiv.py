@@ -187,8 +187,6 @@ class Int3c2eOpt:
                     cp.arange(jsh0, jsh1, dtype=np.int32))
             idx = t_ij[mask[ish0:ish1,jsh0:jsh1]]
             nshl_pair = idx.size
-            if nshl_pair == 0:
-                continue
             shl_pair_idx.append(idx)
             nfi = (li + 1) * (li + 2) // 2
             nfj = (lj + 1) * (lj + 2) // 2
@@ -496,6 +494,8 @@ class Int3c2eOpt:
         p0 = p1 = 0
         for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
             nshl_pair = bas_ij_idx.size
+            if nshl_pair == 0:
+                continue
             ci = c2s[i]
             cj = c2s[j]
             nfi, di = ci.shape

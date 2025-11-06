@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -198,8 +198,11 @@ H  -5.8042 -1.0067 12.1503
     dm = np.eye(mol.nao)
     ref = jk.get_jk(mol, dm)[0].get()
 
-    vj = j_engine.get_j(mol, dm)
-    vj1 = vj.get()
+    vj1 = j_engine.get_j(mol, dm).get()
+    assert abs(vj1 - ref).max() < 1e-9
+
+    dm = np.array([dm, dm])
+    vj1 = j_engine.get_j(mol, dm).get()
     assert abs(vj1 - ref).max() < 1e-9
 
     mol.cart = True
@@ -207,8 +210,7 @@ H  -5.8042 -1.0067 12.1503
     dm = np.eye(mol.nao)
     ref = jk.get_jk(mol, dm)[0].get()
 
-    vj = j_engine.get_j(mol, dm)
-    vj1 = vj.get()
+    vj1 = j_engine.get_j(mol, dm).get()
     assert abs(vj1 - ref).max() < 1e-9
 
 def test_general_contraction():

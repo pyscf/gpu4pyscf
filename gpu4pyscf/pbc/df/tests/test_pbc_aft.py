@@ -14,12 +14,15 @@
 
 import unittest
 import numpy as np
+import pyscf
 from pyscf import lib
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import aft as aft_cpu, aft_jk as aft_jk_cpu
+from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
+from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.lib.cupy_helper import tag_array
-
+from packaging import version
 
 def setUpModule():
     global cell, cell1, kpts
@@ -46,23 +49,23 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_aft_get_pp(self):
-        ref = aft_cpu.AFTDF(cell, kpts[0]).get_pp()
-        v1 = aft.AFTDF(cell, kpts[0]).get_pp().get()
+        ref = aft_cpu.AFTDF(cell).get_pp(kpts=kpts[0])
+        v1 = aft.AFTDF(cell).get_pp(kpts=kpts[0]).get()
         assert abs(v1 - ref).max() < 1e-9
 
         kpts4 = cell.make_kpts([4,1,1])
-        ref = aft_cpu.AFTDF(cell, kpts4).get_pp()
-        v1 = aft.AFTDF(cell, kpts4).get_pp().get()
+        ref = aft_cpu.AFTDF(cell).get_pp(kpts=kpts4)
+        v1 = aft.AFTDF(cell).get_pp(kpts=kpts4).get()
         assert abs(v1 - ref).max() < 1e-9
 
     def test_aft_get_nuc(self):
-        ref = aft_cpu.AFTDF(cell, kpts[0]).get_nuc()
-        v1 = aft.AFTDF(cell, kpts[0]).get_nuc().get()
+        ref = aft_cpu.AFTDF(cell).get_nuc(kpts=kpts[0])
+        v1 = aft.AFTDF(cell).get_nuc(kpts=kpts[0]).get()
         assert abs(v1 - ref).max() < 1e-9
 
         kpts4 = cell.make_kpts([4,1,1])
-        ref = aft_cpu.AFTDF(cell, kpts4).get_nuc()
-        v1 = aft.AFTDF(cell, kpts4).get_nuc().get()
+        ref = aft_cpu.AFTDF(cell).get_nuc(kpts=kpts4)
+        v1 = aft.AFTDF(cell).get_nuc(kpts=kpts4).get()
         assert abs(v1 - ref).max() < 1e-9
 
     def test_jk(self):
@@ -110,15 +113,15 @@ class KnownValues(unittest.TestCase):
         kpts = np.random.random((4,3))
         nkpts = len(kpts)
         mesh = [11]*3
-        mydf0 = aft_cpu.AFTDF(cell, kpts=kpts).set(mesh=mesh)
-        mydf  = aft.AFTDF(cell, kpts=kpts).set(mesh=mesh)
+        mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
+        mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
         nao = cell.nao
         np.random.seed(12)
         dm = np.random.random((nkpts,nao,nao))
         dm = dm + dm.transpose(0,2,1)
-        jref = mydf0.get_jk(dm, with_k=False)[0]
-        vj = mydf.get_jk(dm, with_k=False)[0]
+        jref = mydf0.get_jk(dm, kpts=kpts, with_k=False)[0]
+        vj = mydf.get_jk(dm, kpts=kpts, with_k=False)[0]
         assert abs(vj.get() - jref).max() < 1e-9
 
     def test_aft_k(self):
@@ -132,14 +135,14 @@ class KnownValues(unittest.TestCase):
                                   [ .25, .25, .25]])
         nkpts = len(kpts)
         mesh = [11]*3
-        mydf0 = aft_cpu.AFTDF(cell, kpts=kpts).set(mesh=mesh)
-        mydf  = aft.AFTDF(cell, kpts=kpts).set(mesh=mesh)
+        mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
+        mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
         nao = cell.nao
         np.random.seed(12)
         dm = np.random.random((nkpts,nao,nao))
-        kref = mydf0.get_jk(dm, hermi=0, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=0, with_j=False)[1]
+        kref = mydf0.get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
 
     def test_aft_k1(self):
@@ -153,23 +156,23 @@ class KnownValues(unittest.TestCase):
                                   [ .25, .25, .25]])
         nkpts = len(kpts)
         mesh = [11]*3
-        mydf0 = aft_cpu.AFTDF(cell, kpts=kpts).set(mesh=mesh)
-        mydf  = aft.AFTDF(cell, kpts=kpts).set(mesh=mesh)
+        mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
+        mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
         nao = cell.nao
         np.random.seed(12)
         dm = np.random.random((nkpts,nao,nao))
         dm = dm + dm.transpose(0,2,1)
-        kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
 
     def test_aft_k2(self):
         kpts = cell.make_kpts([2,1,1])
         nkpts = len(kpts)
         mesh = [11]*3
-        mydf0 = aft_cpu.AFTDF(cell, kpts=kpts).set(mesh=mesh)
-        mydf  = aft.AFTDF(cell, kpts=kpts).set(mesh=mesh)
+        mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
+        mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
         nao = cell.nao
         np.random.seed(12)
@@ -178,18 +181,22 @@ class KnownValues(unittest.TestCase):
               np.random.random((nkpts,nao,nocc))*1j)
         mo_occ = np.ones((nkpts,nocc))
         dm = np.random.rand(nkpts, nao, nao)
-        dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
+        dm = dm + dm.transpose(0,2,1)
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        assert abs(vk.get() - kref).max() < 1e-9
 
-        kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
+        dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
 
     def test_aft_k3(self):
         kpts = cell.make_kpts([6,1,1])
         nkpts = len(kpts)
         mesh = [11]*3
-        mydf0 = aft_cpu.AFTDF(cell, kpts=kpts).set(mesh=mesh)
-        mydf  = aft.AFTDF(cell, kpts=kpts).set(mesh=mesh)
+        mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
+        mydf  = aft.AFTDF(cell).set(mesh=mesh)
         mydf0.k_conj_symmetry = False
         mydf.k_conj_symmetry = False
 
@@ -200,11 +207,160 @@ class KnownValues(unittest.TestCase):
               np.random.random((nkpts,nao,nocc))*1j)
         mo_occ = np.ones((nkpts,nocc))
         dm = np.random.rand(nkpts, nao, nao)
-        dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
-
-        kref = mydf0.get_jk(dm, hermi=1, with_j=False)[1]
-        vk = mydf.get_jk(dm, hermi=1, with_j=False)[1]
+        dm = dm + dm.transpose(0,2,1)
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         assert abs(vk.get() - kref).max() < 1e-9
+
+        dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
+        kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
+        assert abs(vk.get() - kref).max() < 1e-9
+
+    def test_ej_ip1_gamma_point(self):
+        cell = pgto.M(
+            atom = '''
+            O   0.000    0.    0.1174
+            H   1.757    0.    0.4696
+            H   0.757    0.    0.4696
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        np.random.seed(9)
+        nao = cell.nao
+        dm = np.random.rand(2, nao, nao) * .5
+        dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
+        mydf = aft.AFTDF(cell)
+        ej = aft_jk.get_ej_ip1(mydf, dm)
+        assert abs(ej.sum(axis=0)).max() < 1e-8
+
+        cell.precision = 1e-10
+        cell.build(0, 0)
+        dm = dm[0] + dm[1]
+        vj = fft_cpu.FFTDF(cell).get_j_e1(dm)
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xpq,qp->x', vj[:,p0:p1], dm[:,p0:p1])
+        assert abs(ej - ref).max() < 1e-8
+
+    def test_ej_ip1_kpts(self):
+        cell = pgto.M(
+            atom = '''
+            O   0.000    0.    0.1174
+            H   1.757    0.    0.4696
+            H   0.757    0.    0.4696
+            C   1.      1.    0.
+            H   0.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        kpts = cell.make_kpts([3,2,1])
+        dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        mydf = aft.AFTDF(cell)
+        ej = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+        assert abs(ej.sum(axis=0)).max() < 1e-8
+
+        cell.precision = 1e-10
+        cell.build(0, 0)
+        vj = fft_cpu.FFTDF(cell).get_j_e1(dm, kpts=kpts)
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
+        assert abs(ej - ref).max() < 1e-8
+
+    def test_ek_ip1_gamma_point(self):
+        cell = pgto.M(
+            atom = '''
+            O   0.000    0.    0.1174
+            H   1.757    0.    0.4696
+            H   0.757    0.    0.4696
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        np.random.seed(9)
+        nao = cell.nao
+        dm = np.random.rand(2, nao, nao) * .5
+        dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
+        myaft = aft.AFTDF(cell)
+        ek = aft_jk.get_ek_ip1(myaft, dm)
+        assert abs(ek.sum(axis=0)).max() < 1e-8
+
+        if version.parse(pyscf.__version__) > version.parse('2.11.0'):
+            ek_ewald = aft_jk.get_ek_ip1(myaft, dm, exxdiv='ewald')
+            assert abs(ek_ewald.sum(axis=0)).max() < 1e-8
+
+        cell.precision = 1e-10
+        cell.build(0, 0)
+        myfft = fft_cpu.FFTDF(cell)
+        vk = myfft.get_k_e1(dm)
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
+        assert abs(ek - ref).max() < 1e-8
+
+        if version.parse(pyscf.__version__) > version.parse('2.11.0'):
+            vk = myfft.get_k_e1(dm, exxdiv='ewald')
+            for i in range(cell.natm):
+                p0, p1 = aoslices[i, 2:]
+                ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
+            assert abs(ek_ewald - ref).max() < 1e-8
+
+    def test_ek_ip1_kpts(self):
+        cell = pgto.M(
+            atom = '''
+            O   0.000    0.    0.1174
+            H   1.757    0.    0.4696
+            H   0.757    0.    0.4696
+            C   1.      1.    0.
+            H   0.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        kpts = cell.make_kpts([3,2,1])
+        dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        myaft = aft.AFTDF(cell)
+        ek = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts)
+        assert abs(ek.sum(axis=0)).max() < 1e-8
+
+        if version.parse(pyscf.__version__) > version.parse('2.11.0'):
+            ek_ewald = aft_jk.get_ek_ip1(myaft, dm, kpts=kpts, exxdiv='ewald')
+            assert abs(ek_ewald.sum(axis=0)).max() < 1e-8
+
+        cell.precision = 1e-10
+        cell.build(0, 0)
+        myfft = fft_cpu.FFTDF(cell)
+        vk = myfft.get_k_e1(dm, kpts=kpts)
+        aoslices = cell.aoslice_by_atom()
+        ref = np.empty((cell.natm, 3))
+        for i in range(cell.natm):
+            p0, p1 = aoslices[i, 2:]
+            ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
+        assert abs(ek - ref).max() < 1e-8
+
+        if version.parse(pyscf.__version__) > version.parse('2.11.0'):
+            vk = myfft.get_k_e1(dm, kpts=kpts, exxdiv='ewald')
+            for i in range(cell.natm):
+                p0, p1 = aoslices[i, 2:]
+                ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
+            assert abs(ek_ewald - ref).max() < 1e-8
 
 if __name__ == '__main__':
     print("Full Tests for aft")

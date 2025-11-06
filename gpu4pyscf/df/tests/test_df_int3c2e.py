@@ -159,7 +159,7 @@ def test_contract_int3c2e():
         H   0.757    4.   -0.4696
         C   1.      1.    0.
         ''',
-        basis=('ccpvtz', [[1, [3.7, 1]], [1, [2., 1]], [1, [.8, 1]]])
+        basis=('ccpvtz', [[1, [3.7, 1, .1]], [1, [2., .5, .3]], [1, [.8, .5, .8]]])
     )
     auxmol = mol.copy()
     auxmol.basis = ('weigend', [[3, [2, 1, .5], [1, .2, 1]]])
@@ -178,3 +178,33 @@ def test_contract_int3c2e():
     dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
     ref = np.einsum('ijP,P->ij', eri3c, auxvec)
     assert abs(dat.get() - ref).max() < 1e-9
+
+# issue 540
+def test_int3c2e_sparse1():
+    mol = pyscf.M(
+        atom='C 1. 1. 0.; O 8. 0. 0.',
+        basis={
+            'C': [[0, [1e4, -.2], [1e3, .8]],
+                  [0, [10., 1]]],
+            'O': [[0, [1e4, -.2], [3e3, .2], [1e3, .8]],
+                  [0, [10., 1]]],},
+    )
+    dat = int3c2e_bdiv.aux_e2(mol, mol)
+    ref = incore.aux_e2(mol, mol)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, mol).build()
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
+    nao = mol.nao
+    i, j = divmod(ao_pair_mapping, nao)
+    coeff = cp.asarray(int3c2e_opt.coeff)
+    aux_coeff = cp.asarray(int3c2e_opt.coeff)
+    for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator():
+        eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+        dat = cp.zeros((nao*nao, nao))
+        dat[i*nao+j] = dat[j*nao+i] = eri3c_batch
+        dat = dat.reshape(nao,nao,nao)
+        dat = contract('pqr,rk->pqk', dat, aux_coeff)
+        dat = contract('pqk,qj->pjk', dat, coeff)
+        dat = contract('pjk,pi->ijk', dat, coeff)
+        assert abs(dat.get() - ref).max() < 1e-9

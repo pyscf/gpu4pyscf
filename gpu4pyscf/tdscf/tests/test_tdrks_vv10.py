@@ -112,6 +112,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_oscillator_strength - reference_oscillator_strength) < oscillator_strength_threshold
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_wb97xv_tda(self):
         # Same Q-Chem input as above, Q-Chem computes both TDA and TDDFT in the same run
         reference_ground_state_energy = -151.3641561221

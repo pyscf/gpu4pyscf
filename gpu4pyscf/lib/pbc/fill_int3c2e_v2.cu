@@ -26,9 +26,9 @@
 #define GOUT_WIDTH      54
 #define PAGE_SIZE       30
 #define REMOTE_THRESHOLD 50
-#define PAGES_PER_BLOCK  524288
-// approximately, 4000 images in each ijk shell triplet for 256 threads
-#define KTASKS_PER_BLOCK 16
+#define PAGES_PER_BLOCK  1048576
+// approximately, 15000 images in each ijk shell triplet for 256 threads
+#define KTASKS_PER_BLOCK 8
 
 typedef struct {
     int pair_ij;
@@ -43,8 +43,6 @@ __device__ __forceinline__ unsigned get_smid() {
     asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
     return smid;
 }
-
-#define allocate_page() (page_pool + atomicAdd(&num_pages, 1))
 
 __device__ __forceinline__
 void _filter_images(int& num_pages, // is stored in shm
@@ -163,7 +161,12 @@ void _filter_images(int& num_pages, // is stored in shm
                         if (page != NULL) {
                             page->nimgs = PAGE_SIZE;
                         }
-                        page = allocate_page();
+                        int page_offset = atomicAdd(&num_pages, 1);
+                        if (page_offset >= PAGES_PER_BLOCK) {
+                            printf("Page overflow\n");
+                            __trap();
+                        }
+                        page = page_pool + page_offset;
                         page->pair_ij = pair_ij;
                         page->ksh = ksh;
                         counts = 0;
@@ -204,7 +207,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
     int nksh_per_block = k_per_block * KTASKS_PER_BLOCK;
     int kcount0 = ksh_block_id * nksh_per_block;
     int kcount1 = min(ncells*bounds.nksh, kcount0 + nksh_per_block);
-    int nimgs = envs.nimgs;
 
     int li = bounds.li;
     int lj = bounds.lj;
@@ -248,7 +250,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                    kcount0, kcount1, log_cutoff);
     __syncthreads();
     if (num_pages >= PAGES_PER_BLOCK) {
-        printf("Page overflow\n");
         __trap();
     }
     __shared__ int img_max;
@@ -271,47 +272,41 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
             atomicMax(&img_max, img_counts);
         }
 
-        int bas_ij = bounds.bas_ij_idx[page->pair_ij];
-        int ish = bas_ij / nbas;
-        int jsh = bas_ij % nbas;
-        int ksh = page->ksh;
-        double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
-        double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
-        double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
-        double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
-        double aij = ai + aj;
-        double aj_aij = aj / aij;
-        double theta_ij = ai * aj_aij;
-        double cicj = ci * cj;
-        if (page_id < num_pages) {
-            img_counts = page->nimgs;
-        } else {
-            cicj = 0;
-            img_counts = 0;
-        }
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         for (int gout_start = 0; gout_start < nfij*nfk; gout_start+=gout_stride*GOUT_WIDTH) {
             __syncthreads();
+            int bas_ij = bounds.bas_ij_idx[page->pair_ij];
+            int ish = bas_ij / nbas;
+            int jsh = bas_ij % nbas;
+            int ksh = page->ksh;
+            double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
+            double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
+            double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
+            double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+            double aij = ai + aj;
+            double aj_aij = aj / aij;
+            double theta_ij = ai * aj_aij;
+            double cicj = ci * cj;
+            double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+            double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             if (gout_id == 0) {
                 gy[0] = PI_FAC * cicj;
             }
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
+            int img_counts = page->nimgs;
             for (int img = 0; img < img_max; ++img) {
                 __syncthreads();
-                int img_j = page->img_j[img];
-                int img_k = page->img_k[img];
-                if (img >= img_counts) {
-                    img_j = page->img_j[nimgs-1];
-                    img_k = page->img_k[nimgs-1];
-                    if (gout_id == 0) {
-                        gy[0] = 0.;
-                    }
+                int img_j = 0;
+                int img_k = 0;
+                if (page_id < num_pages && img < img_counts) {
+                    img_j = page->img_j[img];
+                    img_k = page->img_k[img];
+                } else if (gout_id == 0) {
+                    gy[0] = 0.;
                 }
                 double xjL = img_coords[img_j*3+0];
                 double yjL = img_coords[img_j*3+1];

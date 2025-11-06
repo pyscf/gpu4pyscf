@@ -74,6 +74,9 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     nmo = mo_energy.size
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
+    if nocc > nmo:
+        raise RuntimeError('Failed to assign occupancies. '
+                           f'Nocc ({nocc}) > Nmo ({nmo})')
     mo_occ[e_idx[:nocc]] = 2
     if mf.verbose >= logger.INFO and nocc < nmo:
         homo = float(mo_energy[e_idx[nocc-1]])
@@ -170,8 +173,8 @@ def energy_elec(self, dm=None, h1e=None, vhf=None):
     if vhf is None: vhf = self.get_veff(self.mol, dm)
     e1 = cupy.einsum('ij,ji->', h1e, dm).real
     e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
-    e1 = e1.get()[()]
-    e_coul = e_coul.get()[()]
+    e1 = float(e1.get())
+    e_coul = float(e_coul.get())
     self.scf_summary['e1'] = e1
     self.scf_summary['e2'] = e_coul
     logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
@@ -581,8 +584,16 @@ class SCF(pyscf_lib.StreamObject):
     direct_scf_tol      = hf_cpu.SCF.direct_scf_tol
     conv_check          = hf_cpu.SCF.conv_check
     callback            = hf_cpu.SCF.callback
-    _keys               = hf_cpu.SCF._keys
-    overlap_canonical_decomposed_x = None
+
+    _keys = {
+        'conv_tol', 'conv_tol_grad', 'conv_tol_cpscf', 'max_cycle', 'init_guess',
+        'sap_basis', 'DIIS', 'diis', 'diis_space', 'diis_damp', 'diis_start_cycle',
+        'diis_file', 'diis_space_rollback', 'damp', 'level_shift',
+        'direct_scf', 'direct_scf_tol', 'conv_check', 'callback',
+        'mol', 'chkfile', 'mo_energy', 'mo_coeff', 'mo_occ',
+        'e_tot', 'converged', 'cycles', 'scf_summary',
+        'disp', 'disp_with_3body', 'overlap_canonical_decomposed_x'
+    }
 
     # methods
     def __init__(self, mol):
@@ -605,12 +616,14 @@ class SCF(pyscf_lib.StreamObject):
         self.converged = False
         self.scf_summary = {}
 
+        self.overlap_canonical_decomposed_x = None
         self._opt_gpu = {None: None}
         self._opt_jengine = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
-        excludes=('_opt_gpu', '_eri', '_numint'))
+        excludes=('_opt_gpu', '_eri', '_numint', '_opt_jengine',
+                  'overlap_canonical_decomposed_x'))
 
     def check_sanity(self):
         s1e = self.get_ovlp()
@@ -672,7 +685,7 @@ class SCF(pyscf_lib.StreamObject):
     from_chk                 = hf_cpu.SCF.from_chk
     get_init_guess           = return_cupy_array(hf_cpu.SCF.get_init_guess)
     make_rdm2                = NotImplemented
-    energy_elec              = energy_elec
+    energy_elec              = NotImplemented
     energy_tot               = energy_tot
     energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
@@ -763,10 +776,10 @@ class SCF(pyscf_lib.StreamObject):
     def get_j(self, mol, dm, hermi=1, omega=None):
         if omega is None:
             omega = mol.omega
-        if omega not in self._opt_jengine:
+        jopt = self._opt_jengine.get(omega)
+        if jopt is None:
             jopt = j_engine._VHFOpt(mol, self.direct_scf_tol).build()
             self._opt_jengine[omega] = jopt
-        jopt = self._opt_jengine[omega]
         vj = j_engine.get_j(mol, dm, hermi, jopt)
         if not isinstance(dm, cupy.ndarray):
             vj = vj.get()
@@ -812,20 +825,7 @@ class RHF(SCF):
                         'It is recommended to use the scf.LRHF or dft.LRKS class for this system.')
         return SCF.check_sanity(self)
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        '''
-        electronic energy
-        '''
-        if dm is None: dm = self.make_rdm1()
-        if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.mol, dm)
-        assert dm.dtype == np.float64
-        e1 = float(h1e.ravel().dot(dm.ravel()))
-        e_coul = float(vhf.ravel().dot(dm.ravel())) * .5
-        self.scf_summary['e1'] = e1
-        self.scf_summary['e2'] = e_coul
-        logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-        return e1+e_coul, e_coul
+    energy_elec = energy_elec
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rhf

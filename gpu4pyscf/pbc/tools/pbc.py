@@ -14,9 +14,10 @@
 
 import numpy as np
 import cupy as cp
-import pyscf
+from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
+from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):
@@ -159,7 +160,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             range-separated JK builder and range-separated DF (and other
             range-separated integral methods if any).
     '''
-    from pyscf.pbc.tools.pbc import get_coulG, madelung
+    from pyscf.pbc.tools.pbc import get_coulG
     exxdiv = exx
     if isinstance(exx, str):
         exxdiv = exx
@@ -207,7 +208,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             coulG[0] = np.pi / _omega**2
         return coulG
 
-    if abs(k).sum() > 1e-9:
+    is_gamma_point = k is None or abs(k).sum() < 1e-9
+    if not is_gamma_point:
         if wrap_around:
             kG = _Gv_wrap_around(cell, Gv, k, mesh)
         else:
@@ -217,7 +219,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
 
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0
-    if abs(k).sum() > 1e-9:
+    if not is_gamma_point:
         G0_idx = None
 
     # Ewald probe charge method to get the leading term of the finite size
@@ -276,8 +278,20 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             Nk = len(kpts)
         else:
             Nk = 1
-        if omega is None: # Affects DFT-RSH
+        if omega is None or omega == 0:
             coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
-        else: # for RangeSeparatedJKBuilder
-            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega=0)
+        else: # G=0 term should be handled separately in RSGDF and RSJK
+            raise NotImplementedError(f'exx=ewald for omega={omega}')
     return coulG
+
+def probe_charge_sr_coulomb(cell, omega, kpts=None):
+    if kpts is None:
+        kmesh = np.array([1, 1, 1])
+    else:
+        kmesh = get_monkhorst_pack_size(cell, kpts)
+    rcut = (-np.log(cell.precision*1e-3)/omega**2)**.5
+    Ls = cell.get_lattice_Ls(rcut=rcut) * kmesh
+    r = np.linalg.norm(Ls, axis=1)
+    r = r[(r > 1e-10) & (omega * r < 7)]
+    ewovrl = .5 * (erfc(omega * r) / r).sum()
+    return 2 * ewovrl * np.prod(kmesh)

@@ -153,7 +153,7 @@ class _Int1eOpt:
             nsp_per_block = _estimate_shl_pairs_per_block(li, lj, nshl_pair)
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
 
-        shl_pair_offsets.append(np.array([sp1], dtype=np.int32))
+        shl_pair_offsets.append(np.int32(sp1))
         shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
         bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
         return bas_ij_idx, shl_pair_offsets

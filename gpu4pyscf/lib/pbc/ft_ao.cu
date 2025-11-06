@@ -57,7 +57,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
 
     int li = bounds.li;
     int lj = bounds.lj;
-    int nfij = bounds.nfij;
+    int nfij = bounds.nfi * bounds.nfj;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int ijprim = iprim * jprim;
@@ -373,7 +373,7 @@ void overlap_img_counts_kernel(int *img_counts, int ish0, int jsh0, int nish, in
         float drj = fi * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-        float estimator = dri_fac + drj_fac + theta_ij_rr;
+        float estimator = dri_fac + drj_fac - theta_ij_rr;
         if (estimator > log_cutoff) {
             counts++;
         }
@@ -448,7 +448,7 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         float drj = fi * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-        float estimator = dri_fac + drj_fac + theta_ij_rr;
+        float estimator = dri_fac + drj_fac - theta_ij_rr;
         if (estimator > log_cutoff) {
             img_idx[counts] = img;
             counts++;
@@ -498,7 +498,7 @@ int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         *envs, exps, log_coeff, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in overlap_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

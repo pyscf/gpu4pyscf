@@ -44,11 +44,12 @@ class UHF(pbchf.SCF):
 
     dump_flags = uhf_cpu.UHF.dump_flags
 
-    def get_veff(self, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+    def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
                  kpt=None, kpts_band=None):
         if cell is None: cell = self.cell
         if dm is None: dm = self.make_rdm1()
         if kpt is None: kpt = self.kpt
+
         if isinstance(dm, cp.ndarray) and dm.ndim == 2:
             dm = cp.repeat(dm[None]*.5, 2, axis=0)
         vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
