@@ -227,30 +227,7 @@ H -0.646 -0.464 -0.804
         _check_hess(atom, solvent='toluene')
 
     @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
-    def test_to_gpu(self):
-        import pyscf
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
-        mf.conv_tol = 1e-12
-        mf.conv_tol_cpscf = 1e-7
-        mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
-
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().SMD()
-        mf.conv_tol = 1e-12
-        mf.conv_tol_cpscf = 1e-7
-        mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
-
-    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
-    def test_to_cpu(self):
+    def test_to_gpu_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7
@@ -260,15 +237,22 @@ H -0.646 -0.464 -0.804
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7
         mf.kernel()
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 2
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
     def test_cds(self):
