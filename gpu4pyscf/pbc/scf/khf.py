@@ -469,6 +469,7 @@ class KRHF(KSCF):
                 log.note('%2d (%6.3f %6.3f %6.3f) %2d   %15.9f %15.9f',
                          k, kpt[0], kpt[1], kpt[2], nocc, homo, lumo)
 
+        log.note('**** Population analysis for atoms in the reference cell ****')
         s = self.get_ovlp(kpts=kpts).get()
         dm = self.make_rdm1().get()
         pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
