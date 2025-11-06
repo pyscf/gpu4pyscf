@@ -21,6 +21,7 @@ import numpy as np
 from pyscf import lib
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
 from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
 from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
@@ -75,7 +76,9 @@ def make_hess_object(base_method):
                          (WithSolventHess, vac_hess.__class__), name)
 
 class WithSolventHess:
-    from gpu4pyscf.lib.utils import to_gpu, device
+
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {'de_solvent', 'de_solute', 'de_cds'}
 
@@ -93,8 +96,6 @@ class WithSolventHess:
         return obj
 
     def to_cpu(self):
-        # smd in pyscf reuses the pcm implementation
-        from pyscf.solvent.hessian import pcm  # type: ignore
         hess_method = self.base.to_cpu().Hessian()
         return utils.to_cpu(self, hess_method)
 

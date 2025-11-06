@@ -25,7 +25,7 @@ from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.multi_gpu import num_devices
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
+pyscf_211 = version.parse(pyscf.__version__) <= version.parse('2.11.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order, eps, xc, tol
