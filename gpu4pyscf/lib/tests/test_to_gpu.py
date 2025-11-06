@@ -89,6 +89,7 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).density_fit().run()
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
+        hobj.auxbasis_response = 1
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-4
 
@@ -106,6 +107,7 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
+        hobj.auxbasis_response = 1
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-4
 
@@ -123,10 +125,10 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
+        hobj.auxbasis_response = 1
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.1858589608638384) < 1e-4
 
 if __name__ == "__main__":
     print("Full tests for to_gpu module")
     unittest.main()
-    
