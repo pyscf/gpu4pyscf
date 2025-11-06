@@ -17,6 +17,7 @@ import numpy
 import pyscf
 import pytest
 from pyscf import gto
+from pyscf.lib.parameters import BOHR
 from gpu4pyscf import scf, dft, lib
 from gpu4pyscf.solvent.hessian import smd as smd_hess
 from gpu4pyscf.solvent.grad import smd as smd_grad
@@ -296,7 +297,7 @@ H -0.646 -0.464 -0.804
         mf = mol.RHF().SMD()
         mf.with_solvent.solvent_descriptors = [1.3843, 1.3766, 0.0, 0.45, 35.06, 13.45, 0.0, 0.0]
         g2 = get_cds_grad(mf.with_solvent)
-        assert abs(dat[0,:,2] - ((g2 - g1) / 2e-3 * lib.param.BOHR)).max() < 1e-5
+        assert abs(dat[0,:,2] - ((g2 - g1) / 2e-3 * BOHR)).max() < 1e-5
 
     def test_hess(self):
         mol = gto.M(atom='''
@@ -306,7 +307,7 @@ H -0.646 -0.464 -0.804
                     ''')
         mf = mol.RHF().to_gpu().density_fit().SMD()
         mf.with_solvent.solvent_descriptors = [1.3843, 1.3766, 0.0, 0.45, 35.06, 13.45, 0.0, 0.0]
-        hess = mf.run().Hessian().kernel()
+        hess = mf.run().Hessian().set(auxbasis_response=2).kernel()
 
         mol.set_geom_('''
                     C        0.000000    0.000000   -0.543500
@@ -322,7 +323,7 @@ H -0.646 -0.464 -0.804
         mf = mol.RHF().to_gpu().density_fit().SMD()
         mf.with_solvent.solvent_descriptors = [1.3843, 1.3766, 0.0, 0.45, 35.06, 13.45, 0.0, 0.0]
         g2 = mf.run().Gradients().kernel()
-        assert abs(hess[0,:,2] - ((g2 - g1) / 2e-3 * lib.param.BOHR)).max() < 1e-5
+        assert abs(hess[0,:,2] - ((g2 - g1) / 2e-3 * BOHR)).max() < 1e-5
 
 if __name__ == "__main__":
     print("Full Tests for Hessian of SMD")

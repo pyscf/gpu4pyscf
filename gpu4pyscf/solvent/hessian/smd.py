@@ -93,9 +93,10 @@ class WithSolventHess:
         return obj
 
     def to_cpu(self):
-        from pyscf.solvent.hessian import smd  # type: ignore
+        # smd in pyscf reuses the pcm implementation
+        from pyscf.solvent.hessian import pcm  # type: ignore
         hess_method = self.undo_solvent().to_cpu()
-        return smd.make_hess_object(hess_method)
+        return pcm.make_hess_object(hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         if dm is None:
