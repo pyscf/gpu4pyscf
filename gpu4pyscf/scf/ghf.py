@@ -22,6 +22,15 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array
 from gpu4pyscf.lib import utils
 
+def _from_rhf_init_dm(dma, breaksym=True):
+    dma = dma * .5
+    dm = block_diag(dma, dma)
+    if breaksym:
+        nao = dma.shape[0]
+        idx, idy = cp.diag_indices(nao)
+        dm[idx+nao,idy] = dm[idx,idy+nao] = dma.diagonal() * .05
+    return dm
+
 class GHF(hf.SCF):
     to_gpu = utils.to_gpu
     device = utils.device
@@ -56,7 +65,7 @@ class GHF(hf.SCF):
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         dma = hf.RHF.get_init_guess(self, mol, key, **kwargs)
-        return block_diag(dma, dma)
+        return _from_rhf_init_dm(dma)
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol

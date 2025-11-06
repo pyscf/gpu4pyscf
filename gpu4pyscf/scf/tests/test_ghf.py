@@ -17,6 +17,7 @@ import pyscf
 import numpy
 import cupy as cp
 
+
 def setUpModule():
     global mol, mol1
     mol = pyscf.gto.Mole()
@@ -40,6 +41,7 @@ def setUpModule():
         spin = 1,
         basis = 'cc-pvdz',
         output = '/dev/null')
+
 
 def tearDownModule():
     global mol, mol1
@@ -97,20 +99,23 @@ class KnownValues(unittest.TestCase):
         d_real = d.real
         vj_gpu = mf.get_j(mol, d_real)
         vk_gpu = mf.get_k(mol, d)
-        print("vj_gpu", vj_gpu)
-        print("vk_gpu", vk_gpu)
 
         mf_cpu = mf.to_cpu()
         vj_cpu = mf_cpu.get_j(mol, d_real)
         vk_cpu = mf_cpu.get_k(mol, d)
-        print("vj_cpu", vj_cpu)
-        print("vk_cpu", vk_cpu)
 
         assert numpy.allclose(vj_gpu, vj_cpu)
         assert numpy.allclose(vk_gpu, vk_cpu)
 
-    #def test_ghf_x2c(self):
-    #    pass
+    def test_to_cpu(self):
+        mf = mol.GHF().to_gpu()
+        assert mf.device == 'gpu'
+        e_tot = mf.kernel()
+        mf = mf.to_cpu()
+        assert mf.device == 'cpu'
+        e_ref = mf.kernel()
+        assert abs(e_tot - e_ref) < 1e-5
+
 
 if __name__ == "__main__":
     print("Full Tests for ghf")
