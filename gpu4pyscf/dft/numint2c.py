@@ -20,9 +20,11 @@ import functools
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.dft import numint2c
 from gpu4pyscf.dft import numint, mcfun_gpu
 from gpu4pyscf.dft.numint import _dot_ao_dm, _dot_ao_ao, _scale_ao
 from gpu4pyscf.dft import xc_deriv
+from gpu4pyscf.lib import utils
 from pyscf import __config__
 
 
@@ -382,6 +384,9 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
 class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     '''Numerical integration methods for 2-component basis (used by GKS)'''
     _keys = {'gdftopt'}
+    to_gpu = utils.to_gpu
+    device = utils.device
+
     gdftopt      = None
 
     # collinear schemes:
@@ -446,33 +451,23 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     _gks_mcol_fxc = _gks_mcol_fxc
 
     @lib.with_doc(numint.nr_rks.__doc__)
-    def nr_vxc(self, mol, grids, xc_code, dms, spin=0, relativity=0, hermi=1,
+    def nr_vxc(self, mol, grids, xc_code, dms, relativity=0, hermi=1,
                max_memory=2000, verbose=None):
         if not isinstance(dms, cp.ndarray):
             dms = cp.asarray(dms)
-        if self.collinear[0] in ('m', 'n'):  # mcol or ncol
+        if self.collinear[0] in ('m',):  # mcol or ncol
             opt = getattr(self, 'gdftopt', None)
             if opt is None:
                 self.build(mol, grids.coords)
                 opt = self.gdftopt
-                assert dms.ndim == 2
-                dms = cp.asarray(dms)
-                dms = opt.sort_orbitals_2c(dms, axis=[0,1])
+            assert dms.ndim == 2
+            dms = cp.asarray(dms)
+            dms = opt.sort_orbitals_2c(dms, axis=[0,1])
             n, exc, vmat = self._gks_mcol_vxc(mol, grids, xc_code, dms, relativity,
                                               hermi, max_memory, verbose)
             vmat = opt.unsort_orbitals_2c(vmat, axis=[0,1])
         else:
-            nao = dms.shape[-1] // 2
-            # ground state density is always real
-            dm_a = dms[...,:nao,:nao].real.copy('C')
-            dm_b = dms[...,nao:,nao:].real.copy('C')
-            dm1 = (dm_a, dm_b)
-            ni = self._to_numint1c()
-            n, exc, v = ni.nr_uks(mol, grids, xc_code, dm1, relativity,
-                                  hermi, max_memory, verbose)
-            vmat = cp.zeros_like(dms)
-            vmat[...,:nao,:nao] = v[0]
-            vmat[...,nao:,nao:] = v[1]
+            raise NotImplementedError("Locally collinear and collinear is not implemented")
         return n.sum(), exc, vmat
     get_vxc = nr_gks_vxc = nr_vxc
 
@@ -498,3 +493,7 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     def _to_numint1c(self):
         '''Converts to the associated class to handle collinear systems'''
         return self.view(numint.NumInt)
+    
+    def to_cpu(self):
+        ni = numint2c.NumInt2C()
+        return ni

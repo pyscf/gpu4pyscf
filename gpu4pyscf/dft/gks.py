@@ -19,6 +19,7 @@ from gpu4pyscf.dft import numint2c
 from gpu4pyscf.dft import rks
 from gpu4pyscf.scf.ghf import GHF
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import tag_array
 
 
@@ -65,6 +66,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
         ni = ks._numint
+        if ni.collinear[0].lower() != 'm':
+            raise NotImplementedError('Only multi-colinear GKS is implemented')
         n, exc, vxc = ni.get_vxc(mol, ks.grids, ks.xc, dm,
                                  hermi=hermi, max_memory=max_memory)
         logger.debug(ks, 'nelec by numeric integration = %s', n)
@@ -130,10 +133,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
 
 class GKS(rks.KohnShamDFT, GHF):
-    from gpu4pyscf.lib.utils import to_cpu, to_gpu, device
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     def __init__(self, mol, xc='LDA,VWN'):
-        raise NotImplementedError("GKS is not implemented")
         GHF.__init__(self, mol)
         rks.KohnShamDFT.__init__(self, xc)
         self._numint = numint2c.NumInt2C()
@@ -167,4 +170,8 @@ class GKS(rks.KohnShamDFT, GHF):
     energy_elec = rks.RKS.energy_elec
     nuc_grad_method = NotImplemented
     to_hf = NotImplemented
-
+    
+    def to_cpu(self):
+        mf = gks.GKS(self.mol)
+        utils.to_cpu(self, out=mf)
+        return mf

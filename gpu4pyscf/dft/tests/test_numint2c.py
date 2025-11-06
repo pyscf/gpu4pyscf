@@ -124,14 +124,14 @@ class KnownValues(unittest.TestCase):
         rho_1c_gpu = ni_gpu_1c.get_rho(mol, dm_1c_test.real, grids_gpu)
         self.assertAlmostEqual(abs(rho_gpu.get() - rho_1c_gpu.get()).max(), 0, 10)
 
-
     def test_eval_xc_eff(self):
         ni_gpu = NumInt2C()
         ni_gpu.collinear='m'
         ni_cpu = pyscf_numint2c()
         ni_cpu.collinear='m'
         np.random.seed(1)
-        dm = dm0*1.0 + 0.0j
+        dm = dm0*1.0 + dm0 * 0.1j
+        dm = dm + dm.T.conj()
         for xc_code in (LDA, ):
             ni_gpu.gdftopt = None
             n_gpu, exc_gpu, vmat_gpu = ni_gpu.nr_vxc(mol, grids_gpu, xc_code, dm)
