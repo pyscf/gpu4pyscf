@@ -29,7 +29,7 @@ void _fill_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -39,7 +39,7 @@ void _fill_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float kl_cutoff = cutoff - q_ij;
 
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
-        int bas_kl = pair_kl_mapping[pair_kl];
+        uint32_t bas_kl = pair_kl_mapping[pair_kl];
         int q_kl = q_cond[bas_kl];
         if (q_kl < kl_cutoff) {
             continue;
@@ -72,7 +72,7 @@ void _fill_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -117,7 +117,7 @@ void _fill_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
 {
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *q_cond = bounds.q_cond;
     float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
@@ -156,7 +156,7 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -271,7 +271,7 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -391,7 +391,7 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -502,7 +502,7 @@ void _fill_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -546,7 +546,7 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -662,7 +662,7 @@ static void _fill_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;
@@ -708,7 +708,7 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int threads = blockDim.x * blockDim.y;
     int *bas = envs.bas;
     int nbas = envs.nbas;
-    int *pair_kl_mapping = bounds.pair_kl_mapping;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;
     float *q_cond = bounds.q_cond;

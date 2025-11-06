@@ -66,12 +66,13 @@ class Int3c2eOpt:
         else:
             q_cond = np.empty((nbas,nbas))
             intor = prim_mol._add_suffix('int2e')
-            _vhf.libcvhf.CVHFnr_int2e_q_cond(
-                getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
-                q_cond.ctypes, ao_loc.ctypes,
-                prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
-                prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas),
-                prim_mol._env.ctypes)
+            with prim_mol.with_integral_screen(1e-26):
+                _vhf.libcvhf.CVHFnr_int2e_q_cond(
+                    getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
+                    q_cond.ctypes, ao_loc.ctypes,
+                    prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
+                    prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas),
+                    prim_mol._env.ctypes)
             q_cond = np.log(q_cond + 1e-300).astype(np.float32)
         log.timer('Initialize q_cond', *cput0)
 

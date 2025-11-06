@@ -581,8 +581,16 @@ class SCF(pyscf_lib.StreamObject):
     direct_scf_tol      = hf_cpu.SCF.direct_scf_tol
     conv_check          = hf_cpu.SCF.conv_check
     callback            = hf_cpu.SCF.callback
-    _keys               = hf_cpu.SCF._keys
-    overlap_canonical_decomposed_x = None
+
+    _keys = {
+        'conv_tol', 'conv_tol_grad', 'conv_tol_cpscf', 'max_cycle', 'init_guess',
+        'sap_basis', 'DIIS', 'diis', 'diis_space', 'diis_damp', 'diis_start_cycle',
+        'diis_file', 'diis_space_rollback', 'damp', 'level_shift',
+        'direct_scf', 'direct_scf_tol', 'conv_check', 'callback',
+        'mol', 'chkfile', 'mo_energy', 'mo_coeff', 'mo_occ',
+        'e_tot', 'converged', 'cycles', 'scf_summary',
+        'disp', 'disp_with_3body', 'overlap_canonical_decomposed_x'
+    }
 
     # methods
     def __init__(self, mol):
@@ -605,12 +613,14 @@ class SCF(pyscf_lib.StreamObject):
         self.converged = False
         self.scf_summary = {}
 
+        self.overlap_canonical_decomposed_x = None
         self._opt_gpu = {None: None}
         self._opt_jengine = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
-        excludes=('_opt_gpu', '_eri', '_numint'))
+        excludes=('_opt_gpu', '_eri', '_numint', '_opt_jengine',
+                  'overlap_canonical_decomposed_x'))
 
     def check_sanity(self):
         s1e = self.get_ovlp()

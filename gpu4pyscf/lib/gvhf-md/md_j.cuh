@@ -20,6 +20,9 @@ typedef struct {
     int lj;
     int lk;
     int ll;
+    int lij;
+    int lkl;
+    int order;
     int nf3ij;
     int nf3kl;
     int nf3ijkl;
@@ -34,3 +37,10 @@ typedef struct {
     float *q_cond;
     float cutoff; // cutoff to screening schwarz estimation q_ij+q_kl
 } MDBoundsInfo;
+
+int offset_for_Rt2_idx(int lij, int lkl);
+int qd_offset_for_threads(int npairs, int threads);
+
+extern __constant__ int8_t c_Rt2_efg_phase[];
+extern __device__ uint16_t Rt2_kl_ij[];
+extern __device__ uint16_t Rt2_ij_kl[];

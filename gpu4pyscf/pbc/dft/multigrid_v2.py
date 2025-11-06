@@ -100,6 +100,29 @@ def image_pair_to_difference(
     vectors_to_neighboring_images,
     lattice_vectors,
 ):
+    '''
+    Find unique image pairs for double lattice-sums associated with orbital products.
+
+    When k-point phases are applied to orbital products with double lattice sum
+        einsum('MmNn,Mk,Nk->kMN', orbital_prod_with_double_latsum, k_phase.conj(), k_phase)
+    where k_phase = exp(1j*lattice_sum_images.dot(kpts)), the double lattice sum
+    can be simplified to
+        einsum('Tmn,Tk->kmn', orbital_prod, exp(1j*image_pair_diff.dot(kpts)))
+    Here, T is the image_pair_to_difference produced by this function.
+    The double lattice-sum over M,N within the orbital product can be pre-summed
+    to certain images in T.
+
+    Args:
+        vectors_to_neighboring_images:
+            Lattice sum vectors.
+        lattice_vectors:
+            Lattice vectors to define periodicity.
+
+    Returns:
+        A tuple containing:
+        - The reduced lattice-sum vectors T for the unique image pairs.
+        - A inverse mapping that restores the index of double lattice-sum from T.
+    '''
     vectors_to_neighboring_images = cp.asarray(vectors_to_neighboring_images)
     lattice_vectors = cp.asarray(lattice_vectors)
 
@@ -107,14 +130,26 @@ def image_pair_to_difference(
         cp.linalg.solve(lattice_vectors.T, vectors_to_neighboring_images.T).T,
     )
     translation_vectors = cp.asarray(cp.round(translation_vectors), dtype = cp.int32)
+    difference_images, inverse = _unique_image_pair(translation_vectors)
+    difference_images = difference_images @ lattice_vectors
+
+    # Given our pair data structure, the difference_images here should be interpretted as R2 - R1,
+    # where R1 is associated with the first orbital in a pair, and R2 associated to the second.
+    return cp.asarray(difference_images), cp.asarray(inverse, dtype=cp.int32)
+
+def _unique_image_pair(translation_vectors):
+    '''
+    unqiue((-L[:,None] + L).reshape(-1, 3), axis=0, return_inverse=True)
+    '''
     image_difference_full = (
-        # k_j - k_i corresponding to <i|j>
+        # -k_i + k_j corresponding to <i|j>
         translation_vectors[None,:,:] - translation_vectors[:,None,:]
     ).reshape(-1, 3)
 
-    max_offset = cp.max(cp.abs(image_difference_full)) + 1
+    max_offset = (translation_vectors.max(axis=0) - translation_vectors.min(axis=0)).max() + 1
     assert (max_offset * 2)**3 < np.iinfo(np.int32).max
-    image_difference_3in1 = image_difference_full + max_offset
+    image_difference_3in1 = image_difference_full
+    image_difference_3in1 += max_offset
     image_difference_3in1 = image_difference_3in1[:, 0] * (max_offset * 2)**2 \
                           + image_difference_3in1[:, 1] * (max_offset * 2) \
                           + image_difference_3in1[:, 2]
@@ -126,17 +161,7 @@ def image_pair_to_difference(
     translation_vectors[:, 1] = (image_difference_3in1 % (max_offset * 2)**2) // (max_offset * 2)
     translation_vectors[:, 2] = image_difference_3in1 % (max_offset * 2)
     translation_vectors -= max_offset
-
-    # translation_vectors, inverse = np.unique(
-    #     image_difference_full.get(), axis=0, return_inverse=True
-    # )
-    # translation_vectors = cp.asarray(translation_vectors)
-
-    difference_images = translation_vectors @ lattice_vectors
-
-    # Given our pair data structure, the difference_images here should be interpretted as R2 - R1,
-    # where R1 is associated with the first orbital in a pair, and R2 associated to the second.
-    return cp.asarray(difference_images), cp.asarray(inverse, dtype=cp.int32)
+    return translation_vectors, inverse
 
 def image_phase_for_kpts(cell, neighboring_images, kpts=None):
     n_images = len(neighboring_images)

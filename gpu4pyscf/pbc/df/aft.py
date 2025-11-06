@@ -168,6 +168,9 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
     get_nuc = get_nuc
     get_pp = get_pp
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_rsh_df',))
+
     @property
     def kpts(self):
         if isinstance(self._kpts, KPoints):
