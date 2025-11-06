@@ -27,17 +27,17 @@ class KnownValues(unittest.TestCase):
     def setUpClass(cls):
         L = 4
         n = 21
-        cell = pbcgto.Cell()
-        cell.build(unit = 'B',
-                   verbose = 7,
-                   output = '/dev/null',
-                   a = ((L,0,0),(0,L,0),(0,0,L)),
-                   mesh = [n,n,n],
-                   atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
-                           ['He', (L/2.   ,L/2.,L/2.+.5)]],
-                   basis = { 'He': [[0, (0.8, 1.0)],
-                                    [0, (1.0, 1.0)],
-                                    [0, (1.2, 1.0)]]})
+        cell = pbcgto.M(
+            unit = 'B',
+            verbose = 7,
+            output = '/dev/null',
+            a = ((L,0,0),(0,L,0),(0,0,L)),
+            mesh = [n,n,n],
+            atom = [['He', (L/2.-.5,L/2.,L/2.-.5)],
+                    ['He', (L/2.   ,L/2.,L/2.+.5)]],
+            basis = { 'He': [[0, (0.8, 1.0)],
+                             [0, (1.0, 1.0)],
+                             [0, (1.2, 1.0)]]})
         cls.cell = cell
 
     @classmethod
@@ -49,8 +49,13 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(cell, exxdiv='ewald').run()
         self.assertAlmostEqual(mf.e_tot, -4.3511582284698633, 7)
         self.assertTrue(mf.mo_coeff.dtype == np.double)
+        pop = mf.analyze()[0][0]
+        self.assertAlmostEqual(lib.fp(pop), 0.011047586674983092, 5)
+
         kmf = scf.KRHF(cell, [[0,0,0]], exxdiv='ewald').run()
         self.assertAlmostEqual(mf.e_tot, kmf.e_tot, 8)
+        pop = kmf.analyze()[0][0]
+        self.assertAlmostEqual(lib.fp(pop), 0.011047586674983092, 5)
 
         # test bands
         np.random.seed(1)

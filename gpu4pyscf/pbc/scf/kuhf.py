@@ -223,7 +223,6 @@ class KUHF(khf.KSCF):
     get_occ = get_occ
     energy_elec = energy_elec
     get_rho = khf.get_rho
-    analyze = NotImplemented
     canonicalize = canonicalize
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
@@ -323,3 +322,37 @@ class KUHF(khf.KSCF):
         mf = kuhf_cpu.KUHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def analyze(self, verbose=None, **kwargs):
+        '''Analyze the given SCF object:  print orbital energies, occupancies;
+        print orbital coefficients; Mulliken population analysis; Dipole moment
+        '''
+        from pyscf.pbc.scf.kuhf import mulliken_meta
+        if verbose is None:
+            verbose = self.verbose
+        log = logger.new_logger(self, verbose)
+        mo_energy = self.mo_energy.get()
+        mo_occ = self.mo_occ.get()
+        cell = self.cell
+        kpts = self.kpts
+        if log.verbose >= logger.NOTE:
+            self.dump_scf_summary(log)
+            log.note('**** MO energy ****')
+            log.note('                           alpha                               | beta')
+            log.note('k-point                    nocc    HOMO/AU         LUMO/AU     | nocc    HOMO/AU         LUMO/AU')
+            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+                nocca = np.count_nonzero(mo_occ[0,k])
+                noccb = np.count_nonzero(mo_occ[1,k])
+                homoa = mo_energy[0,k,nocca-1]
+                homob = mo_energy[1,k,noccb-1]
+                lumoa = mo_energy[0,k,nocca  ]
+                lumob = mo_energy[1,k,noccb  ]
+                log.note('%2d (%6.3f %6.3f %6.3f) %2d   %15.9f %15.9f |%2d   %15.9f %15.9f',
+                         k, kpt[0], kpt[1], kpt[2], nocca, homoa, lumoa, noccb, homob, lumob)
+
+        log.note('**** Population analysis for atoms in the reference cell ****')
+        s = self.get_ovlp(kpts=kpts).get()
+        dm = self.make_rdm1().get()
+        pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
+        dip = None
+        return (pop, chg), dip
