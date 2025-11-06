@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
-    dist_matrix)
+    dist_matrix, batched_vec3_norm2)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
@@ -723,22 +723,23 @@ def eval_vpplocG(cell, mesh):
     '''PRB, 58, 3641 Eq (5) first term
     '''
     assert cell.dimension != 2
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
     SIx = cp.exp(-1j*rb[:,0,None] * basex)
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
-    G2 = contract('px,px->p', Gv, Gv)
+    # G2 = contract('px,px->p', Gv, Gv)
+    G2 = batched_vec3_norm2(Gv)
     charges = cell.atom_charges()
 
     coulG = tools.get_coulG(cell, Gv=Gv)
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
     vlocG0 = 0
+
+    _kernel_registery = {}
+
     for ia in range(cell.natm):
         symb = cell.atom_symbol(ia)
         if symb not in cell._pseudo:
@@ -749,24 +750,97 @@ def eval_vpplocG(cell, mesh):
         if nexp == 0:
             continue
 
-        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
-        G2_red = G2 * rloc**2
-        SI *= cp.exp(-0.5*G2_red)
         vlocG0 += 2*np.pi*charges[ia]*rloc**2
-        vlocG -= charges[ia] * coulG * SI
 
-        # Add the C1, C2, C3, C4 contributions
-        cfacs = 0
+        fn_name = f"gth_loc_reciporcal_nexp_{nexp}_kernel"
+        if fn_name not in _kernel_registery:
+            C_declaration = ''
+            C_contribution = ''
+            if nexp >= 1:
+                C_declaration += ', const double cexp0'
+                C_contribution += 'cfacs += cexp0;'
+            if nexp >= 2:
+                C_declaration += ', const double cexp1'
+                C_contribution += 'cfacs += cexp1 * (3 - G2_red);'
+            if nexp >= 3:
+                C_declaration += ', const double cexp2'
+                C_contribution += 'cfacs += cexp2 * (15 - 10 * G2_red + G2_red * G2_red);'
+            if nexp >= 4:
+                C_declaration += ', const double cexp3'
+                C_contribution += 'cfacs += cexp3 * (105 - 105 * G2_red + 21 * G2_red * G2_red - G2_red * G2_red * G2_red);'
+            kernel_code = r'''
+                #include <cupy/complex.cuh>
+                extern "C" __global__
+                void ''' + fn_name + '''(
+                    const double* __restrict__ grids_G2, const double* __restrict__ grids_coulG,
+                    const complex<double>* __restrict__ grids_SIx, const complex<double>* __restrict__ grids_SIy, const complex<double>* __restrict__ grids_SIz,
+                    complex<double>* __restrict__ grids_vlocG,
+                    const int n_mesh_x, const int n_mesh_y, const int n_mesh_z, const int i_atom,
+                    const double charge, const double rloc''' + C_declaration + r''')
+                {
+                    const int i_grid = blockDim.x * blockIdx.x + threadIdx.x;
+                    const int ngrids = n_mesh_x * n_mesh_y * n_mesh_z;
+                    if (i_grid >= ngrids) return;
+
+                    const double G2 = grids_G2[i_grid];
+                    const double coulG = grids_coulG[i_grid];
+                    const double G2_red = G2 * rloc * rloc;
+                    const int i_grid_x = i_grid / (n_mesh_y * n_mesh_z);
+                    const int i_grid_y = (i_grid - i_grid_x * (n_mesh_y * n_mesh_z)) / n_mesh_z;
+                    const int i_grid_z = i_grid - i_grid_x * (n_mesh_y * n_mesh_z) - i_grid_y * n_mesh_z;
+                    const complex<double> SIx = grids_SIx[i_atom * n_mesh_x + i_grid_x];
+                    const complex<double> SIy = grids_SIy[i_atom * n_mesh_y + i_grid_y];
+                    const complex<double> SIz = grids_SIz[i_atom * n_mesh_z + i_grid_z];
+                    const complex<double> SI = SIx * SIy * SIz * exp(-0.5 * G2_red);
+                    complex<double> vlocG = -charge * coulG * SI;
+
+                    double cfacs = 0;
+                    ''' + C_contribution + r'''
+                    vlocG += 15.749609945722419 * rloc * rloc * rloc * cfacs * SI;
+
+                    grids_vlocG[i_grid] += vlocG;
+                }
+            '''
+            _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
+        kernel = _kernel_registery[fn_name]
+
+        ngrids = G2.shape[0]
+        assert G2.shape == (ngrids,) and G2.dtype == cp.float64
+        assert coulG.shape == (ngrids,) and coulG.dtype == cp.float64
+        assert SIx.shape == (cell.natm, mesh[0]) and SIx.dtype == cp.complex128 and SIx.flags.c_contiguous
+        assert SIy.shape == (cell.natm, mesh[1]) and SIy.dtype == cp.complex128 and SIy.flags.c_contiguous
+        assert SIz.shape == (cell.natm, mesh[2]) and SIz.dtype == cp.complex128 and SIz.flags.c_contiguous
+        assert vlocG.shape == (ngrids,) and vlocG.dtype == cp.complex128
+        assert ngrids < np.iinfo(np.int32).max
+
+        kernel_parameters = [G2, coulG, SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
+                             cp.int32(ia), cp.float64(charges[ia]), cp.float64(rloc)]
         if nexp >= 1:
-            cfacs += cexp[0]
+            kernel_parameters.append(cp.float64(cexp[0]))
         if nexp >= 2:
-            cfacs += cexp[1] * (3 - G2_red)
+            kernel_parameters.append(cp.float64(cexp[1]))
         if nexp >= 3:
-            cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
+            kernel_parameters.append(cp.float64(cexp[2]))
         if nexp >= 4:
-            cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
+            kernel_parameters.append(cp.float64(cexp[3]))
+        kernel(((ngrids + 1024 - 1) // 1024, ), (1024, ), kernel_parameters)
 
-        vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
+        # SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
+        # G2_red = G2 * rloc**2
+        # SI *= cp.exp(-0.5*G2_red)
+        # vlocG -= charges[ia] * coulG * SI
+
+        # # Add the C1, C2, C3, C4 contributions
+        # cfacs = 0
+        # if nexp >= 1:
+        #     cfacs += cexp[0]
+        # if nexp >= 2:
+        #     cfacs += cexp[1] * (3 - G2_red)
+        # if nexp >= 3:
+        #     cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
+        # if nexp >= 4:
+        #     cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
+        # vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
 
     vlocG[0] += vlocG0
     return vlocG

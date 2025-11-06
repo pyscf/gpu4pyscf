@@ -20,6 +20,7 @@ import pyscf
 import gpu4pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf
+from gpu4pyscf.solvent.tdscf.pcm import WithSolventTDSCFGradient
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -426,6 +427,15 @@ class KnownValues(unittest.TestCase):
         mol2 = gto.M(atom='H 0 0  0.001; F .1 0 2.1', verbose=0, unit='B')
         td2 = mol2.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA(equilibrium_solvation=True).run(conf_tol=1e-10)
         assert abs((td2.e_tot[0]-td1.e_tot[0])/0.002- de[0,2]) < 1e-5
+
+    @unittest.skip('PCM-TDA not available in PySCF')
+    def test_from_cpu(self):
+        mol = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
+        grad_cpu = mol.RHF().PCM().TDA(equilibrium_solvation=True).Gradients()
+        grad_gpu = grad_cpu.to_gpu()
+        assert isinstance(grad_gpu, WithSolventTDSCFGradient)
+        assert not hasattr(grad_gpu, 'xy')
+
 
 if __name__ == "__main__":
     print("Full Tests for TDHF and TDDFT Gradient with PCM")

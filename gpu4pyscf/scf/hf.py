@@ -28,6 +28,7 @@ from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot)
 from gpu4pyscf.scf import diis, jk, j_engine
+from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 
@@ -260,8 +261,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('veff', *t1)
 
         fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         e_tot = mf.energy_tot(dm, h1e, vhf)
+        norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
 
         norm_ddm = cupy.linalg.norm(dm-dm_last)
         t1 = log.timer(f'cycle={cycle+1}', *t0)
@@ -698,8 +699,8 @@ class SCF(pyscf_lib.StreamObject):
     init_direct_scf          = NotImplemented
     get_jk                   = _get_jk
     get_veff                 = NotImplemented
-    mulliken_meta            = hf_cpu.SCF.mulliken_meta
-    pop                      = hf_cpu.SCF.pop
+    mulliken_meta = pop      = NotImplemented
+    mulliken_pop             = NotImplemented
     _is_mem_enough           = NotImplemented
     density_fit              = NotImplemented
     newton                   = NotImplemented
@@ -716,8 +717,9 @@ class SCF(pyscf_lib.StreamObject):
     to_gks                   = NotImplemented
     to_ks                    = NotImplemented
     canonicalize             = NotImplemented
-    mulliken_pop             = NotImplemented
-    mulliken_meta            = NotImplemented
+    dump_scf_summary         = hf_cpu.dump_scf_summary
+
+    smearing = smearing
 
     def init_guess_by_minao(self, mol=None):
         if mol is None: mol = self.mol
@@ -741,13 +743,13 @@ class SCF(pyscf_lib.StreamObject):
                    verbose=logger.NOTE):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        return hf_cpu.dip_moment(mol, dm.get(), unit, origin, verbose)
+        return hf_cpu.dip_moment(mol, cupy.asnumpy(dm), unit, origin, verbose)
 
     def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
                     verbose=logger.NOTE):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        return hf_cpu.quad_moment(mol, dm.get(), unit, origin, verbose)
+        return hf_cpu.quad_moment(mol, cupy.asnumpy(dm), unit, origin, verbose)
 
     def remove_soscf(self):
         lib.logger.warn('remove_soscf has no effect in current version')

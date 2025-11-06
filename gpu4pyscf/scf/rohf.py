@@ -97,7 +97,6 @@ class ROHF(hf.RHF):
     to_uks = NotImplemented
     to_gks = NotImplemented
     to_ks = NotImplemented
-    analyze = NotImplemented
     stability = NotImplemented
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented

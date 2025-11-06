@@ -20,6 +20,7 @@ import pyscf
 import gpu4pyscf
 from pyscf import lib, gto, scf
 from gpu4pyscf import tdscf, nac, dft
+from gpu4pyscf.solvent.tdscf.pcm import WithSolventTDSCFNacMethod
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -1070,6 +1071,14 @@ class KnownValues(unittest.TestCase):
         nac1.states=(1,4)
         nac1.kernel()
         assert abs(np.abs(np.abs(nac1.de_scaled) - np.abs(fdiff_nac))).max() < 1e-4
+
+    @unittest.skip('PCM-TDA-NAC not available in PySCF')
+    def test_from_cpu(self):
+        mol = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
+        nac_cpu = mol.RHF().PCM().TDA(equilibrium_solvation=True).nac_method()
+        nac_gpu = nac_cpu.to_gpu()
+        assert isinstance(nac_gpu, WithSolventTDSCFNacMethod)
+        assert not hasattr(nac_gpu, 'xy')
 
 
 if __name__ == "__main__":
