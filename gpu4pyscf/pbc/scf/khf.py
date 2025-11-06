@@ -409,10 +409,11 @@ class KRHF(KSCF):
     check_sanity = pbchf.SCF.check_sanity
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
+        kpts = self.kpts
         if s1e is None:
-            s1e = self.get_ovlp(cell)
+            s1e = self.get_ovlp(cell, kpts)
         dm = mol_hf.SCF.get_init_guess(self, cell, key)
-        nkpts = len(self.kpts)
+        nkpts = len(kpts)
         if dm.ndim == 2:
             # dm[nao,nao] at gamma point -> dm_kpts[nkpts,nao,nao]
             dm = cp.repeat(dm[None,:,:], nkpts, axis=0)
@@ -444,3 +445,32 @@ class KRHF(KSCF):
         mf = khf_cpu.KRHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def analyze(self, verbose=None, **kwargs):
+        '''Analyze the given SCF object:  print orbital energies, occupancies;
+        print orbital coefficients; Mulliken population analysis; Dipole moment
+        '''
+        from pyscf.pbc.scf.khf import mulliken_meta
+        if verbose is None:
+            verbose = self.verbose
+        log = logger.new_logger(self, verbose)
+        mo_energy = self.mo_energy.get()
+        mo_occ = self.mo_occ.get()
+        cell = self.cell
+        kpts = self.kpts
+        if log.verbose >= logger.NOTE:
+            self.dump_scf_summary(log)
+            log.note('**** MO energy ****')
+            log.note('k-point                    nocc    HOMO/AU         LUMO/AU')
+            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+                nocc = np.count_nonzero(mo_occ[k])
+                homo = mo_energy[k,nocc-1]
+                lumo = mo_energy[k,nocc  ]
+                log.note('%2d (%6.3f %6.3f %6.3f) %2d   %15.9f %15.9f',
+                         k, kpt[0], kpt[1], kpt[2], nocc, homo, lumo)
+
+        s = self.get_ovlp(kpts=kpts).get()
+        dm = self.make_rdm1().get()
+        pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
+        dip = None
+        return (pop, chg), dip

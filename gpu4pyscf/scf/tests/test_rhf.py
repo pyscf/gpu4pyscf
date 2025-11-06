@@ -20,7 +20,9 @@ import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
 
-mol = pyscf.M(
+def setUpModule():
+    global mol, mol1
+    mol = pyscf.M(
     atom='''
 C  -0.65830719,  0.61123287, -0.00800148
 C   0.73685281,  0.61123287, -0.00800148
@@ -32,7 +34,7 @@ C   0.73673681,  3.02749287, -0.00920048
     output = '/dev/null'
 )
 
-mol1 = pyscf.M(
+    mol1 = pyscf.M(
     atom='''
 C  -1.20806619, -0.34108413, -0.00755148
 C   1.28636081, -0.34128013, -0.00668648
@@ -249,8 +251,17 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol)
         mf.disp = 'd3bj'
         e_tot = mf.kernel()
+
+        #mf_ref = mol.RHF()
+        #mf_ref.disp = 'd3bj'
+        #e_ref = mf_ref.kernel()
+        #chg_ref = mf_ref.analyze()[0][1]
         e_ref = -151.1150439066
-        assert np.abs(e_tot - e_ref) < 1e-5
+        assert abs(e_tot - e_ref) < 1e-8
+
+        chg = mf.analyze()[0][1]
+        #assert abs(chg - chg_ref).max() < 1e-5
+        self.assertAlmostEqual(lib.fp(chg), -0.003225958206417059, 5)
 
     def test_rhf_d4(self):
         mf = scf.RHF(mol)
@@ -299,11 +310,14 @@ class KnownValues(unittest.TestCase):
             O 0.00000000 0.00000000 0.60539399
             H 0.00000000 0.93467313 -1.18217476
             H 0.00000000 -0.93467313 -1.18217476''',
-            charge=1, spin=1, unit='B')
+            charge=1, spin=1, unit='B', verbose=5, output='/dev/null')
         mf = mol.ROHF().to_gpu().run()
         self.assertAlmostEqual(mf.e_tot, -107.61304925181142, 8)
         ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        chg = mf.analyze()[0][1]
+        self.assertAlmostEqual(lib.fp(chg), -0.0705568646397904, 5)
 
     # TODO:
     #test analyze

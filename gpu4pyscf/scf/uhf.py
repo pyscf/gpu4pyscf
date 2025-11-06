@@ -230,7 +230,6 @@ class UHF(hf.SCF):
     _finalize                = uhf_cpu.UHF._finalize
 
     # TODO: Enable followings after testing
-    analyze                 = NotImplemented
     stability               = NotImplemented
     mulliken_spin_pop       = NotImplemented
     mulliken_meta_spin      = NotImplemented
