@@ -36,6 +36,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
     init_constant, _make_tril_tile_mappings, _make_tril_pair_mappings,
@@ -911,6 +912,11 @@ def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     return vj - 0.5 * vk
 
 class HessianBase(lib.StreamObject):
+
+    to_cpu = utils.to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
+
     # attributes
     max_cycle   = rhf_hess_cpu.HessianBase.max_cycle
     level_shift = rhf_hess_cpu.HessianBase.level_shift
@@ -947,18 +953,8 @@ class HessianBase(lib.StreamObject):
                  self.max_memory, lib.current_memory()[0])
         return self
 
-    def to_cpu(self):
-        mf = self.base.to_cpu()
-        from importlib import import_module
-        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
-        cls = getattr(mod, self.__class__.__name__)
-        obj = cls(mf)
-        return obj
-
 class Hessian(HessianBase):
     '''Non-relativistic restricted Hartree-Fock hessian'''
-
-    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, scf_method):
         self.verbose = scf_method.verbose

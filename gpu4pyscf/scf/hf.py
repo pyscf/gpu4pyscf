@@ -761,6 +761,7 @@ class SCF(pyscf_lib.StreamObject):
             self.mol = mol
         self._opt_gpu = {None: None}
         self._opt_jengine = {None: None}
+        self._eri = None
         self.scf_summary = {}
         self.overlap_canonical_decomposed_x = None
         return self

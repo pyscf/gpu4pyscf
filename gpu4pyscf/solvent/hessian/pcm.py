@@ -31,6 +31,7 @@ from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ipip1, int1e_grids_ipvip1, in
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
+from gpu4pyscf.lib import utils
 from pyscf import lib as pyscf_lib
 from gpu4pyscf.lib.cupy_helper import contract
 
@@ -1001,7 +1002,9 @@ def make_hess_object(base_method):
                          (WithSolventHess, vac_hess.__class__), name)
 
 class WithSolventHess:
-    from gpu4pyscf.lib.utils import to_gpu, device
+
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {'de_solvent', 'de_solute'}
 
@@ -1020,8 +1023,8 @@ class WithSolventHess:
 
     def to_cpu(self):
         from pyscf.solvent.hessian import pcm           # type: ignore
-        hess_method = self.undo_solvent().to_cpu()
-        return pcm.make_hess_object(hess_method)
+        hess_method = self.base.to_cpu().Hessian()
+        return utils.to_cpu(self, hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         if dm is None:
