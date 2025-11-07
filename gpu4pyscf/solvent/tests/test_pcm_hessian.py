@@ -25,7 +25,7 @@ from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.multi_gpu import num_devices
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
+pyscf_211 = version.parse(pyscf.__version__) <= version.parse('2.11.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order, eps, xc, tol
@@ -325,42 +325,8 @@ class KnownValues(unittest.TestCase):
 
         assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_gpu(self):
-        import pyscf
-        mol = gto.Mole()
-        mol.atom = '''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-    '''
-        mol.basis = 'sto-3g'
-        mol.output = '/dev/null'
-        mol.build(verbose=0)
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').PCM()
-        mf.conv_tol = 1e-12
-        mf.conv_tol_cpscf = 1e-7
-        mf.grids.atom_grid = (50,194)
-        mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
-
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().PCM()
-        mf.conv_tol = 1e-12
-        mf.conv_tol_cpscf = 1e-7
-        mf.grids.atom_grid = (50,194)
-        mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
-
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_cpu(self):
+    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
+    def test_to_gpu_to_cpu(self):
         mol = gto.Mole()
         mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -381,6 +347,9 @@ H       0.7570000000     0.0000000000    -0.4696000000
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
         assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
@@ -388,9 +357,14 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mf.grids.atom_grid = (50,194)
         mf.kernel()
         hessobj = mf.Hessian()
+        # The auxbasis_response attribute was not handled in pyscf-2.11
+        hessobj.auxbasis_response = 2
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
         assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
 if __name__ == "__main__":

@@ -87,7 +87,10 @@ def to_cpu(method, out=None):
             val = val.get()
         setattr(out, key, val)
     if hasattr(out, 'reset'):
-        out.reset()
+        try:
+            out.reset()
+        except NotImplementedError:
+            pass
     return out
 
 def to_gpu(method, device=None):

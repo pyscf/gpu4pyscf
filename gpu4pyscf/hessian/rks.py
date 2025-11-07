@@ -4250,8 +4250,6 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
 class Hessian(rhf_hess.HessianBase):
     '''Non-relativistic RKS hessian'''
 
-    from gpu4pyscf.lib.utils import to_gpu, device
-
     _keys = {'grids', 'grid_response'}
 
     def __init__(self, mf):

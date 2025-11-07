@@ -459,8 +459,6 @@ def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
 class Hessian(rhf_hess_gpu.HessianBase):
     '''Non-relativistic unrestricted Hartree-Fock hessian'''
 
-    from gpu4pyscf.lib.utils import to_gpu, device
-
     __init__ = rhf_hess_gpu.Hessian.__init__
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
