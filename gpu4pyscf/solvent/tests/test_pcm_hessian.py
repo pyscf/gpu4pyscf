@@ -355,7 +355,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mf.kernel()
         hessobj = mf.Hessian()
         # The auxbasis_response attribute was not handled in pyscf-2.11
-        if version.parse(pyscf.__version__) <= version.parse('2.11.0')
+        if version.parse(pyscf.__version__) <= version.parse('2.11.0'):
             hessobj.auxbasis_response = 1
         else:
             hessobj.auxbasis_response = 2
