@@ -17,6 +17,10 @@ from pyscf import gto
 from pyscf import lib
 from gpu4pyscf.dft import gks
 from pyscf.dft import gks as gks_cpu
+try:
+    import mcfun
+except ImportError:
+    mcfun = None
 
 
 def setUpModule():
@@ -52,53 +56,31 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_mcol_gks_lda(self):
-        mf_cpu = gks_cpu.GKS(mol)
-        mf_cpu.xc = 'lda,'
-        mf_cpu.collinear = 'mcol'
-        mf_cpu._numint.spin_samples = 6
-        eks4_cpu = mf_cpu.kernel()
-
+        
         mf_gpu = gks.GKS(mol)
         mf_gpu.xc = 'lda,'
         mf_gpu.collinear = 'mcol'
         mf_gpu._numint.spin_samples = 6
         eks4_gpu = mf_gpu.kernel()
-        self.assertAlmostEqual(eks4_gpu, eks4_cpu)
         self.assertAlmostEqual(eks4_gpu, -74.0600297733097, 6)
-        self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -26.421986983504258, 5)
-
-        mf_cpu = gks_cpu.GKS(mol1)
-        mf_cpu.xc = 'lda,vwn'
-        mf_cpu.collinear = 'mcol'
-        mf_cpu._numint.spin_samples = 50
-        eks4_cpu = mf_cpu.kernel()
 
         mf_gpu = gks.GKS(mol1)
         mf_gpu.xc = 'lda,vwn'
         mf_gpu.collinear = 'mcol'
         mf_gpu._numint.spin_samples = 50
         eks4_gpu = mf_gpu.kernel()
-        self.assertAlmostEqual(eks4_gpu, eks4_cpu, 6)
         self.assertAlmostEqual(eks4_gpu, -74.3741809222222, 6)
-        self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.63368769213053, 5)
 
     def test_mcol_gks_gga(self):
-        mf_cpu = gks_cpu.GKS(mol)
-        mf_cpu.xc = 'pbe'
-        mf_cpu.collinear = 'mcol'
-        mf_cpu._numint.spin_samples = 6
-        eks4_cpu = mf_cpu.kernel()
 
         mf_gpu = gks.GKS(mol)
         mf_gpu.xc = 'pbe'
         mf_gpu.collinear = 'mcol'
         mf_gpu._numint.spin_samples = 6
         eks4_gpu = mf_gpu.kernel()
-        self.assertAlmostEqual(eks4_gpu, eks4_cpu)
         self.assertAlmostEqual(eks4_gpu, -75.2256398121708, 6)
-        self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -26.81184613393452, 5)
 
         mf_gpu = gks.GKS(mol1)
@@ -143,6 +125,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(eks4_gpu, -74.9468853267496, 6) # pyscf result
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -28.188215296679516, 5) # pyscf result
 
+    @unittest.skipIf(mcfun is None, "mcfun library not found.")
     def test_to_cpu(self):
         mf_gpu = gks.GKS(mol1)
         mf_gpu.xc = 'lda,vwn'
