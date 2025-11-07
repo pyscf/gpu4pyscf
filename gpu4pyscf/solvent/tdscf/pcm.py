@@ -171,19 +171,21 @@ class WithSolventTDSCFGradient:
         return obj
 
     def solvent_response(self, dm):
-        return self.base.with_solvent._B_dot_x(dm)*2.0 
-        
-    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.INFO):
+        return self.base.with_solvent._B_dot_x(dm)*2.0
+
+    def grad_elec(self, xy, singlet=None, atmlst=None, verbose=logger.INFO,
+                  with_solvent=True):
         if self.base.with_solvent.frozen:
             raise RuntimeError('Frozen solvent model is not supported')
 
-        de = super().grad_elec(xy, singlet, atmlst, verbose) 
+        # self._dmz1doo and self._dmxpy are initialized in super().grad_elec
+        de = super().grad_elec(xy, singlet, atmlst, verbose, with_solvent=True)
 
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
-        dmxpy = self.dmxpy + self.dmxpy.T
+        dmP = 0.5 * (self._dmz1doo + self._dmz1doo.T)
+        dmxpy = self._dmxpy + self._dmxpy.T
         pcmobj = self.base.with_solvent
         de += pcmobj.grad(dm)
 
@@ -229,7 +231,7 @@ class WithSolventTDSCFNacMethod:
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        dmP = self.dmz1doo  #1.0 * (self.dmz1doo + self.dmz1doo.T)
+        dmP = self._dmz1doo  #1.0 * (self._dmz1doo + self._dmz1doo.T)
         pcmobj = self.base.with_solvent
         assert pcmobj.equilibrium_solvation
 
@@ -259,9 +261,9 @@ class WithSolventTDSCFNacMethod:
         dm = self.base._scf.make_rdm1(ao_repr=True)
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
-        dmP = 0.5 * (self.dmz1doo + self.dmz1doo.T)
-        dmxpyI = self.dmxpyI + self.dmxpyI.T
-        dmxpyJ = self.dmxpyJ + self.dmxpyJ.T
+        dmP = 0.5 * (self._dmz1doo + self._dmz1doo.T)
+        dmxpyI = self._dmxpyI + self._dmxpyI.T
+        dmxpyJ = self._dmxpyJ + self._dmxpyJ.T
         pcmobj = self.base.with_solvent
         assert pcmobj.equilibrium_solvation
 
@@ -292,3 +294,15 @@ class WithSolventTDSCFNacMethod:
         de_etf_scaled = de_etf/(EJ-EI)
         
         return de, de_scaled, de_etf, de_etf_scaled
+
+def from_cpu(method):
+    from pyscf.solvent.tdscf import pcm as pcm_cpu
+    if isinstance(method, pcm_cpu.WithSolventTDSCF):
+        return make_tdscf_object(method.undo_solvent().to_gpu(),
+                                 equilibrium_solvation=method.equilibrium_solvation)
+    elif isinstance(method, pcm_cpu.WithSolventTDSCFGradient):
+        return make_tdscf_gradient_object(method.base.to_gpu())
+    elif isinstance(method, pcm_cpu.WithSolventTDSCFNacMethod):
+        return make_tdscf_nac_object(method.base.to_gpu())
+    else:
+        raise RuntimeError(f'{method} must be a PCM-TDDFT instance')

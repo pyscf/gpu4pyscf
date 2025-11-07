@@ -52,6 +52,8 @@ class KnownValues(unittest.TestCase):
         kmf_cpu = kmf.to_cpu().run()
         self.assertAlmostEqual(kmf.e_tot, kmf_cpu.e_tot, 8)
         self.assertAlmostEqual(kmf.e_tot, -4.021029656152094, 8)
+        pop = kmf.analyze()[0][0]
+        self.assertAlmostEqual(lib.fp(pop), 0.02897067698093582, 5)
 
         np.random.seed(1)
         kpts_bands = np.random.random((1,3))
@@ -64,6 +66,8 @@ class KnownValues(unittest.TestCase):
         mf_cpu = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_cpu.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -3.9546467710639632, 7)
+        pop = mf.analyze()[0][0]
+        print(lib.fp(pop), -0.04691820429296646)
 
         np.random.seed(1)
         kpts_bands = np.random.random((1,3))

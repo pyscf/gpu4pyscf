@@ -29,6 +29,7 @@ from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.scf.smearing import smearing
 
 def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     '''Get energy bands at the given (arbitrary) 'band' k-points.
@@ -285,6 +286,7 @@ class SCF(mol_hf.SCF):
     spin_square = NotImplemented
     dip_moment = NotImplemented
     Gradients = NotImplemented
+    smearing = smearing
 
     def nuc_grad_method(self):
         return self.Gradients()
@@ -333,6 +335,31 @@ class RHF(SCF):
         mf = hf_cpu.RHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=True, **kwargs):
+        '''Analyze the given SCF object:  print orbital energies, occupancies;
+        print orbital coefficients; Mulliken population analysis; Diople moment.
+        '''
+        from pyscf.scf.hf import mulliken_meta, mulliken_pop, MO_BASE
+        log = logger.new_logger(self, verbose)
+        cell = self.cell
+        mo_energy = self.mo_energy.get()
+        mo_occ = self.mo_occ.get()
+
+        if log.verbose >= logger.NOTE:
+            self.dump_scf_summary(log)
+            log.note('**** MO energy ****')
+            for i, c in enumerate(mo_occ):
+                log.note('MO #%-3d energy= %-18.15g occ= %g', i+MO_BASE, mo_energy[i], c)
+
+        s = self.get_ovlp().get()
+        dm = self.make_rdm1().get()
+        if with_meta_lowdin:
+            pop = mulliken_meta(cell, dm, s=s, verbose=log)
+        else:
+            pop = mulliken_pop(cell, dm, s=s, verbose=log)
+        dip = None
+        return pop, dip
 
 def normalize_dm_(mf, dm, s1e=None):
     '''

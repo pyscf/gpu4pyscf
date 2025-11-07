@@ -25,8 +25,6 @@ from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.multi_gpu import num_devices
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
-
 def setUpModule():
     global mol, epsilon, lebedev_order, eps, xc, tol
     mol = gto.Mole()
@@ -325,7 +323,6 @@ class KnownValues(unittest.TestCase):
 
         assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu_to_cpu(self):
         mol = gto.Mole()
         mol.atom = '''
@@ -357,7 +354,11 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mf.grids.atom_grid = (50,194)
         mf.kernel()
         hessobj = mf.Hessian()
-        hessobj.auxbasis_response = 2
+        # The auxbasis_response attribute was not handled in pyscf-2.11
+        if version.parse(pyscf.__version__) <= version.parse('2.11.0')
+            hessobj.auxbasis_response = 1
+        else:
+            hessobj.auxbasis_response = 2
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()

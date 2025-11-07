@@ -104,7 +104,8 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 
 class Hessian(rks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
-    from gpu4pyscf.lib.utils import to_gpu, device
+
+    _keys = {'auxbasis_response',}
 
     auxbasis_response = 2
     partial_hess_elec = partial_hess_elec

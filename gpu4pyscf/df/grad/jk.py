@@ -18,13 +18,13 @@ import cupy
 from gpu4pyscf.df.int3c2e import get_int3c2e_ip_jk, VHFOpt, _split_tasks
 from gpu4pyscf.lib.cupy_helper import contract, concatenate, reduce_to_device
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 def _jk_task(with_df, dm, orbo, with_j=True, with_k=True, device_id=0):
     '''  # (L|ij) -> rhoj: (L), rhok: (L|oo)
     '''
     rhoj = rhok = None
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(with_df.mol, with_df.verbose)
         assert isinstance(with_df.verbose, int)
         t0 = log.init_timer()
@@ -87,7 +87,7 @@ def _jk_ip_task(intopt, rhoj_cart, dm_cart, rhok_cart, orbo_cart, task_list,
                 with_j=True, with_k=True, device_id=0, omega=None):
     mol = intopt.mol
     natm = mol.natm
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(mol, mol.verbose)
         t0 = (logger.process_clock(), logger.perf_counter())
 
@@ -197,7 +197,7 @@ def _jk_task_td(with_df, dm, orbol, orbor, with_j=True, with_k=True, device_id=0
     (L|ij) -> rhoj: (L), rhok: (L|lr), for dm0 from scf, rhok is (L|oo) 
     '''
     rhoj = rhok = None
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(with_df.mol, with_df.verbose)
         assert isinstance(with_df.verbose, int)
         t0 = log.init_timer()
@@ -264,7 +264,7 @@ def _jk_ip_task_td(intopt, rhoj_cart, dm_cart, rhok_cart, orbol_cart, orbor_cart
                 with_j=True, with_k=True, device_id=0, omega=None):
     mol = intopt.mol
     natm = mol.natm
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(mol, mol.verbose)
         t0 = (logger.process_clock(), logger.perf_counter())
 
