@@ -112,7 +112,7 @@ class KnownValues(unittest.TestCase):
         assert mf.device == 'gpu'
         e_tot = mf.kernel()
         mf = mf.to_cpu()
-        assert mf.device == 'cpu'
+        assert getattr(mf, 'device', None) is None
         e_ref = mf.kernel()
         assert abs(e_tot - e_ref) < 1e-5
 
