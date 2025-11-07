@@ -33,7 +33,7 @@ from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
     contract, tag_array, transpose_sum, get_avail_mem, condense,
     krylov)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import utils

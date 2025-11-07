@@ -23,8 +23,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
-from gpu4pyscf.lib.multi_gpu import lru_cache
-from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -105,34 +105,8 @@ def broadcast_to_devices():
 
 def reduce_to_device(array_list, inplace=False):
     ''' Reduce a list of ndarray in different devices to device 0
-    TODO: reduce memory footprint, improve throughput
     '''
-    assert len(array_list) == num_devices
-    if num_devices == 1:
-        return array_list[0]
-
-    out_shape = array_list[0].shape
-    for s in _streams:
-        s.synchronize()
-
-    if inplace:
-        result = array_list[0]
-    else:
-        result = array_list[0].copy()
-
-    # Transfer data chunk by chunk, reduce memory footprint,
-    result = result.reshape(-1)
-    for device_id, matrix in enumerate(array_list):
-        if device_id == 0:
-            continue
-
-        assert matrix.device.id == device_id
-        matrix = matrix.reshape(-1)
-        blksize = 1024*1024*1024 // matrix.itemsize # 1GB
-        for p0, p1 in lib.prange(0,len(matrix), blksize):
-            result[p0:p1] += copy_array(matrix[p0:p1])
-            #result[p0:p1] += cupy.asarray(matrix[p0:p1])
-    return result.reshape(out_shape)
+    return multi_gpu.array_reduce(array_list, inplace)
 
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
@@ -377,7 +351,7 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-@lru_cache(1)
+@multi_gpu.lru_cache(1)
 def _initialize_c2s_data():
     from gpu4pyscf.gto import mole
     c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]

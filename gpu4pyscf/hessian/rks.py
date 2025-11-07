@@ -31,7 +31,7 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
                                        reduce_to_device, transpose_sum, take_last2d)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, num_devices, min_grid_blksize
+from gpu4pyscf.__config__ import num_devices, min_grid_blksize
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD, _contract_rho1_fxc
 import ctypes
 from pyscf import __config__
@@ -406,7 +406,7 @@ def _get_vxc_deriv2_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
     ngrids_glob = grids.coords.shape[0]
     grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
 
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(mol, verbose)
         t1 = t0 = log.init_timer()
         mo_occ = cupy.asarray(mo_occ)
@@ -1558,7 +1558,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
     ngrids_glob = grids.coords.shape[0]
     grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         mo_occ = cupy.asarray(mo_occ)
         mo_coeff = cupy.asarray(mo_coeff)
         coeff = cupy.asarray(opt.coeff)
@@ -3805,7 +3805,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
 def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
                         verbose=None, hermi=1, device_id=0):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo1 is not None: mo1 = cupy.asarray(mo1)
         if mocc is not None: mocc = cupy.asarray(mocc)
