@@ -118,7 +118,7 @@ class _Int1eOpt:
             sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
             _atm, _bas, _env, ao_loc_gpu, Ls)
 
-    def generate_shl_pairs(self, hermi=1):
+    def generate_shl_pairs(self, hermi, gout_stride_lookup):
         sorted_cell = self.sorted_cell
         l_ctr_offsets = np.append(0, np.cumsum(self.l_ctr_counts))
         uniq_l = self.uniq_l_ctr[:,0]
@@ -150,7 +150,7 @@ class _Int1eOpt:
             nshl_pair = len(idx)
             bas_ij_idx.append(idx)
             sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = _estimate_shl_pairs_per_block(li, lj, nshl_pair)
+            nsp_per_block = gout_stride_lookup[li, lj] * 8
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
 
         shl_pair_offsets.append(np.int32(sp1))
@@ -167,7 +167,6 @@ class _Int1eOpt:
         i_inc, j_inc = deriv
         lmax = self.uniq_l_ctr[:,0].max()
         gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
-        gout_width = gout_width
         shm_size = SHM_SIZE
         ls = np.arange(lmax+1)
         nf = (ls+1) * (ls+2) // 2
@@ -192,15 +191,15 @@ class _Int1eOpt:
             gout_width = 18
 
         sorted_cell = self.sorted_cell
-        int1e_envs = self.int1e_envs
-        nao_cart, nao = self.coeff.shape
-        bas_ij_idx, shl_pair_offsets = self.generate_shl_pairs(hermi)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
         gout_stride_lookup, shm_size = self.create_gout_stride_lookup_table(
             deriv_ij, gout_width)
+        bas_ij_idx, shl_pair_offsets = self.generate_shl_pairs(hermi, gout_stride_lookup)
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
         bvk_kmesh = self.bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)
         out = cp.empty((bvk_ncells, comp, nao_cart, nao_cart))
+        int1e_envs = self.int1e_envs
+        nao_cart, nao = self.coeff.shape
         drv = getattr(libpbc, kern)
         err = drv(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),

@@ -589,7 +589,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
-                RysIntEnvVars envs, int *shls_slice, int shm_size,
+                RysIntEnvVars *envs, int *shls_slice, int shm_size,
                 int npairs_ij, int npairs_kl,
                 uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                 int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nimgs_uniq_pair,
@@ -642,7 +642,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (1){//!rys_k_unrolled(&envs, &kmat, &bounds, pool)) {
+    if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -654,7 +654,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
         rys_k_kernel<<<workers, threads, buflen>>>(
-            envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
+            *envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
@@ -664,7 +664,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-256));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
+                *envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
@@ -674,7 +674,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-512));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
+                *envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }

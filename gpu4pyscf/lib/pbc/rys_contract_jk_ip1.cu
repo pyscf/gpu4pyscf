@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -556,7 +556,7 @@ while (1) {
 extern "C" {
 int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,
-                        RysIntEnvVars envs, int *scheme, int *shls_slice,
+                        RysIntEnvVars *envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                         int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nimgs_uniq_pair,
@@ -609,7 +609,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (1){//!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
+    if (1){//!rys_ejk_ip1_unrolled(envs, &jk, &bounds, pool, dd_pool)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
@@ -619,7 +619,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
         rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
-                envs, jk, bounds, bas_mask_idx, Ts_ji_lookup,
+                *envs, jk, bounds, bas_mask_idx, Ts_ji_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, dd_pool, head, reserved_shm_size);
     }

@@ -5,11 +5,11 @@ add_library(pbc SHARED
   ft_ao_ip1.cu
   fill_int3c2e.cu unrolled_int3c2e.cu fill_int2c2e.cu
   fill_int3c2e_v2.cu
-  overlap.cu
+  overlap.cu overlap_o1.cu
   estimator.cu supmol_sr_estimator.cu
   rys_roots_dat.cu
   rys_contract_k.cu
-  rys_contract_jk_ip1.cu
+  rys_contract_jk_ip1.cu rys_contract_jk_ip1_o1.cu
   nr_eval_gto.cu
   sorting.c grid_integrate.c
 )
