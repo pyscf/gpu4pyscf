@@ -228,7 +228,6 @@ class KnownValues(unittest.TestCase):
         ni_GPU.collinear = 'mcol'
         eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
         vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='LDA')[1]
-        mask = np.ones((8, mol.nbas), dtype=np.uint8)
         mask_gpu = cupy.array([i for i in range(mol.nbas)])
 
         shls_slice = (0, mol.nbas)
@@ -301,7 +300,6 @@ class KnownValues(unittest.TestCase):
         ni_GPU.collinear = 'mcol'
         eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
         vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='GGA')[1]
-        mask = np.ones((8, mol.nbas), dtype=np.uint8)
         mask_gpu = cupy.array([i for i in range(mol.nbas)])
 
         shls_slice = (0, mol.nbas)
@@ -374,7 +372,6 @@ class KnownValues(unittest.TestCase):
         ni_GPU.collinear = 'mcol'
         eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
         vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='MGGA')[1]
-        mask = np.ones((8, mol.nbas), dtype=np.uint8)
         mask_gpu = cupy.array([i for i in range(mol.nbas)])
 
         shls_slice = (0, mol.nbas)
