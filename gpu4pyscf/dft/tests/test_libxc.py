@@ -20,6 +20,7 @@ from pyscf.dft import Grids
 from gpu4pyscf.dft.numint import NumInt as numint_gpu
 from pyscf.dft.numint import NumInt as numint_cpu
 import cupy
+import os
 
 def setUpModule():
     global mol, dm1, dm0
@@ -84,15 +85,32 @@ class KnownValues(unittest.TestCase):
             assert _diff(kxc_gpu.get(), kxc_cpu).max() < kxc_tol
 
     def test_LDA(self):
-        self._check_xc('LDA_C_VWN', deriv=3)
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            deriv = 3
+            print("test LDA with deriv 3")
+        else:
+            deriv = 2
+            print("test LDA with deriv 2")
+        self._check_xc('LDA_C_VWN', deriv=deriv)
 
     def test_GGA(self):
-        self._check_xc('HYB_GGA_XC_B3LYP', deriv=3, kxc_tol=1e-9)
-        self._check_xc('GGA_X_B88', fxc_tol=1e-10, deriv=3, kxc_tol=1e-8)
-        self._check_xc('GGA_C_PBE', fxc_tol=1e-4, deriv=3, kxc_tol=3e2)
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            deriv = 3
+        else:
+            deriv = 2
+        self._check_xc('HYB_GGA_XC_B3LYP', deriv=deriv, kxc_tol=1e-9)
+        self._check_xc('GGA_X_B88', fxc_tol=1e-10, deriv=deriv, kxc_tol=1e-8)
+        self._check_xc('GGA_C_PBE', fxc_tol=1e-4, deriv=deriv, kxc_tol=3e2)
 
     def test_mGGA(self):
-        self._check_xc('MGGA_C_M06', fxc_tol=1e-4, deriv=3, kxc_tol=1e-2)
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            deriv = 3
+        else:
+            deriv = 2
+        self._check_xc('MGGA_C_M06', fxc_tol=1e-4, deriv=deriv, kxc_tol=1e-2)
 
     def test_u_LDA(self):
         self._check_xc('LDA_C_VWN', spin=1)
