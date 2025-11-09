@@ -19,6 +19,7 @@ import pyscf
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
 from pyscf.pbc.df import fft as fft_cpu
+from pyscf.pbc.tools import pbc as pbctools
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.pbc.scf import rsjk
 from gpu4pyscf.pbc.tools.pbc import probe_charge_sr_coulomb
@@ -432,6 +433,7 @@ def test_ejk_ip1_per_atom_kpts():
     assert abs(ejk - ref).max() < 5e-6
 
 from pyscf.pbc.grad import rks, rks_stress
+from pyscf.pbc.grad import krks, krks_stress
 def _get_coulG_strain_derivatives(cell, Gv):
     '''derivatives of 4pi/G^2'''
     G2 = np.einsum('gx,gx->g', Gv, Gv)
@@ -455,14 +457,16 @@ def _get_coulG_strain_derivatives(cell, Gv):
         coulG_1 = Gxy * coulG_0 * 2/G2
     return coulG_0, coulG_1
 rks_stress._get_coulG_strain_derivatives = _get_coulG_strain_derivatives
+krks_stress._get_coulG_strain_derivatives = _get_coulG_strain_derivatives
 
-def test_jk_sr_strain_deriv_1():
+def test_jk_sr_strain_deriv1():
     a = np.eye(3) * 6.
     np.random.seed(5)
     a += np.random.rand(3, 3) - .5
     cell = pyscf.M(
         atom='He 1 1 1; He 2 1.5 2.4',
         basis=[[0, [1.5, 1]]], a=a, unit='Bohr')
+    # gamma point calculations
     nao = cell.nao
     dm = np.random.rand(nao, nao) - .5
     dm = dm.dot(dm.T)
@@ -470,7 +474,6 @@ def test_jk_sr_strain_deriv_1():
     sigma = with_rsjk._get_jk_sr_strain_deriv(dm)
     #sigma_wo_exxdiv = with_rsjk._get_jk_sr_strain_deriv(dm, exxdiv=False)
 
-    from pyscf.pbc.tools import pbc as pbctools
     Ls = cell.get_lattice_Ls(rcut=cell.rcut+4)
     Ls = Ls[np.argsort(np.linalg.norm(Ls-.1, axis=1))]
     scell = cell.copy()
@@ -485,9 +488,9 @@ def test_jk_sr_strain_deriv_1():
     eri1+= np.einsum('xplokinj,ply->xyijkl', sc_eri[:,:,:,:,:,0], bas_coords+Ls[:,None])
     eri1+= np.einsum('xinjokpl,iy->xyijkl', sc_eri[:,0], bas_coords)
     eri1+= np.einsum('xnjiokpl,njy->xyijkl', sc_eri[:,:,:,0], bas_coords+Ls[:,None])
-    ej = np.einsum('xyijkl,ji,lk->xy', eri1, dm, dm)
-    ek = np.einsum('xyijkl,jk,li->xy', eri1, dm, dm)
-    #ref_wo_exxdiv = -(ej - ek*.5)
+    ej = -.5 * np.einsum('xyijkl,ji,lk->xy', eri1, dm, dm)
+    ek = -.5 * np.einsum('xyijkl,jk,li->xy', eri1, dm, dm)
+    #ref_wo_exxdiv = ej - ek*.5
 
     sc_s1 = scell.intor('int1e_ipovlp').reshape(3,nimgs,nao,nimgs,nao)
     s1 = np.einsum('xmij,miy->xyij', sc_s1[:,:,:,0], bas_coords+Ls[:,None])
@@ -495,11 +498,56 @@ def test_jk_sr_strain_deriv_1():
     s0 = cell.pbc_intor('int1e_ovlp')
     wcoulG_SR_at_G0 = np.pi/scell.omega**2/cell.vol
     j_dm = np.einsum('ij,ji->', s0, dm)
-    ej -= np.einsum('xyij,ji->xy', s1, dm) * wcoulG_SR_at_G0 * j_dm
-    ej -= .5 * j_dm * wcoulG_SR_at_G0 * j_dm * np.eye(3)
-    ek -= np.einsum('xyij,jk,kl,li->xy', s1, dm, s0, dm) * wcoulG_SR_at_G0
-    ek -= .5 *np.einsum('ij,jk,kl,li->', s0, dm, s0, dm) * wcoulG_SR_at_G0 * np.eye(3)
-    ref = -(ej - ek*.5)
+    ej += np.einsum('xyij,ji->xy', s1, dm) * wcoulG_SR_at_G0 * j_dm
+    ej += .5 * j_dm * wcoulG_SR_at_G0 * j_dm * np.eye(3)
+    ek += np.einsum('xyij,jk,kl,li->xy', s1, dm, s0, dm) * wcoulG_SR_at_G0
+    ek += .5 *np.einsum('ij,jk,kl,li->', s0, dm, s0, dm) * wcoulG_SR_at_G0 * np.eye(3)
+    ref = ej - ek*.5
     assert abs(ref - sigma).max() < 1e-6
 
-test_jk_sr_strain_deriv()
+    sigma = with_rsjk._get_jk_sr_strain_deriv(dm, k_factor=0)
+    cell.omega = scell.omega
+    xc = 'lda,'
+    mf_grad = rks.Gradients(cell.RKS(xc=xc))
+    ref = rks_stress.get_vxc(mf_grad, cell, dm, with_j=True, with_nuc=False)
+    ref -= rks_stress.get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=False)
+    assert abs(ref - sigma).max() < 1e-7
+
+    # kpts calculations
+    kpts = cell.make_kpts([1,1,1])
+    dm = np.array(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    sigma = with_rsjk._get_jk_sr_strain_deriv(dm, kpts)
+    #sigma_wo_exxdiv = with_rsjk._get_jk_sr_strain_deriv(dm, exxdiv=False)
+
+    eri1 = np.einsum('xokplinj,oky->xyinjokpl', sc_eri[:,:,:,:,:,0], bas_coords+Ls[:,None])
+    eri1+= np.einsum('xplokinj,ply->xyinjokpl', sc_eri[:,:,:,:,:,0], bas_coords+Ls[:,None])
+    eri1+= np.einsum('xinjokpl,iy->xyinjokpl', sc_eri[:,0], bas_coords)
+    eri1+= np.einsum('xnjiokpl,njy->xyinjokpl', sc_eri[:,:,:,0], bas_coords+Ls[:,None])
+    expLk = np.exp(1j*Ls.dot(kpts.T))
+    eri1 = np.einsum('xyiNjOkPl,Nn,Oo,Pp->xyinjokpl', eri1, expLk, expLk.conj(), expLk, optimize=True)
+    nkpts = len(kpts)
+    idx = np.arange(nkpts)
+    ej = -.5 * np.einsum('xyinjokpl,op,nji,plk->xy', eri1, np.eye(nkpts), dm, dm).real
+    ek = -.5 * np.einsum('xyinjokpl,no,ojk,pli->xy', eri1, np.eye(nkpts), dm, dm).real
+    #ref_wo_exxdiv = ej - ek*.5
+
+    sc_s1 = scell.intor('int1e_ipovlp').reshape(3,nimgs,nao,nimgs,nao)
+    s1 = np.einsum('xmij,miy,mk->xykij', sc_s1[:,:,:,0], bas_coords+Ls[:,None], expLk)
+    s1+= np.einsum('xinj,iy,nk->xykij', sc_s1[:,0], bas_coords, expLk)
+    s0 = np.array(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    wcoulG_SR_at_G0 = np.pi/scell.omega**2/cell.vol
+    j_dm = np.einsum('kij,kji->', s0, dm).real
+    ej += np.einsum('xykij,kji->xy', s1, dm).real * wcoulG_SR_at_G0 * j_dm
+    ej += .5 * j_dm * wcoulG_SR_at_G0 * j_dm * np.eye(3)
+    ek += np.einsum('xytij,tjk,tkl,tli->xy', s1, dm, s0, dm).real * wcoulG_SR_at_G0
+    ek += .5 *np.einsum('tij,tjk,tkl,tli->', s0, dm, s0, dm).real * wcoulG_SR_at_G0 * np.eye(3)
+    ref = ej - ek*.5
+    assert abs(ref - sigma).max() < 2e-5
+
+    sigma = with_rsjk._get_jk_sr_strain_deriv(dm, kpts, k_factor=0)
+    cell.omega = scell.omega
+    xc = 'lda,'
+    mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts))
+    ref = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=True, with_nuc=False)
+    ref -= krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=False, with_nuc=False)
+    assert abs(ref - sigma).max() < 1e-7

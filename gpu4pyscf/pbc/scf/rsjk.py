@@ -805,7 +805,7 @@ class PBCJKMatrixOpt:
         log_cutoff = math.log(cutoff)
 
         libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
-        libpbc.PBC_jk_strain_deriv_init(ctypes.c_int(SHM_SIZE))
+        libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
 
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -921,7 +921,7 @@ class PBCJKMatrixOpt:
 
         ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
         sigma = multi_gpu.array_reduce(sigma_dist, inplace=True)
-        sigma *= 4
+        sigma *= 2
         sigma = sigma.get()
 
         if ((cell.dimension == 3 or
@@ -951,52 +951,11 @@ class PBCJKMatrixOpt:
                 ejk[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
                 ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
 
-#            # G0 contribution for sigma
-#            ao_loc = sorted_cell.ao_loc
-#            ao_repeats = ao_loc[1:] - ao_loc[:-1]
-#            bas_coords = cell.atom_coords()[sorted_cell._bas[:,gto.ATOM_OF]]
-#            bas_coords = np.repeat(bas_coords, ao_repeats, axis=0)
-#            sc_ovlp10 = asarray(gto.intor_cross('int1e_ipovlp', sorted_cell, supmol))
-#            s1_strain = cp.einsum('xij,iy->xyij', sc_ovlp10, asarray(bas_coords))
-#
-#            ao_loc = supmol.ao_loc
-#            ao_repeats = ao_loc[1:] - ao_loc[:-1]
-#            bas_coords = supmol.atom_coords()[supmol._bas[:,gto.ATOM_OF]]
-#            bas_coords = np.repeat(bas_coords, ao_repeats, axis=0)
-#            sc_ovlp01 = asarray(gto.intor_cross('int1e_ipovlp', supmol, sorted_cell))
-#            s1_strain += cp.einsum('xji,jy->xyij', sc_ovlp01, asarray(bas_coords))
-#
-#            cell0_ao_loc = sorted_cell.ao_loc
-#            nao = cell0_ao_loc[-1]
-#            nimgs = len(supmol.Ls)
-#            scell_ao_loc = (cell0_ao_loc[:-1] + np.arange(nimgs)[:,None] * nao).ravel()
-#            ao_idx = np.split(np.arange(nao * nimgs), scell_ao_loc[1:])
-#            ao_idx = np.hstack([ao_idx[i] for i in supmol.bas_mask_idx])
-#
-#            if is_gamma_point:
-#                dm1 = dms[:,0].sum(axis=0)
-#                dm1 = dm1[ao_idx%nao]
-#            else:
-#                dm1 = dms[:,supmol.double_latsum_Ts].sum(axis=0)
-#                dm1 = dm1.reshape(nimgs*nao, nao)[ao_idx]
-#            # J contribution
-#            jfac = j_factor * s_dm * wcoulG_SR_at_G0
-#            sigma += cp.einsum('xyij,ji->xy', s1_strain, dm1) * jfac
-#            sigma += .5 * s_dm * jfac * cp.eye(3)
-#            # K contribution
-#            if n_dm == 1: # RHF
-#                dm1 = k_dm[0,ao_idx%nao]
-#            else:
-#                dm1 = contract('Lk,kpq->Lpq', expLk, k_dm)
-#                dm1 = dm1.reshape(nimgs*nao, nao)[ao_idx]
-#            sigma -= cp.einsum('xyij,ji->xy', s1_strain, dm1)
-#            sigma -= .5 *cp.einsum('kij,kji->', s0, k_dm) * cp.eye(3)
-
             int1e_opt = int1e._Int1eOptV2(cell)
             sigma -= int1e_opt.get_ovlp_strain_deriv(j_dm, kpts)
-            sigma += .5 * cp.einsum('kij,kji->', s0, j_dm).get() * np.eye(3)
+            sigma += .5 * cp.einsum('kij,kji->', s0, j_dm).real.get() * np.eye(3)
             sigma += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
-            sigma -= .5 * cp.einsum('kij,kji->', s0, k_dm).get() * np.eye(3)
+            sigma -= .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() * np.eye(3)
 
         if not is_gamma_point:
             ejk *= 1. / nkpts
