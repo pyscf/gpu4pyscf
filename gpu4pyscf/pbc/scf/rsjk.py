@@ -541,6 +541,11 @@ class PBCJKMatrixOpt:
         #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
         dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
                                    self.l_ctr_offsets, self.ao_idx)
+        # Symmetrize density matrices because 8-fold symmetry is utilized when
+        # computing integrals. Fold the contribution of the upper triangular
+        # part of the density matrices into the lower triangular part.
+        dms = transpose_sum(dms)
+        dms *= .5
 
         if kpts is None:
             kpts = np.zeros((1, 3))
@@ -741,6 +746,261 @@ class PBCJKMatrixOpt:
             ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv)
             ek *= k_factor
         return ej - ek
+
+    def _get_jk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None,
+                        j_factor=1., k_factor=1., verbose=None):
+        '''Compute the derivatives of the short-range part of the aggregated
+        J/K contribution. The aggregated J/K contribution is given by
+        j_factor - k_factor / 2.
+        '''
+        log = logger.new_logger(self, verbose)
+        cell = self.cell
+        assert cell.dimension == 3
+        sorted_cell = self.sorted_cell
+        nao_orig = cell.nao
+        nao = sorted_cell.nao
+        supmol = self.supmol
+
+        dm = asarray(dm, order='C')
+        dms = dm.reshape(-1,nao_orig,nao_orig)
+        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
+        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
+                                   self.l_ctr_offsets, self.ao_idx)
+        # Symmetrize density matrices because 8-fold symmetry is utilized when
+        # computing integrals. Fold the contribution of the upper triangular
+        # part of the density matrices into the lower triangular part.
+        dms = transpose_sum(dms)
+        dms *= .5
+
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+        else:
+            kpts = kpts.reshape(-1, 3)
+        is_gamma_point = is_zero(kpts)
+        if is_gamma_point:
+            assert dms.dtype == np.float64
+            nkpts = 1
+            ao_loc = asarray(sorted_cell.ao_loc)
+            dms = cp.asarray(dms, order='C')
+            dm_cond = condense('absmax', dms, ao_loc)
+            # Add the dimension for kpts
+            dms = dms[:,None,:,:]
+        else:
+            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+            Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
+            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
+            nkpts = expLk.shape[1]
+            dms = dms.reshape(-1, nkpts, nao, nao)
+            dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # Are dms always real for super-mol?
+            assert abs(dms.imag).max() < 1e-6
+            expLk = None
+            dms = dms.real
+            dms = cp.asarray(dms, order='C')
+            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
+        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
+        n_dm = len(dms)
+        assert n_dm <= 2
+        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
+        log_cutoff = math.log(cutoff)
+
+        libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
+        libpbc.PBC_jk_strain_deriv_init(ctypes.c_int(SHM_SIZE))
+
+        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l = uniq_l_ctr[:,0]
+        l_ctr_bas_loc = self.l_ctr_offsets
+        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+        n_groups = np.count_nonzero(uniq_l <= LMAX)
+
+        tasks = ((i,j,k,l)
+                 for i in range(n_groups)
+                 for j in range(i+1)
+                 for k in range(i+1)
+                 for l in range(k+1))
+
+        def proc(dms, dm_cond):
+            device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.stream.get_current_stream()
+            log = logger.new_logger(cell, verbose)
+            t0 = log.init_timer()
+            dms = cp.asarray(dms)
+            dm_cond = cp.asarray(dm_cond)
+
+            q_cond = cp.asarray(self.q_cond)
+            s_estimator = cp.asarray(self.s_estimator)
+            pair_ij_mappings = _make_pair_ij_mappings(
+                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
+            pair_kl_mappings = _make_tril_pair_mappings(
+                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
+            bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
+            nimgs = len(supmol.Ls)
+            if is_gamma_point:
+                Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
+                nimgs_uniq_pair = 1
+            else:
+                Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
+                nimgs_uniq_pair = len(supmol.double_latsum_Ts)
+            ejk = cp.zeros((cell.natm, 3))
+            sigma = cp.zeros((3, 3))
+
+            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
+            workers = gpu_specs['multiProcessorCount']
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.uint32)
+            dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
+
+            timing_counter = Counter()
+            kern_counts = 0
+            kern = libpbc.PBC_jk_strain_deriv
+            rys_envs = self.rys_envs
+
+            for task in tasks:
+                i, j, k, l = task
+                shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
+                pair_ij_mapping = pair_ij_mappings[i,j]
+                pair_kl_mapping = pair_kl_mappings[k,l]
+                npairs_ij = pair_ij_mapping.size
+                npairs_kl = pair_kl_mapping.size
+                if npairs_ij == 0 or npairs_kl == 0:
+                    continue
+                scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
+                err = kern(
+                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                    ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
+                    (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
+                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(sorted_cell.nbas),
+                    supmol._atm.ctypes, ctypes.c_int(supmol.natm),
+                    supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
+                    supmol._env.ctypes)
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                if err != 0:
+                    raise RuntimeError(f'PBC_jk_strain_deriv kernel for {llll} failed')
+                if log.verbose >= logger.DEBUG1:
+                    ntasks = npairs_ij * npairs_kl
+                    msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
+                    t1, t1p = log.timer_debug1(msg, *t1), t1
+                    timing_counter[llll] += t1[1] - t1p[1]
+                    kern_counts += 1
+                if num_devices > 1:
+                    stream.synchronize()
+            return ejk, sigma, kern_counts, timing_counter
+
+        results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
+
+        kern_counts = 0
+        timing_collection = Counter()
+        ejk_dist = []
+        sigma_dist = []
+        for ejk, sigma, counts, t_counter in results:
+            kern_counts += counts
+            timing_collection += t_counter
+            ejk_dist.append(ejk)
+            sigma_dist.append(sigma)
+
+        log = logger.new_logger(cell, verbose)
+        if log.verbose >= logger.DEBUG1:
+            log.debug1('kernel launches %d', kern_counts)
+            for llll, t in timing_collection.items():
+                log.debug1('%s wall time %.2f', llll, t)
+
+        ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
+        sigma = multi_gpu.array_reduce(sigma_dist, inplace=True)
+        sigma *= 4
+        sigma = sigma.get()
+
+        if ((cell.dimension == 3 or
+             (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            # difference associated to the G=0 term between the real space
+            # integrals and the AFT integrals
+            dm0 = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
+            omega = self.omega
+            wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+            if exxdiv == 'ewald':
+                wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
+            else:
+                wcoulG_for_k = wcoulG_SR_at_G0
+            int1e_opt = int1e._Int1eOpt(cell, kpts)
+            s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
+            s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
+            s_dm = cp.einsum('kij,nkji->', s0, dm0)
+            j_dm = dm0.sum(axis=0) * (j_factor * s_dm * wcoulG_SR_at_G0)
+            k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
+            k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
+            if n_dm == 1: # RHF
+                k_dm *= .5 * k_factor * wcoulG_for_k
+            else:
+                k_dm *= k_factor * wcoulG_for_k
+            aoslices = cell.aoslice_by_atom()
+            for i, (p0, p1) in enumerate(aoslices[:,2:]):
+                ejk[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
+                ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
+
+#            # G0 contribution for sigma
+#            ao_loc = sorted_cell.ao_loc
+#            ao_repeats = ao_loc[1:] - ao_loc[:-1]
+#            bas_coords = cell.atom_coords()[sorted_cell._bas[:,gto.ATOM_OF]]
+#            bas_coords = np.repeat(bas_coords, ao_repeats, axis=0)
+#            sc_ovlp10 = asarray(gto.intor_cross('int1e_ipovlp', sorted_cell, supmol))
+#            s1_strain = cp.einsum('xij,iy->xyij', sc_ovlp10, asarray(bas_coords))
+#
+#            ao_loc = supmol.ao_loc
+#            ao_repeats = ao_loc[1:] - ao_loc[:-1]
+#            bas_coords = supmol.atom_coords()[supmol._bas[:,gto.ATOM_OF]]
+#            bas_coords = np.repeat(bas_coords, ao_repeats, axis=0)
+#            sc_ovlp01 = asarray(gto.intor_cross('int1e_ipovlp', supmol, sorted_cell))
+#            s1_strain += cp.einsum('xji,jy->xyij', sc_ovlp01, asarray(bas_coords))
+#
+#            cell0_ao_loc = sorted_cell.ao_loc
+#            nao = cell0_ao_loc[-1]
+#            nimgs = len(supmol.Ls)
+#            scell_ao_loc = (cell0_ao_loc[:-1] + np.arange(nimgs)[:,None] * nao).ravel()
+#            ao_idx = np.split(np.arange(nao * nimgs), scell_ao_loc[1:])
+#            ao_idx = np.hstack([ao_idx[i] for i in supmol.bas_mask_idx])
+#
+#            if is_gamma_point:
+#                dm1 = dms[:,0].sum(axis=0)
+#                dm1 = dm1[ao_idx%nao]
+#            else:
+#                dm1 = dms[:,supmol.double_latsum_Ts].sum(axis=0)
+#                dm1 = dm1.reshape(nimgs*nao, nao)[ao_idx]
+#            # J contribution
+#            jfac = j_factor * s_dm * wcoulG_SR_at_G0
+#            sigma += cp.einsum('xyij,ji->xy', s1_strain, dm1) * jfac
+#            sigma += .5 * s_dm * jfac * cp.eye(3)
+#            # K contribution
+#            if n_dm == 1: # RHF
+#                dm1 = k_dm[0,ao_idx%nao]
+#            else:
+#                dm1 = contract('Lk,kpq->Lpq', expLk, k_dm)
+#                dm1 = dm1.reshape(nimgs*nao, nao)[ao_idx]
+#            sigma -= cp.einsum('xyij,ji->xy', s1_strain, dm1)
+#            sigma -= .5 *cp.einsum('kij,kji->', s0, k_dm) * cp.eye(3)
+
+            int1e_opt = int1e._Int1eOptV2(cell)
+            sigma -= int1e_opt.get_ovlp_strain_deriv(j_dm, kpts)
+            sigma += .5 * cp.einsum('kij,kji->', s0, j_dm).get() * np.eye(3)
+            sigma += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
+            sigma -= .5 * cp.einsum('kij,kji->', s0, k_dm).get() * np.eye(3)
+
+        if not is_gamma_point:
+            ejk *= 1. / nkpts
+        return sigma
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

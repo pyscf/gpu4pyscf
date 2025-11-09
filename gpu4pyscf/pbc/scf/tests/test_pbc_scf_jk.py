@@ -430,3 +430,76 @@ def test_ejk_ip1_per_atom_kpts():
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
     assert abs(ejk - ref).max() < 5e-6
+
+from pyscf.pbc.grad import rks, rks_stress
+def _get_coulG_strain_derivatives(cell, Gv):
+    '''derivatives of 4pi/G^2'''
+    G2 = np.einsum('gx,gx->g', Gv, Gv)
+    G2[0] = np.inf
+    coulG_0 = 4 * np.pi / G2
+    omega = cell.omega
+    Gxy = np.einsum('gx,gy->xyg', Gv, Gv)
+    if omega < 0:
+        coulG_1 = Gxy * coulG_0 * 2/G2
+        coulG_1 *= (1 - np.exp(-.25/omega**2 * G2))
+        coulG_1 -= coulG_0*np.exp(-.25/omega**2 * G2) * .25/omega**2*2 * Gxy
+        coulG_0 *= (1 - np.exp(-.25/omega**2 * G2))
+        #coulG_0[0] = np.pi/omega**2
+    elif omega > 0:
+        coulG_1 = Gxy * coulG_0 * 2/G2
+        coulG_1 *= np.exp(-.25/omega**2 * G2)
+        coulG_1 += coulG_0*np.exp(-.25/omega**2 * G2) * .25/omega**2*2 * Gxy
+        coulG_0 *= np.exp(-.25/omega**2 * G2)
+        #coulG_0[0] = -np.pi/omega**2
+    else:
+        coulG_1 = Gxy * coulG_0 * 2/G2
+    return coulG_0, coulG_1
+rks_stress._get_coulG_strain_derivatives = _get_coulG_strain_derivatives
+
+def test_jk_sr_strain_deriv_1():
+    a = np.eye(3) * 6.
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell = pyscf.M(
+        atom='He 1 1 1; He 2 1.5 2.4',
+        basis=[[0, [1.5, 1]]], a=a, unit='Bohr')
+    nao = cell.nao
+    dm = np.random.rand(nao, nao) - .5
+    dm = dm.dot(dm.T)
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    sigma = with_rsjk._get_jk_sr_strain_deriv(dm)
+    #sigma_wo_exxdiv = with_rsjk._get_jk_sr_strain_deriv(dm, exxdiv=False)
+
+    from pyscf.pbc.tools import pbc as pbctools
+    Ls = cell.get_lattice_Ls(rcut=cell.rcut+4)
+    Ls = Ls[np.argsort(np.linalg.norm(Ls-.1, axis=1))]
+    scell = cell.copy()
+    scell = pbctools._build_supcell_(scell, cell, Ls)
+    scell.omega = -.3
+    nimgs = len(Ls)
+    aoslices = cell.aoslice_by_atom()
+    ao_repeats = aoslices[:,3] - aoslices[:,2]
+    bas_coords = np.repeat(cell.atom_coords(), ao_repeats, axis=0)
+    sc_eri = scell.intor('int2e_ip1').reshape(3,nimgs,nao,nimgs,nao,nimgs,nao,nimgs,nao)
+    eri1 = np.einsum('xokplinj,oky->xyijkl', sc_eri[:,:,:,:,:,0], bas_coords+Ls[:,None])
+    eri1+= np.einsum('xplokinj,ply->xyijkl', sc_eri[:,:,:,:,:,0], bas_coords+Ls[:,None])
+    eri1+= np.einsum('xinjokpl,iy->xyijkl', sc_eri[:,0], bas_coords)
+    eri1+= np.einsum('xnjiokpl,njy->xyijkl', sc_eri[:,:,:,0], bas_coords+Ls[:,None])
+    ej = np.einsum('xyijkl,ji,lk->xy', eri1, dm, dm)
+    ek = np.einsum('xyijkl,jk,li->xy', eri1, dm, dm)
+    #ref_wo_exxdiv = -(ej - ek*.5)
+
+    sc_s1 = scell.intor('int1e_ipovlp').reshape(3,nimgs,nao,nimgs,nao)
+    s1 = np.einsum('xmij,miy->xyij', sc_s1[:,:,:,0], bas_coords+Ls[:,None])
+    s1+= np.einsum('xinj,iy->xyij', sc_s1[:,0], bas_coords)
+    s0 = cell.pbc_intor('int1e_ovlp')
+    wcoulG_SR_at_G0 = np.pi/scell.omega**2/cell.vol
+    j_dm = np.einsum('ij,ji->', s0, dm)
+    ej -= np.einsum('xyij,ji->xy', s1, dm) * wcoulG_SR_at_G0 * j_dm
+    ej -= .5 * j_dm * wcoulG_SR_at_G0 * j_dm * np.eye(3)
+    ek -= np.einsum('xyij,jk,kl,li->xy', s1, dm, s0, dm) * wcoulG_SR_at_G0
+    ek -= .5 *np.einsum('ij,jk,kl,li->', s0, dm, s0, dm) * wcoulG_SR_at_G0 * np.eye(3)
+    ref = -(ej - ek*.5)
+    assert abs(ref - sigma).max() < 1e-6
+
+test_jk_sr_strain_deriv()
