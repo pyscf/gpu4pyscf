@@ -96,8 +96,20 @@ def _get_coulG_strain_derivatives(cell, Gv):
     G2 = cp.einsum('gx,gx->g', Gv, Gv)
     G2[0] = np.inf
     coulG_0 = 4 * np.pi / G2
-    coulG_1 = cp.einsum('gx,gy->xyg', Gv, Gv)
-    coulG_1 *= coulG_0 * 2/G2
+    omega = cell.omega
+    coulGxy = cp.einsum('gx,gy->xyg', Gv, Gv)
+    coulGxy *= coulG_0
+    coulG_1 = coulGxy * 2/G2
+    if omega < 0:
+        coulG_1 *= (1 - cp.exp(-.25/omega**2 * G2))
+        coulG_1 -= cp.exp(-.25/omega**2 * G2) * (.25/omega**2*2) * coulGxy
+        coulG_0 *= (1 - cp.exp(-.25/omega**2 * G2))
+        #coulG_0[0] = np.pi/omega**2
+    elif omega > 0:
+        coulG_1 *= cp.exp(-.25/omega**2 * G2)
+        coulG_1 += cp.exp(-.25/omega**2 * G2) * (.25/omega**2*2) * coulGxy
+        coulG_0 *= cp.exp(-.25/omega**2 * G2)
+        #coulG_0[0] = -np.pi/omega**2
     return coulG_0, coulG_1
 
 def _get_weight_strain_derivatives(cell, grids):
@@ -276,25 +288,25 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     rho0, rho1 = rho0_fft_order, rho1_fft_order
 
     exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=0)[:2]
-    out += contract('xyng,ng->xy', rho1, vxc).real.get() * weight_0
-    out += contract('g,g->', rho0[0], exc.ravel()).real.get() * weight_1
+    out += cp.einsum('xyng,ng->xy', rho1, vxc).real.get() * weight_0
+    out += cp.einsum('g,g->', rho0[0], exc.ravel()).real.get() * weight_1
 
     Gv = cell.get_Gv(mesh)
     coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
     rhoG = pbctools.fft(rho0[0], mesh)
     if with_j:
         vR = pbctools.ifft(rhoG * coulG_0, mesh)
-        EJ = contract('xyg,g->xy', rho1[:,:,0], vR).real.get() * weight_0 * 2
-        EJ += contract('g,g->', rho0[0], vR).real.get() * weight_1
-        EJ += contract('xyg,g->xy', coulG_1, rhoG.conj()*rhoG).real.get() * (weight_0/ngrids)
+        EJ = cp.einsum('xyg,g->xy', rho1[:,:,0], vR).real.get() * weight_0 * 2
+        EJ += cp.einsum('g,g->', rho0[0], vR).real.get() * weight_1
+        EJ += cp.einsum('xyg,g,g->xy', coulG_1, rhoG.conj(), rhoG).real.get() * (weight_0/ngrids)
         out += .5 * EJ
 
     if with_nuc:
         if cell._pseudo:
             vpplocG_0, vpplocG_1 = _get_vpplocG_strain_derivatives(cell, mesh)
             vpplocR = pbctools.ifft(vpplocG_0, mesh).real
-            Ene = contract('xyg,g->xy', rho1[:,:,0], vpplocR).real.get()
-            Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
+            Ene = cp.einsum('xyg,g->xy', rho1[:,:,0], vpplocR).real.get()
+            Ene += cp.einsum('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
             Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm)
         else:
             charge = -cell.atom_charges()
@@ -304,8 +316,8 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
             SI = cell.get_SI(mesh=mesh)
             ZG = asarray(np.dot(charge, SI))
             vR = pbctools.ifft(ZG * coulG_0, mesh).real
-            Ene = contract('xyg,g->xy', rho1[:,:,0], vR).real.get()
-            Ene += contract('xyg,g->xy', coulG_1, rhoG.conj()*ZG).real.get() * (1./ngrids)
+            Ene = cp.einsum('xyg,g->xy', rho1[:,:,0], vR).real.get()
+            Ene += cp.einsum('xyg,g,g->xy', coulG_1, rhoG.conj(), ZG).real.get() * (1./ngrids)
         out += Ene
     return out
 

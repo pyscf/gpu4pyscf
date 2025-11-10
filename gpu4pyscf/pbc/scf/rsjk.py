@@ -50,6 +50,7 @@ __all__ = [
 
 libpbc.PBC_build_k.restype = ctypes.c_int
 libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
+libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 OMEGA = 0.3
@@ -580,7 +581,6 @@ class PBCJKMatrixOpt:
         log_cutoff = math.log(cutoff)
 
         libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
-        libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
 
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -805,7 +805,6 @@ class PBCJKMatrixOpt:
         log_cutoff = math.log(cutoff)
 
         libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
-        libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
 
         uniq_l_ctr = self.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]

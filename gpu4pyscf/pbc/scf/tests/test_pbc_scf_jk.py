@@ -432,34 +432,9 @@ def test_ejk_ip1_per_atom_kpts():
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
     assert abs(ejk - ref).max() < 5e-6
 
-from pyscf.pbc.grad import rks, rks_stress
-from pyscf.pbc.grad import krks, krks_stress
-def _get_coulG_strain_derivatives(cell, Gv):
-    '''derivatives of 4pi/G^2'''
-    G2 = np.einsum('gx,gx->g', Gv, Gv)
-    G2[0] = np.inf
-    coulG_0 = 4 * np.pi / G2
-    omega = cell.omega
-    Gxy = np.einsum('gx,gy->xyg', Gv, Gv)
-    if omega < 0:
-        coulG_1 = Gxy * coulG_0 * 2/G2
-        coulG_1 *= (1 - np.exp(-.25/omega**2 * G2))
-        coulG_1 -= coulG_0*np.exp(-.25/omega**2 * G2) * .25/omega**2*2 * Gxy
-        coulG_0 *= (1 - np.exp(-.25/omega**2 * G2))
-        #coulG_0[0] = np.pi/omega**2
-    elif omega > 0:
-        coulG_1 = Gxy * coulG_0 * 2/G2
-        coulG_1 *= np.exp(-.25/omega**2 * G2)
-        coulG_1 += coulG_0*np.exp(-.25/omega**2 * G2) * .25/omega**2*2 * Gxy
-        coulG_0 *= np.exp(-.25/omega**2 * G2)
-        #coulG_0[0] = -np.pi/omega**2
-    else:
-        coulG_1 = Gxy * coulG_0 * 2/G2
-    return coulG_0, coulG_1
-rks_stress._get_coulG_strain_derivatives = _get_coulG_strain_derivatives
-krks_stress._get_coulG_strain_derivatives = _get_coulG_strain_derivatives
-
 def test_jk_sr_strain_deriv1():
+    from gpu4pyscf.pbc.grad import rks, rks_stress
+    from gpu4pyscf.pbc.grad import krks, krks_stress
     a = np.eye(3) * 6.
     np.random.seed(5)
     a += np.random.rand(3, 3) - .5
@@ -508,7 +483,7 @@ def test_jk_sr_strain_deriv1():
     sigma = with_rsjk._get_jk_sr_strain_deriv(dm, k_factor=0)
     cell.omega = scell.omega
     xc = 'lda,'
-    mf_grad = rks.Gradients(cell.RKS(xc=xc))
+    mf_grad = cell.RKS(xc=xc).to_gpu().Gradients()
     ref = rks_stress.get_vxc(mf_grad, cell, dm, with_j=True, with_nuc=False)
     ref -= rks_stress.get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=False)
     assert abs(ref - sigma).max() < 1e-7
@@ -547,7 +522,7 @@ def test_jk_sr_strain_deriv1():
     sigma = with_rsjk._get_jk_sr_strain_deriv(dm, kpts, k_factor=0)
     cell.omega = scell.omega
     xc = 'lda,'
-    mf_grad = krks.Gradients(cell.KRKS(xc=xc, kpts=kpts))
+    mf_grad = cell.KRKS(xc=xc, kpts=kpts).to_gpu().Gradients()
     ref = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=True, with_nuc=False)
     ref -= krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=False, with_nuc=False)
     assert abs(ref - sigma).max() < 1e-7

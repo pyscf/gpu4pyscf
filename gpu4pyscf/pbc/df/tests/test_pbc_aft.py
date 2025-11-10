@@ -22,6 +22,7 @@ from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.pbc.grad import rks_stress
 from packaging import version
 
 def setUpModule():
@@ -361,6 +362,29 @@ class KnownValues(unittest.TestCase):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
             assert abs(ek_ewald - ref).max() < 1e-8
+
+    def test_ej_strain_deriv_gamma_point(self):
+        cell = pgto.M(
+            atom = '''
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        np.random.seed(9)
+        nao = cell.nao
+        dm = np.random.rand(nao, nao) * .5
+        dm = dm.dot(dm.T)
+        mydf = aft.AFTDF(cell)
+        sigma = aft_jk.get_ej_strain_deriv(mydf, dm)
+
+        xc = 'lda,'
+        mf_grad = cell.RKS(xc=xc).to_gpu().Gradients()
+        ref = rks_stress.get_vxc(mf_grad, cell, dm, with_j=True, with_nuc=False)
+        ref -= rks_stress.get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=False)
+        assert abs(ref - sigma).max() < 1e-8
 
 if __name__ == '__main__':
     print("Full Tests for aft")
