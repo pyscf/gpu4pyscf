@@ -27,6 +27,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf import tdscf
+import os
 
 
 #
@@ -372,13 +373,16 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
             rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
             # quick fix
             if deriv > 2:
-                ni_cpu = numint_cpu()
-                # TODO: If the libxc is stablized, this should be gpulized
-                # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
-                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
-                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+                whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+                if not whether_use_gpu:
+                    ni_cpu = numint_cpu()
+                    # TODO: If the libxc is stablized, this should be gpulized
+                    vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+                    if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
+                    if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
+                    if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+                else:
+                    vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             else:
                 vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             dmvo_mask = dmvo[mask[:, None], mask]
@@ -433,14 +437,15 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
             rho *= 0.5
             rho = cp.repeat(rho[cp.newaxis], 2, axis=0)
             # quick fix
-            if deriv > 2:
-                ni_cpu = numint_cpu()
-                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
-                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
-                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
-            else:
-                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            # if deriv > 2:
+            #     ni_cpu = numint_cpu()
+            #     vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+            #     if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
+            #     if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
+            #     if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+            # else:
+            #     vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             # fxc_t couples triplet excitation amplitudes
             # 1/2 int (tia - tIA) fxc (tjb - tJB) = tia fxc_t tjb
             fxc_t = fxc[:, :, 0] - fxc[:, :, 1]
