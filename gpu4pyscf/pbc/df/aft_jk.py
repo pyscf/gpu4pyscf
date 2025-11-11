@@ -213,11 +213,11 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     for group_id, (kpt, ki_idx, kj_idx, self_conj) \
             in enumerate(kk_adapted_iter(cell, kpts)):
-        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh)
+        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh) * weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
-            update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1] * weight, ki_idx, kj_idx,
+            update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1], ki_idx, kj_idx,
                       not self_conj, k_to_compute, t_rev_pairs)
             Gpq = None
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
@@ -531,7 +531,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     return ek.get()
 
 def _generate_shl_pairs(ft_opt):
-    img_idx_cache = ft_opt.make_img_idx_cache(permutation_symmetry=not True)
+    img_idx_cache = ft_opt.make_img_idx_cache(permutation_symmetry=True)
     bas_ij_idx = []
     bas_ij_img_idx = []
     shl_pair_offsets = []
@@ -624,6 +624,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None):
     GvT = cp.zeros(3*blksize+256)
     ej = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
+    sigma0 = cp.zeros((3, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
@@ -631,7 +632,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None):
         Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpts, transform_ao=False)
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
-        sigma += .5*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
+        sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
 
         vG[:nGv] = rhoG.conj()
         vG[:nGv] *= wcoulG_0[p0:p1]
@@ -657,10 +658,12 @@ def get_ej_strain_deriv(mydf, dm, kpts=None):
             raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
     if nkpts != 1:
         ej /= nkpts
+    sigma *= 2 / nkpts**2
     return sigma.get()
 
 def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
     '''Strain derivatives from exact exchange'''
+    from gpu4pyscf.pbc.grad import rks_stress
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
     if kpts is None:
@@ -674,6 +677,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
     assert nkpts == len(kpts)
     if n_dm > 2:
         raise NotImplementedError
+    assert exxdiv is None
 
     ft_opt = FTOpt(cell, kpts).build()
     ft_kern = ft_opt.gen_ft_kernel()
@@ -716,20 +720,32 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
     sigma = cp.zeros((3, 3))
     for group_id, (kpt, ki_idx, kj_idx, self_conj) \
             in enumerate(kk_adapted_iter(cell, kpts)):
-        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh)
+        Gvk = Gv + kpt
+        coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(
+            cell, Gvk, remove_G0=is_zero(kpt))
+        coulG_0 = asarray(coulG_0)
+        coulG_1 = asarray(coulG_1)
+        weight_0 = 1/cell.vol
+        weight_1 = -1/cell.vol * cp.eye(3)
+        wcoulG_0 = weight_0 * coulG_0
+        wcoulG_1 = weight_0 * coulG_1
+        wcoulG_1 += weight_1[:,:,None] * coulG_0
+
         swap_2e = not self_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
-            #:Gpq = ft_kern(Gv[p0:p1], kpt, kpts, transform_ao=False)
-            #:Gpq = Gpq.transpose(0,2,3,1)
-            #:Gpq_conj = Gpq.conj()
+            Gpq = ft_kern(Gv[p0:p1], kpt, kpts, transform_ao=False)
+            Gpq = Gpq.transpose(0,2,3,1)
+            Gpq_conj = Gpq.conj()
             # Gpq.conj() can be computed equivalently as
-            Gpq_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts, transform_ao=False)
-            Gpq_conj = Gpq_conj.transpose(0,2,3,1)
+            #Gpq_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts, transform_ao=False)
+            #Gpq_conj = Gpq_conj.transpose(0,2,3,1)
 
             if is_gamma_point:
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
+                vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
+                sigma += .25*cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
             else:
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
                 # apply derivatives to nlkG*
@@ -744,16 +760,24 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
                 #:    dm_vG += contract('Lk,kpqg->Lpqg', expLk[:,kj_idx], tmp)
                 idx = np.empty_like(ki_idx)
                 idx[kj_idx] = ki_idx
-                tmp = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
-                tmp = contract('snjlg,snli->njig', tmp, dms[:,idx])
-                dm_vG = contract('Lk,kpqg->Lpqg', expLk, tmp)
+                dm_k = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
+                dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
+                dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
+
+                vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
+                tmp = .25*cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
+                if swap_2e:
+                    sigma += tmp * 2
+                else:
+                    sigma += tmp
+
             if swap_2e:
-                dm_vG *= wcoulG[p0:p1] * 2
+                dm_vG *= wcoulG_0[p0:p1] * 2
             else:
-                dm_vG *= wcoulG[p0:p1]
+                dm_vG *= wcoulG_0[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
-            GvT[:3*nGv].set((Gv[p0:p1]+kpt).T.ravel())
+            GvT[:3*nGv].set(Gvk[p0:p1].T.ravel())
             err = kern(
                 ctypes.cast(ek.data.ptr, ctypes.c_void_p),
                 ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
@@ -775,6 +799,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
     if nkpts != 1:
         ek /= nkpts
+    sigma *= 2 / nkpts**2
     log.timer_debug1('get_ek_ip1', *cpu0)
     return sigma.get()
 

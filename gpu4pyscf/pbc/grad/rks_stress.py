@@ -90,11 +90,12 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
         cell2.build(False, False)
     return cell1, cell2
 
-def _get_coulG_strain_derivatives(cell, Gv):
+def _get_coulG_strain_derivatives(cell, Gv, remove_G0=True):
     '''derivatives of 4pi/G^2'''
     Gv = asarray(Gv)
     G2 = cp.einsum('gx,gx->g', Gv, Gv)
-    G2[0] = np.inf
+    if remove_G0:
+        G2[0] = np.inf
     coulG_0 = 4 * np.pi / G2
     omega = cell.omega
     coulGxy = cp.einsum('gx,gy->xyg', Gv, Gv)

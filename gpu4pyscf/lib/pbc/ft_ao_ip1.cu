@@ -489,9 +489,9 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
             if (gout_id == 0) {
                 double theta_ij = ai * aj_aij;
                 double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
-//                if (ish_cell0 == jsh_cell0) {
-//                    fac *= .5;
-//                }
+                if (ish_cell0 == jsh_cell0) {
+                    fac *= .5;
+                }
                 if (Gv_id >= nGv) {
                     fac = 0;
                 }
