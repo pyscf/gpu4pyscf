@@ -501,7 +501,6 @@ def test_jk_sr_strain_deriv1():
     expLk = np.exp(1j*Ls.dot(kpts.T))
     eri1 = np.einsum('xyiNjOkPl,Nn,Oo,Pp->xyinjokpl', eri1, expLk, expLk.conj(), expLk, optimize=True)
     nkpts = len(kpts)
-    idx = np.arange(nkpts)
     ej = -.5 * np.einsum('xyinjokpl,op,nji,plk->xy', eri1, np.eye(nkpts), dm, dm).real
     ek = -.5 * np.einsum('xyinjokpl,no,ojk,pli->xy', eri1, np.eye(nkpts), dm, dm).real
     #ref_wo_exxdiv = ej - ek*.5

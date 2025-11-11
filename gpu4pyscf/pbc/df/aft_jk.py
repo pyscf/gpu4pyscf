@@ -624,7 +624,6 @@ def get_ej_strain_deriv(mydf, dm, kpts=None):
     GvT = cp.zeros(3*blksize+256)
     ej = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
-    sigma0 = cp.zeros((3, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
@@ -661,7 +660,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None):
     sigma *= 2 / nkpts**2
     return sigma.get()
 
-def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
+def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     '''Strain derivatives from exact exchange'''
     from gpu4pyscf.pbc.grad import rks_stress
     log = logger.new_logger(mydf)
@@ -672,17 +671,16 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
         kpts = kpts.reshape(-1, 3)
     is_gamma_point = is_zero(kpts)
     cell = mydf.cell
-    dms = _format_dms(dm, kpts)
-    n_dm, nkpts, nao = dms.shape[:3]
+    dm0 = _format_dms(dm, kpts)
+    n_dm, nkpts, nao = dm0.shape[:3]
     assert nkpts == len(kpts)
     if n_dm > 2:
         raise NotImplementedError
-    assert exxdiv is None
 
     ft_opt = FTOpt(cell, kpts).build()
     ft_kern = ft_opt.gen_ft_kernel()
     sorted_cell = ft_opt.sorted_cell
-    dms = cp.asarray(dms.reshape(-1,nao,nao))
+    dms = cp.asarray(dm0.reshape(-1,nao,nao))
     dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, ft_opt.uniq_l_ctr,
                                ft_opt.l_ctr_offsets, ft_opt.ao_idx)
     nao = dms.shape[-1]
@@ -722,7 +720,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
             in enumerate(kk_adapted_iter(cell, kpts)):
         Gvk = Gv + kpt
         coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(
-            cell, Gvk, remove_G0=is_zero(kpt))
+            cell, Gvk, omega=omega, remove_G0=is_zero(kpt))
         coulG_0 = asarray(coulG_0)
         coulG_1 = asarray(coulG_1)
         weight_0 = 1/cell.vol
@@ -800,8 +798,43 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None):
     if nkpts != 1:
         ek /= nkpts
     sigma *= 2 / nkpts**2
+    sigma = sigma.get()
+
+    if (exxdiv == 'ewald' and
+        (cell.dimension == 3 or
+         (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+        from pyscf.pbc.tools.pbc import madelung
+        from gpu4pyscf.pbc.gto import int1e
+        int1e_opt = int1e._Int1eOpt(cell, kpts)
+        s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
+        k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
+        k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
+        ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get()
+
+        scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+        ewald_G0 = np.empty((3,3))
+        disp = max(1e-5, (cell.precision*.1)**.5)
+        for i in range(3):
+            for j in range(i+1):
+                cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp)
+                kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+                kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+                e1 = madelung(cell1, kpts1, omega=omega)
+                e2 = madelung(cell2, kpts2, omega=omega)
+                ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
+        if n_dm == 1: # RHF
+            ewald_G0 *= .5 * ek_G0
+            k_dm *= .5 * madelung(cell, kpts, omega=omega)
+        else:
+            ewald_G0 *= ek_G0
+            k_dm *= madelung(cell, kpts, omega=omega)
+        int1e_opt = int1e._Int1eOptV2(cell)
+        ewald_G0 += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts) * 2
+        ewald_G0 /= nkpts
+        sigma += ewald_G0
+
     log.timer_debug1('get_ek_ip1', *cpu0)
-    return sigma.get()
+    return sigma
 
 ##################################################
 #

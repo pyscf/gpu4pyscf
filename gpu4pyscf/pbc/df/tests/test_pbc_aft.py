@@ -398,7 +398,9 @@ class KnownValues(unittest.TestCase):
             a=np.eye(3)*4.,
             basis=[[0, [.25, 1]], [1, [.3, 1]]],
         )
-        kpts = cell.make_kpts([3,2,1])
+        kmesh = [3,2,1]
+        kpts = cell.make_kpts(kmesh)
+        nkpts = len(kpts)
         dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
         sigma = aft_jk.get_ej_strain_deriv(mydf, dm, kpts)
@@ -461,17 +463,17 @@ class KnownValues(unittest.TestCase):
         nkpts = len(kpts)
         dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
         mydf = aft.AFTDF(cell)
-        sigma = aft_jk.get_ek_strain_deriv(mydf, dm, kpts)
+        sigma = aft_jk.get_ek_strain_deriv(mydf, dm, kpts, exxdiv='ewald')
 
         for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
             cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
-            vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv=None)
+            vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv='ewald')
             e1 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts
             mydf = aft.AFTDF(cell2, kpts=cell2.make_kpts(kmesh))
-            vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv=None)
+            vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv='ewald')
             e2 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts
-            assert abs(sigma[i, j] - (e1-e2)/2e-4).max() < 2e-7
+            assert abs(sigma[i, j] - (e1-e2)/2e-4).max() < 5e-7
 
 if __name__ == '__main__':
     print("Full Tests for aft")
