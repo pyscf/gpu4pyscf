@@ -103,10 +103,10 @@ def kernel(mf_grad):
 def get_veff(mf_grad, cell, dm, kpts):
     '''Strain derivatives for Coulomb and exchange energy with k-point samples
     '''
-    from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
     mf = mf_grad.base
     with_rsjk = mf.rsjk
     if with_rsjk is not None:
+        assert isinstance(with_rsjk, PBCJKMatrixOpt)
         if with_rsjk.supmol is None:
             with_rsjk.build()
         sigma = with_rsjk._get_ejk_sr_strain_deriv(dm, kpts, exxdiv=mf.exxdiv)

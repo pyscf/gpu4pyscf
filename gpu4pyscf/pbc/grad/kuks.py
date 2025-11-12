@@ -87,10 +87,10 @@ def get_veff(ks_grad, dm=None, kpts=None):
             with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
         if with_rsjk.supmol is None:
             with_rsjk.build()
-        exc += with_rsjk._get_ejk_sr_ip1(dm, j_factor=j_factor, k_factor=k_sr,
-                                         kpts=kpts, exxdiv=mf.exxdiv)
-        exc += with_rsjk._get_ejk_lr_ip1(dm, j_factor=j_factor, k_factor=k_lr,
-                                         kpts=kpts, exxdiv=mf.exxdiv)
+        exc += with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
+                                         j_factor=j_factor, k_factor=k_sr)
+        exc += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
+                                         j_factor=j_factor, k_factor=k_lr)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):

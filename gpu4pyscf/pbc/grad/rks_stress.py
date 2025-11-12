@@ -58,6 +58,7 @@ from gpu4pyscf.pbc.df import FFTDF, ft_ao
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 
@@ -162,6 +163,33 @@ def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
         out = contract('Lks,xycLig->kxycigs', expLk, out)
         out = out.view(np.complex128)[:,:,:,:,:,:,0]
     return out
+
+def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
+    '''Strain derivatives for Coulomb and exchange energy with k-point samples
+    '''
+    mf = mf_grad.base
+    with_rsjk = mf.rsjk
+    ni = mf._numint
+
+    if with_rsjk is not None:
+        assert isinstance(with_rsjk, PBCJKMatrixOpt)
+        if with_rsjk.supmol is None:
+            with_rsjk.build()
+        # TODO: with_nuc should be disabled for all-electron calculations
+        sigma = get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=with_nuc)
+        if not ni.libxc.is_hybrid_xc(mf.xc):
+            return sigma
+        j_factor = 1
+        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        sigma += with_rsjk._get_ejk_sr_strain_deriv(
+            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_sr)
+        sigma += with_rsjk._get_ejk_lr_strain_deriv(
+            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_lr)
+    else:
+        if not ni.libxc.is_hybrid_xc(mf.xc):
+            return get_vxc(mf_grad, cell, dm, with_j, with_nuc)
+        raise NotImplementedError(f'Stress tensor for KHF for {mf.with_df}')
+    return sigma
 
 def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     '''Strain derivatives for Coulomb and XC at gamma point
@@ -456,8 +484,6 @@ def kernel(mf_grad):
     with_df = mf.with_df
     assert isinstance(with_df, FFTDF)
     ni = mf._numint
-    if ni.libxc.is_hybrid_xc(mf.xc):
-        raise NotImplementedError('Stress tensor for hybrid DFT')
     if hasattr(mf, 'U_idx'):
         raise NotImplementedError('Stress tensor for DFT+U')
 
@@ -484,7 +510,7 @@ def kernel(mf_grad):
             sigma[x,y] += (t1 - t2) / (2*disp)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
-    sigma += get_vxc(mf_grad, cell, dm0, with_j=True, with_nuc=True)
+    sigma += get_veff(mf_grad, cell, dm0, with_j=True, with_nuc=True)
     t0 = log.timer_debug1('Vxc and Coulomb derivatives', *t0)
 
     sigma /= cell.vol

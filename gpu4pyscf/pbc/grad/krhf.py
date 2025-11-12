@@ -31,6 +31,7 @@ from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.df.fft import get_SI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 
