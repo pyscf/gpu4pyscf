@@ -29,7 +29,7 @@
 
 __global__ static
 void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                        int *bas_mask_idx, int *Ts_ji_lookup,
+                        int *bas_mask_idx, int *Ts_ij_lookup,
                         int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                         uint32_t *pool, double *dd_pool, int *head,
                         int reserved_shm_size)
@@ -154,7 +154,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                           Ts_ji_lookup, nimgs, nbas_cell0, jk, envs, bounds);
+                           Ts_ij_lookup, nimgs, nbas_cell0, jk, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
@@ -203,12 +203,12 @@ while (1) {
             double v_ly = 0;
             double v_lz = 0;
             int nao2 = nao * nao;
-            double *dm_jk = dm + Ts_ji_lookup[cell_j+cell_k*nimgs] * nao2;
-            double *dm_jl = dm + Ts_ji_lookup[cell_j+cell_l*nimgs] * nao2;
-            double *dm_ki = dm + Ts_ji_lookup[cell_k             ] * nao2;
-            double *dm_li = dm + Ts_ji_lookup[cell_l             ] * nao2;
-            double *dm_ji = dm + Ts_ji_lookup[cell_j             ] * nao2;
-            double *dm_lk = dm + Ts_ji_lookup[cell_l+cell_k*nimgs] * nao2;
+            double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
+            double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
+            double *dm_ki = dm + Ts_ij_lookup[cell_k             ] * nao2;
+            double *dm_li = dm + Ts_ij_lookup[cell_l             ] * nao2;
+            double *dm_ji = dm + Ts_ij_lookup[cell_j             ] * nao2;
+            double *dm_lk = dm + Ts_ij_lookup[cell_l+cell_k*nimgs] * nao2;
             if (jk.n_dm == 1) {
                 for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
                     int kl = n / nfij;
@@ -552,7 +552,7 @@ while (1) {
 
 __global__ static
 void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                        double *sigma, int *bas_mask_idx, int *Ts_ji_lookup,
+                        double *sigma, int *bas_mask_idx, int *Ts_ij_lookup,
                         int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                         uint32_t *pool, double *dd_pool, int *head,
                         int reserved_shm_size)
@@ -689,7 +689,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                           Ts_ji_lookup, nimgs, nbas_cell0, jk, envs, bounds);
+                           Ts_ij_lookup, nimgs, nbas_cell0, jk, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
@@ -744,12 +744,12 @@ while (1) {
             double v_ly = 0;
             double v_lz = 0;
             int nao2 = nao * nao;
-            double *dm_jk = dm + Ts_ji_lookup[cell_j+cell_k*nimgs] * nao2;
-            double *dm_jl = dm + Ts_ji_lookup[cell_j+cell_l*nimgs] * nao2;
-            double *dm_ki = dm + Ts_ji_lookup[cell_k             ] * nao2;
-            double *dm_li = dm + Ts_ji_lookup[cell_l             ] * nao2;
-            double *dm_ji = dm + Ts_ji_lookup[cell_j             ] * nao2;
-            double *dm_lk = dm + Ts_ji_lookup[cell_l+cell_k*nimgs] * nao2;
+            double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
+            double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
+            double *dm_ki = dm + Ts_ij_lookup[cell_k             ] * nao2;
+            double *dm_li = dm + Ts_ij_lookup[cell_l             ] * nao2;
+            double *dm_ji = dm + Ts_ij_lookup[cell_j             ] * nao2;
+            double *dm_lk = dm + Ts_ij_lookup[cell_l+cell_k*nimgs] * nao2;
             if (jk.n_dm == 1) {
                 for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
                     int kl = n / nfij;
@@ -1175,7 +1175,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         RysIntEnvVars *envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                        int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nimgs_uniq_pair,
+                        int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                         float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
                         uint32_t *pool, double *dd_pool, int nbas_cell0,
                         int *atm, int natm, int *bas, int nbas, double *env)
@@ -1235,7 +1235,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
         rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
-                *envs, jk, bounds, bas_mask_idx, Ts_ji_lookup,
+                *envs, jk, bounds, bas_mask_idx, Ts_ij_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, dd_pool, head, reserved_shm_size);
     }
@@ -1253,7 +1253,7 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
                         RysIntEnvVars *envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                        int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nimgs_uniq_pair,
+                        int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                         float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
                         uint32_t *pool, double *dd_pool, int nbas_cell0,
                         int *atm, int natm, int *bas, int nbas, double *env)
@@ -1313,7 +1313,7 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
         rys_ejk_strain_deriv_kernel<<<workers, threads, buflen>>>(
-                *envs, jk, bounds, sigma, bas_mask_idx, Ts_ji_lookup,
+                *envs, jk, bounds, sigma, bas_mask_idx, Ts_ij_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, dd_pool, head, reserved_shm_size);
     }

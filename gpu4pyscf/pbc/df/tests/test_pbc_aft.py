@@ -415,10 +415,10 @@ class KnownValues(unittest.TestCase):
             cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
             mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
             vj = aft_jk.get_j_kpts(mydf, dm, hermi=1, kpts=mydf.kpts)
-            e1 = cp.einsum('kij,kji->', vj, dm).real / nkpts
+            e1 = .5 * cp.einsum('kij,kji->', vj, dm).real / nkpts
             mydf = aft.AFTDF(cell2, kpts=cell2.make_kpts(kmesh))
             vj = aft_jk.get_j_kpts(mydf, dm, hermi=1, kpts=mydf.kpts)
-            e2 = cp.einsum('kij,kji->', vj, dm).real / nkpts
+            e2 = .5 * cp.einsum('kij,kji->', vj, dm).real / nkpts
             assert abs(sigma[i,j] - (e1-e2)/2e-4) < 1e-7
 
     def test_ek_strain_deriv_gamma_point(self):

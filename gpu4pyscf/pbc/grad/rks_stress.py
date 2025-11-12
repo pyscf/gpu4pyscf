@@ -103,14 +103,16 @@ def _get_coulG_strain_derivatives(cell, Gv, omega=None, remove_G0=True):
     coulGxy *= coulG_0
     coulG_1 = coulGxy * 2/G2
     if omega < 0:
-        coulG_1 *= (1 - cp.exp(-.25/omega**2 * G2))
-        coulG_1 -= cp.exp(-.25/omega**2 * G2) * (.25/omega**2*2) * coulGxy
-        coulG_0 *= (1 - cp.exp(-.25/omega**2 * G2))
+        exp_omega_g2 = cp.exp(-.25/omega**2 * G2)
+        coulG_1 *= 1 - exp_omega_g2
+        coulG_1 -= exp_omega_g2 * (.25/omega**2*2) * coulGxy
+        coulG_0 *= 1 - exp_omega_g2
         #coulG_0[0] = np.pi/omega**2
     elif omega > 0:
-        coulG_1 *= cp.exp(-.25/omega**2 * G2)
-        coulG_1 += cp.exp(-.25/omega**2 * G2) * (.25/omega**2*2) * coulGxy
-        coulG_0 *= cp.exp(-.25/omega**2 * G2)
+        exp_omega_g2 = cp.exp(-.25/omega**2 * G2)
+        coulG_1 *= exp_omega_g2
+        coulG_1 += exp_omega_g2 * (.25/omega**2*2) * coulGxy
+        coulG_0 *= exp_omega_g2
         #coulG_0[0] = -np.pi/omega**2
     return coulG_0, coulG_1
 

@@ -551,7 +551,7 @@ def _generate_shl_pairs(ft_opt):
     shl_pair_offsets = cp.hstack(shl_pair_offsets, dtype=np.int32)
     return bas_ij_idx, bas_ij_img_idx, shl_pair_offsets
 
-def get_ej_strain_deriv(mydf, dm, kpts=None):
+def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     '''Strain derivatives from Coulomb matrix'''
     from gpu4pyscf.pbc.grad import rks_stress
     log = logger.new_logger(mydf)
@@ -594,7 +594,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None):
     blksize = min(blksize, ngrids, 16384)
 
     kpt_allow = np.zeros(3)
-    coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(cell, Gv)
+    coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(cell, Gv, omega=omega)
     coulG_0 = asarray(coulG_0)
     coulG_1 = asarray(coulG_1)
     weight_0 = 1/cell.vol
@@ -822,14 +822,9 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 e1 = madelung(cell1, kpts1, omega=omega)
                 e2 = madelung(cell2, kpts2, omega=omega)
                 ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
-        if n_dm == 1: # RHF
-            ewald_G0 *= .5 * ek_G0
-            k_dm *= .5 * madelung(cell, kpts, omega=omega)
-        else:
-            ewald_G0 *= ek_G0
-            k_dm *= madelung(cell, kpts, omega=omega)
+        ewald_G0 *= ek_G0
         int1e_opt = int1e._Int1eOptV2(cell)
-        ewald_G0 += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts) * 2
+        ewald_G0 += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts) * madelung(cell, kpts, omega=omega)
         ewald_G0 /= nkpts
         sigma += ewald_G0
 

@@ -39,6 +39,7 @@ from gpu4pyscf.scf.jk import (
     PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
 from gpu4pyscf.pbc.df.fft import _check_kpts
+from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
@@ -727,12 +728,17 @@ class PBCJKMatrixOpt:
                         j_factor=1., k_factor=1., verbose=None):
         '''Compute the derivatives of the long-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
-        j_factor - k_factor / 2.
+        j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
         from gpu4pyscf.pbc.df.aft_jk import get_ej_ip1, get_ek_ip1
         cell = self.cell
         assert cell.dimension == 3
-        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        dm = _format_dms(dm, kpts)
+        n_dm = len(dm)
+        if kpts is None:
+            kpts = np.zeros((1,3))
+        else:
+            kpts = kpts.reshape(-1, 3)
         self.kpts = kpts # get_coulG() might need to access the .kpts attribute
         ej = ek = 0
         if j_factor != 0:
@@ -740,14 +746,13 @@ class PBCJKMatrixOpt:
             ej *= j_factor
         if k_factor != 0:
             # RHF energy is computed as J - 1/2 K
-            if ((is_single_kpt and dm.ndim == 2) or # RHF
-                (not is_single_kpt and dm.ndim == 3)): # KRHF
+            if n_dm == 1: # RHF or KRHF
                 k_factor *= .5
             ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv)
             ek *= k_factor
         return ej - ek
 
-    def _get_jk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None,
+    def _get_ejk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None,
                         j_factor=1., k_factor=1., verbose=None):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
@@ -801,7 +806,7 @@ class PBCJKMatrixOpt:
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         assert n_dm <= 2
-        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
+        cutoff = self.estimate_cutoff_with_penalty()#cell.precision**.5*1e-2)
         log_cutoff = math.log(cutoff)
 
         libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
@@ -901,6 +906,7 @@ class PBCJKMatrixOpt:
             return ejk, sigma, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
+        dms = None
 
         kern_counts = 0
         timing_collection = Counter()
@@ -934,6 +940,7 @@ class PBCJKMatrixOpt:
                 wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
+
             int1e_opt = int1e._Int1eOpt(cell, kpts)
             s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
             s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
@@ -941,24 +948,72 @@ class PBCJKMatrixOpt:
             j_dm = dm0.sum(axis=0) * (j_factor * s_dm * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
+            ej_G0 = cp.einsum('kij,kji->', s0, j_dm).real.get()
+            ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get() * k_factor
             if n_dm == 1: # RHF
+                ek_G0 *= .5
                 k_dm *= .5 * k_factor * wcoulG_for_k
             else:
                 k_dm *= k_factor * wcoulG_for_k
+
             aoslices = cell.aoslice_by_atom()
             for i, (p0, p1) in enumerate(aoslices[:,2:]):
                 ejk[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
                 ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
 
-            int1e_opt = int1e._Int1eOptV2(cell)
-            sigma -= int1e_opt.get_ovlp_strain_deriv(j_dm, kpts)
-            sigma += .5 * cp.einsum('kij,kji->', s0, j_dm).real.get() * np.eye(3)
-            sigma += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
-            sigma -= .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() * np.eye(3)
+            int1e_opt_v2 = int1e._Int1eOptV2(cell)
+            # Response of the overlap integrals in Tr(S D S D)
+            sigma -= int1e_opt_v2.get_ovlp_strain_deriv(j_dm, kpts)
+            sigma += int1e_opt_v2.get_ovlp_strain_deriv(k_dm, kpts)
+            # Response of 1/cell.vol within the G=0 term of the coulG_SR
+            sigma += .5 * ej_G0 * np.eye(3)
+            sigma -= .5 * wcoulG_SR_at_G0 * ek_G0 * np.eye(3)
+            if exxdiv == 'ewald':
+                from pyscf.pbc.tools.pbc import madelung
+                from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+                scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+                ewald_G0_response = np.empty((3,3))
+                disp = max(1e-5, (cell.precision*.1)**.5)
+                for i in range(3):
+                    for j in range(i+1):
+                        cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
+                        kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+                        kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+                        e1 = nkpts * madelung(cell1, kpts1, omega=-omega)
+                        e2 = nkpts * madelung(cell2, kpts2, omega=-omega)
+                        ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
+                ewald_G0_response *= ek_G0
+                sigma -= ewald_G0_response
 
         if not is_gamma_point:
             ejk *= 1. / nkpts
+        sigma /= nkpts**2
+
         return sigma
+
+    def _get_ejk_lr_strain_deriv(self, dm, kpts=None, exxdiv=None,
+                        j_factor=1., k_factor=1., verbose=None):
+        '''Compute the strain derivatives of the long-range part of the
+        aggregated J/K contribution. The aggregated J/K contribution is given by
+        j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
+        '''
+        from gpu4pyscf.pbc.df.aft_jk import get_ej_strain_deriv, get_ek_strain_deriv
+        cell = self.cell
+        assert cell.dimension == 3
+        dm = _format_dms(dm, kpts)
+        n_dm = len(dm)
+        ej = ek = 0
+        if j_factor != 0:
+            ej = get_ej_strain_deriv(self, dm, kpts, omega=self.omega)
+            ej *= j_factor
+        if k_factor != 0:
+            # RHF energy is computed as J - 1/2 K
+            if n_dm == 1: # RHF or KRHF
+                k_factor *= .5
+            ek = get_ek_strain_deriv(self, dm, kpts, exxdiv=exxdiv,
+                                     omega=self.omega)
+            ek *= k_factor
+        return ej - ek
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''
