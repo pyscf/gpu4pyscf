@@ -34,14 +34,14 @@ def tearDownModule():
     del cell
 
 class KnownValues(unittest.TestCase):
-    def test_krhf_vs_finite_difference(self):
+    def test_kuhf_vs_finite_difference(self):
         kmesh = [3, 1, 1]
-        mf = cell.KRHF(kpts=cell.make_kpts(kmesh)).to_gpu()
+        mf = cell.KUHF(kpts=cell.make_kpts(kmesh)).to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell).build()
         mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
-        mf_scanner = cell.KRHF(kpts=cell.make_kpts(kmesh)).to_gpu().as_scanner()
+        mf_scanner = cell.KUHF(kpts=cell.make_kpts(kmesh)).to_gpu().as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
@@ -49,13 +49,13 @@ class KnownValues(unittest.TestCase):
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
-    def test_rhf_vs_finite_difference(self):
-        mf = cell.RHF().to_gpu()
+    def test_uhf_vs_finite_difference(self):
+        mf = cell.UHF().to_gpu()
         mf.run()
         mf.rsjk = PBCJKMatrixOpt(cell).build()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
-        mf_scanner = cell.RHF().as_scanner()
+        mf_scanner = cell.UHF().as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
@@ -64,5 +64,5 @@ class KnownValues(unittest.TestCase):
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
 if __name__ == "__main__":
-    print("Full Tests for KRHF Stress tensor")
+    print("Full Tests for KUHF Stress tensor")
     unittest.main()

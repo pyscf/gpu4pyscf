@@ -109,3 +109,7 @@ class Gradients(krhf_grad.GradientsBase):
     as_scanner = krhf_grad.Gradients.as_scanner
     _finalize = krhf_grad.Gradients._finalize
     kernel = krhf_grad.Gradients.kernel
+
+    def get_stress(self):
+        from gpu4pyscf.pbc.grad import kuhf_stress
+        return kuhf_stress.kernel(self)
