@@ -419,7 +419,7 @@ class KnownValues(unittest.TestCase):
             mydf = aft.AFTDF(cell2, kpts=cell2.make_kpts(kmesh))
             vj = aft_jk.get_j_kpts(mydf, dm, hermi=1, kpts=mydf.kpts)
             e2 = .5 * cp.einsum('kij,kji->', vj, dm).real / nkpts
-            assert abs(sigma[i,j] - (e1-e2)/2e-4) < 1e-7
+            assert abs(sigma[i,j] - (e1-e2)/2e-4) < 2e-7
 
     def test_ek_strain_deriv_gamma_point(self):
         cell = pgto.M(

@@ -988,7 +988,6 @@ class PBCJKMatrixOpt:
         if not is_gamma_point:
             ejk *= 1. / nkpts
         sigma /= nkpts**2
-
         return sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, exxdiv=None,

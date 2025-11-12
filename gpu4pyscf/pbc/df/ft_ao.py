@@ -532,7 +532,7 @@ class PBCIntEnvVars(ctypes.Structure):
         ao_loc = cp.asarray(ao_loc)
         Ls = cp.asarray(Ls)
         return PBCIntEnvVars.new(
-            self.cell0_natm, self.cell0_nbas, self.bvk_ncells, self.nimgs,
+            self.natm, self.nbas, self.bvk_ncells, self.nimgs,
             atm, bas, env, ao_loc, Ls)
 
     @property
