@@ -253,8 +253,23 @@ class KSCF(pbchf.SCF):
 
     check_sanity = pbchf.SCF.check_sanity
     dump_flags = khf_cpu.KSCF.dump_flags
-    build = khf_cpu.KSCF.build
     reset = pbchf.SCF.reset
+
+    def build(self, cell=None):
+        # To handle the attribute kpt or kpts loaded from chkfile
+        if 'kpts' in self.__dict__:
+            self.kpts = self.__dict__.pop('kpts')
+
+        kpts = self.kpts
+        with_df = self.with_df
+        if len(kpts) > 1 and getattr(with_df, '_j_only', False):
+            logger.warn(self, 'df.j_only cannot be used with k-point HF')
+            with_df._j_only = False
+            with_df.reset()
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        return self
 
     def get_ovlp(self, cell=None, kpts=None):
         if cell is None: cell = self.cell

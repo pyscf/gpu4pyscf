@@ -721,7 +721,7 @@ class PBCJKMatrixOpt:
                 ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
 
         if not is_gamma_point:
-            ejk *= 1. / nkpts
+            ejk *= 1. / nkpts**2
         return ejk.get()
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, exxdiv=None,
@@ -806,7 +806,7 @@ class PBCJKMatrixOpt:
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         assert n_dm <= 2
-        cutoff = self.estimate_cutoff_with_penalty()#cell.precision**.5*1e-2)
+        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
         log_cutoff = math.log(cutoff)
 
         libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
@@ -926,8 +926,10 @@ class PBCJKMatrixOpt:
 
         ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
         sigma = multi_gpu.array_reduce(sigma_dist, inplace=True)
-        sigma *= 2
         sigma = sigma.get()
+        sigma *= 2 / nkpts**2
+        if not is_gamma_point:
+            ejk *= 1. / nkpts**2
 
         if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
@@ -944,30 +946,32 @@ class PBCJKMatrixOpt:
             int1e_opt = int1e._Int1eOpt(cell, kpts)
             s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
             s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
-            s_dm = cp.einsum('kij,nkji->', s0, dm0)
-            j_dm = dm0.sum(axis=0) * (j_factor * s_dm * wcoulG_SR_at_G0)
+            nelectron = cp.einsum('kij,nkji->', s0, dm0).real.get() / nkpts
+            j_dm = dm0.sum(axis=0) * (j_factor * nelectron * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
-            ej_G0 = cp.einsum('kij,kji->', s0, j_dm).real.get()
-            ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get() * k_factor
+            ej_G0 = .5 * cp.einsum('kij,kji->', s0, j_dm).real.get() / nkpts
+            ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() * k_factor / nkpts**2
             if n_dm == 1: # RHF
                 ek_G0 *= .5
-                k_dm *= .5 * k_factor * wcoulG_for_k
+                k_dm *= .5 * k_factor * wcoulG_for_k / nkpts
             else:
-                k_dm *= k_factor * wcoulG_for_k
+                k_dm *= k_factor * wcoulG_for_k / nkpts
 
             aoslices = cell.aoslice_by_atom()
+            ejk_G0 = cp.zeros_like(ejk)
             for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                ejk[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
-                ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
+                ejk_G0[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
+                ejk_G0[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
+            ejk += ejk_G0 / nkpts
 
             int1e_opt_v2 = int1e._Int1eOptV2(cell)
             # Response of the overlap integrals in Tr(S D S D)
             sigma -= int1e_opt_v2.get_ovlp_strain_deriv(j_dm, kpts)
             sigma += int1e_opt_v2.get_ovlp_strain_deriv(k_dm, kpts)
             # Response of 1/cell.vol within the G=0 term of the coulG_SR
-            sigma += .5 * ej_G0 * np.eye(3)
-            sigma -= .5 * wcoulG_SR_at_G0 * ek_G0 * np.eye(3)
+            sigma += ej_G0 * np.eye(3)
+            sigma -= wcoulG_SR_at_G0 * ek_G0 * np.eye(3)
             if exxdiv == 'ewald':
                 from pyscf.pbc.tools.pbc import madelung
                 from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
@@ -985,9 +989,7 @@ class PBCJKMatrixOpt:
                 ewald_G0_response *= ek_G0
                 sigma -= ewald_G0_response
 
-        if not is_gamma_point:
-            ejk *= 1. / nkpts
-        sigma /= nkpts**2
+        ejk = ejk.get()
         return sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, exxdiv=None,

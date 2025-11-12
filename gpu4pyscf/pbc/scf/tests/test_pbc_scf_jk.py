@@ -342,6 +342,7 @@ def test_ejk_sr_ip1_per_atom_kpts():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
+    ref /= len(kpts)
     # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
     assert abs(ejk - ref).max() < 3e-6
 
@@ -429,6 +430,7 @@ def test_ejk_ip1_per_atom_kpts():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
+    ref /= len(kpts)
     assert abs(ejk - ref).max() < 2e-7
 
 def test_ejk_sr_strain_deriv():
@@ -564,7 +566,6 @@ def test_ejk_strain_deriv_kpts():
     )
     kmesh = [3,2,1]
     kpts = cell.make_kpts(kmesh)
-    nkpts = len(kpts)
     dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
     with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm, kpts=kpts)

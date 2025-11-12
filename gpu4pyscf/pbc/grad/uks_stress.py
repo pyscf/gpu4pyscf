@@ -91,7 +91,7 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
         rho += cp.einsum('ig,ig->g', bra.imag, ket.imag)
         return rho
 
-    eval_gto_opt = _GTOvalOpt(cell, deriv=deriv)
+    eval_gto_opt = _GTOvalOpt(cell, deriv=deriv+1)
     max_memory = 4e9
     blksize = int((max_memory/16/(nvar*10*nao))/ ALIGNED) * ALIGNED
     XY, YY, ZY, XZ, YZ, ZZ = 5, 7, 8, 6, 8, 9
@@ -243,6 +243,9 @@ def kernel(mf_grad):
     dme0 = mf_grad.make_rdm1e().sum(axis=0)
     sigma = ewald(cell)
 
+    int1e_opt_v2 = int1e._Int1eOptV2(cell)
+    sigma -= int1e_opt_v2.get_ovlp_strain_deriv(dme0)
+
     disp = 1e-5
     for x in range(3):
         for y in range(3):
@@ -252,11 +255,6 @@ def kernel(mf_grad):
             t1 = cp.einsum('ij,ji->', t1, dm0)
             t2 = cp.einsum('ij,ji->', t2, dm0)
             sigma[x,y] += (t1 - t2) / (2*disp)
-            s1 = int1e.int1e_ovlp(cell1)[0]
-            s2 = int1e.int1e_ovlp(cell2)[0]
-            s1 = cp.einsum('ij,ji->', s1, dme0)
-            s2 = cp.einsum('ij,ji->', s2, dme0)
-            sigma[x,y] -= (s1 - s2) / (2*disp)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     dm0 = mf.make_rdm1()

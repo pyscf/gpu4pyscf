@@ -279,6 +279,7 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
+        ref /= len(kpts)
         assert abs(ej - ref).max() < 1e-8
 
     def test_ek_ip1_gamma_point(self):
@@ -356,6 +357,7 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
+        ref /= len(kpts)
         assert abs(ek - ref).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -363,6 +365,7 @@ class KnownValues(unittest.TestCase):
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
+            ref /= len(kpts)
             assert abs(ek_ewald - ref).max() < 1e-8
 
     def test_ej_strain_deriv_gamma_point(self):

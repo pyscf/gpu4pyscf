@@ -409,9 +409,9 @@ def get_ej_ip1(mydf, dm, kpts=None):
             sorted_cell._env.ctypes)
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
-    if nkpts != 1:
-        ej /= nkpts
-    return ej.get()
+    ej = ej.get()
+    ej /= nkpts**2
+    return ej
 
 def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     '''The first order energy derivatives from exact exchange'''
@@ -525,10 +525,11 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-    if nkpts != 1:
-        ek /= nkpts
+    ek = ek.get()
+    if not is_gamma_point:
+        ek /= nkpts**2
     log.timer_debug1('get_ek_ip1', *cpu0)
-    return ek.get()
+    return ek
 
 def _generate_shl_pairs(ft_opt):
     img_idx_cache = ft_opt.make_img_idx_cache(permutation_symmetry=True)
@@ -655,10 +656,12 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
             sorted_cell._env.ctypes)
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
-    if nkpts != 1:
-        ej /= nkpts
+    ej = ej.get()
+    if not is_gamma_point:
+        ej /= nkpts**2
+    sigma = sigma.get()
     sigma *= 2 / nkpts**2
-    return sigma.get()
+    return sigma
 
 def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     '''Strain derivatives from exact exchange'''
@@ -716,6 +719,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     GvT = cp.zeros(3*blksize+256)
     ek = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
+    sigma1 = cp.zeros((3, 3))
     for group_id, (kpt, ki_idx, kj_idx, self_conj) \
             in enumerate(kk_adapted_iter(cell, kpts)):
         Gvk = Gv + kpt
@@ -743,7 +747,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
                 vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
-                sigma += .25*cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
+                sigma += cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
             else:
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
                 # apply derivatives to nlkG*
@@ -763,7 +767,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
 
                 vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
-                tmp = .25*cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
+                tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
                 if swap_2e:
                     sigma += tmp * 2
                 else:
@@ -778,7 +782,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
             GvT[:3*nGv].set(Gvk[p0:p1].T.ravel())
             err = kern(
                 ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-                ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
                 ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
                 ctypes.byref(aft_envs),
@@ -795,9 +799,14 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-    if nkpts != 1:
-        ek /= nkpts
-    sigma *= 2 / nkpts**2
+    ek = ek.get()
+    if not is_gamma_point:
+        ek /= nkpts**2
+    sigma *= .5 / nkpts**2
+    # First *2 due to i>=j symmetry in kernel;
+    # second *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+    sigma1 *= .5 * 2 * 2 / nkpts**2
+    sigma += sigma1
     sigma = sigma.get()
 
     if (exxdiv == 'ewald' and
@@ -809,7 +818,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
         k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
         k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
-        ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get()
+        ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
 
         scaled_kpts = kpts.dot(cell.lattice_vectors().T)
         ewald_G0 = np.empty((3,3))
@@ -819,13 +828,12 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp)
                 kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
                 kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-                e1 = madelung(cell1, kpts1, omega=omega)
-                e2 = madelung(cell2, kpts2, omega=omega)
+                e1 = nkpts * madelung(cell1, kpts1, omega=omega)
+                e2 = nkpts * madelung(cell2, kpts2, omega=omega)
                 ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
         ewald_G0 *= ek_G0
         int1e_opt = int1e._Int1eOptV2(cell)
         ewald_G0 += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts) * madelung(cell, kpts, omega=omega)
-        ewald_G0 /= nkpts
         sigma += ewald_G0
 
     log.timer_debug1('get_ek_ip1', *cpu0)

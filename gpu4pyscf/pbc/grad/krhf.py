@@ -60,7 +60,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     hcore_deriv = mf_grad.hcore_generator(cell, kpts)
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    dvhf = mf_grad.get_veff(dm0, kpts)
+    # derivatives of the Veff contribution
+    dvhf = mf_grad.get_veff(dm0, kpts) * 2
     t1 = log.timer('gradients of 2e part', *t0)
 
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
@@ -77,7 +78,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     ds = contract('kxij,kji->xi', s1, dme0).real
     ds = (-2 * ds).get()
     ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    de = (2 * dvhf + dh1e.get() + ds) / nkpts + extra_force
+    de = (dh1e.get() + ds) / nkpts + dvhf + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
@@ -305,6 +306,7 @@ class GradientsBase(molgrad.GradientsBase):
         return -int1e.int1e_ipovlp(cell, kpts)
 
     def get_jk(self, dm=None, kpts=None):
+        '''The derivatives of the Coulomb and exchange energy per cell'''
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
         if self.base.rsjk is not None:
@@ -316,25 +318,39 @@ class GradientsBase(molgrad.GradientsBase):
         return ej, ek
 
     def get_j(self, dm=None, kpts=None):
+        '''
+        The derivatives of Coulomb energy per cell
+        '''
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
         cpu0 = (logger.process_clock(), logger.perf_counter())
-        if self.base.rsjk is not None:
-            ej = self.rsjk._get_ejk_sr_ip1(dm, kpts, k_factor=0)
-            ej += self.rsjk._get_ejk_lr_ip1(dm, kpts, k_factor=0)
+        with_rsjk = self.base.rsjk
+        if with_rsjk is not None:
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
+            ej = with_rsjk._get_ejk_sr_ip1(dm, kpts, k_factor=0)
+            ej += with_rsjk._get_ejk_lr_ip1(dm, kpts, k_factor=0)
         else:
             ej = self.base.with_df.get_j_e1(dm, kpts)
         logger.timer(self, 'ej', *cpu0)
         return ej
 
     def get_k(self, dm=None, kpts=None, kpts_band=None):
+        '''
+        The derivatives of exchange energy per cell
+        '''
         if kpts is None: kpts = self.kpts
         if dm is None: dm = self.base.make_rdm1()
         cpu0 = (logger.process_clock(), logger.perf_counter())
-        if self.base.rsjk is not None:
+        with_rsjk = self.base.rsjk
+        if with_rsjk is not None:
+            assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
             exxdiv = self.base.exxdiv
-            ek = self.rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
-            ek += self.rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
+            ek = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
+            ek += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
             if dm.ndim == 3: # KRHF
                 ek *= 2
             elif dm.ndim == 4: # KUHF
@@ -348,8 +364,8 @@ class GradientsBase(molgrad.GradientsBase):
 
     def get_veff(self, dm=None, kpts=None):
         '''
-        Computes the first-order derivatives of the energy contributions from
-        Veff per atom.
+        Computes the first-order derivatives of the energy contributions per
+        cell from Veff per atom.
 
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
@@ -367,12 +383,14 @@ class Gradients(GradientsBase):
         '''
         The energy contribution from the effective potential
 
-        einsum('kxij,kji->x', veff, dm)
+        einsum('kxij,kji->x', veff, dm) / nkpts
         '''
         if self.base.rsjk is not None:
             from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
             with_rsjk = self.base.rsjk
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
             ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
             ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
         else:
@@ -424,3 +442,7 @@ class Gradients(GradientsBase):
         logger.timer(self, 'SCF gradients', *cput0)
         self._finalize()
         return self.de
+
+    def get_stress(self):
+        from gpu4pyscf.pbc.grad import krhf_stress
+        return krhf_stress.kernel(self)

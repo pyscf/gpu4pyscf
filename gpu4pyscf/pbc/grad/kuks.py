@@ -53,11 +53,16 @@ def get_veff(ks_grad, dm=None, kpts=None):
     if grids.coords is None:
         grids.build()
 
+    if kpts is None:
+        nkpts = 1
+    else:
+        nkpts = len(kpts)
+
     if not ni.libxc.is_hybrid_xc(mf.xc):
         if isinstance(mf._numint, multigrid_v2.MultiGridNumInt):
             exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
-            # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
-            exc /= 2
+            # The return value from get_veff() assumes a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
+            exc /= 2 * nkpts
             return exc
         exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
         t0 = log.timer('vxc', *t0)
@@ -72,7 +77,7 @@ def get_veff(ks_grad, dm=None, kpts=None):
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
             exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
             # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
-            exc /= 2
+            exc /= 2 * nkpts
             j_factor = 0
         else:
             exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
@@ -150,6 +155,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     aoslices = cell.aoslice_by_atom()
     exc = contract('skxij,skji->xi', vmat, dm_kpts).real.get()
     exc = np.array([exc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
+    exc /= nkpts
     return -exc
 
 class Gradients(kuhf_grad.Gradients):

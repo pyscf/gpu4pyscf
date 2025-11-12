@@ -349,6 +349,10 @@ class _Int1eOptV2:
         return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
 
     def get_ovlp_strain_deriv(self, dm, kpts=None):
+        '''Computes the strain derivatives for the product of density matrix and
+        overlap matrix. In the case of k-points calculations, the derivatives
+        are averaged over k-mesh.
+        '''
         cell = self.cell
         sorted_cell = self.sorted_cell
         nao_orig = cell.nao
@@ -395,6 +399,7 @@ class _Int1eOptV2:
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(is_gamma_point))
-        sigma *= 2
-        return sigma.get()
+            ctypes.c_int(int(is_gamma_point)))
+        sigma = sigma.get()
+        sigma *= 2 / nkpts
+        return sigma

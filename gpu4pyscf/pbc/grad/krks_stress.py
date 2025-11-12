@@ -87,7 +87,7 @@ def get_ovlp(cell, kpts):
     return s
 
 def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
-    '''Strain derivatives for Coulomb and XC at gamma point
+    '''Strain derivatives for Coulomb and Exc with k-point samples
 
     Kwargs:
         with_j : Whether to include the electron-electron Coulomb interactions
@@ -144,7 +144,7 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
         rho += cp.einsum('ig,ig->g', bra.imag, ket.imag)
         return rho
 
-    eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=deriv)
+    eval_gto_opt = _GTOvalOpt(cell, kpts, deriv=deriv+1)
     max_memory = 4e9
     blksize = int((max_memory/16/(nkpts*nvar*10*nao))/ ALIGNED) * ALIGNED
     XY, YY, ZY, XZ, YZ, ZZ = 5, 7, 8, 6, 8, 9
@@ -181,7 +181,7 @@ def get_vxc(ks_grad, cell, dm_kpts, kpts, with_j=False, with_nuc=False):
                 c0 = contract('xig,ij->xjg', ao[:4], dm)
                 for i in range(4):
                     rho0[i,p0:p1] += partial_dot(ao[0], c0[i]).real
-                # TODO: computing density derivatives using FFT
+                # TODO: computing density derivatives in FT form
                 rho1[:,:, : ,p0:p1] += contract('xynig,ig->xyng', ao_strain, c0[0].conj()).real
                 rho1[:,:,1:4,p0:p1] += contract('xyig,nig->xyng', ao_strain[:,:,0], c0[1:4].conj()).real
             else: # MGGA
@@ -291,10 +291,13 @@ def kernel(mf_grad):
     dm0 = mf.make_rdm1()
     dme0 = mf_grad.make_rdm1e()
     sigma = ewald(cell)
+
     kpts = mf.kpts
+    int1e_opt_v2 = int1e._Int1eOptV2(cell)
+    sigma -= int1e_opt_v2.get_ovlp_strain_deriv(dme0, kpts)
+
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
     nkpts = len(kpts)
-
     disp = 1e-5
     for x in range(3):
         for y in range(3):
@@ -306,11 +309,6 @@ def kernel(mf_grad):
             t1 = cp.einsum('kij,kji->', t1, dm0).real
             t2 = cp.einsum('kij,kji->', t2, dm0).real
             sigma[x,y] += (t1 - t2).get() / (2*disp) / nkpts
-            s1 = int1e.int1e_ovlp(cell1, kpts1)
-            s2 = int1e.int1e_ovlp(cell2, kpts2)
-            s1 = cp.einsum('kij,kji->', s1, dme0).real
-            s2 = cp.einsum('kij,kji->', s2, dme0).real
-            sigma[x,y] -= (s1 - s2).get() / (2*disp) / nkpts
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
     sigma += get_vxc(mf_grad, cell, dm0, kpts=kpts, with_j=True, with_nuc=True)
