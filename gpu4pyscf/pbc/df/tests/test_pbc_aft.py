@@ -138,7 +138,7 @@ class KnownValues(unittest.TestCase):
                                   [ .25, .25,-.25],
                                   [ .25, .25, .25]])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
@@ -159,7 +159,7 @@ class KnownValues(unittest.TestCase):
                                   [ .25, .25,-.25],
                                   [ .25, .25, .25]])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
@@ -174,7 +174,7 @@ class KnownValues(unittest.TestCase):
     def test_aft_k2(self):
         kpts = cell.make_kpts([2,1,1])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
@@ -198,7 +198,7 @@ class KnownValues(unittest.TestCase):
     def test_aft_k3(self):
         kpts = cell.make_kpts([6,1,1])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
         mydf0.k_conj_symmetry = False
