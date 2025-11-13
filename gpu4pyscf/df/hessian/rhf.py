@@ -654,6 +654,7 @@ class Hessian(rhf_hess.Hessian):
     # by the utils.to_cpu() due to a bug in the df.Hessian classes. To support
     # old pyscf versions, explictly assgin auxbasis_response 
     def to_cpu(self):
+        from gpu4pyscf.lib import utils
         out = utils.to_cpu(self)
-        out.auxbasis_response = auxbasis_response
+        out.auxbasis_response = self.auxbasis_response
         return out
