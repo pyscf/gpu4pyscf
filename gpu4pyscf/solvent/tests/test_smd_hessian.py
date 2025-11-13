@@ -244,9 +244,9 @@ H -0.646 -0.464 -0.804
         mf.kernel()
         hessobj = mf.Hessian()
         if version.parse(pyscf.__version__) <= version.parse('2.11.0'):
-            hessobj.auxbasis_response = 1
-        else:
             hessobj.auxbasis_response = 2
+        else:
+            hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
