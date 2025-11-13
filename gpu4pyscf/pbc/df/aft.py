@@ -124,8 +124,7 @@ class AFTDFMixin:
         if mesh is None:
             mesh = mydf.mesh
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        coulG = tools.get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv, omega=omega,
-                                kpts=kpts)
+        coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv, omega=omega, kpts=kpts)
         coulG *= kws
         return coulG
 
