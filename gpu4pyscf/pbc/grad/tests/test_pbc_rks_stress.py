@@ -295,7 +295,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
-        mf_scanner = cell.RKS(xc=xc).as_scanner()
+        mf_scanner = cell.RKS(xc=xc).to_gpu().as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
@@ -318,7 +318,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
-        mf_scanner = cell.RKS(xc=xc).as_scanner()
+        mf_scanner = cell.RKS(xc=xc).to_gpu().as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)

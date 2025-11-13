@@ -106,7 +106,6 @@ class PBCJKMatrixOpt:
 
         # Attributes required by AFTDF functions
         self.time_reversal_symmetry = True
-        self.kpts = None
 
         # Hold cache on GPU devices
         self._rys_envs = {}
@@ -491,27 +490,25 @@ class PBCJKMatrixOpt:
         cell = self.cell
         assert cell.dimension == 3
         kpts, is_single_kpt = _check_kpts(kpts, dm)
-        # get_coulG() might need to access the .kpts attribute
-        self.kpts = kpts
         if is_single_kpt:
             kpts = kpts[0]
         return get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv)
 
-    def weighted_coulG(self, kpt=np.zeros(3), exx=None, mesh=None):
-        '''weighted LR Coulomb kernel'''
+    def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+        '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
         if mesh is None:
             mesh = self.mesh
         cell = self.cell
-        omega = abs(self.omega)
+        omega = self.omega
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        coulG = get_coulG(cell, kpt, False, self, mesh, Gv, wrap_around=True,
-                          omega=omega)
+        coulG = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
+                          wrap_around=True, omega=omega, kpts=kpts)
         coulG *= kws
-        if not is_zero(kpt):
+        if kpt is None or not is_zero(kpt):
             return coulG
 
         if exx == 'ewald':
-            Nk = len(self.kpts)
+            Nk = len(kpts)
             # In the full-range Coulomb, the ewald correction corresponds to
             #     +Nk*pbctools.madelung(cell, kpts) - np.pi / omega**2 * kws - probe_charge_sr_coulomb
             # The second term removes the contribution of the SR integrals at G=0.
@@ -521,7 +518,7 @@ class PBCJKMatrixOpt:
             # evaluates -2*(ewself_lr_point_charges + ewg)
             # The ewself_sr_at_G0 should cancel out the second term.
             # -2*ewovrl cancels out the last term.
-            coulG[0] += Nk*pbctools.madelung(cell, self.kpts, omega=omega)
+            coulG[0] += Nk*pbctools.madelung(cell, kpts, omega=omega)
         return coulG
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None,
@@ -739,7 +736,6 @@ class PBCJKMatrixOpt:
             kpts = np.zeros((1,3))
         else:
             kpts = kpts.reshape(-1, 3)
-        self.kpts = kpts # get_coulG() might need to access the .kpts attribute
         ej = ek = 0
         if j_factor != 0:
             ej = get_ej_ip1(self, dm, kpts)

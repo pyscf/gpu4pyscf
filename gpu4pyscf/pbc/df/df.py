@@ -149,7 +149,7 @@ class GDF(lib.StreamObject):
         return self
 
     has_kpts = df_cpu.GDF.has_kpts
-    weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
+    weighted_coulG = AFTDFMixin.weighted_coulG
     pw_loop = NotImplemented
     ft_loop = NotImplemented
     range_coulomb = aft_cpu.AFTDFMixin.range_coulomb

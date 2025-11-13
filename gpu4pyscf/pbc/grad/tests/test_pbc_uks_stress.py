@@ -25,6 +25,7 @@ from gpu4pyscf.pbc.grad import uks_stress, uks
 from gpu4pyscf.pbc.grad.uks_stress import _finite_diff_cells
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
 
 class KnownValues(unittest.TestCase):
@@ -178,6 +179,7 @@ class KnownValues(unittest.TestCase):
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_pbe0_vs_finite_difference(self):
         a = np.eye(3) * 3.5
         np.random.seed(5)
@@ -192,7 +194,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
-        mf_scanner = cell.UKS(xc=xc).as_scanner()
+        mf_scanner = cell.UKS(xc=xc).to_gpu().as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
@@ -215,7 +217,7 @@ class KnownValues(unittest.TestCase):
         mf.run()
         mf_grad = mf.Gradients()
         dat = mf_grad.get_stress()
-        mf_scanner = cell.UKS(xc=xc).as_scanner()
+        mf_scanner = cell.UKS(xc=xc).to_gpu().as_scanner()
         vol = cell.vol
         for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)

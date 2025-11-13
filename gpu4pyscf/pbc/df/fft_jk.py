@@ -177,7 +177,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         for k1, ao1 in enumerate(ao1_kpts):
             ao1T = ao1.T
             kpt1 = kpts_band[k1]
-            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mydf, mesh)
+            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kpts=kpts)
             if is_zero(kpt1-kpt2):
                 expmikr = cp.array(1.)
             else:
@@ -303,7 +303,7 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
         vk = vk[0]
     return vk
 
-def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
+def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     '''Derivatives of Coulomb (J) AO matrix at sampled k-points.
     '''
     cell = mydf.cell
@@ -311,6 +311,11 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
 
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+    is_gamma_point = is_zero(kpts)
     ni = mydf._numint
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -331,7 +336,7 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
     rhoG = tools.fft(rhoR, mesh)
     vG = coulG * rhoG
     vR = tools.ifft(vG, mesh)
-    if is_zero(kpts):
+    if is_gamma_point:
         vR = vR.real
     weight = cell.vol / ngrids
     vR *= weight
@@ -348,8 +353,11 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
     aoslices = cell.aoslice_by_atom()
     ej = ej.get()
     ej = np.array([ej[:,:,p0:p1].sum(axis=2) for p0, p1 in aoslices[:,2:]])
+    ej = ej.transpose(1,0,2)
+    if not is_gamma_point:
+        ej /= nkpts
     if nset == 1:
-        ej = ej[:,0]
+        ej = ej[0]
     return ej
 
 def get_k_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3)), exxdiv=None):

@@ -267,7 +267,6 @@ def kernel(mf_grad):
     mf = mf_grad.base
     with_df = mf.with_df
     assert isinstance(with_df, FFTDF)
-    ni = mf._numint
 
     log = logger.new_logger(mf_grad)
     t0 = (logger.process_clock(), logger.perf_counter())

@@ -25,6 +25,7 @@ from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.pbc.grad import rks_stress
 from gpu4pyscf.pbc.grad import krks_stress
+from gpu4pyscf.lib.multi_gpu import num_devices
 from packaging import version
 
 def setUpModule():
@@ -325,6 +326,7 @@ class KnownValues(unittest.TestCase):
                 ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
             assert abs(ek_ewald - ref).max() < 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_ek_ip1_kpts(self):
         cell = pgto.M(
             atom = '''

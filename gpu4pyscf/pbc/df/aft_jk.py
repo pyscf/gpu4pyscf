@@ -213,7 +213,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     for group_id, (kpt, ki_idx, kj_idx, self_conj) \
             in enumerate(kk_adapted_iter(cell, kpts)):
-        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh) * weight
+        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, kpts=kpts) * weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
@@ -469,7 +469,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     ek = cp.zeros((cell.natm, 3))
     for group_id, (kpt, ki_idx, kj_idx, self_conj) \
             in enumerate(kk_adapted_iter(cell, kpts)):
-        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh)
+        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, kpts=kpts)
         swap_2e = not self_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0

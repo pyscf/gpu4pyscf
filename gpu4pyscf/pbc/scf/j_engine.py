@@ -73,9 +73,6 @@ class PBCJMatrixOpt:
         self.l_ctr_offsets = None
         self.supmol = None
 
-        # Attributes required by AFTDF functions
-        self.kpts = None
-
         # Hold cache on GPU devices
         self._rys_envs = {}
         self._q_cond = {}
@@ -408,16 +405,15 @@ class PBCJMatrixOpt:
         assert cell.dimension == 3
         return get_j_kpts(self, dm, hermi, kpts, kpts_band)
 
-    def weighted_coulG(self, kpt=np.zeros(3), exx=None, mesh=None):
-        '''weighted LR Coulomb kernel'''
+    def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+        '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
         if mesh is None:
             mesh = self.mesh
         cell = self.cell
-        omega = abs(self.omega)
+        omega = self.omega
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        coulG = get_coulG(cell, kpt, False, self, mesh, Gv, wrap_around=True,
-                          omega=omega)
-        if is_zero(kpt):
+        coulG = get_coulG(cell, kpt, mesh=mesh, Gv=Gv, wrap_around=True, omega=omega)
+        if kpt is None or is_zero(kpt):
             coulG[0] -= np.pi / omega**2
         coulG *= kws
         return coulG

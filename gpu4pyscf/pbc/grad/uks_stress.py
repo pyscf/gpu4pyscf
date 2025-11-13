@@ -256,7 +256,6 @@ def kernel(mf_grad):
     mf = mf_grad.base
     with_df = mf.with_df
     assert isinstance(with_df, FFTDF)
-    ni = mf._numint
     if hasattr(mf, 'U_idx'):
         raise NotImplementedError('Stress tensor for DFT+U')
 

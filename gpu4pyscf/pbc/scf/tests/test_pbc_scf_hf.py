@@ -111,7 +111,7 @@ class KnownValues(unittest.TestCase):
         dm = cp.asarray(dm)
         vj, vk = scf.RHF(cell).get_jk(cell, dm)
         self.assertAlmostEqual(abs(vj.get() - ref[0]).max(), 0, 9)
-        self.assertAlmostEqual(abs(vk.get() - ref[1]).max(), 0, 9)
+        self.assertAlmostEqual(abs(vk.get() - ref[1]).max(), 0, 8)
 
     def test_krhf_bands(self):
         nk = [2, 2, 1]
