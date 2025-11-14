@@ -71,7 +71,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f_b = []
         for k in range(len(s_kpts)):
             f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
-            f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampa))
+            f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb))
         f_kpts = cp.asarray([f_a, f_b])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)

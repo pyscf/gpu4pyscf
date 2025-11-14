@@ -152,7 +152,7 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if damp_factor is None:
         damp_factor = mf.damp
     if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
-        f = damping(f, last_fock, damp_factor)
+        f = damping(f, fock_last, damp_factor)
     if diis is not None and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f)
 
