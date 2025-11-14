@@ -286,7 +286,7 @@ class _VHFOpt(jk._VHFOpt):
                     ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(dm_xyz_size),
-                    rys_envs, (ctypes.c_int*6)(*scheme),
+                    ctypes.byref(rys_envs), (ctypes.c_int*6)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),

@@ -24,7 +24,7 @@
 
 __device__ static
 void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
-                       int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nbas_cell0,
+                       int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nbas_cell0,
                        RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
@@ -103,10 +103,10 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
         int cell_k = _ksh / nbas_cell0;
         int cell_l = _lsh / nbas_cell0;
         float d_cutoff = kl_cutoff - q_kl;
-        float *dm_jk = dm_cond + Ts_ji_lookup[cell_j+cell_k*nimgs] * nbas2;
-        float *dm_jl = dm_cond + Ts_ji_lookup[cell_j+cell_l*nimgs] * nbas2;
-        float *dm_ik = dm_cond + Ts_ji_lookup[cell_k             ] * nbas2;
-        float *dm_il = dm_cond + Ts_ji_lookup[cell_l             ] * nbas2;
+        float *dm_jk = dm_cond + Ts_ij_lookup[cell_j+cell_k*nimgs] * nbas2;
+        float *dm_jl = dm_cond + Ts_ij_lookup[cell_j+cell_l*nimgs] * nbas2;
+        float *dm_ik = dm_cond + Ts_ij_lookup[cell_k             ] * nbas2;
+        float *dm_il = dm_cond + Ts_ij_lookup[cell_l             ] * nbas2;
         if (dm_jk[jsh_cell0*nbas_cell0+ksh_cell0] > d_cutoff ||
             dm_jl[jsh_cell0*nbas_cell0+lsh_cell0] > d_cutoff ||
             dm_ik[ish_cell0*nbas_cell0+ksh_cell0] > d_cutoff ||
@@ -160,7 +160,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
 
 __device__ static
 void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
-                        int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nbas_cell0,
+                        int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nbas_cell0,
                         JKEnergy &jk, RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
@@ -208,8 +208,8 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
     float zij = zi + zpa;
     float cutoff = bounds.cutoff;
     float q_ij = q_cond[bas_ij];
-    float dm_ij = dm_cond[Ts_ji_lookup[cell_j*nimgs]*nbas2 + ish_cell0*nbas_cell0+jsh_cell0];
-    dm_ij += 1.5f;
+    float dm_ji = dm_cond[Ts_ij_lookup[cell_j]*nbas2 + jsh_cell0*nbas_cell0+ish_cell0];
+    dm_ji += 1.5f;
     float s_ij = s_estimator[bas_ij];
     float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
@@ -243,14 +243,14 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
         int cell_k = _ksh / nbas_cell0;
         int cell_l = _lsh / nbas_cell0;
         float d_cutoff = kl_cutoff - q_kl;
-        float dm_jk = dm_cond[Ts_ji_lookup[cell_j+cell_k*nimgs]*nbas2 + jsh_cell0*nbas_cell0+ksh_cell0];
-        float dm_jl = dm_cond[Ts_ji_lookup[cell_j+cell_l*nimgs]*nbas2 + jsh_cell0*nbas_cell0+lsh_cell0];
-        float dm_ik = dm_cond[Ts_ji_lookup[cell_k             ]*nbas2 + ish_cell0*nbas_cell0+ksh_cell0];
-        float dm_il = dm_cond[Ts_ji_lookup[cell_l             ]*nbas2 + ish_cell0*nbas_cell0+lsh_cell0];
+        float dm_jk = dm_cond[Ts_ij_lookup[cell_j+cell_k*nimgs]*nbas2 + jsh_cell0*nbas_cell0+ksh_cell0];
+        float dm_jl = dm_cond[Ts_ij_lookup[cell_j+cell_l*nimgs]*nbas2 + jsh_cell0*nbas_cell0+lsh_cell0];
+        float dm_ik = dm_cond[Ts_ij_lookup[cell_k             ]*nbas2 + ish_cell0*nbas_cell0+ksh_cell0];
+        float dm_il = dm_cond[Ts_ij_lookup[cell_l             ]*nbas2 + ish_cell0*nbas_cell0+lsh_cell0];
         float dm_jk_il = dm_jk + dm_il;
         float dm_ik_jl = dm_ik + dm_jl;
-        float dm_kl = dm_cond[Ts_ji_lookup[cell_k+cell_k*nimgs]*nbas2 + ksh_cell0*nbas_cell0+lsh_cell0];
-        float dm_ij_kl = dm_ij + dm_kl;
+        float dm_lk = dm_cond[Ts_ij_lookup[cell_l+cell_k*nimgs]*nbas2 + lsh_cell0*nbas_cell0+ksh_cell0];
+        float dm_ij_kl = dm_ji + dm_lk;
         if ((do_k && (dm_jk_il > d_cutoff || dm_ik_jl > d_cutoff)) ||
             (do_j && dm_ij_kl > d_cutoff)) {
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];

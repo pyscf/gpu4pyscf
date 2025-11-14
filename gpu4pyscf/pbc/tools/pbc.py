@@ -147,7 +147,7 @@ def _Gv_wrap_around(cell, Gv, k, mesh):
     return kG
 
 def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
-              wrap_around=True, omega=None, **kwargs):
+              wrap_around=True, omega=None, kpts=None, **kwargs):
     '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
 
     Args:
@@ -286,12 +286,15 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # cancelled out by Coulomb integrals. Its leading term is calculated
     # using Ewald probe charge (the function madelung below)
     if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
-        if hasattr(mf, 'kpts'):
-            kpts = mf.kpts
-            assert isinstance(kpts, np.ndarray)
-            Nk = len(kpts)
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+            if mf is not None:
+                raise DeprecationWarning(
+                    'Accessing kpts via mf.kpts is deprecated. '
+                    'kpts should be passed to get_coulG explicitly.')
         else:
-            Nk = 1
+            assert kpts.ndim == 2
+        Nk = len(kpts)
         if omega is None or omega == 0:
             coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
         else: # G=0 term should be handled separately in RSGDF and RSJK

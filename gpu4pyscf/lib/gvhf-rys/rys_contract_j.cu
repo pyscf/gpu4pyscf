@@ -793,7 +793,7 @@ extern int rys_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
 
 extern "C" {
 int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
-                RysIntEnvVars envs, int *scheme, int *shls_slice,
+                RysIntEnvVars *envs, int *scheme, int *shls_slice,
                 int npairs_ij, int npairs_kl, int *pair_ij_mapping, int *pair_kl_mapping,
                 float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
                 int *pool, int *atm, int natm, int *bas, int nbas, double *env)
@@ -834,7 +834,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
 
     JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
 
-    if (!rys_j_unrolled(&envs, &jk, &bounds, pool)) {
+    if (!rys_j_unrolled(envs, &jk, &bounds, pool)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int with_gout = scheme[2];
@@ -846,11 +846,11 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block + iprim*jprim;
         if (with_gout) {
             buflen += nf3_ij*nf3_kl * quartets_per_block;
-            rys_j_with_gout_kernel<<<npairs_ij, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool);
+            rys_j_with_gout_kernel<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, jk, bounds, pool);
         } else {
             buflen += (nf3_ij+nf3_kl*2+(lij+1)*(lkl+1)*(nmax+2)) * quartets_per_block;
             buflen += nf3_ij; // dm_ij_cache
-            rys_j_kernel<<<npairs_ij, threads, buflen*sizeof(double)>>>(envs, jk, bounds, pool);
+            rys_j_kernel<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, jk, bounds, pool);
         }
     }
     cudaError_t err = cudaGetLastError();

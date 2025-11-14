@@ -58,6 +58,7 @@ from gpu4pyscf.pbc.df import FFTDF, ft_ao
 from gpu4pyscf.pbc.dft.numint import NumInt, eval_ao_kpts, _GTOvalOpt
 from gpu4pyscf.pbc.grad import rks as rks_grad
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 
@@ -90,14 +91,30 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
         cell2.build(False, False)
     return cell1, cell2
 
-def _get_coulG_strain_derivatives(cell, Gv):
+def _get_coulG_strain_derivatives(cell, Gv, omega=None, remove_G0=True):
     '''derivatives of 4pi/G^2'''
     Gv = asarray(Gv)
     G2 = cp.einsum('gx,gx->g', Gv, Gv)
-    G2[0] = np.inf
+    if remove_G0:
+        G2[0] = np.inf
     coulG_0 = 4 * np.pi / G2
-    coulG_1 = cp.einsum('gx,gy->xyg', Gv, Gv)
-    coulG_1 *= coulG_0 * 2/G2
+    if omega is None:
+        omega = cell.omega
+    coulGxy = cp.einsum('gx,gy->xyg', Gv, Gv)
+    coulGxy *= coulG_0
+    coulG_1 = coulGxy * 2/G2
+    if omega < 0:
+        exp_omega_g2 = cp.exp(-.25/omega**2 * G2)
+        coulG_1 *= 1 - exp_omega_g2
+        coulG_1 -= exp_omega_g2 * (.25/omega**2*2) * coulGxy
+        coulG_0 *= 1 - exp_omega_g2
+        #coulG_0[0] = np.pi/omega**2
+    elif omega > 0:
+        exp_omega_g2 = cp.exp(-.25/omega**2 * G2)
+        coulG_1 *= exp_omega_g2
+        coulG_1 += exp_omega_g2 * (.25/omega**2*2) * coulGxy
+        coulG_0 *= exp_omega_g2
+        #coulG_0[0] = -np.pi/omega**2
     return coulG_0, coulG_1
 
 def _get_weight_strain_derivatives(cell, grids):
@@ -146,6 +163,33 @@ def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
         out = contract('Lks,xycLig->kxycigs', expLk, out)
         out = out.view(np.complex128)[:,:,:,:,:,:,0]
     return out
+
+def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
+    '''Strain derivatives for Coulomb and exchange energy with k-point samples
+    '''
+    mf = mf_grad.base
+    with_rsjk = mf.rsjk
+    ni = mf._numint
+
+    if with_rsjk is not None:
+        assert isinstance(with_rsjk, PBCJKMatrixOpt)
+        if with_rsjk.supmol is None:
+            with_rsjk.build()
+        # TODO: with_nuc should be disabled for all-electron calculations
+        sigma = get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=with_nuc)
+        if not ni.libxc.is_hybrid_xc(mf.xc):
+            return sigma
+        j_factor = 1
+        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        sigma += with_rsjk._get_ejk_sr_strain_deriv(
+            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_sr)
+        sigma += with_rsjk._get_ejk_lr_strain_deriv(
+            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_lr)
+    else:
+        if not ni.libxc.is_hybrid_xc(mf.xc):
+            return get_vxc(mf_grad, cell, dm, with_j, with_nuc)
+        raise NotImplementedError(f'Stress tensor for KHF for {mf.with_df}')
+    return sigma
 
 def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     '''Strain derivatives for Coulomb and XC at gamma point
@@ -201,7 +245,7 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
         rho += cp.einsum('ig,ig->g', bra.imag, ket.imag)
         return rho
 
-    eval_gto_opt = _GTOvalOpt(cell, deriv=deriv)
+    eval_gto_opt = _GTOvalOpt(cell, deriv=deriv+1)
     max_memory = 4e9
     blksize = int((max_memory/16/(nvar*10*nao))/ ALIGNED) * ALIGNED
     XY, YY, ZY, XZ, YZ, ZZ = 5, 7, 8, 6, 8, 9
@@ -276,25 +320,25 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
     rho0, rho1 = rho0_fft_order, rho1_fft_order
 
     exc, vxc = ni.eval_xc_eff(xc_code, rho0, 1, xctype=xctype, spin=0)[:2]
-    out += contract('xyng,ng->xy', rho1, vxc).real.get() * weight_0
-    out += contract('g,g->', rho0[0], exc.ravel()).real.get() * weight_1
+    out += cp.einsum('xyng,ng->xy', rho1, vxc).real.get() * weight_0
+    out += cp.einsum('g,g->', rho0[0], exc.ravel()).real.get() * weight_1
 
     Gv = cell.get_Gv(mesh)
     coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
     rhoG = pbctools.fft(rho0[0], mesh)
     if with_j:
         vR = pbctools.ifft(rhoG * coulG_0, mesh)
-        EJ = contract('xyg,g->xy', rho1[:,:,0], vR).real.get() * weight_0 * 2
-        EJ += contract('g,g->', rho0[0], vR).real.get() * weight_1
-        EJ += contract('xyg,g->xy', coulG_1, rhoG.conj()*rhoG).real.get() * (weight_0/ngrids)
+        EJ = cp.einsum('xyg,g->xy', rho1[:,:,0], vR).real.get() * weight_0 * 2
+        EJ += cp.einsum('g,g->', rho0[0], vR).real.get() * weight_1
+        EJ += cp.einsum('xyg,g,g->xy', coulG_1, rhoG.conj(), rhoG).real.get() * (weight_0/ngrids)
         out += .5 * EJ
 
     if with_nuc:
         if cell._pseudo:
             vpplocG_0, vpplocG_1 = _get_vpplocG_strain_derivatives(cell, mesh)
             vpplocR = pbctools.ifft(vpplocG_0, mesh).real
-            Ene = contract('xyg,g->xy', rho1[:,:,0], vpplocR).real.get()
-            Ene += contract('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
+            Ene = cp.einsum('xyg,g->xy', rho1[:,:,0], vpplocR).real.get()
+            Ene += cp.einsum('g,xyg->xy', rhoG.conj(), vpplocG_1).real.get() * (1./ngrids)
             Ene += _get_pp_nonloc_strain_derivatives(cell, mesh, dm)
         else:
             charge = -cell.atom_charges()
@@ -304,8 +348,8 @@ def get_vxc(ks_grad, cell, dm, with_j=False, with_nuc=False):
             SI = cell.get_SI(mesh=mesh)
             ZG = asarray(np.dot(charge, SI))
             vR = pbctools.ifft(ZG * coulG_0, mesh).real
-            Ene = contract('xyg,g->xy', rho1[:,:,0], vR).real.get()
-            Ene += contract('xyg,g->xy', coulG_1, rhoG.conj()*ZG).real.get() * (1./ngrids)
+            Ene = cp.einsum('xyg,g->xy', rho1[:,:,0], vR).real.get()
+            Ene += cp.einsum('xyg,g,g->xy', coulG_1, rhoG.conj(), ZG).real.get() * (1./ngrids)
         out += Ene
     return out
 
@@ -439,9 +483,6 @@ def kernel(mf_grad):
     assert is_zero(mf.kpt)
     with_df = mf.with_df
     assert isinstance(with_df, FFTDF)
-    ni = mf._numint
-    if ni.libxc.is_hybrid_xc(mf.xc):
-        raise NotImplementedError('Stress tensor for hybrid DFT')
     if hasattr(mf, 'U_idx'):
         raise NotImplementedError('Stress tensor for DFT+U')
 
@@ -454,6 +495,9 @@ def kernel(mf_grad):
     dme0 = mf_grad.make_rdm1e()
     sigma = ewald(cell)
 
+    int1e_opt_v2 = int1e._Int1eOptV2(cell)
+    sigma -= int1e_opt_v2.get_ovlp_strain_deriv(dme0)
+
     disp = 1e-5
     for x in range(3):
         for y in range(3):
@@ -463,14 +507,9 @@ def kernel(mf_grad):
             t1 = cp.einsum('ij,ji->', t1, dm0)
             t2 = cp.einsum('ij,ji->', t2, dm0)
             sigma[x,y] += (t1 - t2) / (2*disp)
-            s1 = int1e.int1e_ovlp(cell1)[0]
-            s2 = int1e.int1e_ovlp(cell2)[0]
-            s1 = cp.einsum('ij,ji->', s1, dme0)
-            s2 = cp.einsum('ij,ji->', s2, dme0)
-            sigma[x,y] -= (s1 - s2) / (2*disp)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
-    sigma += get_vxc(mf_grad, cell, dm0, with_j=True, with_nuc=True)
+    sigma += get_veff(mf_grad, cell, dm0, with_j=True, with_nuc=True)
     t0 = log.timer_debug1('Vxc and Coulomb derivatives', *t0)
 
     sigma /= cell.vol

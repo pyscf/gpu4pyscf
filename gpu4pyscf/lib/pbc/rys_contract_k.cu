@@ -33,7 +33,7 @@
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ji_lookup,
+                  int *bas_mask_idx, int *Ts_ij_lookup,
                   int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                   uint32_t *pool, int *head, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
@@ -153,7 +153,7 @@ while (1) {
     while (pair_kl0 < bounds.npairs_kl) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ji_lookup, nimgs, nbas_cell0, envs, bounds);
+                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
@@ -450,10 +450,10 @@ while (1) {
                 int ldl = bounds.ntiles_l * 3;
                 double *vk = kmat.vk + i_dm * dm_size;
                 double *dm = kmat.dm + i_dm * dm_size;
-                double *dm_jk = dm + Ts_ji_lookup[cell_j+cell_k*nimgs] * nao2;
-                double *dm_jl = dm + Ts_ji_lookup[cell_j+cell_l*nimgs] * nao2;
-                double *vk_il = vk + Ts_ji_lookup[cell_l] * nao2;
-                double *vk_ik = vk + Ts_ji_lookup[cell_k] * nao2;
+                double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
+                double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
+                double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
+                double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
                 load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
                 dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
                                     ioff, joff, koff, loff, ldk, nfi, nfl, active);
@@ -461,10 +461,10 @@ while (1) {
                 dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
                                     ioff, joff, loff, koff, ldl, nfi, nfk, active);
                 if (ish_cell0 != jsh_cell0) {
-                    double *dm_ik = dm + Ts_ji_lookup[cell_k*nimgs] * nao2;
-                    double *dm_il = dm + Ts_ji_lookup[cell_l*nimgs] * nao2;
-                    double *vk_jl = vk + Ts_ji_lookup[cell_j*nimgs+cell_l] * nao2;
-                    double *vk_jk = vk + Ts_ji_lookup[cell_j*nimgs+cell_k] * nao2;
+                    double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
+                    double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
+                    double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
+                    double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
                     load_dm(dm_ik+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
                     dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
                                         joff, ioff, koff, loff, ldk, nfj, nfl, active);
@@ -589,10 +589,10 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
-                RysIntEnvVars envs, int *shls_slice, int shm_size,
+                RysIntEnvVars *envs, int *shls_slice, int shm_size,
                 int npairs_ij, int npairs_kl,
                 uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nimgs_uniq_pair,
+                int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond, float *s_estimator, float *dm_cond,
                 float cutoff, uint32_t *pool, int nbas_cell0,
                 int *atm, int natm, int *bas, int nbas, double *env)
@@ -642,7 +642,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (1){//!rys_k_unrolled(&envs, &kmat, &bounds, pool)) {
+    if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -654,7 +654,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
         rys_k_kernel<<<workers, threads, buflen>>>(
-            envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
+            *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
@@ -664,7 +664,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-256));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
+                *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
@@ -674,7 +674,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-512));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
+                *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }
