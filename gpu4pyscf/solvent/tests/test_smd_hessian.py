@@ -233,10 +233,10 @@ H -0.646 -0.464 -0.804
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
         mf.conv_tol = 1e-12
@@ -250,10 +250,10 @@ H -0.646 -0.464 -0.804
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
     def test_cds(self):
         from gpu4pyscf.solvent.hessian.smd import get_cds as get_cds_hess

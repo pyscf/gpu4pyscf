@@ -343,10 +343,10 @@ H       0.7570000000     0.0000000000    -0.4696000000
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
@@ -362,10 +362,10 @@ H       0.7570000000     0.0000000000    -0.4696000000
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")

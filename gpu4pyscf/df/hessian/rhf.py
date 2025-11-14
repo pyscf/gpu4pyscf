@@ -650,9 +650,9 @@ class Hessian(rhf_hess.Hessian):
     make_h1 = make_h1
     get_jk_mo = _get_jk_mo
 
-    # In pyscf-2.10, the auxbasis_response attributed is automatically converted
-    # by the utils.to_cpu() due to a bug in the df.Hessian classes. To support
-    # old pyscf versions, explictly assgin auxbasis_response 
+    # In pyscf-2.10, the auxbasis_response attributed is not automatically
+    # converted by the utils.to_cpu() due to a bug in the df.Hessian classes.
+    # To support multiple pyscf versions, explictly assgin auxbasis_response.
     def to_cpu(self):
         from gpu4pyscf.lib import utils
         out = utils.to_cpu(self)

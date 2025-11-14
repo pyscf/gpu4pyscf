@@ -97,7 +97,13 @@ class WithSolventHess:
 
     def to_cpu(self):
         hess_method = self.base.to_cpu().Hessian()
-        return utils.to_cpu(self, hess_method)
+        out = utils.to_cpu(self, hess_method)
+        # In pyscf-2.10, the auxbasis_response attributed is not automatically
+        # converted by the utils.to_cpu() due to a bug in the df.Hessian classes.
+        # To support multiple pyscf versions, explictly assgin auxbasis_response.
+        if hasattr(self, 'auxbasis_response'):
+            out.auxbasis_response = self.auxbasis_response
+        return out
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         if dm is None:
