@@ -705,8 +705,6 @@ class SCF(pyscf_lib.StreamObject):
             log.info('direct_scf_tol = %g', self.direct_scf_tol)
         if self.chkfile:
             log.info('chkfile to save SCF result = %s', self.chkfile)
-        log.info('max_memory %d MB (current use %d MB)',
-                 self.max_memory, lib.current_memory()[0])
         return self
 
     opt                      = NotImplemented
