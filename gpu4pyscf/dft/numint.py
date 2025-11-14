@@ -2428,74 +2428,7 @@ class _GDFTOpt:
             out = cupy.empty_like(sorted_mat)
         out[tuple(fancy_index)] = sorted_mat
         return out
-
-    def sort_orbitals_2c(self, mat, axis=[]):
-        ''' Transform given axis of a 2-component matrix (GKS) into sorted AO
-        
-        This assumes the axes specified in 'axis' have a dimension of 2*nao,
-        representing alpha (:nao) and beta (nao:) components. Both components
-        are sorted using the same AO sorting index.
-        '''
-        idx = self._ao_idx
-        nao = len(idx)
-        
-        # Create the 2-component sorting index:
-        # [sorted_alpha_indices, sorted_beta_indices]
-        # E.g., if idx = [0, 2, 1] (nao=3),
-        # idx_2c = [0, 2, 1, 3+0, 3+2, 3+1] = [0, 2, 1, 3, 5, 4]
-        # We use numpy to build the index, consistent with self._ao_idx
-        idx_2c = np.concatenate([idx, idx + nao])
-
-        shape_ones = (1,) * mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(mat.shape):
-            if dim in axis:
-                # Check if the dimension matches the 2-component size
-                if n != 2 * nao:
-                    raise ValueError(f"Axis {dim} has dimension {n}, expected {2*nao} for 2-component sorting")
-                indices = idx_2c
-            else:
-                # Use cupy.arange for non-sorted axes, as in the original sort_orbitals
-                indices = cupy.arange(n)
-            
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-            
-        # Perform the sorting using advanced indexing
-        return mat[tuple(fancy_index)]
-
-    def unsort_orbitals_2c(self, sorted_mat, axis=[], out=None):
-        ''' Transform given axis of a 2-component matrix from sorted AO to original AO
-        
-        This assumes the axes specified in 'axis' have a dimension of 2*nao.
-        This is the inverse operation of sort_orbitals_2c.
-        '''
-        idx = self._ao_idx
-        nao = len(idx)
-        
-        # The 2-component index is created identically to sort_orbitals_2c
-        idx_2c = np.concatenate([idx, idx + nao])
-
-        shape_ones = (1,) * sorted_mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(sorted_mat.shape):
-            if dim in axis:
-                # Check if the dimension matches the 2-component size
-                if n != 2 * nao:
-                    raise ValueError(f"Axis {dim} has dimension {n}, expected {2*nao} for 2-component unsorting")
-                indices = idx_2c
-            else:
-                indices = cupy.arange(n)
-            
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-            
-        if out is None:
-            out = cupy.empty_like(sorted_mat)
-            
-        # Perform the unsorting assignment
-        out[tuple(fancy_index)] = sorted_mat
-        return out
+    
 
 class GTOValEnvVars(ctypes.Structure):
     _fields_ = [
