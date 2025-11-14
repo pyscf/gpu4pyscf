@@ -20,7 +20,6 @@ import pytest
 from pyscf import gto
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf import scf, dft
-from packaging import version
 from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_nuc, analytical_hess_solver, analytical_hess_qv
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.multi_gpu import num_devices
@@ -354,11 +353,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mf.grids.atom_grid = (50,194)
         mf.kernel()
         hessobj = mf.Hessian()
-        # The auxbasis_response attribute was not handled in pyscf-2.11
-        if version.parse(pyscf.__version__) <= version.parse('2.11.0'):
-            hessobj.auxbasis_response = 2
-        else:
-            hessobj.auxbasis_response = 1
+        hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()

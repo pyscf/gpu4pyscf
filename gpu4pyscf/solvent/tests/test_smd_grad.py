@@ -246,46 +246,30 @@ H -0.646 -0.464 -0.804
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
-    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
     def test_to_gpu(self):
-        import pyscf
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
+        mf = mol.RKS(xc='b3lyp').SMD()
         mf.conv_tol = 1e-12
         mf.kernel()
         gradobj = mf.nuc_grad_method()
         g_cpu = gradobj.kernel()
         gradobj = gradobj.to_gpu()
         g_gpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
+        gradobj = gradobj.to_cpu()
+        g_cpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
 
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        mf = mol.RKS(xc='b3lyp').density_fit().SMD()
         mf.conv_tol = 1e-12
         mf.kernel()
         gradobj = mf.nuc_grad_method()
         g_cpu = gradobj.kernel()
         gradobj = gradobj.to_gpu()
         g_gpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
-
-    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
-    def test_to_cpu(self):
-        mf = dft.RKS(mol, xc='b3lyp').SMD()
-        mf.conv_tol = 1e-12
-        mf.kernel()
-        gradobj = mf.nuc_grad_method()
-        g_gpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
         gradobj = gradobj.to_cpu()
         g_cpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
-
-        mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
-        mf.conv_tol = 1e-12
-        mf.kernel()
-        gradobj = mf.nuc_grad_method()
-        g_gpu = gradobj.kernel()
-        gradobj = gradobj.to_cpu()
-        g_cpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for Gradient of SMD")

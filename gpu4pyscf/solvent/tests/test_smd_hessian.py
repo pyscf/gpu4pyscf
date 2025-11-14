@@ -22,7 +22,6 @@ from gpu4pyscf import scf, dft, lib
 from gpu4pyscf.solvent.hessian import smd as smd_hess
 from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
-from packaging import version
 
 def setUpModule():
     global mol
@@ -243,10 +242,7 @@ H -0.646 -0.464 -0.804
         mf.conv_tol_cpscf = 1e-7
         mf.kernel()
         hessobj = mf.Hessian()
-        if version.parse(pyscf.__version__) <= version.parse('2.11.0'):
-            hessobj.auxbasis_response = 2
-        else:
-            hessobj.auxbasis_response = 1
+        hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()

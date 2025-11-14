@@ -21,9 +21,6 @@ from pyscf import gto
 from gpu4pyscf import scf
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf.solvent.grad import pcm as pcm_grad
-from packaging import version
-
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order
@@ -191,7 +188,6 @@ class KnownValues(unittest.TestCase):
         print(f"Gradient error in UHF with IEFPCM: {numpy.linalg.norm(g0 - grad)}")
         assert numpy.linalg.norm(g0 - grad) < 1e-6
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_cpu(self):
         mf = scf.RHF(mol).PCM()
         mf.verbose = 0
@@ -215,7 +211,6 @@ class KnownValues(unittest.TestCase):
         grad_cpu = gradobj.kernel()
         assert numpy.linalg.norm(grad_gpu - grad_cpu) < 1e-8
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):
         mf = pyscf.scf.RHF(mol).PCM()
         mf.verbose = 0

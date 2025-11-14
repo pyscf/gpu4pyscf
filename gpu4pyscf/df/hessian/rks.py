@@ -111,4 +111,3 @@ class Hessian(rks_hess.Hessian):
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     get_jk_mo = df_rhf_hess._get_jk_mo
-    to_cpu = df_rhf_hess.Hessian.to_cpu
