@@ -169,7 +169,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(lib.fp(vmat_gpu.get()) 
             - (-0.18688247306409317+7.50400133342109e-20j)).max(), 0, 10)
 
-    @unittest.skipIf(mcfun is None, "mcfun library not found.")
     def test_mcol_lda_vxc_mat(self):
         xc_code = 'lda,'
 
@@ -179,69 +178,51 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12)
         dm = np.random.rand(n2c, n2c) * .001 + np.random.rand(n2c, n2c) * .0001j
         dm += np.eye(n2c)
-        dm = dm + dm.T
+        dm = dm + dm.T.conj()
         ngrids = 8
         coords = np.random.rand(ngrids,3)
         weight = np.random.rand(ngrids)
 
         ao = numint.eval_ao(mol, coords, deriv=0, transpose=False)
         rho = numint2c.eval_rho(mol, ao, dm, xctype='LDA', hermi=1, with_lapl=False)
-        ni_CPU = pyscf_numint2c()
+        
+        # --- GPU Calculations (Always Run) ---
         ni_GPU = NumInt2C()
         ni_GPU.collinear = 'mcol'
-        ni_CPU.collinear = 'mcol'
-        eval_xc_cpu = ni_CPU.mcfun_eval_xc_adapter(xc_code)
         eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
-        vxc_cpu = eval_xc_cpu(xc_code, rho.get(), deriv=1)[1]
         vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='LDA')[1]
-        mask = np.ones((8, mol.nbas), dtype=np.uint8)
-        mask_gpu = cupy.array([i for i in range(mol.nbas)])
-
+        mask_gpu = cupy.arange(mol.nbas)
         shls_slice = (0, mol.nbas)
-        v0_cpu = pyscf_numint2c_file._mcol_lda_vxc_mat(mol, ao.transpose(1,0).get(), weight, 
-            rho.get(), vxc_cpu.copy(), mask, shls_slice, ao_loc, 0)
+        
         v0_gpu = numint2c._mcol_lda_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
             mask_gpu, shls_slice, ao_loc, 0)
         v1_gpu = numint2c._mcol_lda_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
             mask_gpu, shls_slice, ao_loc, 1)
         v1_gpu = v1_gpu + v1_gpu.conj().T
-        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
-        self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
 
-    def test_mcol_lda_vxc_mat_fp(self):
-        xc_code = 'lda,'
-
-        nao = mol.nao
-        n2c = nao * 2
-        ao_loc = mol.ao_loc
-        np.random.seed(12)
-        dm = np.random.rand(n2c, n2c) * .001 + np.random.rand(n2c, n2c) * .0001j
-        dm += np.eye(n2c)
-        dm = dm + dm.T
-        ngrids = 8
-        coords = np.random.rand(ngrids,3)
-        weight = np.random.rand(ngrids)
-
-        ao = numint.eval_ao(mol, coords, deriv=0, transpose=False)
-        rho = numint2c.eval_rho(mol, ao, dm, xctype='LDA', hermi=1, with_lapl=False)
-        ni_GPU = NumInt2C()
-        ni_GPU.collinear = 'mcol'
-        eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
-        vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='LDA')[1]
-        mask_gpu = cupy.array([i for i in range(mol.nbas)])
-
-        shls_slice = (0, mol.nbas)
-        v0_gpu = numint2c._mcol_lda_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 0)
-        v1_gpu = numint2c._mcol_lda_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 1)
-        v1_gpu = v1_gpu + v1_gpu.conj().T
+        # --- Assertions (Always Run) ---
+        # Fingerprint checks (from _fp test)
         self.assertAlmostEqual(abs(lib.fp(v0_gpu.get()) - 
-            (-9.596802282363786+0.000531850990220307j)).max(), 0, 13)
+            (-9.596802359283691+2.969010922568367e-05j)).max(), 0, 13)
         self.assertAlmostEqual(abs(lib.fp(v1_gpu.get()) - 
-            (-9.596802282363786+0.000531850990220307j)).max(), 0, 13)
+            (-9.596802359283691+2.969010922568367e-05j)).max(), 0, 13)
+        # Internal consistency check
+        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
 
-    @unittest.skipIf(mcfun is None, "mcfun library not found.")
+        # --- CPU Comparison (Conditional) ---
+        if mcfun is not None:
+            ni_CPU = pyscf_numint2c()
+            ni_CPU.collinear = 'mcol'
+            eval_xc_cpu = ni_CPU.mcfun_eval_xc_adapter(xc_code)
+            vxc_cpu = eval_xc_cpu(xc_code, rho.get(), deriv=1)[1]
+            mask = np.ones((8, mol.nbas), dtype=np.uint8)
+            
+            v0_cpu = pyscf_numint2c_file._mcol_lda_vxc_mat(mol, ao.transpose(1,0).get(), weight, 
+                rho.get(), vxc_cpu.copy(), mask, shls_slice, ao_loc, 0)
+            
+            # CPU vs GPU check
+            self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
+
     def test_mcol_gga_vxc_mat(self):
         xc_code = 'pbe,'
 
@@ -251,69 +232,51 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12)
         dm = np.random.rand(n2c, n2c) * .001 + np.random.rand(n2c, n2c) * .001j
         dm += np.eye(n2c)
-        dm = dm + dm.T
+        dm = dm + dm.T.conj()
         ngrids = 8
         coords = np.random.rand(ngrids,3)
         weight = np.random.rand(ngrids)
 
         ao = numint.eval_ao(mol, coords, deriv=1, transpose=False)
         rho = numint2c.eval_rho(mol, ao, dm, xctype='GGA', hermi=1, with_lapl=False)
-        ni_CPU = pyscf_numint2c()
+
+        # --- GPU Calculations (Always Run) ---
         ni_GPU = NumInt2C()
         ni_GPU.collinear = 'mcol'
-        ni_CPU.collinear = 'mcol'
-        eval_xc_cpu = ni_CPU.mcfun_eval_xc_adapter(xc_code)
         eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
-        vxc_cpu = eval_xc_cpu(xc_code, rho.get(), deriv=1)[1]
         vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='GGA')[1]
-        mask = np.ones((8, mol.nbas), dtype=np.uint8)
-        mask_gpu = cupy.array([i for i in range(mol.nbas)])
-
+        mask_gpu = cupy.arange(mol.nbas)
         shls_slice = (0, mol.nbas)
-        v0_cpu = pyscf_numint2c_file._mcol_gga_vxc_mat(mol, ao.transpose(0,2,1).get(), weight, 
-            rho.get(), vxc_cpu.copy(), mask, shls_slice, ao_loc, 0)
+        
         v0_gpu = numint2c._mcol_gga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
             mask_gpu, shls_slice, ao_loc, 0)
         v1_gpu = numint2c._mcol_gga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
             mask_gpu, shls_slice, ao_loc, 1)
         v1_gpu = v1_gpu + v1_gpu.conj().T
-        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
-        self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
 
-    def test_mcol_gga_vxc_mat_fp(self):
-        xc_code = 'pbe,'
-
-        nao = mol.nao
-        n2c = nao * 2
-        ao_loc = mol.ao_loc
-        np.random.seed(12)
-        dm = np.random.rand(n2c, n2c) * .001 + np.random.rand(n2c, n2c) * .001j
-        dm += np.eye(n2c)
-        dm = dm + dm.T
-        ngrids = 8
-        coords = np.random.rand(ngrids,3)
-        weight = np.random.rand(ngrids)
-
-        ao = numint.eval_ao(mol, coords, deriv=1, transpose=False)
-        rho = numint2c.eval_rho(mol, ao, dm, xctype='GGA', hermi=1, with_lapl=False)
-        ni_GPU = NumInt2C()
-        ni_GPU.collinear = 'mcol'
-        eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
-        vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='GGA')[1]
-        mask_gpu = cupy.array([i for i in range(mol.nbas)])
-
-        shls_slice = (0, mol.nbas)
-        v0_gpu = numint2c._mcol_gga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 0)
-        v1_gpu = numint2c._mcol_gga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 1)
-        v1_gpu = v1_gpu + v1_gpu.conj().T
+        # --- Assertions (Always Run) ---
+        # Fingerprint checks (from _fp test)
         self.assertAlmostEqual(abs(lib.fp(v1_gpu.get()) - 
-            (-9.624252836509262+0.005273283360578891j)).max(), 0, 13)
+            (-9.624260408900755+0.0003122100947141664j)).max(), 0, 13)
         self.assertAlmostEqual(abs(lib.fp(v0_gpu.get()) - 
-            (-9.624252836509262+0.005273283360578891j)).max(), 0, 13)
+            (-9.624260408900755+0.0003122100947141664j)).max(), 0, 13)
+        # Internal consistency check
+        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
 
-    @unittest.skipIf(mcfun is None, "mcfun library not found.")
+        # --- CPU Comparison (Conditional) ---
+        if mcfun is not None:
+            ni_CPU = pyscf_numint2c()
+            ni_CPU.collinear = 'mcol'
+            eval_xc_cpu = ni_CPU.mcfun_eval_xc_adapter(xc_code)
+            vxc_cpu = eval_xc_cpu(xc_code, rho.get(), deriv=1)[1]
+            mask = np.ones((8, mol.nbas), dtype=np.uint8)
+
+            v0_cpu = pyscf_numint2c_file._mcol_gga_vxc_mat(mol, ao.transpose(0,2,1).get(), weight, 
+                rho.get(), vxc_cpu.copy(), mask, shls_slice, ao_loc, 0)
+            
+            # CPU vs GPU check
+            self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
+
     def test_mcol_mgga_vxc_mat(self):
         xc_code = 'tpss'
 
@@ -323,67 +286,51 @@ class KnownValues(unittest.TestCase):
         np.random.seed(12)
         dm = np.random.rand(n2c, n2c) * .001
         dm += np.eye(n2c)
-        dm = dm + dm.T
+        dm = dm + dm.T.conj()
         ngrids = 8
         coords = np.random.rand(ngrids,3)
         weight = np.random.rand(ngrids)
 
         ao = numint.eval_ao(mol, coords, deriv=1, transpose=False)
         rho = numint2c.eval_rho(mol, ao, dm, xctype='MGGA', hermi=1, with_lapl=False)
-        ni_CPU = pyscf_numint2c()
+
+        # --- GPU Calculations (Always Run) ---
         ni_GPU = NumInt2C()
         ni_GPU.collinear = 'mcol'
-        ni_CPU.collinear = 'mcol'
-        eval_xc_cpu = ni_CPU.mcfun_eval_xc_adapter(xc_code)
         eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
-        vxc_cpu = eval_xc_cpu(xc_code, rho.get(), deriv=1)[1]
         vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='MGGA')[1]
-        mask = np.ones((8, mol.nbas), dtype=np.uint8)
-        mask_gpu = cupy.array([i for i in range(mol.nbas)])
-
+        mask_gpu = cupy.arange(mol.nbas)
         shls_slice = (0, mol.nbas)
-        v0_cpu = pyscf_numint2c_file._mcol_mgga_vxc_mat(mol, ao.transpose(0,2,1).get(), weight, 
-            rho.get(), vxc_cpu.copy(), mask, shls_slice, ao_loc, 0)
+        
         v0_gpu = numint2c._mcol_mgga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
             mask_gpu, shls_slice, ao_loc, 0)
         v1_gpu = numint2c._mcol_mgga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
             mask_gpu, shls_slice, ao_loc, 1)
         v1_gpu = v1_gpu + v1_gpu.conj().T
-        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
-        self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
 
-    def test_mcol_mgga_vxc_mat_fp(self):
-        xc_code = 'tpss'
-
-        nao = mol.nao
-        n2c = nao * 2
-        ao_loc = mol.ao_loc
-        np.random.seed(12)
-        dm = np.random.rand(n2c, n2c) * .001
-        dm += np.eye(n2c)
-        dm = dm + dm.T
-        ngrids = 8
-        coords = np.random.rand(ngrids,3)
-        weight = np.random.rand(ngrids)
-
-        ao = numint.eval_ao(mol, coords, deriv=1, transpose=False)
-        rho = numint2c.eval_rho(mol, ao, dm, xctype='MGGA', hermi=1, with_lapl=False)
-        ni_GPU = NumInt2C()
-        ni_GPU.collinear = 'mcol'
-        eval_xc_GPU = ni_GPU.mcfun_eval_xc_adapter(xc_code)
-        vxc_gpu = eval_xc_GPU(xc_code, rho, deriv=1, xctype='MGGA')[1]
-        mask_gpu = cupy.array([i for i in range(mol.nbas)])
-
-        shls_slice = (0, mol.nbas)
-        v0_gpu = numint2c._mcol_mgga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 0)
-        v1_gpu = numint2c._mcol_mgga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 1)
-        v1_gpu = v1_gpu + v1_gpu.conj().T
+        # --- Assertions (Always Run) ---
+        # Fingerprint checks (from _fp test) <-- UPDATED
         self.assertAlmostEqual(abs(lib.fp(v1_gpu.get()) 
             - (-11.359687631112195+6.13828986953566e-22j)).max(), 0, 13)
         self.assertAlmostEqual(abs(lib.fp(v0_gpu.get()) 
             - (-11.359687631112195+6.13828986953566e-22j)).max(), 0, 13)
+        
+        # Internal consistency check
+        self.assertAlmostEqual(abs(v0_gpu.get() - v1_gpu.get()).max(), 0, 13)
+        
+        # --- CPU Comparison (Conditional) ---
+        if mcfun is not None:
+            ni_CPU = pyscf_numint2c()
+            ni_CPU.collinear = 'mcol'
+            eval_xc_cpu = ni_CPU.mcfun_eval_xc_adapter(xc_code)
+            vxc_cpu = eval_xc_cpu(xc_code, rho.get(), deriv=1)[1]
+            mask = np.ones((8, mol.nbas), dtype=np.uint8)
+
+            v0_cpu = pyscf_numint2c_file._mcol_mgga_vxc_mat(mol, ao.transpose(0,2,1).get(), weight, 
+                rho.get(), vxc_cpu.copy(), mask, shls_slice, ao_loc, 0)
+            
+            # CPU vs GPU check
+            self.assertAlmostEqual(abs(v0_gpu.get() - v0_cpu).max(), 0, 13)
 
 
 if __name__ == "__main__":
