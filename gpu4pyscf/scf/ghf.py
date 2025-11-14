@@ -176,3 +176,20 @@ class GHF(hf.SCF):
         mf = ghf_cpu.GHF(self.mol)
         utils.to_cpu(self, out=mf)
         return mf
+    
+    def x2c1e(self):
+        '''X2C with spin-orbit coupling effects.
+
+        Starting from PySCF 2.1, this function (mol.GHF().x2c()) produces an X2C
+        calculation in spherical GTO bases. The results in theory are equivalent
+        to those obtained from the mol.X2C() method, which is computed in the
+        spinor GTO bases. This function called the spin-free X2C1E method in the
+        older versions.
+
+        Please note the difference from other SCF methods, such as RHF and UHF.
+        In those methods, the .x2c() method produces a scalar relativistic
+        calculation using the X2C Hamiltonian.
+        '''
+        from gpu4pyscf.x2c.x2c import x2c1e_ghf
+        return x2c1e_ghf(self)
+    x2c = x2c1e
