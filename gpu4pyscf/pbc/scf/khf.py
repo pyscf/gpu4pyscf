@@ -22,8 +22,9 @@ __all__ = [
 
 import numpy as np
 import cupy as cp
-from pyscf.pbc.scf import khf as khf_cpu
 from pyscf import lib
+from pyscf.pbc.scf import khf as khf_cpu
+from pyscf.pbc import tools
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
     return_cupy_array, contract, tag_array, sandwich_dot)
@@ -246,6 +247,34 @@ class KSCF(pbchf.SCF):
         self.conv_tol = max(cell.precision * 10, 1e-8)
         self.exx_built = False
 
+    def dump_flags(self, verbose=None):
+        mol_hf.SCF.dump_flags(self, verbose)
+        log = logger.new_logger(self, verbose)
+        lo.info('\n')
+        lo.info('******** PBC SCF flags ********')
+        lo.info('N kpts = %d', len(self.kpts))
+        lo.debug('kpts = %s', self.kpts)
+        lo.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
+        cell = self.cell
+        if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
+            isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
+            madelung = tools.pbc.madelung(cell, self.kpts)
+            log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
+            nkpts = len(self.kpts)
+            # FIXME: consider the fractional num_electron or not? This maybe
+            # relates to the charged system.
+            nelectron = float(self.cell.tot_electrons(nkpts)) / nkpts
+            log.info('    Total energy shift due to Ewald probe charge'
+                     ' = -1/2 * Nelec*madelung = %.12g',
+                     madelung*nelectron * -.5)
+        if getattr(self, 'smearing_method', None) is not None:
+            log.info('Smearing method = %s', self.smearing_method)
+        log.info('DF object = %s', self.with_df)
+        if not getattr(self.with_df, 'build', None):
+            # .dump_flags() is called in pbc.df.build function
+            self.with_df.dump_flags(verbose)
+        return self
+
     kpts = khf_cpu.KSCF.kpts
     mol = pbchf.SCF.mol
     mo_energy_kpts = khf_cpu.KSCF.mo_energy_kpts
@@ -253,7 +282,6 @@ class KSCF(pbchf.SCF):
     mo_occ_kpts = khf_cpu.KSCF.mo_occ_kpts
 
     check_sanity = pbchf.SCF.check_sanity
-    dump_flags = khf_cpu.KSCF.dump_flags
     build = khf_cpu.KSCF.build
     reset = pbchf.SCF.reset
 
