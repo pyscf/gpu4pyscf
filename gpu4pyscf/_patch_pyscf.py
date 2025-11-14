@@ -215,28 +215,28 @@ if pyscf_version <= 11:
 
         cls_keys = set.union(*[getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]])
         cpu_keys = set.union(*[getattr(cls, '_keys', ()) for cls in method.__class__.__mro__[:-1]])
-        # Discards keys that are only defined in GPU classes
+        # Discards keys that are only defined in CPU classes
         discards = cpu_keys.difference(cls_keys)
         for k in discards:
             out.__dict__.pop(k, None)
 
-        # Convert only the keys that are defined in the corresponding CPU class
-        keys = set(method.__dict__).intersection(cls_keys)
-        for key in keys:
-            val = getattr(method, key)
-            if isinstance(val, np.ndarray):
-                if key not in misc._ATTRIBUTES_IN_NPARRAY:
+        for key, val in method.__dict__.items():
+            # Convert only the keys that are defined in the corresponding GPU class
+            if key in cls_keys and key not in misc._ATTRIBUTES_IN_NPARRAY:
+                if isinstance(val, np.ndarray):
                     val = cupy.asarray(val)
-            elif hasattr(val, 'to_gpu'):
-                val = val.to_gpu()
+                elif hasattr(val, 'to_gpu'):
+                    val = val.to_gpu()
             setattr(out, key, val)
+        if hasattr(method, '_scf'):
+            out._scf = method._scf.to_cpu()
         if hasattr(out, 'reset'):
             try:
                 out.reset()
             except NotImplementedError:
                 pass
         return out
-    misc.to_gpu = to_gpu
+    lib.to_gpu = misc.to_gpu = to_gpu
 
     from pyscf.solvent.grad import pcm as pcm_grad
     if hasattr(pcm_grad, 'WithSolventGrad'):

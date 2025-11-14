@@ -819,6 +819,8 @@ class TDA(TDBase):
             from gpu4pyscf.grad import tduhf
             return tduhf.Gradients(self)
 
+    to_cpu = tdhf_gpu.TDA.to_cpu
+
 CIS = TDA
 
 class SpinFlipTDA(TDBase):
@@ -1167,6 +1169,8 @@ class TDHF(TDBase):
         return self.e, self.xy
 
     Gradients = TDA.Gradients
+
+    to_cpu = tdhf_gpu.TDHF.to_cpu
 
 TDUHF = TDHF
 

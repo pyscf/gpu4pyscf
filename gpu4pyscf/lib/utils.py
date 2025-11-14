@@ -80,15 +80,16 @@ def to_cpu(method, out=None):
     for k in discards:
         out.__dict__.pop(k, None)
 
-    # Convert only the keys that are defined in the corresponding CPU class
-    keys = set(method.__dict__).intersection(cls_keys)
-    for key in keys:
-        val = getattr(method, key)
-        if hasattr(val, 'to_cpu'):
-            val = val.to_cpu()
-        elif isinstance(val, cupy.ndarray):
-            val = val.get()
+    for key, val in method.__dict__.items():
+        # Convert only the keys that are defined in the corresponding GPU class
+        if key in cls_keys:
+            if hasattr(val, 'to_cpu'):
+                val = val.to_cpu()
+            elif isinstance(val, cupy.ndarray):
+                val = val.get()
         setattr(out, key, val)
+    if hasattr(method, '_scf'):
+        out._scf = method._scf.to_cpu()
     if hasattr(out, 'reset'):
         try:
             out.reset()

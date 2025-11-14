@@ -357,7 +357,7 @@ class TD_Scanner(lib.SinglePointScanner):
 class TDBase(lib.StreamObject):
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
+    to_cpu = NotImplemented
 
     conv_tol              = tdhf_cpu.TDBase.conv_tol
     nstates               = tdhf_cpu.TDBase.nstates
@@ -588,6 +588,12 @@ class TDA(TDBase):
             from gpu4pyscf.nac import tdrhf
             return tdrhf.NAC(self)
 
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [(cp.asnumpy(x), None) for x, y in out.xy]
+        return out
+
 CIS = TDA
 
 
@@ -706,6 +712,12 @@ class TDHF(TDBase):
 
     Gradients = TDA.Gradients
     nac_method = TDA.nac_method
+
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [(cp.asnumpy(x), cp.asnumpy(y)) for x, y in out.xy]
+        return out
 
 TDRHF = TDHF
 
