@@ -15,7 +15,7 @@
 
 
 '''
-X2C 2-component HF methods
+X2C 2-component HF methods from pyscf
 '''
 
 from functools import reduce
@@ -27,6 +27,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, ghf
 from pyscf.scf import _vhf
 from pyscf import __config__
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib import utils
 
 LINEAR_DEP_THRESHOLD = 1e-9
 
@@ -117,6 +119,11 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
         v = _block_diag(xmol.intor_symmetric('int1e_nuc'))
         s = _block_diag(xmol.intor_symmetric('int1e_ovlp'))
         w = _sigma_dot(xmol.intor('int1e_spnucsp'))
+        t = cp.asarray(t)
+        v = cp.asarray(v)
+        w = cp.asarray(w)
+        s = cp.asarray(s)
+
         if 'get_xmat' in self.__dict__:
             # If the get_xmat method is overwritten by user, build the X
             # matrix with the external get_xmat method
@@ -134,10 +141,14 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
                 shls_slice = (ish0, ish1, ish0, ish1)
                 t1 = _block_diag(xmol.intor('int1e_kin', shls_slice=shls_slice))
                 s1 = _block_diag(xmol.intor('int1e_ovlp', shls_slice=shls_slice))
+                t1 = cp.asarray(t1)
+                s1 = cp.asarray(s1)
                 with xmol.with_rinv_at_nucleus(ia):
                     z = -xmol.atom_charge(ia)
                     v1 = _block_diag(z * xmol.intor('int1e_rinv', shls_slice=shls_slice))
                     w1 = _sigma_dot(z * xmol.intor('int1e_sprinvsp', shls_slice=shls_slice))
+                    w1 = cp.asarray(w1)
+                    v1 = cp.asarray(v1)
                 x[p0:p1,p0:p1] = _x2c1e_xmatrix(t1, v1, w1, s1, c)
             h1 = _get_hcore_fw(t, v, w, s, x, c)
 
@@ -149,10 +160,12 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             s22 = xmol.intor_symmetric('int1e_ovlp')
             s21 = mole.intor_cross('int1e_ovlp', xmol, mol)
             c = _block_diag(pyscf_lib.cho_solve(s22, s21))
-            h1 = reduce(pyscf_lib.dot, (c.T, h1, c))
+            c = cp.asarray(c)
+            h1 = reduce(cp.dot, (c.T, h1, c))
         if self.xuncontract and contr_coeff is not None:
             contr_coeff = _block_diag(contr_coeff)
-            h1 = reduce(pyscf_lib.dot, (contr_coeff.T, h1, contr_coeff))
+            contr_coeff = cp.asarray(contr_coeff)
+            h1 = reduce(cp.dot, (contr_coeff.T, h1, contr_coeff))
         return h1
 
     def get_xmat(self, mol=None):
@@ -186,17 +199,6 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             w = _sigma_dot(xmol.intor('int1e_spnucsp'))
             x = _x2c1e_xmatrix(t, v, w, s, c)
         return x
-
-    def _get_rmat(self, x=None):
-        '''The matrix (in AO basis) that changes metric from NESC metric to NR metric'''
-        xmol = self.get_xmol()[0]
-        if x is None:
-            x = self.get_xmat(xmol)
-        c = pyscf_lib.param.LIGHT_SPEED
-        s = _block_diag(xmol.intor_symmetric('int1e_ovlp'))
-        t = _block_diag(xmol.intor_symmetric('int1e_kin'))
-        s1 = s + reduce(cp.dot, (x.conj().T, t, x)) * (.5/c**2)
-        return _get_r(s, s1)
 
 
 make_rdm1 = hf.make_rdm1
@@ -252,7 +254,8 @@ class X2C1E_GSCF(_X2C_SCF):
     '''
 
     __name_mixin__ = 'X2C1e'
-
+    to_gpu = utils.to_gpu
+    device = utils.device
     _keys = {'with_x2c'}
 
     def __init__(self, mf):
@@ -284,7 +287,10 @@ class X2C1E_GSCF(_X2C_SCF):
         raise NotImplementedError
 
     def to_cpu(self):
-        raise NotImplementedError("X2C-GSCF object cannot be converted to CPU object")
+        from pyscf.x2c.x2c import X2C1E_GSCF
+        x2c1e_obj = X2C1E_GSCF(self)
+        utils.to_cpu(self, out=x2c1e_obj)
+        return x2c1e_obj
 
 
 def _uncontract_mol(mol, xuncontract=None, exp_drop=0.2):
@@ -353,11 +359,11 @@ def _x2c1e_xmatrix(t, v, w, s, c):
     m[nao:,nao:] = t * (.5/c**2)
 
     try:
-        e, a = scipy.linalg.eigh(h, m)
+        e, a = solve_gen_eigh_cupy(h, m)
         cl = a[:nao,nao:]
         cs = a[nao:,nao:]
         x = cp.linalg.solve(cl.T, cs.T).T  # B = XA
-    except scipy.linalg.LinAlgError:
+    except cp.linalg.LinAlgError:
         d, t = cp.linalg.eigh(m)
         idx = d>LINEAR_DEP_THRESHOLD
         t = t[:,idx] / cp.sqrt(d[idx])
@@ -385,7 +391,7 @@ def _x2c1e_get_hcore(t, v, w, s, c):
     m[nao:,nao:] = t * (.5/c**2)
 
     try:
-        e, a = cp.linalg.eigh(h, m)
+        e, a = solve_gen_eigh_cupy(h, m)
         cl = a[:nao,nao:]
         # cs = a[nao:,nao:]
         e = e[nao:]
@@ -449,6 +455,48 @@ def _block_diag(mat):
 
 def _sigma_dot(mat):
     '''sigma dot A x B + A dot B'''
-    quaternion = cp.vstack([1j * pyscf_lib.PauliMatrices, cp.eye(2)[None,:,:]])
+    quaternion = cp.vstack([1j * cp.asarray(pyscf_lib.PauliMatrices), cp.eye(2)[None,:,:]])
     nao = mat.shape[-1] * 2
-    return pyscf_lib.einsum('sxy,spq->xpyq', quaternion, mat).reshape(nao, nao)
+    return contract('sxy,spq->xpyq', quaternion, mat).reshape(nao, nao)
+
+
+def solve_gen_eigh_cupy(h, m):
+    """
+    Solves Hx = \lambda Mx using CuPy.
+    Equivalent to numpy.linalg.eigh(h, m).
+    
+    Args:
+        h (cp.ndarray): Hermitian matrix H
+        m (cp.ndarray): Hermitian positive-definite matrix M
+    
+    Returns:
+        tuple (e, a): eigenvalues (e) and eigenvectors (a)
+    """
+    
+    try:
+        # 1. Cholesky decomposition: M = L L^H
+        L = cp.linalg.cholesky(m)
+    except cp.linalg.LinAlgError as e:
+        print(f"ERROR: Matrix M is not positive-definite. {e}")
+        return None, None
+
+    # 2. Transform H to C = L^{-1} H (L^H)^{-1}
+    
+    # K = L^{-1} H  (by solving L K = H)
+    K = cp.linalg.solve(L, h)
+    
+    # C = K (L^H)^{-1}  (by solving L C^H = K^H, then C = (C^H)^H)
+    K_H = K.T.conj()
+    C_H = cp.linalg.solve(L, K_H)
+    C = C_H.T.conj()
+    
+    # 3. Solve standard problem: C y = \lambda y
+    # Symmetrize C to remove numerical noise
+    C_hermitian = (C + C.T.conj()) * 0.5
+    e, y = cp.linalg.eigh(C_hermitian)
+
+    # 4. Back-transform eigenvectors: a = (L^H)^{-1} y
+    # (by solving L^H a = y)
+    a = cp.linalg.solve(L.T.conj(), y)
+    
+    return e, a
