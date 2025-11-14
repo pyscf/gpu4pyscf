@@ -21,40 +21,37 @@ import numpy as np
 from pyscf import lib
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.solvent import smd
+from gpu4pyscf.lib import utils
+from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent.hessian import pcm as pcm_hess
 from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
 
 def get_cds(smdobj):
-    mol = smdobj.mol
-    solvent = smdobj.solvent
+    mol = smdobj.mol.copy()
+    smdobj_tmp = smdobj.copy()
     def smd_grad_scanner(mol):
-        smdobj_tmp = smd.SMD(mol)
-        smdobj_tmp.solvent = solvent
-        return smd.get_cds_legacy(smdobj_tmp)[1]
+        smdobj_tmp.reset(mol)
+        return smd_grad.get_cds(smdobj_tmp)
 
     log = logger.new_logger(mol, mol.verbose)
     t1 = log.init_timer()
 
+    coords = mol.atom_coords(unit='B')
+    coords_backup = coords.copy()
     eps = 1e-4
     natm = mol.natm
     hess_cds = np.zeros([natm,natm,3,3])
     for ia in range(mol.natm):
         for j in range(3):
-            coords = mol.atom_coords(unit='B')
             coords[ia,j] += eps
             mol.set_geom_(coords, unit='B')
-            mol.build()
             grad0_cds = smd_grad_scanner(mol)
 
             coords[ia,j] -= 2.0*eps
             mol.set_geom_(coords, unit='B')
-            mol.build()
             grad1_cds = smd_grad_scanner(mol)
-
-            coords[ia,j] += eps
-            mol.set_geom_(coords, unit='B')
             hess_cds[ia,:,j] = (grad0_cds - grad1_cds) / (2.0 * eps)
+            coords[ia,j] = coords_backup[ia,j]
     t1 = log.timer_debug1('solvent energy', *t1)
     return hess_cds # hartree
 
@@ -79,7 +76,9 @@ def make_hess_object(base_method):
                          (WithSolventHess, vac_hess.__class__), name)
 
 class WithSolventHess:
-    from gpu4pyscf.lib.utils import to_gpu, device
+
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {'de_solvent', 'de_solute', 'de_cds'}
 
@@ -97,15 +96,17 @@ class WithSolventHess:
         return obj
 
     def to_cpu(self):
-        from pyscf.solvent.hessian import smd  # type: ignore
-        hess_method = self.undo_solvent().to_cpu()
-        return smd.make_hess_object(hess_method)
+        hess_method = self.base.to_cpu().Hessian()
+        return utils.to_cpu(self, hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
         if dm is None:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
+        if self.base.with_solvent.frozen_dm0_for_finite_difference_without_response is not None:
+            raise NotImplementedError("frozen_dm0_for_finite_difference_without_response not implemented for PCM Hessian")
+
         with lib.temporary_env(self.base.with_solvent, equilibrium_solvation=True):
             logger.debug(self, 'Compute hessian from solutes')
             self.de_solute = super().kernel(*args, **kwargs)
@@ -115,53 +116,9 @@ class WithSolventHess:
         self.de = self.de_solute + self.de_solvent + self.de_cds
         return self.de
 
-    def make_h1(self, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
-        if atmlst is None:
-            atmlst = range(self.mol.natm)
-        h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
-        if isinstance(self.base, scf.hf.RHF):
-            dm = self.base.make_rdm1()
-            dv = pcm_hess.analytical_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
-            for i0, ia in enumerate(atmlst):
-                h1ao[i0] += dv[i0]
-            return h1ao
-        elif isinstance(self.base, scf.uhf.UHF):
-            h1aoa, h1aob = h1ao
-            solvent = self.base.with_solvent
-            dm = self.base.make_rdm1()
-            dm = dm[0] + dm[1]
-            dva = pcm_hess.analytical_grad_vmat(solvent, dm, mo_coeff[0], mo_occ[0], atmlst=atmlst, verbose=verbose)
-            dvb = pcm_hess.analytical_grad_vmat(solvent, dm, mo_coeff[1], mo_occ[1], atmlst=atmlst, verbose=verbose)
-            for i0, ia in enumerate(atmlst):
-                h1aoa[i0] += dva[i0]
-                h1aob[i0] += dvb[i0]
-            return h1aoa, h1aob
-        else:
-            raise NotImplementedError('Base object is not supported')
+    make_h1 = pcm_hess.WithSolventHess.make_h1
 
-    def get_veff_resp_mo(self, mol, dms, mo_coeff, mo_occ, hermi=1):
-        v1vo = super().get_veff_resp_mo(mol, dms, mo_coeff, mo_occ, hermi=hermi)
-        if not self.base.with_solvent.equilibrium_solvation:
-            return v1vo
-        v_solvent = self.base.with_solvent._B_dot_x(dms)
-        
-        if isinstance(self.base, scf.uhf.UHF):
-            n_dm = dms.shape[1]
-            mocca = mo_coeff[0][:,mo_occ[0]>0]
-            moccb = mo_coeff[1][:,mo_occ[1]>0]
-            moa, mob = mo_coeff
-            nmoa = moa.shape[1]
-            nocca = mocca.shape[1]
-            v1vo_sol = v_solvent[0] + v_solvent[1]
-            v1vo[:,:nmoa*nocca] += _ao2mo(v1vo_sol, mocca, moa).reshape(n_dm,-1)
-            v1vo[:,nmoa*nocca:] += _ao2mo(v1vo_sol, moccb, mob).reshape(n_dm,-1)
-        elif isinstance(self.base, scf.hf.RHF):
-            n_dm = dms.shape[0]
-            mocc = mo_coeff[:,mo_occ>0]
-            v1vo += _ao2mo(v_solvent, mocc, mo_coeff).reshape(n_dm,-1)
-        else:
-            raise NotImplementedError('Base object is not supported')
-        return v1vo
+    get_veff_resp_mo = pcm_hess.WithSolventHess.get_veff_resp_mo
 
     def _finalize(self):
         # disable _finalize. It is called in grad_method.kernel method

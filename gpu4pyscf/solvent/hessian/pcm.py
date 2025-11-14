@@ -22,7 +22,7 @@ import cupy
 import ctypes
 from pyscf import lib, gto
 from gpu4pyscf import scf
-from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent
+from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent, PCM
 from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_solver, grad_nuc, get_dD_dS, get_dF_dA, get_dSii, grad_switch_h
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib import logger
@@ -31,6 +31,7 @@ from gpu4pyscf.gto.int3c1e_ipip import int1e_grids_ipip1, int1e_grids_ipvip1, in
 from gpu4pyscf.gto import int3c1e
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.hessian.rhf import HessianBase, _ao2mo
+from gpu4pyscf.lib import utils
 from pyscf import lib as pyscf_lib
 from gpu4pyscf.lib.cupy_helper import contract
 
@@ -1001,7 +1002,9 @@ def make_hess_object(base_method):
                          (WithSolventHess, vac_hess.__class__), name)
 
 class WithSolventHess:
-    from gpu4pyscf.lib.utils import to_gpu, device
+
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {'de_solvent', 'de_solute'}
 
@@ -1019,12 +1022,10 @@ class WithSolventHess:
         return obj
 
     def to_cpu(self):
-        from pyscf.solvent.hessian import pcm           # type: ignore
-        hess_method = self.undo_solvent().to_cpu()
-        return pcm.make_hess_object(hess_method)
+        hess_method = self.base.to_cpu().Hessian()
+        return utils.to_cpu(self, hess_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
-        dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
@@ -1043,7 +1044,9 @@ class WithSolventHess:
     def make_h1(self, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
         if atmlst is None:
             atmlst = range(self.mol.natm)
-        h1ao = super().make_h1(mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
+        # self.__class__.__bases__ are (WithSolventHess, vac_hess.__class__)
+        vac_hess_klass = self.__class__.__bases__[1]
+        h1ao = vac_hess_klass.make_h1(self, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
         if isinstance(self.base, scf.hf.RHF):
             dm = self.base.make_rdm1()
             dv = analytical_grad_vmat(self.base.with_solvent, dm, mo_coeff, mo_occ, atmlst=atmlst, verbose=verbose)
@@ -1065,7 +1068,9 @@ class WithSolventHess:
             raise NotImplementedError('Base object is not supported')
 
     def get_veff_resp_mo(self, mol, dms, mo_coeff, mo_occ, hermi=1):
-        v1vo = super().get_veff_resp_mo(mol, dms, mo_coeff, mo_occ, hermi=hermi)
+        # self.__class__.__bases__ are (WithSolventHess, vac_hess.__class__)
+        vac_hess_klass = self.__class__.__bases__[1]
+        v1vo = vac_hess_klass.get_veff_resp_mo(self, mol, dms, mo_coeff, mo_occ, hermi=hermi)
         if not self.base.with_solvent.equilibrium_solvation:
             return v1vo
         v_solvent = self.base.with_solvent._B_dot_x(dms)
@@ -1091,5 +1096,3 @@ class WithSolventHess:
         # disable _finalize. It is called in grad_method.kernel method
         # where self.de was not yet initialized.
         pass
-
-

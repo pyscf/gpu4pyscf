@@ -16,12 +16,6 @@ import cupy
 
 num_devices = cupy.cuda.runtime.getDeviceCount()
 
-# TODO: switch to non_blocking stream (currently blocked by libxc)
-_streams = [None] * num_devices
-for device_id in range(num_devices):
-    with cupy.cuda.Device(device_id):
-        _streams[device_id] = cupy.cuda.stream.Stream(non_blocking=False)
-
 props = cupy.cuda.runtime.getDeviceProperties(0)
 GB = 1024*1024*1024
 min_ao_blksize = 256        # maxisum batch size of AOs

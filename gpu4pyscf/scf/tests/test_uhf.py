@@ -22,7 +22,9 @@ from gpu4pyscf import scf
 from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
 
-mol = pyscf.M(
+def setUpModule():
+    global mol, mol1
+    mol = pyscf.M(
     atom='''
 C  -0.65830719,  0.61123287, -0.00800148
 C   0.73685281,  0.61123287, -0.00800148
@@ -35,7 +37,7 @@ C   0.73673681,  3.02749287, -0.00920048
     output = '/dev/null'
 )
 
-mol1 = pyscf.M(
+    mol1 = pyscf.M(
     atom='''
 C  -1.20806619, -0.34108413, -0.00755148
 C   1.28636081, -0.34128013, -0.00668648
@@ -258,9 +260,12 @@ class KnownValues(unittest.TestCase):
         mol1 = mol.copy()
         mol1.basis = 'sto3g'
         mol1.build(False, False)
-        e_tot = mol1.UHF().to_gpu().kernel()
+        mf = mol1.UHF().to_gpu()
+        e_tot = mf.kernel()
         e_ref = -148.8650361770461
         assert np.abs(e_tot - e_ref) < 1e-5
+        chg = mf.analyze()[0][1]
+        self.assertAlmostEqual(lib.fp(chg), 0.022191785654920748, 5)
 
     @pytest.mark.slow
     def test_uhf_d3bj(self):

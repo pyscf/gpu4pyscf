@@ -243,8 +243,19 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     '''JK for given k-point'''
     from gpu4pyscf.pbc.df import df_jk_real
     assert kpts_band is None
-    if is_zero(kpt):
-        if mydf._cderi is None:
-            mydf.build()
+    if not is_zero(kpt):
+        raise NotImplementedError(f'get_jk for single k-point {kpt}')
+
+    if mydf._cderi is None:
+        mydf.build()
+
+    if dm.dtype == np.float64:
         return df_jk_real.get_jk(mydf, dm, hermi, with_j, with_k, exxdiv)
-    raise NotImplementedError(f'get_jk for single k-point {kpt}')
+    else:
+        kpts = kpt.reshape(1, 3)
+        vj = vk = None
+        if with_k:
+            vk = get_k_kpts(mydf, dm, hermi, kpts, kpts_band, exxdiv)
+        if with_j:
+            vj = get_j_kpts(mydf, dm, hermi, kpts, kpts_band)
+        return vj, vk

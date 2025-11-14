@@ -30,7 +30,7 @@ from gpu4pyscf.pbc.dft.krkspu import _set_U, _make_minao_lo, reference_mol
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract, tag_array
 
-def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpts=None, kpts_band=None):
     """
     Coulomb + XC functional + (Hubbard - double counting) for KUKSpU.

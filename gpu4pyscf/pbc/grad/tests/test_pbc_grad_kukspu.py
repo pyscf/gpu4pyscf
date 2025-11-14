@@ -23,6 +23,7 @@ from pyscf.data.nist import BOHR
 class KnownValues(unittest.TestCase):
     def test_finite_diff_hubbard_U_grad(self):
         cell = pyscf.M(
+            verbose = 0,
             unit = 'A',
             atom = 'C 0.,  0.,  0.; O 0.5,  0.8,  1.1',
             a = '''0.      1.7834  1.7834

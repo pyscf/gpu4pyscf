@@ -28,7 +28,7 @@ from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf import __config__
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
@@ -250,7 +250,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
         p1 = min(aux_blksize*(device_id+1), naux)
         #for device_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
         if use_gpu_memory:
-            with cupy.cuda.Device(device_id), _streams[device_id]:
+            with cupy.cuda.Device(device_id):
                 _cderi[device_id] = cupy.empty([p1-p0, npairs])
             log.debug(f"CDERI size {_cderi[device_id].nbytes/GB:.3f} GB on Device {device_id}")
         else:
@@ -296,7 +296,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
     naoaux = cd_low.shape[0]
     npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
     pairs_loc = np.append(0, np.cumsum(npairs))
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(mol.verbose, int)
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()

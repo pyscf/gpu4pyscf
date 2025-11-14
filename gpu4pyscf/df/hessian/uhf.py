@@ -708,7 +708,7 @@ _get_jk_mo = df_rhf_hess._get_jk_mo
 class Hessian(uhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
-    from gpu4pyscf.lib.utils import to_gpu, device
+    _keys = {'auxbasis_response',}
 
     auxbasis_response = 1
     partial_hess_elec = partial_hess_elec

@@ -27,12 +27,14 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf import tdscf
+import os
 
 
 #
 # Given Y = 0, TDDFT gradients (XAX+XBY+YBX+YAY)^1 turn to TDA gradients (XAX)^1
 #
-def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
+              with_solvent=False):
     """
     Electronic part of TDA, TDDFT nuclear gradients
 
@@ -42,6 +44,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         x_y : a two-element list of cp arrays
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
+
+    Kwargs:
+        with_solvent :
+            Include the response of solvent in the gradients of the electronic
+            energy.
     """
     if singlet is None:
         singlet = True
@@ -69,7 +76,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
-    td_grad.dmxpy = dmxpy
+    if with_solvent:
+        td_grad._dmxpy = dmxpy
 
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
@@ -107,13 +115,15 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
                 vk2 = cp.asarray(vk2)
             vk += cp.stack((vk0, vk1, vk2)) * (alpha - hyb)
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0] + k1ao[0] * 2
-        veff0doo += td_grad.solvent_response(dmzoo)
+        if with_solvent:
+            veff0doo += td_grad.solvent_response(dmzoo)
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
             veff = vj[1] * 2 - vk[1] + f1vo[0] * 2
         else:
             veff = f1vo[0] - vk[1]
-        veff += td_grad.solvent_response(dmxpy + dmxpy.T)
+        if with_solvent:
+            veff += td_grad.solvent_response(dmxpy + dmxpy.T)
         veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
         wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
         wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
@@ -187,7 +197,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     s1 = mf_grad.get_ovlp(mol)
 
     dmz1doo = z1ao + dmzoo
-    td_grad.dmz1doo = dmz1doo
+    if with_solvent:
+        td_grad._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))
 
     if atmlst is None:
@@ -362,13 +373,16 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
             rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
             # quick fix
             if deriv > 2:
-                ni_cpu = numint_cpu()
-                # TODO: If the libxc is stablized, this should be gpulized
-                # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
-                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
-                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+                whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+                if not whether_use_gpu:
+                    ni_cpu = numint_cpu()
+                    # TODO: If the libxc is stablized, this should be gpulized
+                    vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+                    if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
+                    if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
+                    if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+                else:
+                    vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             else:
                 vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             dmvo_mask = dmvo[mask[:, None], mask]
@@ -423,14 +437,15 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
             rho *= 0.5
             rho = cp.repeat(rho[cp.newaxis], 2, axis=0)
             # quick fix
-            if deriv > 2:
-                ni_cpu = numint_cpu()
-                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-                if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
-                if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
-                if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
-            else:
-                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            # if deriv > 2:
+            #     ni_cpu = numint_cpu()
+            #     vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+            #     if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
+            #     if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
+            #     if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
+            # else:
+            #     vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
             # fxc_t couples triplet excitation amplitudes
             # 1/2 int (tia - tIA) fxc (tjb - tJB) = tia fxc_t tjb
             fxc_t = fxc[:, :, 0] - fxc[:, :, 1]
@@ -524,9 +539,7 @@ def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
 
 
 class Gradients(tdrhf.Gradients):
-    @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.info):
-        return grad_elec(self, xy, singlet, atmlst, self.verbose)
+    grad_elec = grad_elec
 
 
 Grad = Gradients

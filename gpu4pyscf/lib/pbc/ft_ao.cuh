@@ -25,7 +25,8 @@
 typedef struct {
     int li;
     int lj;
-    int nfij;
+    int nfi;
+    int nfj;
     int g_size;
     int stride_i;
     int stride_j;

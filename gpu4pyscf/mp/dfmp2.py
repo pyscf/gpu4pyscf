@@ -20,14 +20,14 @@ from gpu4pyscf import df
 from gpu4pyscf.mp import mp2
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, tag_array, reduce_to_device
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 from pyscf import __config__
 
 WITH_T2 = getattr(__config__, 'mp_dfmp2_with_t2', True)
 _einsum = cupy.einsum
 
 def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id=0):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         mo_energy = cupy.asarray(mo_energy)
         mo_coeff = cupy.asarray(mo_coeff)
         
@@ -47,7 +47,7 @@ def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id=0):
 def get_occ_blk(Lov_dist, i, nocc, nvir):
     occ_blk_dist = [None] * num_devices
     for device_id in range(num_devices):
-        with cupy.cuda.Device(device_id), _streams[device_id]:
+        with cupy.cuda.Device(device_id):
             Lov = Lov_dist[device_id]
             mat = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
                             Lov).reshape(nvir,nocc,nvir)

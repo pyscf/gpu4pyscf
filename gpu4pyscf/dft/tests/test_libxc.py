@@ -20,6 +20,7 @@ from pyscf.dft import Grids
 from gpu4pyscf.dft.numint import NumInt as numint_gpu
 from pyscf.dft.numint import NumInt as numint_cpu
 import cupy
+import os
 
 def setUpModule():
     global mol, dm1, dm0
@@ -51,7 +52,7 @@ def _diff(dat, ref):
     return np.min((abs(d/(ref+1e-300)), abs(d)), axis=0)
 
 class KnownValues(unittest.TestCase):
-    def _check_xc(self, xc, spin=0, fxc_tol=1e-10, kxc_tol=1e-10):
+    def _check_xc(self, xc, spin=0, deriv=2, fxc_tol=1e-10, kxc_tol=1e-10):
         ni_cpu = numint_cpu()
         ni_gpu = numint_gpu()
         xctype = ni_cpu._xc_type(xc)
@@ -66,8 +67,15 @@ class KnownValues(unittest.TestCase):
         if spin != 0:
             rho = (rho, rho)
 
-        exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=2, xctype=xctype)
-        exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=2, xctype=xctype)
+        exc_cpu, vxc_cpu, fxc_cpu, kxc_cpu = ni_cpu.eval_xc_eff(xc, rho, deriv=deriv, xctype=xctype)
+        exc_gpu, vxc_gpu, fxc_gpu, kxc_gpu = ni_gpu.eval_xc_eff(xc, cupy.array(rho), deriv=deriv, xctype=xctype)
+
+        print(f"{xc} {spin} exc", _diff(exc_gpu[:,0].get(), exc_cpu).max())
+        print(f"{xc} {spin} vxc", _diff(vxc_gpu.get(), vxc_cpu).max())
+        if fxc_gpu is not None:
+            print(f"{xc} {spin} fxc", _diff(fxc_gpu.get(), fxc_cpu).max())
+        if kxc_gpu is not None:
+            print(f"{xc} {spin} kxc", _diff(kxc_gpu.get(), kxc_cpu).max())
 
         assert _diff(exc_gpu[:,0].get(), exc_cpu).max() < 1e-10
         assert _diff(vxc_gpu.get(), vxc_cpu).max() < 1e-10
@@ -77,15 +85,32 @@ class KnownValues(unittest.TestCase):
             assert _diff(kxc_gpu.get(), kxc_cpu).max() < kxc_tol
 
     def test_LDA(self):
-        self._check_xc('LDA_C_VWN')
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            deriv = 3
+            print("test LDA with deriv 3")
+        else:
+            deriv = 2
+            print("test LDA with deriv 2")
+        self._check_xc('LDA_C_VWN', deriv=deriv)
 
     def test_GGA(self):
-        self._check_xc('HYB_GGA_XC_B3LYP')
-        self._check_xc('GGA_X_B88', fxc_tol=1e-10)
-        self._check_xc('GGA_C_PBE', fxc_tol=1e-4)
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            deriv = 3
+        else:
+            deriv = 2
+        self._check_xc('HYB_GGA_XC_B3LYP', deriv=deriv, kxc_tol=1e-9)
+        self._check_xc('GGA_X_B88', fxc_tol=1e-10, deriv=deriv, kxc_tol=1e-8)
+        self._check_xc('GGA_C_PBE', fxc_tol=1e-4, deriv=deriv, kxc_tol=3e2)
 
     def test_mGGA(self):
-        self._check_xc('MGGA_C_M06', fxc_tol=1e-4)
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            deriv = 3
+        else:
+            deriv = 2
+        self._check_xc('MGGA_C_M06', fxc_tol=1e-4, deriv=deriv, kxc_tol=1e-2)
 
     def test_u_LDA(self):
         self._check_xc('LDA_C_VWN', spin=1)

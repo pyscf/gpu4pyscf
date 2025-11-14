@@ -31,7 +31,7 @@ from gpu4pyscf.pbc.dft import krks
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.lib.cupy_helper import asarray, contract
 
-def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpts=None, kpts_band=None):
     """
     Coulomb + XC functional + Hubbard U terms.

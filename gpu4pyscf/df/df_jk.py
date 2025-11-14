@@ -27,7 +27,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.df import df, int3c2e
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 def _pin_memory(array):
     mem = cupy.cuda.alloc_pinned_memory(array.nbytes)
@@ -296,7 +296,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
                      with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices on single GPU
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
@@ -361,7 +361,7 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
         For CP-HF or TDDFT
     '''
     vj = vk = None
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
@@ -422,7 +422,7 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
 def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices with density matrix
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()

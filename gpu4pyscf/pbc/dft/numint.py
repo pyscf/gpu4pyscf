@@ -374,6 +374,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ao_deriv = 1
         nvar = 5
     elif xctype == 'HF':
+        if input_band is None and is_single_kpt:
+            vmat = vmat[0]
+        if is_zero(kpts_band):
+            vmat = vmat.real
         return 0, 0, vmat
     else:
         raise NotImplementedError(f'r_vxc for functional {xc_code}')
@@ -456,6 +460,10 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ao_deriv = 1
         nvar = 5
     elif xctype == 'HF':
+        if input_band is None and is_single_kpt:
+            vmat = vmat[:,0]
+        if is_zero(kpts_band):
+            vmat = vmat.real
         return 0, 0, vmat
     else:
         raise NotImplementedError(f'r_vxc for functional {xc_code}')

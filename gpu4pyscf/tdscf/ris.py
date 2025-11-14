@@ -1265,7 +1265,6 @@ class TDA(RisBase):
             raise NotImplementedError('Does not support UKS method yet')
         return TDA_MVP, hdiag
 
-
     def kernel(self):
 
         '''for TDA, pure and hybrid share the same form of

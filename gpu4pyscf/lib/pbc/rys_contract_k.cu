@@ -33,8 +33,8 @@
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ji_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0,
+                  int *bas_mask_idx, int *Ts_ij_lookup,
+                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                   uint32_t *pool, int *head, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
@@ -97,8 +97,7 @@ while (1) {
         break;
     }
 
-    __shared__ int ish;
-    __shared__ int jsh;
+    __shared__ int ish, jsh, cell_j, ish_cell0, jsh_cell0, i0, j0;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
@@ -113,6 +112,14 @@ while (1) {
         jsh = bas_ij % nbas;
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        int *ao_loc = envs.ao_loc;
+        int _ish = bas_mask_idx[ish];
+        int _jsh = bas_mask_idx[jsh];
+        ish_cell0 = _ish % nbas_cell0;
+        jsh_cell0 = _jsh % nbas_cell0;
+        cell_j = _jsh / nbas_cell0;
+        i0 = ao_loc[ish_cell0];
+        j0 = ao_loc[jsh_cell0];
     }
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -145,7 +152,8 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
+                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
@@ -170,9 +178,16 @@ while (1) {
             uint32_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / nbas;
             int lsh = bas_kl % nbas;
+            int _ksh = bas_mask_idx[ksh];
+            int cell_k = _ksh / nbas_cell0;
+            int ksh_cell0 = _ksh % nbas_cell0;
+            int _lsh = bas_mask_idx[lsh];
+            int cell_l = _lsh / nbas_cell0;
+            int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
             if (task_id < ntasks) {
-                if (ksh == lsh) fac_sym *= .5;
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
             } else {
                 fac_sym = 0;
             }
@@ -412,53 +427,51 @@ while (1) {
             }
             __syncthreads();
 
-            int _ish = bas_mask_idx[ish];
-            int ish_cell0 = _ish % nbas_cell0;
-            int _jsh = bas_mask_idx[jsh];
-            int cell_j = _jsh / nbas_cell0;
-            int jsh_cell0 = _jsh % nbas_cell0;
-            int _ksh = bas_mask_idx[ksh];
-            int cell_k = _ksh / nbas_cell0;
-            int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
-            int cell_l = _lsh / nbas_cell0;
-            int lsh_cell0 = _lsh % nbas_cell0;
             GXYZOffset goff = gxyz_offsets[gout_id];
             int ioff = goff.ioff;
             int joff = goff.joff;
             int koff = goff.koff;
             int loff = goff.loff;
             int *ao_loc = envs.ao_loc;
-            int nao = ao_loc[nbas_cell0];
-            int nao2 = nao * nao;
-            int nao_supmol = ao_loc[envs.nbas];
-            int i0 = ao_loc[ish_cell0];
-            int j0 = ao_loc[jsh_cell0];
             int k0 = ao_loc[ksh_cell0];
             int l0 = ao_loc[lsh_cell0];
-            int k0_supmol = ao_loc[ksh];
-            int l0_supmol = ao_loc[lsh];
+            int nao2 = nao * nao;
+            int dm_size = nao2 * nimgs_uniq_pair;
             int nfi = bounds.nfi;
             int nfj = bounds.nfj;
             int nfk = bounds.nfk;
             int nfl = bounds.nfl;
-            //int ldi = bounds.ntiles_i * 3;
-            int ldj = bounds.ntiles_j * 3;
-            int ldk = bounds.ntiles_k * 3;
-            int ldl = bounds.ntiles_l * 3;
             double *dm_cache = shared_memory + sq_id;
             int active = task_id < ntasks;
             for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                double *vk = kmat.vk + i_dm * nao * nao_supmol;
-                double *dm = kmat.dm + i_dm * nao2 * nimgs_uniq_pair;
-                double *dm_jk = dm + Ts_ji_lookup[cell_j+cell_k*nimgs] * nao2;
-                double *dm_jl = dm + Ts_ji_lookup[cell_j+cell_l*nimgs] * nao2;
+                int ldi = bounds.ntiles_i * 3;
+                int ldj = bounds.ntiles_j * 3;
+                int ldk = bounds.ntiles_k * 3;
+                int ldl = bounds.ntiles_l * 3;
+                double *vk = kmat.vk + i_dm * dm_size;
+                double *dm = kmat.dm + i_dm * dm_size;
+                double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
+                double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
+                double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
+                double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
                 load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
-                dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao_supmol, i0, l0_supmol,
+                dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
                                     ioff, joff, koff, loff, ldk, nfi, nfl, active);
                 load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
-                dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao_supmol, i0, k0_supmol,
+                dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
                                     ioff, joff, loff, koff, ldl, nfi, nfk, active);
+                if (ish_cell0 != jsh_cell0) {
+                    double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
+                    double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
+                    double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
+                    double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
+                    load_dm(dm_ik+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
+                    dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
+                                        joff, ioff, koff, loff, ldk, nfj, nfl, active);
+                    load_dm(dm_il+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
+                    dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
+                                        joff, ioff, loff, koff, ldl, nfj, nfk, active);
+                }
             }
         }
     }
@@ -576,10 +589,10 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
-                RysIntEnvVars envs, int *shls_slice, int shm_size,
+                RysIntEnvVars *envs, int *shls_slice, int shm_size,
                 int npairs_ij, int npairs_kl,
                 uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ji_lookup, int nimgs, int nimgs_uniq_pair,
+                int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond, float *s_estimator, float *dm_cond,
                 float cutoff, uint32_t *pool, int nbas_cell0,
                 int *atm, int natm, int *bas, int nbas, double *env)
@@ -629,7 +642,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (1){//!rys_k_unrolled(&envs, &kmat, &bounds, pool)) {
+    if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -641,8 +654,8 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
         rys_k_kernel<<<workers, threads, buflen>>>(
-            envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0,
+            *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -651,8 +664,8 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-256));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0,
+                *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
+                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
 
@@ -661,8 +674,8 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-512));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                envs, kmat, bounds, bas_mask_idx, Ts_ji_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0,
+                *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
+                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, head, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }
     }

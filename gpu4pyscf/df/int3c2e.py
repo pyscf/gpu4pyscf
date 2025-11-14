@@ -24,7 +24,7 @@ from gpu4pyscf.lib.cupy_helper import (block_c2s_diag, cart2sph, contract, get_a
                                        reduce_to_device, copy_array, transpose_sum)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import basis_seg_contraction
-from gpu4pyscf.__config__ import num_devices, _streams
+from gpu4pyscf.__config__ import num_devices
 
 LMAX_ON_GPU = 8
 FREE_CUPY_CACHE = True
@@ -253,7 +253,7 @@ class VHFOpt(_vhf.VHFOpt):
     def bpcache(self):
         device_id = cupy.cuda.Device().id
         if device_id not in self._bpcache:
-            with cupy.cuda.Device(device_id), _streams[device_id]:
+            with cupy.cuda.Device(device_id):
                 log = logger.new_logger(self.mol, self.mol.verbose)
                 cput0 = log.init_timer()
                 bpcache = ctypes.POINTER(BasisProdCache)()
@@ -777,7 +777,7 @@ def get_j_int3c2e_pass2(intopt, rhoj, stream=None):
     return vj
 
 def _int3c2e_jk_task(intopt, task_k_list, dm0, mocc, device_id=0, omega=None):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()
         mocc = cupy.asarray(mocc)
@@ -874,7 +874,7 @@ def _int3c2e_ip1_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo, device_id=
     aoslices = intopt.mol.aoslice_by_atom()
     vj1_buf = vk1_buf = vj1 = vk1 = None
 
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()
         ao2atom = get_ao2atom(intopt, aoslices)
@@ -978,7 +978,7 @@ def _int3c2e_ip2_vjk_task(intopt, task_k_list, rhoj, rhok, dm0, orbo,
     nao = intopt.mol.nao
     auxslices = intopt.auxmol.aoslice_by_atom()
     vj1 = vk1 = None
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()
         aux2atom = get_aux2atom(intopt, auxslices)
@@ -1067,7 +1067,7 @@ def _int3c2e_ip1_wjk_task(intopt, task_k_list, dm0, orbo, wk, device_id=0, with_
     nao = intopt.mol.nao
     naux = intopt.auxmol.nao
     aux_ao_loc = intopt.aux_ao_loc
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()
         ncp_ij = len(intopt.log_qs)
@@ -1127,7 +1127,7 @@ def get_int3c2e_ip1_wjk(intopt, dm0_tag, with_k=True, omega=None):
 
 def _int3c2e_ip2_wjk(intopt, task_list, dm0, orbo, with_k=True, omega=None, device_id=0):
     aux_ao_loc = intopt.aux_ao_loc
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         cupy.get_default_memory_pool().free_all_blocks()
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()

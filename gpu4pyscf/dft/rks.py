@@ -92,8 +92,6 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     t0 = logger.init_timer(ks)
     initialize_grids(ks, mol, dm)
 
-    ground_state = getattr(dm, 'ndim', 0) == 2
-
     ni = ks._numint
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
@@ -120,10 +118,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     if vj_last is not None:
         vj += asarray(vj_last)
     vxc += vj
-    if ground_state:
-        ecoul = float(cupy.einsum('ij,ij', dm_orig, vj).real) * .5
-    else:
-        ecoul = None
+    ecoul = float(cupy.einsum('ij,ij', dm_orig, vj).real) * .5
 
     vk = None
     if ni.libxc.is_hybrid_xc(ks.xc):
@@ -147,8 +142,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if vj_last is not None:
             vk += asarray(vhf_last.vk)
         vxc -= vk
-        if ground_state:
-            exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
+        exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
     t0 = logger.timer(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc

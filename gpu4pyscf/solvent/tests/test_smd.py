@@ -21,7 +21,7 @@ from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import smd
 from packaging import version
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
+pyscf_211 = version.parse(pyscf.__version__) <= version.parse('2.11.0')
 
 # for reproducing the reference
 """
@@ -295,33 +295,25 @@ H -0.646 -0.464 -0.804
         _check_smd(atom, -2614.0791753204, solvent='water')
         _check_smd(atom, -2614.0823543837, solvent='toluene')
     """
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_gpu(self):
-        import pyscf
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
-        e_cpu = mf.kernel()
-        mf = mf.to_gpu()
-        e_gpu = mf.kernel()
-        assert abs(e_cpu - e_gpu) < 1e-8
 
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().SMD()
-        e_cpu = mf.kernel()
-        mf = mf.to_gpu()
-        e_gpu = mf.kernel()
-        assert abs(e_cpu - e_gpu) < 1e-8
-
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_cpu(self):
+    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.11 or higher')
+    def test_to_gpu_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         e_gpu = mf.kernel()
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+        mf = mf.to_gpu()
+        e_gpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
         e_gpu = mf.kernel()
         mf = mf.to_cpu()
         e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
+        mf = mf.to_gpu()
+        e_gpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
 
 if __name__ == "__main__":

@@ -177,14 +177,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         for k1, ao1 in enumerate(ao1_kpts):
             ao1T = ao1.T
             kpt1 = kpts_band[k1]
-
-            # If we have an ewald exxdiv, we add the G=0 correction near the
-            # end of the function to bypass any discretization errors
-            # that arise from the FFT.
-            if exxdiv == 'ewald':
-                coulG = tools.get_coulG(cell, kpt2-kpt1, False, mydf, mesh)
-            else:
-                coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mydf, mesh)
+            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kpts=kpts)
             if is_zero(kpt1-kpt2):
                 expmikr = cp.array(1.)
             else:
@@ -206,14 +199,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
 
             for i in range(nset):
                 vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
-
-    # Function _ewald_exxdiv_for_G0 to add back in the G=0 component to vk_kpts
-    # Note in the _ewald_exxdiv_for_G0 implementation, the G=0 treatments are
-    # different for 1D/2D and 3D systems.  The special treatments for 1D and 2D
-    # can only be used with AFTDF/GDF/MDF method.  In the FFTDF method, 1D, 2D
-    # and 3D should use the ewald probe charge correction.
-    if exxdiv == 'ewald':
-        vk_kpts = _ewald_exxdiv_for_G0(cell, kpts, dms, vk_kpts, kpts_band=kpts_band)
 
     return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
 
@@ -276,6 +261,7 @@ def get_j(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None):
     nao = dm.shape[-1]
     dm_kpts = dm.reshape(-1,1,nao,nao)
     vj = get_j_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band)
+    assert vj.ndim == 4
     if kpts_band is None:
         vj = vj[:,0,:,:]
     if dm.ndim == 2:
@@ -310,13 +296,14 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
     nao = dm.shape[-1]
     dm_kpts = dm.reshape(-1,1,nao,nao)
     vk = get_k_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band, exxdiv)
+    assert vk.ndim == 4
     if kpts_band is None:
         vk = vk[:,0,:,:]
     if dm.ndim == 2:
         vk = vk[0]
     return vk
 
-def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
+def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     '''Derivatives of Coulomb (J) AO matrix at sampled k-points.
     '''
     cell = mydf.cell
@@ -324,6 +311,11 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
 
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
+    is_gamma_point = is_zero(kpts)
     ni = mydf._numint
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -344,7 +336,7 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
     rhoG = tools.fft(rhoR, mesh)
     vG = coulG * rhoG
     vR = tools.ifft(vG, mesh)
-    if is_zero(kpts):
+    if is_gamma_point:
         vR = vR.real
     weight = cell.vol / ngrids
     vR *= weight
@@ -361,8 +353,11 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3))):
     aoslices = cell.aoslice_by_atom()
     ej = ej.get()
     ej = np.array([ej[:,:,p0:p1].sum(axis=2) for p0, p1 in aoslices[:,2:]])
+    ej = ej.transpose(1,0,2)
+    if not is_gamma_point:
+        ej /= nkpts
     if nset == 1:
-        ej = ej[:,0]
+        ej = ej[0]
     return ej
 
 def get_k_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3)), exxdiv=None):

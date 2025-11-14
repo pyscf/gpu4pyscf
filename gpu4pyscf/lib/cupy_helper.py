@@ -23,8 +23,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
-from gpu4pyscf.lib.multi_gpu import lru_cache
-from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -105,35 +105,9 @@ def broadcast_to_devices():
 
 def reduce_to_device(array_list, inplace=False):
     ''' Reduce a list of ndarray in different devices to device 0
-    TODO: reduce memory footprint, improve throughput
     '''
-    assert len(array_list) == num_devices
-    if num_devices == 1:
-        return array_list[0]
-    
-    out_shape = array_list[0].shape
-    for s in _streams:
-        s.synchronize()
-        
-    if inplace:
-        result = array_list[0]
-    else:
-        result = array_list[0].copy()
-    
-    # Transfer data chunk by chunk, reduce memory footprint,
-    result = result.reshape(-1)
-    for device_id, matrix in enumerate(array_list):
-        if device_id == 0:
-            continue
-        
-        assert matrix.device.id == device_id
-        matrix = matrix.reshape(-1)
-        blksize = 1024*1024*1024 // matrix.itemsize # 1GB
-        for p0, p1 in lib.prange(0,len(matrix), blksize):
-            result[p0:p1] += copy_array(matrix[p0:p1])
-            #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
-    return result.reshape(out_shape)
-    
+    return multi_gpu.array_reduce(array_list, inplace)
+
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -183,7 +157,7 @@ def asarray(a, **kwargs):
         # CuPy always allocates pinned memory as a temporary buffer during array transfer.
         # This leads to additional memory usage, and the buffer is not managed by CuPy's
         # memory pool or Python's GC.
-        # See the `cdef _ndarray_base _array_default` function in 
+        # See the `cdef _ndarray_base _array_default` function in
         # cupy/_core/core.pyx, where memory buffer is allocated via
         # mem = _alloc_async_transfer_buffer(nbytes)
 
@@ -377,7 +351,7 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-@lru_cache(1)
+@multi_gpu.lru_cache(1)
 def _initialize_c2s_data():
     from gpu4pyscf.gto import mole
     c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]
@@ -388,7 +362,7 @@ def _initialize_c2s_data():
 def block_c2s_diag(angular, counts):
     '''
     Diagonal blocked cartesian to spherical transformation
-    Args: 
+    Args:
         angular (list): angular momentum type, e.g. [0,1,2,3]
         counts (list): count of each angular momentum
     '''
@@ -405,7 +379,7 @@ def block_c2s_diag(angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
-    
+
     ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')
@@ -690,7 +664,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
     if len(x1) == 0:
         return cupy.zeros_like(b)
-    
+
     x1 *= rmat.diagonal()[:,None]
 
     innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
@@ -1153,3 +1127,33 @@ def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
             return cuda_malloc(size)
         return default_mempool_malloc(size)
     cupy.cuda.set_allocator(malloc)
+
+def batched_vec3_norm2(batched_vec3):
+    assert type(batched_vec3) is cupy.ndarray
+    assert batched_vec3.dtype == cupy.float64
+    assert batched_vec3.ndim == 2
+    assert batched_vec3.shape[1] == 3
+    assert batched_vec3.flags.c_contiguous
+
+    fn_name = "vec3_norm2_kernel"
+    if fn_name not in _kernel_registery:
+        kernel_code = r'''
+            extern "C" __global__
+            void vec3_norm2_kernel(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
+                const int i = blockDim.x * blockIdx.x + threadIdx.x;
+                if (i >= n) return;
+                const double x = vec3[i * 3 + 0];
+                const double y = vec3[i * 3 + 1];
+                const double z = vec3[i * 3 + 2];
+                norm2[i] = x*x + y*y + z*z;
+            }
+        '''
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+    kernel = _kernel_registery[fn_name]
+
+    n = batched_vec3.shape[0]
+    assert n < np.iinfo(np.int32).max
+    batched_norm2 = cupy.zeros(n, dtype = cupy.float64)
+    kernel(((n + 1024 - 1) // 1024,), (1024,), (batched_vec3, batched_norm2, cupy.int32(n)))
+
+    return batched_norm2

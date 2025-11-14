@@ -23,7 +23,7 @@ from gpu4pyscf.scf.int4c2e import libgint
 from gpu4pyscf.hessian.rhf import _ao2mo
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, cart2sph, reduce_to_device
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 NROOT_ON_GPU = 7
 
@@ -33,7 +33,7 @@ def _jk_task_with_mo1(dfobj, dms, mo_coeff, mo1s, occ_coeffs,
         For CP-HF
     '''
     assert hermi == 1
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
@@ -278,7 +278,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
     assert with_j or with_k
     ao_loc = intopt.ao_loc
     aux_ao_loc = intopt.aux_ao_loc
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         log = logger.new_logger(intopt.mol, intopt.mol.verbose)
         t0 = log.init_timer()
         orbo = cupy.asarray(orbo)

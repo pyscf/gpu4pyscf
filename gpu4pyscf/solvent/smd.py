@@ -320,7 +320,7 @@ class SMD(lib.StreamObject):
             raise RuntimeError(f'{solvent} is not available in SMD')
         self._solvent = solvent
         self.solvent_descriptors = solvent_db[solvent]
-        self.radii_table = smd_radii(self.solvent_descriptors[2])
+        self.radii_table = None
         self.e_cds = None
 
     @property
@@ -333,6 +333,7 @@ class SMD(lib.StreamObject):
         self.solvent_descriptors = solvent_db[solvent]
         self.radii_table = smd_radii(self.solvent_descriptors[2])
         self.eps = self.solvent_descriptors[5]
+        self.reset()
 
     @property
     def sol_desc(self):
@@ -348,6 +349,7 @@ class SMD(lib.StreamObject):
         self.solvent_descriptors = values
         self.radii_table = smd_radii(self.solvent_descriptors[2])
         self.eps = values[5]
+        self.reset()
 
     def dump_flags(self, verbose=None):
         n, _, alpha, beta, gamma, _, phi, psi = self.solvent_descriptors
@@ -365,20 +367,21 @@ class SMD(lib.StreamObject):
         logger.info(self, f'psi   = {psi}')
         logger.info(self, '--------------------- end ----------------')
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
-        logger.info(self, 'radii_table %s', self.radii_table*radii.BOHR)
         if self.atom_radii:
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         return self
 
     def build(self, ng=None):
         if self.radii_table is None:
-            vdw_scale = self.vdw_scale
-            self.radii_table = vdw_scale * pcm.modified_Bondi + self.r_probe
+            radii_table = smd_radii(self.solvent_descriptors[2])
+        else:
+            radii_table = self.radii_table
+        logger.info(self, 'radii_table %s', radii_table*radii.BOHR)
         mol = self.mol
         if ng is None:
             ng = gen_grid.LEBEDEV_ORDER[self.lebedev_order]
 
-        self.surface = pcm.gen_surface(mol, rad=self.radii_table, ng=ng)
+        self.surface = pcm.gen_surface(mol, rad=radii_table, ng=ng)
         self._intermediates = {}
         F, A = pcm.get_F_A(self.surface)
         D, S = pcm.get_D_S(self.surface, with_S=True, with_D=True)
@@ -430,7 +433,9 @@ class SMD(lib.StreamObject):
     if_method_in_CPCM_category = pcm.PCM.if_method_in_CPCM_category
 
     def get_cds(self):
-        return get_cds_legacy(self)[0]
+        if self.e_cds is None:
+            self.e_cds = get_cds_legacy(self)[0]
+        return self.e_cds
 
     def nuc_grad_method(self, grad_method):
         raise DeprecationWarning

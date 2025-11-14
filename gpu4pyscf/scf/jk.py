@@ -28,11 +28,11 @@ from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
     load_library, condense, transpose_sum, reduce_to_device, hermi_triu,
     asarray)
-from gpu4pyscf.__config__ import _streams, num_devices, shm_size
+from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l
+from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l, extract_pgto_params
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -273,6 +273,7 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
 class _VHFOpt:
     def __init__(self, mol, cutoff=1e-13, tile=TILE):
         self.mol = mol
+        self.sorted_mol = None
         self.direct_scf_tol = cutoff
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
@@ -280,6 +281,15 @@ class _VHFOpt:
         self.tile = tile
 
         # Hold cache on GPU devices
+        self._rys_envs = {}
+        self._q_cond = {}
+        self._tile_q_cond = {}
+        self._s_estimator = {}
+        self._cupy_ao_idx = {}
+
+    def reset(self, mol):
+        self.mol = mol
+        self.sorted_mol = None
         self._rys_envs = {}
         self._q_cond = {}
         self._tile_q_cond = {}
@@ -329,9 +339,28 @@ class _VHFOpt:
         if mol.omega < 0:
             # CVHFnr_sr_int2e_q_cond in pyscf has bugs in upper bound estimator.
             # Use the local version of s_estimator instead
-            s_estimator = np.empty((nbas,nbas), dtype=np.float32)
+
+            # FIXME: To avoid changing the CUDA kernel function signature,
+            # temporarily attach the extra information to the s_estimator array and
+            # pass it along with s_estimator.
+            # This is a workaround and should be addressed in the future.
+            s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
+            # The most diffuse pGTO in each shell is used to estimate the
+            # asymptotic value of SR integrals. In a contracted shell, the
+            # diffuse_ctr_coef for the diffuse_exps may only represent a portion
+            # of the AO basis. Using this ctr_coef can introduce errors in the SR
+            # integral estimation. The diffuse pGTO is normalized to approximate the
+            # entire shell.
+            diffuse_exps, _ = extract_pgto_params(mol, 'diffuse')
+            l = mol._bas[:,ANG_OF]
+            diffuse_ctr_coef = gto.gto_norm(l, diffuse_exps)
+            diffuse_exps = diffuse_exps.astype(np.float32)
+            diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
+            s_estimator[nbas] = diffuse_exps
+            s_estimator[nbas+1] = diffuse_ctr_coef
             libvhf_rys.sr_eri_s_estimator(
                 s_estimator.ctypes, ctypes.c_float(mol.omega),
+                diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
                 mol._atm.ctypes, ctypes.c_int(mol.natm),
                 mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
             self.s_estimator_cpu = s_estimator
@@ -429,59 +458,30 @@ class _VHFOpt:
 
         return out
 
-    @property
+    @multi_gpu.property(cache='_q_cond')
     def q_cond(self):
-        device_id = cp.cuda.Device().id
-        if device_id not in self._q_cond:
-            with cp.cuda.Device(device_id), _streams[device_id]:
-                self._q_cond[device_id] = asarray(self.q_cond_cpu)
-        return self._q_cond[device_id]
+        return asarray(self.q_cond_cpu)
 
-    @property
+    @multi_gpu.property(cache='_tile_q_cond')
     def tile_q_cond(self):
-        device_id = cp.cuda.Device().id
-        if device_id not in self._tile_q_cond:
-            with cp.cuda.Device(device_id), _streams[device_id]:
-                q_cpu = self._tile_q_cond_cpu
-                self._tile_q_cond[device_id] = asarray(q_cpu)
-        return self._tile_q_cond[device_id]
+        return asarray(self._tile_q_cond_cpu)
 
-    @property
+    @multi_gpu.property(cache='_s_estimator')
     def s_estimator(self):
-        if not self.mol.omega < 0:
-            return None
-        device_id = cp.cuda.Device().id
-        if device_id not in self._rys_envs:
-            with cp.cuda.Device(device_id), _streams[device_id]:
-                s_cpu = self.s_estimator_cpu
-                self._s_estimator[device_id] = asarray(s_cpu)
-        return self._s_estimator[device_id]
+        return asarray(self.s_estimator_cpu)
 
-    @property
+    @multi_gpu.property(cache='_cupy_ao_idx')
     def cupy_ao_idx(self):
-        device_id = cp.cuda.Device().id
-        if device_id not in self._cupy_ao_idx:
-            with cp.cuda.Device(device_id), _streams[device_id]:
-                ao_idx_cpu = self.ao_idx
-                self._cupy_ao_idx[device_id] = cp.asarray(ao_idx_cpu, dtype = cp.int32)
-        return self._cupy_ao_idx[device_id]
+        return asarray(self.ao_idx, dtype = cp.int32)
 
-    @property
+    @multi_gpu.property(cache='_rys_envs')
     def rys_envs(self):
-        device_id = cp.cuda.Device().id
-        if device_id not in self._rys_envs:
-            with cp.cuda.Device(device_id), _streams[device_id]:
-                mol = self.sorted_mol
-                _atm = cp.array(mol._atm)
-                _bas = cp.array(mol._bas)
-                _env = cp.array(_scale_sp_ctr_coeff(mol))
-                ao_loc = cp.array(mol.ao_loc)
-                self._rys_envs[device_id] = rys_envs = RysIntEnvVars(
-                    mol.natm, mol.nbas,
-                    _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
-                    ao_loc.data.ptr)
-                rys_envs._env_ref_holder = (_atm, _bas, _env, ao_loc)
-        return self._rys_envs[device_id]
+        mol = self.sorted_mol
+        _atm = cp.array(mol._atm)
+        _bas = cp.array(mol._bas)
+        _env = cp.array(_scale_sp_ctr_coeff(mol))
+        ao_loc = cp.array(mol.ao_loc)
+        return RysIntEnvVars.new(mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
 
     @property
     def coeff(self):
@@ -543,6 +543,7 @@ class _VHFOpt:
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms) # transfer to current device
@@ -588,7 +589,7 @@ class _VHFOpt:
                         ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        rys_envs, (ctypes.c_int*8)(*shls_slice),
+                        ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                         ctypes.c_int(SHM_SIZE),
                         ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
                         ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
@@ -610,6 +611,8 @@ class _VHFOpt:
                     t1, t1p = log.timer_debug1(msg, *t1), t1
                     timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
+                if num_devices > 1:
+                    stream.synchronize()
 
             if hermi == 1:
                 vj *= 2.
@@ -705,6 +708,7 @@ class _VHFOpt:
 
         def proc(dm_xyz, dm_cond):
             device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dm_xyz = asarray(dm_xyz) # transfer to current device
@@ -754,7 +758,7 @@ class _VHFOpt:
                         ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        rys_envs, (ctypes.c_int*3)(*scheme),
+                        ctypes.byref(rys_envs), (ctypes.c_int*3)(*scheme),
                         (ctypes.c_int*8)(*shls_slice),
                         ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
                         ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
@@ -778,6 +782,8 @@ class _VHFOpt:
                         timing_collection[llll] = 0
                     timing_collection[llll] += t1[1] - t1p[1]
                     kern_counts += 1
+                if num_devices > 1:
+                    stream.synchronize()
             return vj_xyz, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dm_xyz, dm_cond), non_blocking=True)
@@ -851,6 +857,7 @@ class _VHFOpt:
 
         def proc(dms, dm_cond):
             device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(mol, verbose)
             t0 = log.init_timer()
             dms = cp.asarray(dms) # transfer to current device
@@ -893,7 +900,7 @@ class _VHFOpt:
                         ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
-                        rys_envs, (ctypes.c_int*8)(*shls_slice),
+                        ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                         ctypes.c_int(SHM_SIZE),
                         ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
                         ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
@@ -915,6 +922,8 @@ class _VHFOpt:
                     t1, t1p = log.timer_debug1(msg, *t1), t1
                     timing_counter[llll] += t1[1] - t1p[1]
                     kern_counts += 1
+                if num_devices > 1:
+                    stream.synchronize()
 
             if hermi == 1:
                 vk = transpose_sum(vk)

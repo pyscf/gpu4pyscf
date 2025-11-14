@@ -895,7 +895,6 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
 
 class Hessian(rhf_hess.HessianBase):
     '''Non-relativistic UKS hessian'''
-    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mf):
         rhf_hess.Hessian.__init__(self, mf)

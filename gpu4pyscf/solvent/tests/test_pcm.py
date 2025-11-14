@@ -128,9 +128,12 @@ class KnownValues(unittest.TestCase):
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit()
         e_gpu = mf.kernel()
-        mf = mf.to_cpu()
-        e_cpu = mf.kernel()
+        chg = mf.analyze()[0][1]
+        mf_cpu = mf.to_cpu()
+        e_cpu = mf_cpu.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
+        chg_ref = mf_cpu.analyze()[0][1]
+        assert abs(chg - chg_ref).max() < 1e-5
 
     @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):

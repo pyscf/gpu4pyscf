@@ -57,7 +57,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
 
     int li = bounds.li;
     int lj = bounds.lj;
-    int nfij = bounds.nfij;
+    int nfij = bounds.nfi * bounds.nfj;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
     int ijprim = iprim * jprim;
@@ -498,7 +498,7 @@ int overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         *envs, exps, log_coeff, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in overlap_img_counts: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in overlap_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

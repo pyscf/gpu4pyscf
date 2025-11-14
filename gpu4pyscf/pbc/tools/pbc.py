@@ -14,9 +14,10 @@
 
 import numpy as np
 import cupy as cp
-import pyscf
+from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
+from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):
@@ -100,6 +101,7 @@ def ifftk(g, mesh, expikr):
     return ifft(g, mesh) * expikr
 
 def _get_Gv(cell, mesh):
+    assert cell.dimension == 3
     # Default, the 3D uniform grids
     rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
     ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
@@ -110,6 +112,19 @@ def _get_Gv(cell, mesh):
           ry[:,None,None] * b[1] +
           rz[:,None] * b[2])
     return Gv.reshape(-1, 3)
+
+def _get_Gv_with_base(cell, mesh):
+    assert cell.dimension == 3
+    # Default, the 3D uniform grids
+    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
+    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
+    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
+    b = cp.asarray(cell.reciprocal_vectors())
+    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
+    Gv = (rx[:,None,None,None] * b[0] +
+          ry[:,None,None] * b[1] +
+          rz[:,None] * b[2])
+    return Gv.reshape(-1, 3), (rx, ry, rz)
 
 def _Gv_wrap_around(cell, Gv, k, mesh):
     '''wrap around the high frequency k+G vectors into their lower frequency
@@ -132,7 +147,7 @@ def _Gv_wrap_around(cell, Gv, k, mesh):
     return kG
 
 def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
-              wrap_around=True, omega=None, **kwargs):
+              wrap_around=True, omega=None, kpts=None, **kwargs):
     '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
 
     Args:
@@ -159,7 +174,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             range-separated JK builder and range-separated DF (and other
             range-separated integral methods if any).
     '''
-    from pyscf.pbc.tools.pbc import get_coulG, madelung
+    from pyscf.pbc.tools.pbc import get_coulG
     exxdiv = exx
     if isinstance(exx, str):
         exxdiv = exx
@@ -207,7 +222,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             coulG[0] = np.pi / _omega**2
         return coulG
 
-    if abs(k).sum() > 1e-9:
+    is_gamma_point = k is None or abs(k).sum() < 1e-9
+    if not is_gamma_point:
         if wrap_around:
             kG = _Gv_wrap_around(cell, Gv, k, mesh)
         else:
@@ -217,7 +233,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
 
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0
-    if abs(k).sum() > 1e-9:
+    if not is_gamma_point:
         G0_idx = None
 
     # Ewald probe charge method to get the leading term of the finite size
@@ -270,14 +286,29 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # cancelled out by Coulomb integrals. Its leading term is calculated
     # using Ewald probe charge (the function madelung below)
     if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
-        if hasattr(mf, 'kpts'):
-            kpts = mf.kpts
-            assert isinstance(kpts, np.ndarray)
-            Nk = len(kpts)
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+            if mf is not None:
+                raise DeprecationWarning(
+                    'Accessing kpts via mf.kpts is deprecated. '
+                    'kpts should be passed to get_coulG explicitly.')
         else:
-            Nk = 1
+            assert kpts.ndim == 2
+        Nk = len(kpts)
         if omega is None or omega == 0:
             coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
         else: # G=0 term should be handled separately in RSGDF and RSJK
             raise NotImplementedError(f'exx=ewald for omega={omega}')
     return coulG
+
+def probe_charge_sr_coulomb(cell, omega, kpts=None):
+    if kpts is None:
+        kmesh = np.array([1, 1, 1])
+    else:
+        kmesh = get_monkhorst_pack_size(cell, kpts)
+    rcut = (-np.log(cell.precision*1e-3)/omega**2)**.5
+    Ls = cell.get_lattice_Ls(rcut=rcut) * kmesh
+    r = np.linalg.norm(Ls, axis=1)
+    r = r[(r > 1e-10) & (omega * r < 7)]
+    ewovrl = .5 * (erfc(omega * r) / r).sum()
+    return 2 * ewovrl * np.prod(kmesh)
