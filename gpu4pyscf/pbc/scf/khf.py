@@ -250,11 +250,11 @@ class KSCF(pbchf.SCF):
     def dump_flags(self, verbose=None):
         mol_hf.SCF.dump_flags(self, verbose)
         log = logger.new_logger(self, verbose)
-        lo.info('\n')
-        lo.info('******** PBC SCF flags ********')
-        lo.info('N kpts = %d', len(self.kpts))
-        lo.debug('kpts = %s', self.kpts)
-        lo.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
+        log.info('\n')
+        log.info('******** PBC SCF flags ********')
+        log.info('N kpts = %d', len(self.kpts))
+        log.debug('kpts = %s', self.kpts)
+        log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
             isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
