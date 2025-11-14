@@ -725,8 +725,6 @@ def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charg
                                            mesh, G2, coulG, SIx, SIy, SIz, vlocG):
     # Result will be appended to vlocG
 
-    global _kernel_registery
-
     fn_name = f"gth_loc_reciporcal_nexp_{nexp}_kernel"
     if fn_name not in _kernel_registery:
         C_declaration = ''

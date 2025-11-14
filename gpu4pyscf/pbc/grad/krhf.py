@@ -114,14 +114,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 def get_hcore(cell, kpts):
     '''Part of the nuclear gradients of core Hamiltonian'''
     h1 = int1e.int1e_ipkin(cell, kpts)
-    dtype = h1.dtype
     if cell._pseudo:
         SI = cell.get_SI()
         Gv_cpu = cell.Gv
         Gv = cp.asarray(Gv_cpu)
-        natom = cell.natm
         coords = cp.asarray(cell.get_uniform_grids())
-        ngrids = len(coords)
         vlocG = get_vlocG(cell)
         vpplocG = -cp.einsum('ij,ij->j', SI, vlocG)
         vpplocG[0] = cp.sum(get_alphas(cell))
@@ -172,14 +169,12 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
     else:
         kpts = kpts.reshape(-1, 3)
     h1 = mf_grad.get_hcore(cell, kpts)
-    dtype = h1.dtype
 
     aoslices = cell.aoslice_by_atom()
     SI = cp.asarray(cell.get_SI())
     mesh = cell.mesh
     Gv_cpu = cell.Gv
     Gv = cp.asarray(Gv_cpu)
-    ngrids = len(Gv)
     if cell._pseudo:
         vlocG = cp.asarray(get_vlocG(cell))
     else:
@@ -187,7 +182,6 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         coulG = get_coulG(cell, mesh=mesh, Gv=Gv)
     ni = pbc_numint.KNumInt()
     grids = UniformGrids(cell)
-    ptr = PTR_ENV_START
 
     def hcore_deriv(atm_id):
         hcore = cp.zeros_like(h1)
