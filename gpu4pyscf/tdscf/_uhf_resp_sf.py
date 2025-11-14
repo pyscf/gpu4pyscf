@@ -71,16 +71,24 @@ def _eval_xc_sf(func, rho_tmz, deriv, collinear_samples):
         nvar = 1
     else:
         nvar = rho_tmz.shape[1]
-    # spin-flip part
-    fxc_sf = 0.0
+    fxc_sf = cp.zeros((nvar,nvar,ngrids))
+    kxc_sf = cp.zeros((nvar,nvar,2,nvar,ngrids))
+    
     rho = _project_spin_paxis2(rho_tmz, sgridz)
-    fxc = func(rho, deriv)[2]
-    fxc = fxc.reshape(2, nvar, 2, nvar, ngrids, weights.size)
-    if not isinstance(fxc, cp.ndarray):
-        fxc = cp.array(fxc)
-    fxc_sf += fxc[1,:,1].dot(weights)
+    xc_orig = func(rho, deriv)
+    if deriv > 1:
+        fxc = xc_orig[2].reshape(2, nvar, 2, nvar, ngrids, weights.size)
+        if not isinstance(fxc, cp.ndarray):
+            fxc = cp.array(fxc)
+        fxc_sf += fxc[1,:,1].dot(weights)
 
-    return None,None,fxc_sf
+    if deriv > 2:
+        kxc = xc_orig[3].reshape(2, nvar, 2, nvar, 2, nvar, ngrids, weights.size)
+        if not isinstance(kxc, cp.ndarray):
+            kxc = cp.array(kxc)
+        kxc_sf[:,:,0] += kxc[1,:,1,:,0].dot(weights)
+        kxc_sf[:,:,1] += kxc[1,:,1,:,1].dot(weights*sgridz)
+    return None,None,fxc_sf,kxc_sf
 
 
 def _project_spin_paxis2(rho_tm, sgridz=None):
