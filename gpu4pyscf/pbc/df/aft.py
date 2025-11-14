@@ -116,8 +116,17 @@ def get_nuc(mydf, kpts=None):
 
 class AFTDFMixin:
 
-    weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
     pw_loop = NotImplemented
+
+    def weighted_coulG(mydf, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+        '''Weighted regular Coulomb kernel'''
+        cell = mydf.cell
+        if mesh is None:
+            mesh = mydf.mesh
+        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv, omega=omega, kpts=kpts)
+        coulG *= kws
+        return coulG
 
     def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvk_kmesh=None,
                 max_memory=None, transform_ao=True, **kwargs):

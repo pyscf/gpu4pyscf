@@ -14,6 +14,7 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf import lib
 from pyscf.pbc import gto as pgto
@@ -22,6 +23,9 @@ from pyscf.pbc.df import fft as fft_cpu
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.df import fft
 from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.pbc.grad import rks_stress
+from gpu4pyscf.pbc.grad import krks_stress
+from gpu4pyscf.lib.multi_gpu import num_devices
 from packaging import version
 
 def setUpModule():
@@ -134,7 +138,7 @@ class KnownValues(unittest.TestCase):
                                   [ .25, .25,-.25],
                                   [ .25, .25, .25]])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
@@ -155,7 +159,7 @@ class KnownValues(unittest.TestCase):
                                   [ .25, .25,-.25],
                                   [ .25, .25, .25]])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
@@ -170,7 +174,7 @@ class KnownValues(unittest.TestCase):
     def test_aft_k2(self):
         kpts = cell.make_kpts([2,1,1])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
 
@@ -194,7 +198,7 @@ class KnownValues(unittest.TestCase):
     def test_aft_k3(self):
         kpts = cell.make_kpts([6,1,1])
         nkpts = len(kpts)
-        mesh = [11]*3
+        mesh = [13]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
         mydf  = aft.AFTDF(cell).set(mesh=mesh)
         mydf0.k_conj_symmetry = False
@@ -276,6 +280,7 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
+        ref /= len(kpts)
         assert abs(ej - ref).max() < 1e-8
 
     def test_ek_ip1_gamma_point(self):
@@ -321,6 +326,7 @@ class KnownValues(unittest.TestCase):
                 ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
             assert abs(ek_ewald - ref).max() < 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_ek_ip1_kpts(self):
         cell = pgto.M(
             atom = '''
@@ -353,6 +359,7 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
+        ref /= len(kpts)
         assert abs(ek - ref).max() < 1e-8
 
         if version.parse(pyscf.__version__) > version.parse('2.11.0'):
@@ -360,7 +367,118 @@ class KnownValues(unittest.TestCase):
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xkpq,kqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1]).real
+            ref /= len(kpts)
             assert abs(ek_ewald - ref).max() < 1e-8
+
+    def test_ej_strain_deriv_gamma_point(self):
+        cell = pgto.M(
+            atom = '''
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        np.random.seed(9)
+        nao = cell.nao
+        dm = np.random.rand(nao, nao) * .5
+        dm = dm.dot(dm.T)
+        mydf = aft.AFTDF(cell)
+        sigma = aft_jk.get_ej_strain_deriv(mydf, dm)
+
+        xc = 'lda,'
+        mf_grad = cell.RKS(xc=xc).to_gpu().Gradients()
+        ref = rks_stress.get_vxc(mf_grad, cell, dm, with_j=True, with_nuc=False)
+        ref -= rks_stress.get_vxc(mf_grad, cell, dm, with_j=False, with_nuc=False)
+        assert abs(ref - sigma).max() < 1e-8
+
+    def test_ej_strain_deriv_kpts(self):
+        cell = pgto.M(
+            atom = '''
+            C   1.      1.    0.
+            H   4.      0.    3.
+            H   0.      1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        kmesh = [3,2,1]
+        kpts = cell.make_kpts(kmesh)
+        nkpts = len(kpts)
+        dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        mydf = aft.AFTDF(cell)
+        sigma = aft_jk.get_ej_strain_deriv(mydf, dm, kpts)
+
+        xc = 'lda,'
+        mf_grad = cell.KRKS(xc=xc, kpts=kpts).to_gpu().Gradients()
+        ref = krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=True, with_nuc=False)
+        ref -= krks_stress.get_vxc(mf_grad, cell, dm, kpts=kpts, with_j=False, with_nuc=False)
+        assert abs(ref - sigma).max() < 1e-8
+
+        for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
+            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
+            vj = aft_jk.get_j_kpts(mydf, dm, hermi=1, kpts=mydf.kpts)
+            e1 = .5 * cp.einsum('kij,kji->', vj, dm).real / nkpts
+            mydf = aft.AFTDF(cell2, kpts=cell2.make_kpts(kmesh))
+            vj = aft_jk.get_j_kpts(mydf, dm, hermi=1, kpts=mydf.kpts)
+            e2 = .5 * cp.einsum('kij,kji->', vj, dm).real / nkpts
+            assert abs(sigma[i,j] - (e1-e2)/2e-4) < 2e-7
+
+    def test_ek_strain_deriv_gamma_point(self):
+        cell = pgto.M(
+            atom = '''
+            C   1.      1.    0.
+            H   4.      0.5   3.
+            H   0.5     1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        np.random.seed(9)
+        nao = cell.nao
+        dm = np.random.rand(nao, nao) * .5
+        dm = cp.array(dm.dot(dm.T))
+        mydf = aft.AFTDF(cell)
+        sigma = aft_jk.get_ek_strain_deriv(mydf, dm)
+
+        for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
+            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            mydf = aft.AFTDF(cell1)
+            vk = aft_jk.get_jk(mydf, dm, hermi=1, with_j=False, exxdiv=None)[1]
+            e1 = .5 * cp.einsum('ij,ji->', vk, dm).real
+            mydf = aft.AFTDF(cell2)
+            vk = aft_jk.get_jk(mydf, dm, hermi=1, with_j=False, exxdiv=None)[1]
+            e2 = .5 * cp.einsum('ij,ji->', vk, dm).real
+            assert abs(sigma[i, j] - (e1-e2)/2e-4).max() < 2e-7
+
+    def test_ek_strain_deriv_kpts(self):
+        cell = pgto.M(
+            atom = '''
+            C   1.      1.    0.
+            H   4.      0.5   3.
+            H   0.5     1.    .6
+            ''',
+            a=np.eye(3)*4.,
+            basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        )
+        kmesh = [1,3,1]
+        kpts = cell.make_kpts(kmesh)
+        nkpts = len(kpts)
+        dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+        mydf = aft.AFTDF(cell)
+        sigma = aft_jk.get_ek_strain_deriv(mydf, dm, kpts, exxdiv='ewald')
+
+        for (i, j) in [(0, 0), (0, 1), (1, 2), (2, 1), (2, 2)]:
+            cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp=1e-4)
+            mydf = aft.AFTDF(cell1, kpts=cell1.make_kpts(kmesh))
+            vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv='ewald')
+            e1 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts
+            mydf = aft.AFTDF(cell2, kpts=cell2.make_kpts(kmesh))
+            vk = aft_jk.get_k_kpts(mydf, dm, hermi=1, kpts=mydf.kpts, exxdiv='ewald')
+            e2 = .5 * cp.einsum('kij,kji->', vk, dm).real / nkpts
+            assert abs(sigma[i, j] - (e1-e2)/2e-4).max() < 5e-7
 
 if __name__ == '__main__':
     print("Full Tests for aft")

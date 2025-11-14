@@ -91,8 +91,8 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     ao_loc_cpu = sorted_cell.ao_loc
     ao_loc_gpu = cp.array(ao_loc_cpu)
     envs = PBCIntEnvVars(
-        sorted_cell.natm, sorted_cell.nbas, 1, 1, _atm.data.ptr,
-        _bas.data.ptr, _env.data.ptr, ao_loc_gpu.data.ptr, 0,
+        sorted_cell.natm, sorted_cell.nbas, _atm.data.ptr,
+        _bas.data.ptr, _env.data.ptr, ao_loc_gpu.data.ptr, 1, 1, 0,
     )
     ngrids = len(Gv)
     GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
@@ -504,21 +504,21 @@ most_diffused_pgto = most_diffuse_pgto # for backward compatibility
 
 class PBCIntEnvVars(ctypes.Structure):
     _fields_ = [
-        ('cell0_natm', ctypes.c_int),
-        ('cell0_nbas', ctypes.c_int),
-        ('bvk_ncells', ctypes.c_int),
-        ('nimgs', ctypes.c_int),
+        ('natm', ctypes.c_int),
+        ('nbas', ctypes.c_int),
         ('atm', ctypes.c_void_p),
         ('bas', ctypes.c_void_p),
         ('env', ctypes.c_void_p),
         ('ao_loc', ctypes.c_void_p),
+        ('bvk_ncells', ctypes.c_int),
+        ('nimgs', ctypes.c_int),
         ('img_coords', ctypes.c_void_p),
     ]
 
     @classmethod
     def new(cls, natm, nbas, ncells, nimgs, atm, bas, env, ao_loc, Ls):
-        obj = PBCIntEnvVars(natm, nbas, ncells, nimgs, atm.data.ptr, bas.data.ptr,
-                            env.data.ptr, ao_loc.data.ptr, Ls.data.ptr)
+        obj = PBCIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr, env.data.ptr,
+                            ao_loc.data.ptr, ncells, nimgs, Ls.data.ptr)
         # Keep a reference to these arrays, prevent releasing them upon returning
         obj._env_ref_holder = (atm, bas, env, ao_loc, Ls)
         obj._device = cp.cuda.device.get_device_id()
@@ -532,7 +532,7 @@ class PBCIntEnvVars(ctypes.Structure):
         ao_loc = cp.asarray(ao_loc)
         Ls = cp.asarray(Ls)
         return PBCIntEnvVars.new(
-            self.cell0_natm, self.cell0_nbas, self.bvk_ncells, self.nimgs,
+            self.natm, self.nbas, self.bvk_ncells, self.nimgs,
             atm, bas, env, ao_loc, Ls)
 
     @property

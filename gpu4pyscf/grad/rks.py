@@ -30,7 +30,7 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, sandwich_dot,
     reduce_to_device, take_last2d, ndarray)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
 
 from pyscf import __config__
@@ -157,7 +157,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                   verbose=None, with_lapl=False, device_id=0):
     ''' Calculate the gradient of vxc on given device
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None: dms = cupy.asarray(dms)
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo_occ is not None: mo_occ = cupy.asarray(mo_occ)

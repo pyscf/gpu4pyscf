@@ -882,7 +882,7 @@ int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, d
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
-                RysIntEnvVars envs, int *scheme, int *shls_slice,
+                RysIntEnvVars *envs, int *scheme, int *shls_slice,
                 int npairs_ij, int npairs_kl,
                 int *pair_ij_mapping, int *pair_kl_mapping,
                 int *pair_ij_loc, int *pair_kl_loc,
@@ -935,15 +935,15 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     pRt2_kl_ij += offset_for_Rt2_idx(lij, lkl);
     efg_phase += offset_for_Rt2_idx(0, lkl);
     if (n_dm == 1) {
-        if (!md_j_unrolled(&envs, &jk, &bounds, omega)) {
+        if (!md_j_unrolled(envs, &jk, &bounds, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             md_j_1dm_kernel<<<blocks, threads, buflen>>>(
-                envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
+                *envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
                 pRt2_kl_ij, efg_phase);
         }
     } else {
-        if (!md_j_4dm_unrolled(&envs, &jk, &bounds, omega, dm_size)) {
+        if (!md_j_4dm_unrolled(envs, &jk, &bounds, omega, dm_size)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             for (int dm_offset = 0; dm_offset < n_dm; dm_offset+=4) {
@@ -951,7 +951,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 jk.dm = dm + dm_offset * dm_size;
                 jk.n_dm = n_dm - dm_offset;
                 md_j_4dm_kernel<<<blocks, threads, buflen>>>(
-                    envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size,
+                    *envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size,
                     pRt2_kl_ij, efg_phase);
             }
         }

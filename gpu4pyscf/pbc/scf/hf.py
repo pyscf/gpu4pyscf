@@ -155,12 +155,19 @@ class SCF(mol_hf.SCF):
             self.j_engine.reset(cell)
         return self
 
+    def build(self, cell=None):
+        # To handle the attribute kpt or kpts loaded from chkfile
+        if 'kpt' in self.__dict__:
+            self.kpt = self.__dict__.pop('kpt')
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        return self
+
     kpts = hf_cpu.SCF.kpts
     mol = hf_cpu.SCF.mol # required by the hf.kernel
 
-    build = hf_cpu.SCF.build
     dump_flags = hf_cpu.SCF.dump_flags
-
     get_bands = get_bands
     get_rho = get_rho
 

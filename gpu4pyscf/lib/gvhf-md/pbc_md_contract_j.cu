@@ -333,7 +333,7 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
 extern "C" {
 int PBC_build_j(double *vj, double *dm, int n_dm,
                 int dm_xyz_size, int nimgs_uniq_pair,
-                RysIntEnvVars envs, int *scheme, int *shls_slice,
+                RysIntEnvVars *envs, int *scheme, int *shls_slice,
                 int npairs_ij, int npairs_kl,
                 int *pair_ij_mapping, int *pair_kl_mapping,
                 int *pair_ij_loc, int *pair_kl_loc,
@@ -386,11 +386,11 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
     int dm_size = dm_xyz_size * nimgs_uniq_pair;
     for (int i_dm = 0; i_dm < n_dm; ++i_dm) {
         JKMatrix jmat = {vj+i_dm*dm_size, NULL, dm+i_dm*dm_size, n_dm, 0, omega};
-        if (1){//!pbc_md_j_unrolled(&envs, &jmat, &bounds, omega)) {
+        if (1){//!pbc_md_j_unrolled(envs, &jmat, &bounds, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             pbc_md_j_kernel<<<blocks, threads, buflen>>>(
-                envs, jmat, bounds, threads_ij, threads_kl, tilex, tiley,
+                *envs, jmat, bounds, threads_ij, threads_kl, tilex, tiley,
                 pRt2_kl_ij, efg_phase);
         }
     }

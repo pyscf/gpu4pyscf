@@ -117,3 +117,7 @@ class Gradients(rhf.GradientsBase):
         de -= kinetic_contribution * 2
 
         return de
+
+    def get_stress(self):
+        from gpu4pyscf.pbc.grad import uhf_stress
+        return uhf_stress.kernel(self)

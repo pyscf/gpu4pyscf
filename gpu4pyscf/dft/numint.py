@@ -29,7 +29,7 @@ from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf import __config__
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
@@ -448,7 +448,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
                  verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_rks task on given device
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if isinstance(dm, cupy.ndarray):
             assert dm.ndim == 2
             # Ensure dm allocated on each device
@@ -858,7 +858,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 verbose=None, with_lapl=False, device_id=0, hermi=1):
     ''' nr_uks task on one device
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None:
             dma, dmb = dms
             dma = cupy.asarray(dma)
@@ -1117,7 +1117,7 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
 
 def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None: dms = cupy.asarray(dms)
         if mo1 is not None: mo1 = cupy.asarray(mo1)
         if occ_coeff is not None: occ_coeff = cupy.asarray(occ_coeff)
@@ -1281,7 +1281,7 @@ def nr_rks_fxc_st(ni, mol, grids, xc_code, dm0=None, dms_alpha=None,
 
 def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None:
             dma, dmb = dms
             dma = cupy.asarray(dma)

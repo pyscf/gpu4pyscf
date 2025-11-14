@@ -1459,6 +1459,13 @@ def get_veff_ip1(
     with_pseudo_vloc_orbital_derivative=True,
     verbose=None,
 ):
+    '''Computes the derivatives of the Exc along with additional contributions
+    from the Coulomb and pseudopotential terms.
+
+    Note, the current return is the energy per cell scaled by the number of
+    k-points. This should return the energy per cell directly and will be
+    changed in future.
+    '''
     if kpts is None:
         kpts = np.zeros((1, 3))
     else:

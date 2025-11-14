@@ -22,7 +22,7 @@ from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
 from packaging import version
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
+pyscf_211 = version.parse(pyscf.__version__) <= version.parse('2.11.0')
 
 def setUpModule():
     global mol
@@ -246,7 +246,7 @@ H -0.646 -0.464 -0.804
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
     def test_to_gpu(self):
         import pyscf
         mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
@@ -267,7 +267,7 @@ H -0.646 -0.464 -0.804
         g_gpu = gradobj.kernel()
         assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
+    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
     def test_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         mf.conv_tol = 1e-12

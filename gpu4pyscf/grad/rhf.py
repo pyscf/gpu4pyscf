@@ -30,7 +30,6 @@ from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import (
     tag_array, contract, condense, reduce_to_device, transpose_sum, ensure_numpy)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.__config__ import _streams, num_devices
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu

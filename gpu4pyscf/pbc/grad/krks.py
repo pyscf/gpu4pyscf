@@ -54,6 +54,11 @@ def get_veff(ks_grad, dm=None, kpts=None):
     if grids.coords is None:
         grids.build()
 
+    if kpts is None:
+        nkpts = 1
+    else:
+        nkpts = len(kpts)
+
     if not ni.libxc.is_hybrid_xc(mf.xc):
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
             exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
@@ -61,7 +66,7 @@ def get_veff(ks_grad, dm=None, kpts=None):
             # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
             # They are differed by a factor of two. Scale exc to match the
             # convention of molecular rhf/rks get_veff.
-            exc /= 2
+            exc /= 2 * nkpts
         else:
             exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
             t0 = log.timer('vxc', *t0)
@@ -79,7 +84,7 @@ def get_veff(ks_grad, dm=None, kpts=None):
             # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
             # They are differed by a factor of two. Scale exc to match the
             # convention of molecular rhf/rks get_veff.
-            exc /= 2
+            exc /= 2 * nkpts
             j_factor = 0
         else:
             exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
@@ -89,13 +94,14 @@ def get_veff(ks_grad, dm=None, kpts=None):
             with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
         if with_rsjk.supmol is None:
             with_rsjk.build()
-        exc += with_rsjk._get_ejk_sr_ip1(dm, j_factor=j_factor, k_factor=k_sr,
-                                         kpts=kpts, exxdiv=mf.exxdiv)
-        exc += with_rsjk._get_ejk_lr_ip1(dm, j_factor=j_factor, k_factor=k_lr,
-                                         kpts=kpts, exxdiv=mf.exxdiv)
+        exc += with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
+                                         j_factor=j_factor, k_factor=k_sr)
+        exc += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
+                                         j_factor=j_factor, k_factor=k_lr)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
+    '''derivatives of the Exc per cell'''
     assert dm_kpts.ndim == 3
     xctype = ni._xc_type(xc_code)
     nao = cell.nao
@@ -146,6 +152,7 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     aoslices = cell.aoslice_by_atom()
     exc = contract('kxij,kji->xi', vmat, dm_kpts).real.get()
     exc = np.array([exc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
+    exc /= nkpts
     return -exc
 
 def _d1_dot_(ao1, ao2, out=None):

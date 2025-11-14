@@ -47,7 +47,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     log.debug('Computing Gradients of NR-UHF Coulomb repulsion')
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    dvhf = mf_grad.get_veff(dm0, kpts)
+    # derivatives of the Veff contribution
+    dvhf = mf_grad.get_veff(dm0, kpts) * 2
     t1 = log.timer('gradients of 2e part', *t0)
 
     dm0_sf = dm0[0] + dm0[1]
@@ -92,7 +93,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     ds = contract('kxij,kji->xi', s1, dme0_sf).real
     ds = (-2 * ds).get()
     ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    de = (2 * dvhf + dh1e.get() + ds) / nkpts + extra_force
+    de = (dh1e.get() + ds) / nkpts + dvhf + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
@@ -103,10 +104,17 @@ class Gradients(krhf_grad.GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
     def get_veff(self, dm, kpts):
+        '''
+        The energy contribution from the effective potential
+
+        einsum('skxij,skji->x', veff, dm) / nkpts
+        '''
         if self.base.rsjk is not None:
             from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
             with_rsjk = self.base.rsjk
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
+            if with_rsjk.supmol is None:
+                with_rsjk.build()
             ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
             ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
         else:
@@ -129,3 +137,7 @@ class Gradients(krhf_grad.GradientsBase):
     as_scanner = krhf_grad.Gradients.as_scanner
     _finalize = krhf_grad.Gradients._finalize
     kernel = krhf_grad.Gradients.kernel
+
+    def get_stress(self):
+        from gpu4pyscf.pbc.grad import kuhf_stress
+        return kuhf_stress.kernel(self)
