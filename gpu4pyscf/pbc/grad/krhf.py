@@ -33,6 +33,8 @@ from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
+from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 __all__ = ['Gradients']
 
@@ -57,23 +59,48 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     log = logger.new_logger(mf_grad)
     t0 = log.init_timer()
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
-    hcore_deriv = mf_grad.hcore_generator(cell, kpts)
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dvhf = mf_grad.get_veff(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
 
-    dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-    aoslices = cell.aoslice_by_atom()
-    extra_force = np.empty([natm, 3])
-    dh1e = cp.empty([natm, 3])
-    for ia in range(natm):
-        h1ao = hcore_deriv(ia)
-        dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
-        extra_force[ia] = ensure_numpy(mf_grad.extra_force(ia, locals()))
+    ni = getattr(mf, "_numint", None)
+    if isinstance(ni, multigrid.MultiGridNumInt):
+        raise NotImplementedError(
+            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
+            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
+    elif isinstance(ni, multigrid_v2.MultiGridNumInt):
+        # Attention: The orbital derivative of vpploc term is in multigrid_v2.get_veff_ip1() function.
+        rho_g = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0, kpts)
+        rho_g = rho_g[0,0]
+        dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
+
+        dm_dmH = dm0 + dm0.transpose(0,2,1).conj()
+        dh1e_kin = int1e.int1e_ipkin(cell, kpts)
+        aoslices = cell.aoslice_by_atom()
+        for ia in range(natm):
+            p0, p1 = aoslices[ia, 2:]
+            dh1e[ia] -= cp.einsum('kxij,kji->x', dh1e_kin[:,:,p0:p1,:], dm_dmH[:,:,p0:p1]).real
+    else:
+        hcore_deriv = mf_grad.hcore_generator(cell, kpts)
+        dh1e = cp.empty([natm, 3])
+        for ia in range(natm):
+            h1ao = hcore_deriv(ia)
+            dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
+
+    dm0_cpu = dm0.get()
+    dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_cpu, kpts = kpts)
+    dh1e += cp.asarray(dh1e_pp_nonlocal)
+
     log.timer('gradients of 1e part', *t1)
 
+    extra_force = np.empty([natm, 3])
+    for ia in range(natm):
+        extra_force[ia] = ensure_numpy(mf_grad.extra_force(ia, locals()))
+
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
+    dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
+    aoslices = cell.aoslice_by_atom()
     ds = contract('kxij,kji->xi', s1, dme0).real
     ds = (-2 * ds).get()
     ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
@@ -113,49 +140,6 @@ def get_hcore(cell, kpts):
             aow = ao_ks[:,0] * vpplocR[grid0:grid1]
             #:h1 += cp.einsum('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow)
             contract('kxig,kjg->kxij', ao_ks[:,1:].conj(), aow, beta=1, out=h1)
-
-        fakemol = krhf_cpu._make_fakemol()
-        ptr = PTR_ENV_START
-        ft_weight = 1. / cell.vol
-        for kn, kpt in enumerate(kpts):
-            # Compute aokG analytically. An error ~cell.precision may be
-            # encountered compared to the fftk results.
-            #:expir = cp.exp(-1j*cp.dot(coords, cp.asarray(kpt)))
-            #:aos = pbc_numint.eval_ao(cell, coords, kpt, deriv=1)
-            #:aokG = tools.fftk(aos.transpose(0,2,1).reshape(-1,ngrids),
-            #                   cell.mesh, expir).reshape(4,nao,ngrids)
-            #:aokG, aokG_ip1 = aokG[0], aokG[1:4]
-            aokG = ft_ao.ft_ao(cell, Gv, kpt=kpt).T
-            aokG *= ft_weight
-            Gk = Gv_cpu + kpt
-            aokG_ip1 = aokG * (cp.asarray(Gk).T[:,None,:]*1j)
-            G_rad = np.linalg.norm(Gk, axis=1)
-            for ia in range(natom):
-                symb = cell.atom_symbol(ia)
-                if symb not in cell._pseudo:
-                    continue
-                pp = cell._pseudo[symb]
-                for l, proj in enumerate(pp[5:]):
-                    rl, nl, hl = proj
-                    if nl >0:
-                        hl = cp.asarray(hl)
-                        fakemol._bas[0,ANG_OF] = l
-                        fakemol._env[ptr+3] = .5*rl**2
-                        fakemol._env[ptr+4] = rl**(l+1.5)*np.pi**1.25
-                        pYlm_part = fakemol.eval_gto('GTOval', Gk)
-                        pYlm = cp.empty((nl,l*2+1,ngrids))
-                        for k in range(nl):
-                            qkl = _qli(G_rad*rl, l, k)
-                            pYlm[k].set(pYlm_part.T * qkl)
-                        SPG_lmi = cp.einsum('g,nmg->nmg', SI[ia].conj(), pYlm)
-                        SPG_lm_aoG = contract('nmg,pg->nmp', SPG_lmi, aokG)
-                        SPG_lm_aoG_ip1 = contract('nmg,apg->anmp', SPG_lmi, aokG_ip1)
-                        tmp = contract('ij,jmp->imp', hl, SPG_lm_aoG)
-                        vnl = contract('aimp,imq->apq', SPG_lm_aoG_ip1.conj(), tmp)
-                        if dtype == np.float64:
-                            h1[kn,:] += vnl.real
-                        else:
-                            h1[kn,:] += vnl
     else:
         mesh = cell.mesh
         charge = cp.asarray(-cell.atom_charges(), dtype=np.float64)
@@ -225,50 +209,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
             #:hcore += contract('kig,kxjg->kxij',ao_ks.conj(), aow)
             contract('kig,kxjg->kxij', ao_ks.conj(), aow, beta=1, out=hcore)
 
-        symb = cell.atom_symbol(atm_id)
         shl0, shl1, p0, p1 = aoslices[atm_id]
-        if symb not in cell._pseudo:
-            hcore[:,:,p0:p1] -= h1[:,:,p0:p1]
-            hcore[:,:,:,p0:p1] -= h1[:,:,p0:p1].transpose(0,1,3,2).conj()
-            return hcore
-
-        fakemol = krhf_cpu._make_fakemol()
-        ft_weight = 1. / cell.vol
-        for kn, kpt in enumerate(kpts):
-            # Compute aokG analytically. An error ~cell.precision may be
-            # encountered compared to the fftk results.
-            #:aokG = 1./ngrids*fftk(ao.T, mesh, exp(-1j*coords.dot(kpt)))
-            aokG = ft_ao.ft_ao(cell, Gv, kpt=kpt).T
-            aokG *= ft_weight
-            Gk = Gv_cpu + kpt
-            G_rad = lib.norm(Gk, axis=1)
-            pp = cell._pseudo[symb]
-            for l, proj in enumerate(pp[5:]):
-                rl, nl, hl = proj
-                if nl > 0:
-                    hl = cp.asarray(hl)
-                    fakemol._bas[0,ANG_OF] = l
-                    fakemol._env[ptr+3] = .5*rl**2
-                    fakemol._env[ptr+4] = rl**(l+1.5)*np.pi**1.25
-                    pYlm_part = fakemol.eval_gto('GTOval', Gk)
-                    pYlm = cp.empty((nl,l*2+1,ngrids))
-                    for k in range(nl):
-                        qkl = _qli(G_rad*rl, l, k)
-                        pYlm[k].set(pYlm_part.T * qkl)
-                    SPG_lmi = cp.einsum('g,nmg->nmg', SI[atm_id].conj(), pYlm)
-                    SPG_lm_aoG = contract('nmg,pg->nmp', SPG_lmi, aokG)
-                    SPG_lmi_G = contract('nmg, ga->anmg', SPG_lmi, 1j*Gv)
-                    SPG_lm_G_aoG = contract('anmg, pg->anmp', SPG_lmi_G, aokG)
-                    tmp_1 = contract('ij,ajmp->aimp', hl, SPG_lm_G_aoG)
-                    vppnl = contract('imp,aimq->apq', SPG_lm_aoG.conj(), tmp_1)
-                    tmp = contract('ij,jmp->imp', hl, SPG_lm_aoG)
-                    vppnl = contract('jmp,ajmq->apq', tmp.conj(), SPG_lm_G_aoG)
-                    if dtype == np.float64:
-                        hcore[kn] += vppnl.real
-                        hcore[kn] += vppnl.real.transpose(0,2,1)
-                    else:
-                        hcore[kn] += vppnl
-                        hcore[kn] += vppnl.conj().transpose(0,2,1)
         hcore[:,:,p0:p1] -= h1[:,:,p0:p1]
         hcore[:,:,:,p0:p1] -= h1[:,:,p0:p1].transpose(0,1,3,2).conj()
         return hcore

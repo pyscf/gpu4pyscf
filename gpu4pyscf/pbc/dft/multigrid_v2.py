@@ -1456,7 +1456,7 @@ def get_veff_ip1(
     kpts=None,
     kpts_band=None,
     with_j=True,
-    with_pseudo=True,
+    with_pseudo_vloc_orbital_derivative=True,
     verbose=None,
 ):
     if kpts is None:
@@ -1526,9 +1526,9 @@ def get_veff_ip1(
     if with_j:
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
-    if with_pseudo:
+    if with_pseudo_vloc_orbital_derivative:
         assert cell._pseudo is not None
-        xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG_part1(cell, mesh)
+        xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG(cell, mesh)
 
     veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
         ni, xc_for_fock, dm_kpts, hermi, kpts_band, with_tau = (xc_type == "MGGA")

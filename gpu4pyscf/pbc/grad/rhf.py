@@ -25,8 +25,9 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.lib.cupy_helper import return_cupy_array
 from gpu4pyscf.pbc.dft import multigrid_v2
+import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.grad.pp import vpploc_part1_nuc_grad
+from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 
 __all__ = ['Gradients']
 
@@ -81,15 +82,14 @@ class Gradients(GradientsBase):
                     with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
                 if with_rsjk.supmol is None:
                     with_rsjk.build()
-                de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo=True).get()
+                de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
                 j_factor = 0
             else:
                 ni = multigrid_v2.MultiGridNumInt(cell).build()
                 j_factor = k_sr = k_lr = 1
                 de = 0
                 if cell._pseudo:
-                    import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
-                    vpplocG = multigrid_v1.eval_vpplocG_part1(ni.cell, ni.mesh)
+                    vpplocG = multigrid_v1.eval_vpplocG(ni.cell, ni.mesh)
                     de = multigrid_v2.convert_xc_on_g_mesh_to_fock_gradient(
                         ni, vpplocG.reshape(1,1,-1), dm0).get()
                 else:
@@ -103,17 +103,17 @@ class Gradients(GradientsBase):
             assert hasattr(mf, 'xc'), 'HF gradients not supported'
             ni = mf._numint
             assert isinstance(ni, multigrid_v2.MultiGridNumInt)
-            de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True).get()
+            de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
 
         s1 = int1e.int1e_ipovlp(cell)[0].get()
         de += cpu_rhf._contract_vhf_dm(self, s1, dme0) * 2
 
         # the CPU code requires the attribute .rhoG
         rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
-        with lib.temporary_env(ni, rhoG=rhoG):
-            de += vpploc_part1_nuc_grad(ni, dm0_cpu)
-        de += pp_int.vpploc_part2_nuc_grad(cell, dm0_cpu)
-        de += pp_int.vppnl_nuc_grad(cell, dm0_cpu)
+        rhoG = rhoG[0,0]
+        de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
+        rhoG = None
+        de += vppnl_nuc_grad(cell, dm0_cpu)
         core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0].get()
         kinetic_contribution = cpu_rhf._contract_vhf_dm(
             self, core_hamiltonian_gradient, dm0_cpu

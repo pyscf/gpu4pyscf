@@ -23,6 +23,9 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
+from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.pbc.gto import int1e
 
 __all__ = ['Gradients']
 
@@ -42,25 +45,50 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     log = logger.new_logger(mf_grad)
     t0 = log.init_timer()
     log.debug('Computing Gradients of NR-UHF Coulomb repulsion')
-    hcore_deriv = mf_grad.hcore_generator(cell, kpts)
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     dvhf = mf_grad.get_veff(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
 
-    dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dm0_sf = dm0[0] + dm0[1]
-    dme0_sf = dme0[0] + dme0[1]
-    aoslices = cell.aoslice_by_atom()
-    extra_force = np.empty([natm, 3])
-    dh1e = cp.empty([natm, 3])
-    for ia in range(natm):
-        h1ao = hcore_deriv(ia)
-        dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0_sf).real
-        extra_force[ia] = ensure_numpy(mf_grad.extra_force(ia, locals()))
+    ni = getattr(mf, "_numint", None)
+    if isinstance(ni, multigrid.MultiGridNumInt):
+        raise NotImplementedError(
+            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
+            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
+    elif isinstance(ni, multigrid_v2.MultiGridNumInt):
+        # Attention: The orbital derivative of vpploc term is in multigrid_v2.get_veff_ip1() function.
+        rho_g = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0_sf, kpts)
+        rho_g = rho_g[0,0]
+        dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
+
+        dm_dmH = dm0_sf + dm0_sf.transpose(0,2,1).conj()
+        dh1e_kin = int1e.int1e_ipkin(cell, kpts)
+        aoslices = cell.aoslice_by_atom()
+        for ia in range(natm):
+            p0, p1 = aoslices[ia, 2:]
+            dh1e[ia] -= cp.einsum('kxij,kji->x', dh1e_kin[:,:,p0:p1,:], dm_dmH[:,:,p0:p1]).real
+    else:
+        hcore_deriv = mf_grad.hcore_generator(cell, kpts)
+        dh1e = cp.empty([natm, 3])
+        for ia in range(natm):
+            h1ao = hcore_deriv(ia)
+            dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0_sf).real
+
+    dm0_sf_cpu = dm0_sf.get()
+    dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_sf_cpu, kpts = kpts)
+    dh1e += cp.asarray(dh1e_pp_nonlocal)
+
     log.timer('gradients of 1e part', *t1)
 
+    extra_force = np.empty([natm, 3])
+    for ia in range(natm):
+        extra_force[ia] = ensure_numpy(mf_grad.extra_force(ia, locals()))
+
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
+    dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
+    dme0_sf = dme0[0] + dme0[1]
+    aoslices = cell.aoslice_by_atom()
     ds = contract('kxij,kji->xi', s1, dme0_sf).real
     ds = (-2 * ds).get()
     ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])

@@ -56,7 +56,7 @@ def get_veff(ks_grad, dm=None, kpts=None):
 
     if not ni.libxc.is_hybrid_xc(mf.xc):
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
-            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
             # exc of multigrid_v2 is the full response of dE/dX. However,
             # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
             # They are differed by a factor of two. Scale exc to match the
@@ -74,7 +74,7 @@ def get_veff(ks_grad, dm=None, kpts=None):
             raise NotImplementedError('Nuclear gradients for hybrid functional '
                                       'are only available via the rsjk method')
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
-            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
             # exc of multigrid_v2 is the full response of dE/dX. However,
             # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
             # They are differed by a factor of two. Scale exc to match the
