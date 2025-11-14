@@ -429,8 +429,8 @@ def _int3c2e_overlap_mask(int3c2e_opt, cutoff):
     _bas = cp.array(pcell._bas)
     _env = cp.array(_scale_sp_ctr_coeff(pcell))
     int3c2e_envs = PBCIntEnvVars(
-        pcell.natm, p_nbas, 1, nimgs, _atm.data.ptr, _bas.data.ptr,
-        _env.data.ptr, 0, Ls.data.ptr,
+        pcell.natm, p_nbas, _atm.data.ptr, _bas.data.ptr,
+        _env.data.ptr, 0, 1, nimgs, Ls.data.ptr,
     )
     err = libpbc.bvk_overlap_img_counts(
         ctypes.cast(ovlp_img_counts.data.ptr, ctypes.c_void_p),

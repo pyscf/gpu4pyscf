@@ -114,7 +114,7 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
 }
 
 extern "C" {
-int filter_q_cond_by_distance(float *q_cond, float *s_estimator, RysIntEnvVars envs,
+int filter_q_cond_by_distance(float *q_cond, float *s_estimator, RysIntEnvVars *envs,
                               float *diffuse_exps_per_atom, float *s_max_per_atom,
                               float log_cutoff, int natm_cell0, int nbas)
 {
@@ -123,7 +123,7 @@ int filter_q_cond_by_distance(float *q_cond, float *s_estimator, RysIntEnvVars e
     dim3 blocks(sh_blocks, sh_blocks);
     int buflen = natm_cell0 * 3 * sizeof(float);
     filter_q_cond_by_distance_kernel<<<blocks, threads, buflen>>>(
-        q_cond, s_estimator, envs, diffuse_exps_per_atom, s_max_per_atom,
+        q_cond, s_estimator, *envs, diffuse_exps_per_atom, s_max_per_atom,
         log_cutoff, natm_cell0);
 
     cudaError_t err = cudaGetLastError();

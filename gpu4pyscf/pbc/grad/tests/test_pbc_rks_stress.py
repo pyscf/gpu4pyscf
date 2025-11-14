@@ -22,18 +22,17 @@ from pyscf.pbc.dft.numint import NumInt
 from pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.pbc.grad import rks_stress, rks
 from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 import pytest
-
-def setUpModule():
-    global cell
-    a = np.eye(3) * 5
-    np.random.seed(5)
-    a += np.random.rand(3, 3) - .5
-    cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                 basis=[[0, [.5, 1]], [1, [.5, 1]]], a=a, unit='Bohr')
 
 class KnownValues(unittest.TestCase):
     def test_coulG(self):
+        a = np.eye(3) * 5
+        np.random.seed(5)
+        a += np.random.rand(3, 3) - .5
+        cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
+                     basis=[[0, [.5, 1]], [1, [.5, 1]]], a=a, unit='Bohr')
         coulG0, coulG1 = rks_stress._get_coulG_strain_derivatives(cell, cell.Gv)
         cell1, cell2 = _finite_diff_cells(cell, 0, 0, disp=1e-5)
         assert abs(coulG1[0,0].get() - (pbc.get_coulG(cell1) - pbc.get_coulG(cell2)) / 2e-5).max() < 1e-9
@@ -281,6 +280,51 @@ class KnownValues(unittest.TestCase):
             e1 = mf_scanner(cell1)
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+
+    def test_pbe0_vs_finite_difference(self):
+        a = np.eye(3) * 3.5
+        np.random.seed(5)
+        a += np.random.rand(3, 3) - .5
+        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
+                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
+                     a=a, unit='Bohr', verbose=0)
+        xc = 'pbe0'
+        mf = cell.RKS(xc=xc).to_gpu()
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = cell.RKS(xc=xc).to_gpu().as_scanner()
+        vol = cell.vol
+        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
+            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-7
+
+    @pytest.mark.slow
+    def test_hse_vs_finite_difference(self):
+        a = np.eye(3) * 5
+        np.random.seed(5)
+        a += np.random.rand(3, 3) - .5
+        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
+                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
+                     a=a, unit='Bohr', verbose=0)
+        xc = 'hse06'
+        mf = cell.RKS(xc=xc).to_gpu()
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = cell.RKS(xc=xc).to_gpu().as_scanner()
+        vol = cell.vol
+        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
+            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 2e-7
 
 if __name__ == "__main__":
     print("Full Tests for RKS Stress tensor")

@@ -523,7 +523,7 @@ extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds
 
 extern "C" {
 int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
-                 RysIntEnvVars envs, int *shls_slice, int shm_size,
+                 RysIntEnvVars *envs, int *shls_slice, int shm_size,
                  int npairs_ij, int npairs_kl,
                  uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                  float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
@@ -567,7 +567,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         ntiles_i, ntiles_j, ntiles_k, ntiles_l};
 
     JKMatrix jk = {vj, vk, dm, n_dm, 0, omega};
-    if (!rys_jk_unrolled(&envs, &jk, &bounds, pool)) {
+    if (!rys_jk_unrolled(envs, &jk, &bounds, pool)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -579,7 +579,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
         rys_jk_kernel<<<npairs_ij, threads, buflen>>>(
-            envs, jk, bounds, pool, p_gxyz_offset,
+            *envs, jk, bounds, pool, p_gxyz_offset,
             gout_pattern, reserved_shm_size);
 
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -588,7 +588,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                                            min(256, n_tiles-256));
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_jk_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, jk, bounds, pool, p_gxyz_offset+256,
+                *envs, jk, bounds, pool, p_gxyz_offset+256,
                 gout_pattern, reserved_shm_size);
         }
 
@@ -597,7 +597,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                                            min(256, n_tiles-512));
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_jk_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, jk, bounds, pool, p_gxyz_offset+512,
+                *envs, jk, bounds, pool, p_gxyz_offset+512,
                 gout_pattern, reserved_shm_size);
         }
     }
