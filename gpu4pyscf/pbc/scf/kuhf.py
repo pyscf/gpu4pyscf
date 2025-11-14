@@ -55,34 +55,34 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f_kpts
 
-    if diis_start_cycle is None:
-        diis_start_cycle = mf.diis_start_cycle
-    if level_shift_factor is None:
-        level_shift_factor = mf.level_shift
-    if damp_factor is None:
-        damp_factor = mf.damp
     if s_kpts is None: s_kpts = mf.get_ovlp()
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
 
-    if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
-        shifta, shiftb = level_shift_factor
-    else:
-        shifta = shiftb = level_shift_factor
-    if isinstance(damp_factor, (tuple, list, np.ndarray)):
-        dampa, dampb = damp_factor
-    else:
-        dampa = dampb = damp_factor
-
-    if 0 <= cycle < diis_start_cycle-1 and abs(dampa)+abs(dampb) > 1e-4 and fock_last is not None:
+    if diis_start_cycle is None:
+        diis_start_cycle = mf.diis_start_cycle
+    if damp_factor is None:
+        damp_factor = mf.damp
+    if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+        if isinstance(damp_factor, (tuple, list, np.ndarray)):
+            dampa, dampb = damp_factor
+        else:
+            dampa = dampb = damp_factor
         f_a = []
         f_b = []
         for k in range(len(s_kpts)):
             f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
             f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampa))
-        f_kpts = [f_a, f_b]
+        f_kpts = cp.asarray([f_a, f_b])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
-    if abs(level_shift_factor) > 1e-4:
+
+    if level_shift_factor is None:
+        level_shift_factor = mf.level_shift
+    if level_shift_factor is not None:
+        if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
+            shifta, shiftb = level_shift_factor
+        else:
+            shifta = shiftb = level_shift_factor
         f_kpts =([mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta)
                   for k, s in enumerate(s_kpts)],
                  [mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb)

@@ -77,26 +77,25 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
 
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
-    if level_shift_factor is None:
-        level_shift_factor = mf.level_shift
     if damp_factor is None:
         damp_factor = mf.damp
-
-    if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
-        shifta, shiftb = level_shift_factor
-    else:
-        shifta = shiftb = level_shift_factor
-    if isinstance(damp_factor, (tuple, list, np.ndarray)):
-        dampa, dampb = damp_factor
-    else:
-        dampa = dampb = damp_factor
-
-    if 0 <= cycle < diis_start_cycle-1 and abs(dampa)+abs(dampb) > 1e-4:
-        f = (damping(s1e, dm[0], f[0], dampa),
-             damping(s1e, dm[1], f[1], dampb))
+    if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+        if isinstance(damp_factor, (tuple, list, np.ndarray)):
+            dampa, dampb = damp_factor
+        else:
+            dampa = dampb = damp_factor
+        f = cupy.asarray((damping(f[0], fock_last[0], dampa),
+                          damping(f[1], fock_last[1], dampb)))
     if diis and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f)
-    if abs(shifta)+abs(shiftb) > 1e-4:
+
+    if level_shift_factor is None:
+        level_shift_factor = mf.level_shift
+    if level_shift_factor is not None:
+        if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
+            shifta, shiftb = level_shift_factor
+        else:
+            shifta = shiftb = level_shift_factor
         f = (level_shift(s1e, dm[0], f[0], shifta),
              level_shift(s1e, dm[1], f[1], shiftb))
     return f

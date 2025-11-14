@@ -107,11 +107,8 @@ def get_grad(mo_coeff, mo_occ, fock_ao):
                            mo_coeff[:,occidx])) * 2
     return g.ravel()
 
-def damping(s, d, f, factor):
-    dm_vir = cupy.eye(s.shape[0]) - cupy.dot(s, d)
-    f0 = reduce(cupy.dot, (dm_vir, f, d, s))
-    f0 = (f0+f0.conj().T) * (factor/(factor+1.))
-    return f - f0
+def damping(f, f_prev, factor):
+    return f*(1-factor) + f_prev*factor
 
 def level_shift(s, d, f, factor):
     dm_vir = s - reduce(cupy.dot, (s, d, s))
@@ -136,7 +133,8 @@ def get_hcore(mol):
     return h
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
-             diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
+             diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
+             fock_last=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
     h1e = cupy.asarray(h1e)
@@ -151,16 +149,15 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     dm = cupy.asarray(dm)
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
-    if level_shift_factor is None:
-        level_shift_factor = mf.level_shift
     if damp_factor is None:
         damp_factor = mf.damp
-
-    if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4:
-        f = damping(s1e, dm*.5, f, damp_factor)
+    if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+        f = damping(f, last_fock, damp_factor)
     if diis is not None and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f)
 
+    if level_shift_factor is None:
+        level_shift_factor = mf.level_shift
     if level_shift_factor is not None:
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
     return f
@@ -242,15 +239,18 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         # Note in pbc.scf, mf.mol == mf.cell, cell is saved under key "mol"
         chkfile.save_mol(mol, mf.chkfile)
 
+    fock_last = None
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
         mo_coeff = mo_occ = mo_energy = fock = None
         dm_last = dm
         last_hf_e = e_tot
 
-        fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis)
+        fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis, fock_last=fock_last)
         t1 = log.timer_debug1('DIIS', *t0)
         mo_energy, mo_coeff = mf.eig(fock, s1e)
+        if mf.damp is not None:
+            fock_last = fock
         fock = None
         t1 = log.timer_debug1('eig', *t1)
 
@@ -579,7 +579,7 @@ class SCF(pyscf_lib.StreamObject):
     diis_start_cycle    = hf_cpu.SCF.diis_start_cycle
     diis_file           = hf_cpu.SCF.diis_file
     diis_space_rollback = hf_cpu.SCF.diis_space_rollback
-    damp                = hf_cpu.SCF.damp
+    damp                = None
     level_shift         = None
     direct_scf          = hf_cpu.SCF.direct_scf
     direct_scf_tol      = hf_cpu.SCF.direct_scf_tol

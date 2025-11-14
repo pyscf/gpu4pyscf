@@ -42,21 +42,22 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f_kpts
 
-    if diis_start_cycle is None:
-        diis_start_cycle = mf.diis_start_cycle
-    if level_shift_factor is None:
-        level_shift_factor = mf.level_shift
-    if damp_factor is None:
-        damp_factor = mf.damp
     if s_kpts is None: s_kpts = mf.get_ovlp()
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
 
-    if 0 <= cycle < diis_start_cycle-1 and damp_factor and fock_last is not None:
-        f_kpts = [pbchf.damping(f, f_prev, damp_factor)
-                  for f,f_prev in zip(f_kpts,fock_last)]
+    if diis_start_cycle is None:
+        diis_start_cycle = mf.diis_start_cycle
+    if damp_factor is None:
+        damp_factor = mf.damp
+    if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+        f_kpts = cp.asarray([pbchf.damping(f, f_prev, damp_factor)
+                             for f,f_prev in zip(f_kpts,fock_last)])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
-    if level_shift_factor:
+
+    if level_shift_factor is None:
+        level_shift_factor = mf.level_shift
+    if level_shift_factor is not None:
         f_kpts = [pbchf.level_shift(s, dm_kpts[k], f_kpts[k], level_shift_factor)
                   for k, s in enumerate(s_kpts)]
     return cp.asarray(f_kpts)
