@@ -2428,6 +2428,7 @@ class _GDFTOpt:
             out = cupy.empty_like(sorted_mat)
         out[tuple(fancy_index)] = sorted_mat
         return out
+    
 
 class GTOValEnvVars(ctypes.Structure):
     _fields_ = [

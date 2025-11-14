@@ -22,6 +22,15 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array
 from gpu4pyscf.lib import utils
 
+def _from_rhf_init_dm(dma, breaksym=True):
+    dma = dma * .5
+    dm = block_diag(dma, dma)
+    if breaksym:
+        nao = dma.shape[0]
+        idx, idy = cp.diag_indices(nao)
+        dm[idx+nao,idy] = dm[idx,idy+nao] = dma.diagonal() * .05
+    return dm
+
 class GHF(hf.SCF):
     to_gpu = utils.to_gpu
     device = utils.device
@@ -56,7 +65,7 @@ class GHF(hf.SCF):
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         dma = hf.RHF.get_init_guess(self, mol, key, **kwargs)
-        return block_diag(dma, dma)
+        return _from_rhf_init_dm(dma)
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
@@ -86,6 +95,7 @@ class GHF(hf.SCF):
         return vj, vk
 
     def get_j(self, mol=None, dm=None, hermi=1, omega=None):
+        assert hermi == 1, 'hermi must be 1'
         dm = asarray(dm)
         dm_shape = dm.shape
         nso = dm.shape[-1]
@@ -93,8 +103,8 @@ class GHF(hf.SCF):
         dm = dm.reshape(-1,nso,nso)
         n_dm = dm.shape[0]
         dm = dm[:,:nao,:nao] + dm[:,nao:,nao:]
-        jtmp = hf.SCF.get_j(self, mol, dm, hermi, omega)
-        vj = cp.zeros((n_dm,nso,nso))
+        jtmp = hf.SCF.get_j(self, mol, dm.real, hermi, omega)
+        vj = cp.zeros((n_dm,nso,nso), dtype=dm.dtype)
         vj[:,:nao,:nao] = vj[:,nao:,nao:] = jtmp
         return vj.reshape(dm_shape)
 
@@ -109,14 +119,27 @@ class GHF(hf.SCF):
         dmbb = dm[:,nao:,nao:]
         dmab = dm[:,:nao,nao:]
         dmba = dm[:,nao:,:nao]
-        dm = cp.vstack((dmaa, dmbb, dmab, dmba))
-        ktmp = super().get_k(mol, dm, hermi=0, omega=omega)
-        ktmp = ktmp.reshape(4,n_dm,nao,nao)
-        vk = cp.zeros((n_dm,nso,nso), dm.dtype)
-        vk[:,:nao,:nao] = ktmp[0]
-        vk[:,nao:,nao:] = ktmp[1]
-        vk[:,:nao,nao:] = ktmp[2]
-        vk[:,nao:,:nao] = ktmp[3]
+        if dm.dtype == cp.complex128:
+            dm_real = cp.vstack((dmaa.real, dmbb.real, dmab.real, dmba.real))
+            ktmp_real = super().get_k(mol, dm_real, hermi=0, omega=omega)
+            ktmp_real = ktmp_real.reshape(4,n_dm,nao,nao)
+            dm_imag = cp.vstack((dmaa.imag, dmbb.imag, dmab.imag, dmba.imag))
+            ktmp_imag = super().get_k(mol, dm_imag, hermi=0, omega=omega)
+            ktmp_imag = ktmp_imag.reshape(4,n_dm,nao,nao)
+            vk = cp.zeros((n_dm,nso,nso), dm.dtype)
+            vk[:,:nao,:nao] = ktmp_real[0] + 1j*ktmp_imag[0]
+            vk[:,nao:,nao:] = ktmp_real[1] + 1j*ktmp_imag[1]
+            vk[:,:nao,nao:] = ktmp_real[2] + 1j*ktmp_imag[2]
+            vk[:,nao:,:nao] = ktmp_real[3] + 1j*ktmp_imag[3]
+        else:
+            dm = cp.vstack((dmaa, dmbb, dmab, dmba))
+            ktmp = super().get_k(mol, dm, hermi=0, omega=omega)
+            ktmp = ktmp.reshape(4,n_dm,nao,nao)
+            vk = cp.zeros((n_dm,nso,nso), dm.dtype)
+            vk[:,:nao,:nao] = ktmp[0]
+            vk[:,nao:,nao:] = ktmp[1]
+            vk[:,:nao,nao:] = ktmp[2]
+            vk[:,nao:,:nao] = ktmp[3]
         return vk.reshape(dm_shape)
 
     def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
