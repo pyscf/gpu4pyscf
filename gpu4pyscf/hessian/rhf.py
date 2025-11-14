@@ -953,6 +953,12 @@ class HessianBase(lib.StreamObject):
                  self.max_memory, lib.current_memory()[0])
         return self
 
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self.base.reset(mol)
+        return self
+
 class Hessian(HessianBase):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
