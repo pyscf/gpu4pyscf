@@ -690,6 +690,7 @@ class TDBase(tdhf_gpu.TDBase):
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
         
+        
         return get_ab(self, mf)
 
     def nac_method(self): 
@@ -939,6 +940,8 @@ class SpinFlipTDA(TDBase):
         TDBase.dump_flags(self, verbose)
         logger.note(self, 'extype = %s', self.extype)
         logger.note(self, 'collinear = %s', self.collinear)
+        logger.note(self, 'extype = %s', self.extype)
+        logger.note(self, 'collinear = %s', self.collinear)
         if self.collinear == 'mcol':
             logger.note(self, 'collinear_samples = %s', self.collinear_samples)
         return self
@@ -976,6 +979,8 @@ class SpinFlipTDA(TDBase):
             mf = self._scf
             ni = mf._numint
             if not ni.libxc.is_hybrid_xc(mf.xc):
+                self.converged = [True for _ in range(self.nstates)]
+                self.e, xs = self._init_guess(self._scf, self.nstates)
                 self.converged = [True for _ in range(self.nstates)]
                 self.e, xs = self._init_guess(self._scf, self.nstates)
                 self.xy = [(x, 0) for x in xs]
@@ -1021,6 +1026,13 @@ class SpinFlipTDA(TDBase):
         if collinear_samples is None: collinear_samples = self.collinear_samples
         return get_ab_sf(mf, mo_energy=mo_energy, mo_coeff=mo_coeff, mo_occ=mo_occ, 
             collinear=collinear, collinear_samples=collinear_samples)
+
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError('DFT TD-SCF gradients are not implemented')
+        else:
+            from gpu4pyscf.grad import tduks_sf
+            return tduks_sf.Gradients(self)
 
 
 def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
