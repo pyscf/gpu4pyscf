@@ -141,7 +141,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.63368769213053, 5)
 
-    @unittest.skipIf(mcfun is None, "mcfun library not found.")
+    @unittest.skip("NumInt2C in PySCF has no to_gpu method.")
     def test_to_gpu(self):
         mf_cpu = gks_cpu.GKS(mol1)
         mf_cpu.xc = 'lda,vwn'
