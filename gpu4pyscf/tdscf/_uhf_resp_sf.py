@@ -26,6 +26,7 @@ from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.dft.numint import _scale_ao, _tau_dot, eval_rho, eval_rho2
 from gpu4pyscf.lib.cupy_helper import transpose_sum, add_sparse, contract
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 
 MAX_GRIDS_PER_TASK = 8192 # Approximately (2,4,2,4,200,8192) ~ 800MB
@@ -249,7 +250,13 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
         vxc, fxc = eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)[1:3]
         return rho_ab, vxc, fxc
     elif deriv == 3:
-        vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
+        else:
+            ni_cpu = ni.to_cpu()
+            eval_xc_eff = mcfun_eval_xc_adapter_sf(ni_cpu, xc_code, collinear_samples)
+            vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
         return rho_ab, vxc, fxc, kxc
 
 def nr_uks_fxc_sf(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
