@@ -73,12 +73,15 @@ def to_cpu(method, out=None):
         cls = getattr(mod, method.__class__.__name__)
         out = method.view(cls)
 
-    # Convert only the keys that are defined in the corresponding CPU class
-    cls_keys = [getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]]
-    out_keys = set(out.__dict__).union(*cls_keys)
-    # Only overwrite the attributes of the same name.
-    keys = out_keys.intersection(method.__dict__)
+    cls_keys = set.union(*[getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]])
+    gpu_keys = set.union(*[getattr(cls, '_keys', ()) for cls in method.__class__.__mro__[:-1]])
+    # Discards keys that are only defined in GPU classes
+    discards = gpu_keys.difference(cls_keys)
+    for k in discards:
+        out.__dict__.pop(k, None)
 
+    # Convert only the keys that are defined in the corresponding CPU class
+    keys = set(method.__dict__).intersection(cls_keys)
     for key in keys:
         val = getattr(method, key)
         if hasattr(val, 'to_cpu'):

@@ -133,8 +133,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    assert atmlst is None
-    atmlst = range(mol.natm)
+    if atmlst is None:
+        atmlst = range(mol.natm)
 
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = mocc.dot(mocc.T) * 2

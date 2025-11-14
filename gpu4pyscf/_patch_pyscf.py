@@ -213,12 +213,15 @@ if pyscf_version <= 11:
             out.__dict__.update(out.__class__.from_cpu(method).__dict__)
             return out
 
-        # Convert only the keys that are defined in the corresponding GPU class
-        cls_keys = [getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]]
-        out_keys = set(out.__dict__).union(*cls_keys)
-        # Only overwrite the attributes of the same name.
-        keys = out_keys.intersection(method.__dict__)
+        cls_keys = set.union(*[getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]])
+        cpu_keys = set.union(*[getattr(cls, '_keys', ()) for cls in method.__class__.__mro__[:-1]])
+        # Discards keys that are only defined in GPU classes
+        discards = cpu_keys.difference(cls_keys)
+        for k in discards:
+            out.__dict__.pop(k, None)
 
+        # Convert only the keys that are defined in the corresponding CPU class
+        keys = set(method.__dict__).intersection(cls_keys)
         for key in keys:
             val = getattr(method, key)
             if isinstance(val, np.ndarray):
@@ -254,3 +257,9 @@ if pyscf_version <= 11:
                 raise NotImplementedError('.to_gpu() for PCM-TDDFT')
             return misc.to_gpu(self, self.base.to_gpu().Hessian())
         pcm_hess.WithSolventHess.to_gpu = _pcm_hessian_to_gpu
+
+    from pyscf.solvent.hessian import smd as smd_hess
+    if hasattr(smd_hess, 'WithSolventHess'):
+        def _smd_hessian_to_gpu(self):
+            return misc.to_gpu(self, self.base.to_gpu().Hessian())
+        smd_hess.WithSolventHess.to_gpu = _smd_hessian_to_gpu

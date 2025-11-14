@@ -22,6 +22,7 @@ from gpu4pyscf import scf, dft, lib
 from gpu4pyscf.solvent.hessian import smd as smd_hess
 from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
+from packaging.version import Version
 
 def setUpModule():
     global mol
@@ -223,6 +224,8 @@ H -0.646 -0.464 -0.804
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.11.0'),
+                     'bug for SMD.radii_table in pyscf')
     def test_to_gpu_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         mf.conv_tol = 1e-12
