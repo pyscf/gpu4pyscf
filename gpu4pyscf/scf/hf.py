@@ -673,8 +673,43 @@ class SCF(pyscf_lib.StreamObject):
             mo_coeff = x @ C
             return mo_energy, mo_coeff
 
+    def dump_flags(self, verbose=None):
+        log = logger.new_logger(self, verbose)
+        if log.verbose < logger.INFO:
+            return self
+
+        log.info('\n')
+        log.info('******** %s ********', self.__class__)
+        log.info('method = %s', self.__class__.__name__)
+        log.info('initial guess = %s', self.init_guess)
+        log.info('damping factor = %s', self.damp)
+        log.info('level_shift factor = %s', self.level_shift)
+        if isinstance(self.diis, lib.diis.DIIS):
+            log.info('DIIS = %s', self.diis)
+            log.info('diis_start_cycle = %d', self.diis_start_cycle)
+            log.info('diis_space = %d', self.diis.space)
+            if getattr(self.diis, 'damp', None):
+                log.info('diis_damp = %g', self.diis.damp)
+        elif self.diis:
+            log.info('DIIS = %s', self.DIIS)
+            log.info('diis_start_cycle = %d', self.diis_start_cycle)
+            log.info('diis_space = %d', self.diis_space)
+            log.info('diis_damp = %g', self.diis_damp)
+        else:
+            log.info('DIIS disabled')
+        log.info('SCF conv_tol = %g', self.conv_tol)
+        log.info('SCF conv_tol_grad = %s', self.conv_tol_grad)
+        log.info('SCF max_cycles = %d', self.max_cycle)
+        log.info('direct_scf = %s', self.direct_scf)
+        if self.direct_scf:
+            log.info('direct_scf_tol = %g', self.direct_scf_tol)
+        if self.chkfile:
+            log.info('chkfile to save SCF result = %s', self.chkfile)
+        log.info('max_memory %d MB (current use %d MB)',
+                 self.max_memory, lib.current_memory()[0])
+        return self
+
     opt                      = NotImplemented
-    dump_flags               = hf_cpu.SCF.dump_flags
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
