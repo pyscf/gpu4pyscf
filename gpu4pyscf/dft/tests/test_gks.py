@@ -141,6 +141,22 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
         self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.63368769213053, 5)
 
+    @unittest.skipIf(mcfun is None, "mcfun library not found.")
+    def test_to_gpu(self):
+        mf_cpu = gks_cpu.GKS(mol1)
+        mf_cpu.xc = 'lda,vwn'
+        mf_cpu.collinear = 'mcol'
+        mf_cpu._numint.spin_samples = 50
+        eks4_cpu = mf_cpu.kernel()
+
+        mf_gpu = mf_cpu.to_gpu()
+        eks4_gpu = mf_cpu.kernel()
+
+        self.assertAlmostEqual(eks4_gpu, eks4_cpu, 6)
+        self.assertAlmostEqual(eks4_gpu, -74.3741809222222, 6)
+        self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
+        self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), -27.63368769213053, 5)
+
 
 if __name__ == "__main__":
     print("Test GKS")

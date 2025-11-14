@@ -84,47 +84,46 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             logger.debug(ks, 'nelec with nlc grids = %s', n)
         t0 = logger.timer(ks, 'vxc', *t0)
 
-    incremental_jk = (ks._eri is None and ks.direct_scf and
-                      getattr(vhf_last, 'vj', None) is not None)
-    if incremental_jk:
-        _dm = cp.asarray(dm) - cp.asarray(dm_last)
-    else:
-        _dm = dm
+    
+    dm_orig = cp.asarray(dm)
+    vj_last = getattr(vhf_last, 'vj', None)
+    if vj_last is not None:
+        dm = cp.asarray(dm) - cp.asarray(dm_last)
     if not ni.libxc.is_hybrid_xc(ks.xc):
         vk = None
-        vj = ks.get_j(mol, _dm, hermi)
-        if incremental_jk:
-            vj += vhf_last.vj
+        vj = ks.get_j(mol, dm, hermi)
+        if vj_last is not None:
+            vj += vj_last
         vxc += vj
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         if omega == 0:
-            vj, vk = ks.get_jk(mol, _dm, hermi)
+            vj, vk = ks.get_jk(mol, dm, hermi)
             vk *= hyb
         elif alpha == 0: # LR=0, only SR exchange
-            vj = ks.get_j(mol, _dm, hermi)
-            vk = ks.get_k(mol, _dm, hermi, omega=-omega)
+            vj = ks.get_j(mol, dm, hermi)
+            vk = ks.get_k(mol, dm, hermi, omega=-omega)
             vk *= hyb
         elif hyb == 0: # SR=0, only LR exchange
-            vj = ks.get_j(mol, _dm, hermi)
-            vk = ks.get_k(mol, _dm, hermi, omega=omega)
+            vj = ks.get_j(mol, dm, hermi)
+            vk = ks.get_k(mol, dm, hermi, omega=omega)
             vk *= alpha
         else: # SR and LR exchange with different ratios
-            vj, vk = ks.get_jk(mol, _dm, hermi)
+            vj, vk = ks.get_jk(mol, dm, hermi)
             vk *= hyb
-            vklr = ks.get_k(mol, _dm, hermi, omega=omega)
+            vklr = ks.get_k(mol, dm, hermi, omega=omega)
             vklr *= (alpha - hyb)
             vk += vklr
-        if incremental_jk:
+        if vj_last is not None:
             vj += vhf_last.vj
             vk += vhf_last.vk
         vxc += vj - vk
 
         if ground_state:
-            exc -= cp.einsum('ij,ji', dm, vk).real * .5
+            exc -= cp.einsum('ij,ji', dm_orig, vk).real * .5
 
     if ground_state:
-        ecoul = cp.einsum('ij,ji', dm, vj).real * .5
+        ecoul = cp.einsum('ij,ji', dm_orig, vj).real * .5
     else:
         ecoul = None
 

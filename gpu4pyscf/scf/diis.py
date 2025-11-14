@@ -48,6 +48,8 @@ class CDIIS(lib.diis.DIIS):
         self.space = 8
 
     def update(self, s, d, f, *args, **kwargs):
+        if d.dtype == cp.complex128:
+            s = s.astype(cp.complex128)
         errvec = self._sdf_err_vec(s, d, f)
         if self.incore is None:
             mem_avail = get_avail_mem()
