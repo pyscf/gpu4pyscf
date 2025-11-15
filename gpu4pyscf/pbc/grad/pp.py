@@ -24,7 +24,7 @@ from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl, _contract_ppnl_
 # particularly pyscf==2.8.0, the version used by github CI.
 # So, we made a copy.
 
-def vppnl_nuc_grad(cell, dm, kpts=None, log=None):
+def vppnl_nuc_grad(cell, dm, kpts=None):
     '''
     Nuclear gradients of the non-local part of the GTH pseudo potential,
     contracted with the density matrix.
@@ -87,9 +87,7 @@ def vppnl_nuc_grad(cell, dm, kpts=None, log=None):
 
     grad_max_imag = numpy.max(numpy.abs(grad.imag))
     if grad_max_imag >= 1e-8:
-        if log is None:
-            log = logger.new_logger(cell)
-        log.warn(f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient.")
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient.")
     grad = grad.real
 
     return grad
