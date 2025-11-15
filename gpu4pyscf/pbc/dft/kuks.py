@@ -121,7 +121,11 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         kuhf.KUHF.__init__(self, cell, kpts, exxdiv=exxdiv)
         rks.KohnShamDFT.__init__(self, xc)
 
-    dump_flags = kuks_cpu.KUKS.dump_flags
+    def dump_flags(self, verbose=None):
+        kuhf.KUHF.dump_flags(self, verbose)
+        rks.KohnShamDFT.dump_flags(self, verbose)
+        return self
+
     get_hcore = krks.KRKS.get_hcore
     get_veff = get_veff
     energy_elec = energy_elec
