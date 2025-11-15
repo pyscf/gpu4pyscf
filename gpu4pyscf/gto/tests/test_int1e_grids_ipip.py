@@ -68,6 +68,7 @@ class KnownValues(unittest.TestCase):
 
         mol = mol_cart
         fakemol = gto.fakemol_for_charges(grid_points)
+        fakemol.cart = True
 
         int3c2e_ipip1 = mol._add_suffix('int3c2e_ipip1')
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ipip1)
@@ -170,6 +171,7 @@ class KnownValues(unittest.TestCase):
 
         mol = mol_cart
         fakemol = gto.fakemol_for_charges(grid_points)
+        fakemol.cart = True
 
         int3c2e_ipvip1 = mol._add_suffix('int3c2e_ipvip1')
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ipvip1)
@@ -272,6 +274,7 @@ class KnownValues(unittest.TestCase):
 
         mol = mol_cart
         fakemol = gto.fakemol_for_charges(grid_points)
+        fakemol.cart = True
 
         int3c2e_ip1ip2 = mol._add_suffix('int3c2e_ip1ip2')
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip1ip2)
@@ -374,6 +377,7 @@ class KnownValues(unittest.TestCase):
 
         mol = mol_cart
         fakemol = gto.fakemol_for_charges(grid_points)
+        fakemol.cart = True
 
         # Note: we cannot compute ipip2 (dCdC) directly due to numerical problems,
         #       pyscf treat a point charge as a sharp Gaussian, and we cannot take 2nd derivative of it.

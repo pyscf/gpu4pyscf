@@ -245,7 +245,21 @@ class KohnShamDFT(rks.KohnShamDFT):
         log.info('small_rho_cutoff = %g', self.small_rho_cutoff)
         return self
 
-    reset = rks.KohnShamDFT.reset
+    def reset(self, mol=None):
+        hf.SCF.reset(self, mol)
+        self.grids.reset(mol)
+        self.nlcgrids.reset(mol)
+        self._numint.reset()
+        # The cphf_grids attribute is not available in the PySCF CPU version.
+        # In PySCF's to_gpu() function, this attribute is not initialized.
+        if hasattr(self, 'cphf_grids'):
+            self.cphf_grids.reset(self.mol)
+        else:
+            cphf_grids = self.cphf_grids = gen_grid.Grids(self.mol)
+            cphf_grids.prune = gen_grid.sg1_prune
+            cphf_grids.atom_grid = (50,194)
+        return self
+
     do_nlc = rks.KohnShamDFT.do_nlc
 
 hf.KohnShamDFT = KohnShamDFT
@@ -263,19 +277,6 @@ class RKS(KohnShamDFT, hf.RHF):
     def dump_flags(self, verbose=None):
         hf.RHF.dump_flags(self, verbose)
         return KohnShamDFT.dump_flags(self, verbose)
-
-    def reset(self, mol=None):
-        hf.SCF.reset(self, mol)
-        self.grids.reset(mol)
-        self.nlcgrids.reset(mol)
-        self._numint.reset()
-        # The cphf_grids attribute is not available in the PySCF CPU version.
-        # In PySCF's to_gpu() function, this attribute is not properly
-        # initialized. mol of the KS object must be used for initialization.
-        if mol is None:
-            mol = self.mol
-        self.cphf_grids.reset(mol)
-        return self
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import rks as rks_grad

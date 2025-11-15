@@ -20,12 +20,9 @@ import pytest
 from pyscf import gto
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf import scf, dft
-from packaging import version
 from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_nuc, analytical_hess_solver, analytical_hess_qv
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.multi_gpu import num_devices
-
-pyscf_211 = version.parse(pyscf.__version__) <= version.parse('2.11.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order, eps, xc, tol
@@ -325,7 +322,6 @@ class KnownValues(unittest.TestCase):
 
         assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
-    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
     def test_to_gpu_to_cpu(self):
         mol = gto.Mole()
         mol.atom = '''
@@ -346,10 +342,10 @@ H       0.7570000000     0.0000000000    -0.4696000000
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
@@ -357,15 +353,14 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mf.grids.atom_grid = (50,194)
         mf.kernel()
         hessobj = mf.Hessian()
-        # The auxbasis_response attribute was not handled in pyscf-2.11
-        hessobj.auxbasis_response = 2
+        hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")

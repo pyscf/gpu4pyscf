@@ -136,8 +136,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    assert atmlst is None
-    atmlst = range(mol.natm)
+    if atmlst is None:
+        atmlst = range(mol.natm)
 
     mocca = mo_coeff[0][:,mo_occ[0]>0]
     moccb = mo_coeff[1][:,mo_occ[1]>0]
@@ -175,7 +175,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     return e1, ejk
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
-    assert atmlst is None
     mol = hessobj.mol
     natm = mol.natm
 

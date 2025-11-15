@@ -66,6 +66,7 @@ class KnownValues(unittest.TestCase):
 
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
 
@@ -81,6 +82,7 @@ class KnownValues(unittest.TestCase):
 
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 1
         hessobj.base.cphf_grids = hessobj.base.grids
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
@@ -97,6 +99,7 @@ class KnownValues(unittest.TestCase):
 
         mf = mf.to_gpu()
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 1
         hessobj.base.cphf_grids = hessobj.base.grids
         hess_gpu = hessobj.kernel()
         assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
@@ -104,4 +107,3 @@ class KnownValues(unittest.TestCase):
 if __name__ == "__main__":
     print("Full Tests for DF RKS Hessian")
     unittest.main()
-    

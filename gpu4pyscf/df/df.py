@@ -40,6 +40,8 @@ GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
 
+    use_gpu_memory = True
+
     _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
 
     def __init__(self, mol, auxbasis=None):
@@ -47,7 +49,6 @@ class DF(lib.StreamObject):
         self.stdout = mol.stdout
         self.verbose = mol.verbose
         self.max_memory = mol.max_memory
-        self.use_gpu_memory = True
         self._auxbasis = auxbasis
 
         self.auxmol = None

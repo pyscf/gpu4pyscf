@@ -18,7 +18,6 @@ import unittest
 import pytest
 from pyscf.dft import rks as cpu_rks
 from gpu4pyscf.dft import rks as gpu_rks
-from packaging import version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000

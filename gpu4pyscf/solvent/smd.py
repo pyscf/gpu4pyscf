@@ -304,7 +304,7 @@ class SMD(lib.StreamObject):
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
-        'eps', 'grids', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n',
         'e_cds', 'solvent_descriptors', 'sasa_ng'

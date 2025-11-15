@@ -65,6 +65,7 @@ class KnownValues(unittest.TestCase):
     def test_int1e_grids_ip_full_tensor_cart(self):
         mol = mol_cart
         fakemol = gto.fakemol_for_charges(grid_points)
+        fakemol.cart = True
 
         int3c2e_ip1 = mol._add_suffix('int3c2e_ip1')
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip1)
@@ -183,6 +184,7 @@ class KnownValues(unittest.TestCase):
 
         mol = mol_cart
         fakemol = gto.fakemol_for_charges(grid_points)
+        fakemol.cart = True
 
         int3c2e_ip1 = mol._add_suffix('int3c2e_ip1')
         cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, int3c2e_ip1)

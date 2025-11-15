@@ -22,9 +22,7 @@ from gpu4pyscf import scf, dft, lib
 from gpu4pyscf.solvent.hessian import smd as smd_hess
 from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
-from packaging import version
-
-pyscf_211 = version.parse(pyscf.__version__) <= version.parse('2.11.0')
+from packaging.version import Version
 
 def setUpModule():
     global mol
@@ -226,7 +224,8 @@ H -0.646 -0.464 -0.804
         _check_hess(atom, solvent='water')
         _check_hess(atom, solvent='toluene')
 
-    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.12 or higher')
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.11.0'),
+                     'bug for SMD.radii_table in pyscf')
     def test_to_gpu_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         mf.conv_tol = 1e-12
@@ -236,24 +235,24 @@ H -0.646 -0.464 -0.804
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
         mf.conv_tol = 1e-12
         mf.conv_tol_cpscf = 1e-7
         mf.kernel()
         hessobj = mf.Hessian()
-        hessobj.auxbasis_response = 2
+        hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
         hessobj = hessobj.to_gpu()
         hess_gpu = hessobj.kernel()
-        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert numpy.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
     def test_cds(self):
         from gpu4pyscf.solvent.hessian.smd import get_cds as get_cds_hess

@@ -23,7 +23,7 @@ class GKS(gks.GKS, GHF):
     def __init__(self, mol, xc='LDA,VWN'):
         raise NotImplementedError
 
-    reset = rks.RKS.reset
+    reset = rks.KohnShamDFT.reset
     energy_elec = rks.RKS.energy_elec
     get_veff = NotImplemented
     nuc_grad_method = NotImplemented
