@@ -1264,9 +1264,8 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     Gv = pbc_tools._get_Gv(cell, mesh)
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
     coulomb_on_g_mesh = rho_sf * coulomb_kernel_on_g_mesh
-    coulomb_energy = rho_sf.conj().dot(coulomb_on_g_mesh).real
-    coulomb_energy = 0.5 * float(coulomb_energy.get())
-    coulomb_energy /= cell.vol
+    coulomb_energy = complex(rho_sf.conj().dot(coulomb_on_g_mesh).get())
+    coulomb_energy = (0.5 / cell.vol) * coulomb_energy
     log.debug("Multigrid Coulomb energy %s", coulomb_energy)
     t0 = log.timer("coulomb", *t0)
     weight = cell.vol / ngrids
@@ -1289,7 +1288,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         raise ValueError(f"Incorrect xc_type = {xc_type}")
 
     rho_sf = density[0].real
-    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).real.get()) * weight
+    xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).get()) * weight
 
     # To reduce the memory usage, we reuse the xc_for_fock name.
     # Now xc_for_fock represents xc on G space

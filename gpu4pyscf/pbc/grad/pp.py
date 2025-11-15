@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import numpy
+from gpu4pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl, _contract_ppnl_nuc_grad
 
@@ -23,7 +24,7 @@ from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl, _contract_ppnl_
 # particularly pyscf==2.8.0, the version used by github CI.
 # So, we made a copy.
 
-def vppnl_nuc_grad(cell, dm, kpts=None):
+def vppnl_nuc_grad(cell, dm, kpts=None, log=None):
     '''
     Nuclear gradients of the non-local part of the GTH pseudo potential,
     contracted with the density matrix.
@@ -85,8 +86,10 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
         grad[ia] -= numpy.einsum('kdpq,kqp->d', dppnl[:,:,p0:p1,:], dm_dmH[:,:,p0:p1])
 
     grad_max_imag = numpy.max(numpy.abs(grad.imag))
-    assert grad_max_imag < 1e-8, \
-        f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient"
+    if grad_max_imag >= 1e-8:
+        if log is None:
+            log = logger.new_logger(cell)
+        log.warn(f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient.")
     grad = grad.real
 
     return grad

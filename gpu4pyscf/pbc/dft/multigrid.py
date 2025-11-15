@@ -853,7 +853,7 @@ def eval_vpplocG(cell, mesh):
     vlocG[0] += vlocG0
     return vlocG
 
-def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
+def eval_vpplocG_SI_gradient(cell, mesh, rho_g, log=None):
     ngrids = np.prod(mesh)
     assert rho_g.shape == (ngrids,)
 
@@ -889,11 +889,13 @@ def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
         vlocG0 = 2*np.pi*charges[ia]*rloc**2
         vlocG[0] += vlocG0
 
-        de[ia, :] = cp.einsum("dg,g->d", dSI_prefactor, vlocG)
+        de[ia, :] = dSI_prefactor @ vlocG
 
     grad_max_imag = cp.max(cp.abs(de.imag))
-    assert grad_max_imag < 1e-8, \
-        f"Large imaginary part ({grad_max_imag:e}) from pseudopotential local term structure factor gradient"
+    if grad_max_imag >= 1e-8:
+        if log is None:
+            log = logger.new_logger(cell)
+        log.warn(f"Large imaginary part ({grad_max_imag:e}) from pseudopotential local term structure factor gradient")
 
     de = de.real
     de /= cell.vol

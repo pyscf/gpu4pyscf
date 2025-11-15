@@ -114,7 +114,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     return de
 
 def get_hcore(cell, kpts):
-    '''Part of the nuclear gradients of core Hamiltonian'''
+    '''
+        Part of the nuclear gradients of core Hamiltonian
+        If pseudo potential is turned on, the local term is included, but the nonlocal term is not included.
+    '''
     h1 = int1e.int1e_ipkin(cell, kpts)
     if cell._pseudo:
         SI = cell.get_SI()
@@ -165,6 +168,9 @@ def get_hcore(cell, kpts):
     return h1
 
 def hcore_generator(mf_grad, cell=None, kpts=None):
+    '''
+        If pseudo potential is turned on, the local term is included, but the nonlocal term is not included.
+    '''
     if cell is None: cell = mf_grad.cell
     if kpts is None:
         kpts = mf_grad.kpts
