@@ -212,8 +212,13 @@ class KUHF(khf.KSCF):
         khf.KSCF.__init__(self, cell, kpts, exxdiv)
         self.nelec = None
 
+    def dump_flags(self, verbose=None):
+        khf.KSCF.dump_flags(self, verbose)
+        logger.info(self, 'number of electrons per cell  '
+                    'alpha = %d beta = %d', *self.nelec)
+        return self
+
     nelec = kuhf_cpu.KUHF.nelec
-    dump_flags = kuhf_cpu.KUHF.dump_flags
 
     init_guess_by_1e     = pbcuhf.UHF.init_guess_by_1e
     init_guess_by_minao  = pbcuhf.UHF.init_guess_by_minao

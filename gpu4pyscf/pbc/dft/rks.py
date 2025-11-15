@@ -246,7 +246,11 @@ Compact basis functions are found in the system. It is recommended to use Becke 
             self.cphf_grids.reset(cell)
         return self
 
-    dump_flags = rks_cpu.KohnShamDFT.dump_flags
+    def dump_flags(self, verbose=None):
+        logger.info(self, 'XC functionals = %s', self.xc)
+        logger.info(self, 'small_rho_cutoff = %g', self.small_rho_cutoff)
+        self.grids.dump_flags(verbose)
+        return self
 
     get_veff = NotImplemented
     get_rho = NotImplemented
