@@ -24,6 +24,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import hf as hf_cpu
+from pyscf.pbc import tools
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import return_cupy_array, contract
 from gpu4pyscf.scf import hf as mol_hf
@@ -155,6 +156,27 @@ class SCF(mol_hf.SCF):
             self.j_engine.reset(cell)
         return self
 
+    def dump_flags(self, verbose=None):
+        mol_hf.SCF.dump_flags(self, verbose)
+        log = logger.new_logger(self, verbose)
+        log.info('******** PBC SCF flags ********')
+        log.info('kpt = %s', self.kpt)
+        log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
+        cell = self.cell
+        if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
+            isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
+            madelung = tools.pbc.madelung(cell, self.kpt[None])
+            log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
+            log.info('    Total energy shift due to Ewald probe charge'
+                     ' = -1/2 * Nelec*madelung = %.12g',
+                     madelung*cell.nelectron * -.5)
+        if getattr(self, 'smearing_method', None) is not None:
+            log.info('Smearing method = %s', self.smearing_method)
+        log.info('DF object = %s', self.with_df)
+        if not getattr(self.with_df, 'build', None):
+            # .dump_flags() is called in pbc.df.build function
+            self.with_df.dump_flags(verbose)
+
     def build(self, cell=None):
         # To handle the attribute kpt or kpts loaded from chkfile
         if 'kpt' in self.__dict__:
@@ -167,7 +189,6 @@ class SCF(mol_hf.SCF):
     kpts = hf_cpu.SCF.kpts
     mol = hf_cpu.SCF.mol # required by the hf.kernel
 
-    dump_flags = hf_cpu.SCF.dump_flags
     get_bands = get_bands
     get_rho = get_rho
 

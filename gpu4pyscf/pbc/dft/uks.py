@@ -107,7 +107,11 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
         pbcuhf.UHF.__init__(self, cell, kpt, exxdiv=exxdiv)
         rks.KohnShamDFT.__init__(self, xc)
 
-    dump_flags = uks_cpu.UKS.dump_flags
+    def dump_flags(self, verbose=None):
+        pbcuhf.UHF.dump_flags(self, verbose)
+        rks.KohnShamDFT.dump_flags(self, verbose)
+        return self
+
     get_hcore = rks.RKS.get_hcore
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec
