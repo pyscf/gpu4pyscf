@@ -228,8 +228,12 @@ if pyscf_version <= 11:
                 elif hasattr(val, 'to_gpu'):
                     val = val.to_gpu()
             setattr(out, key, val)
-        if hasattr(method, '_scf'):
-            out._scf = method._scf.to_cpu()
+
+        for key in ['_scf', '_numint']:
+            val = getattr(method, key, None)
+            if hasattr(val, 'to_gpu'):
+                setattr(out, key, val.to_gpu())
+
         if hasattr(out, 'reset'):
             try:
                 out.reset()

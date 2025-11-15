@@ -88,8 +88,12 @@ def to_cpu(method, out=None):
             elif isinstance(val, cupy.ndarray):
                 val = val.get()
         setattr(out, key, val)
-    if hasattr(method, '_scf'):
-        out._scf = method._scf.to_cpu()
+
+    for key in ['_scf', '_numint']:
+        val = getattr(method, key, None)
+        if hasattr(val, 'to_cpu'):
+            setattr(out, key, val.to_cpu())
+
     if hasattr(out, 'reset'):
         try:
             out.reset()
