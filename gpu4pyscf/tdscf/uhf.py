@@ -22,6 +22,7 @@ from pyscf.data import nist
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.tdscf._uhf_resp_sf import gen_uhf_response_sf, cache_xc_kernel_sf
 from gpu4pyscf.gto.int3c1e import int1e_grids
@@ -819,7 +820,12 @@ class TDA(TDBase):
             from gpu4pyscf.grad import tduhf
             return tduhf.Gradients(self)
 
-    to_cpu = tdhf_gpu.TDA.to_cpu
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [((cp.asnumpy(xa), cp.asnumpy(xb)), y)
+                       for (xa, xb), y in out.xy]
+        return out
 
 CIS = TDA
 
@@ -1170,7 +1176,13 @@ class TDHF(TDBase):
 
     Gradients = TDA.Gradients
 
-    to_cpu = tdhf_gpu.TDHF.to_cpu
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [((cp.asnumpy(xa), cp.asnumpy(xb)),
+                       (cp.asnumpy(ya), cp.asnumpy(yb)))
+                       for (xa, xb), (ya, yb) in out.xy]
+        return out
 
 TDUHF = TDHF
 
