@@ -135,7 +135,7 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             # spin-orbital basis is twice the size of NR basis
             atom_slices[:,2:] *= 2
             nao = xmol.nao_nr() * 2
-            x = cp.zeros((nao,nao))
+            x = cp.zeros((nao,nao), dtype=cp.complex128)
             for ia in range(xmol.natm):
                 ish0, ish1, p0, p1 = atom_slices[ia]
                 shls_slice = (ish0, ish1, ish0, ish1)
@@ -181,7 +181,7 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             # spin-orbital basis is twice the size of NR basis
             atom_slices[:,2:] *= 2
             nao = xmol.nao_nr() * 2
-            x = cp.zeros((nao,nao))
+            x = cp.zeros((nao,nao), dtype=cp.complex128)
             for ia in range(xmol.natm):
                 ish0, ish1, p0, p1 = atom_slices[ia]
                 shls_slice = (ish0, ish1, ish0, ish1)
@@ -287,9 +287,14 @@ class X2C1E_GSCF(_X2C_SCF):
         raise NotImplementedError
 
     def to_cpu(self):
-        from pyscf.x2c.x2c import X2C1E_GSCF
-        x2c1e_obj = X2C1E_GSCF(self)
+        from pyscf.scf import ghf as ghf_cpu
+        mf_cpu = ghf_cpu.GHF(self.mol)
+        x2c1e_obj = mf_cpu.x2c1e()
+        cpu_x2c_helper = x2c1e_obj.with_x2c
+        utils.to_cpu(self.with_x2c, out=cpu_x2c_helper)
         utils.to_cpu(self, out=x2c1e_obj)
+        x2c1e_obj.with_x2c = cpu_x2c_helper
+        
         return x2c1e_obj
 
 
@@ -357,7 +362,6 @@ def _x2c1e_xmatrix(t, v, w, s, c):
     h[nao:,nao:] = w * (.25/c**2) - t
     m[:nao,:nao] = s
     m[nao:,nao:] = t * (.5/c**2)
-
     try:
         e, a = solve_gen_eigh_cupy(h, m)
         cl = a[:nao,nao:]
