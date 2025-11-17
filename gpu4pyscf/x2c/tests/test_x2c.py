@@ -15,6 +15,7 @@
 import cupy as cp
 import unittest
 from pyscf import gto
+from pyscf import lib
 from pyscf import scf as pyscf_scf
 from gpu4pyscf import scf
 import scipy.linalg
@@ -59,6 +60,8 @@ class KnownValues(unittest.TestCase):
         e_cpu = myx2c_cpu.kernel()
         self.assertAlmostEqual(e_gpu, -76.08176796102066, 9)
         self.assertAlmostEqual(e_cpu, e_gpu, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -31.8150290793213, 5)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_cpu.mo_energy), 5)
 
         myx2c = scf.GHF(mol).x2c1e()
         myx2c.with_x2c.xuncontract = True
@@ -68,6 +71,8 @@ class KnownValues(unittest.TestCase):
         e_cpu = myx2c_cpu.kernel()
         self.assertAlmostEqual(e_gpu, -76.075431226329414, 9)
         self.assertAlmostEqual(e_cpu, e_gpu, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -31.811713632863754, 5)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_cpu.mo_energy), 5)
 
         myx2c = scf.GHF(mol).x2c1e()
         myx2c.with_x2c.xuncontract = True
@@ -78,7 +83,9 @@ class KnownValues(unittest.TestCase):
         myx2c_cpu.with_x2c.approx = 'ATOM1E'
         e_cpu = myx2c_cpu.kernel()
         self.assertAlmostEqual(e_gpu, -76.0761343226608, 9)
-        # self.assertAlmostEqual(e_cpu, e_gpu, 9)
+        # self.assertAlmostEqual(e_cpu, e_gpu, 9) # TODO: waiting to fix the bug in 
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -31.814825611164004, 5)
+        # self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_cpu.mo_energy), 5)
 
         myx2c = scf.GHF(mol).x2c1e()
         myx2c.with_x2c.basis = 'aug-cc-pvqz'
@@ -88,6 +95,8 @@ class KnownValues(unittest.TestCase):
         e_cpu = myx2c_cpu.kernel()
         self.assertAlmostEqual(e_gpu, -76.08961705366349, 9)
         self.assertAlmostEqual(e_cpu, e_gpu, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -31.745790194455765, 5)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_cpu.mo_energy), 5)
 
     def test_1e_vs_atom1e(self):
         myx2c = scf.GHF(mol1).x2c1e()
@@ -98,6 +107,8 @@ class KnownValues(unittest.TestCase):
         e_gpu_atom = myx2c_atom.kernel()
         self.assertAlmostEqual(e_gpu_atom, -128.615723692333, 9)
         self.assertAlmostEqual(e_gpu, e_gpu_atom, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -41.15250349727189, 9)
+        self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_atom.mo_energy.get()), 9)
 
     def test_get_xmat_routine_and_get_hcore(self):
         myx2c = scf.GHF(mol).x2c1e()
