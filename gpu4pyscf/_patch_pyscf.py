@@ -16,7 +16,9 @@ import numpy as np
 import cupy
 import pyscf
 
-if int(pyscf.__version__.split('.')[1]) <= 10:
+pyscf_version = int(pyscf.__version__.split('.')[1])
+
+if pyscf_version <= 10:
     def _fftdf_to_gpu(self):
         from gpu4pyscf.pbc.df.fft import FFTDF
         return FFTDF(self.cell, self.kpts)
@@ -34,26 +36,6 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
         return GDF(self.cell, self.kpts)
     from pyscf.pbc.df.df import GDF
     GDF.to_gpu = _gdf_to_gpu
-
-    from pyscf.solvent.grad import pcm as pcm_grad
-    if hasattr(pcm_grad, 'WithSolventGrad'):
-        def _pcm_grad_to_gpu(self):
-            from pyscf.tdscf.rhf import TDBase
-            from pyscf.solvent.pcm import PCM
-            assert isinstance(self.base.with_solvent, PCM)
-            if isinstance(self, TDBase):
-                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
-            return self.base.to_gpu().PCM().Gradients()
-        pcm_grad.WithSolventGrad.to_gpu = _pcm_grad_to_gpu
-
-    from pyscf.solvent.hessian import pcm as pcm_hess
-    if hasattr(pcm_hess, 'WithSolventHess'):
-        def _pcm_hessian_to_gpu(self):
-            from pyscf.tdscf.rhf import TDBase
-            if isinstance(self, TDBase):
-                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
-            return self.base.to_gpu().PCM().Hessian()
-        pcm_hess.WithSolventHess.to_gpu = _pcm_hessian_to_gpu
 
     # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.10
     from pyscf import lib
@@ -182,3 +164,106 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
         return np.asarray(Ls, order='C')
     # Patch the get_lattice_Ls for pyscf-2.9 or older
     Cell.get_lattice_Ls = get_lattice_Ls
+
+if pyscf_version <= 11:
+    # In pyscf-2.11, the auxbasis_response attribute is not registered in the
+    # df.Hessian._keys. Consequently, this key is excluded by the conversion in
+    # utils.to_cpu()
+    from pyscf.df.hessian import rhf, rks, uhf, uks
+    rhf.Hessian._keys = uhf.Hessian._keys = \
+            rks.Hessian._keys = uks.Hessian._keys = {'auxbasis_response',}
+
+    from pyscf.lib import misc
+    misc._ATTRIBUTES_IN_NPARRAY = {
+        'kpt', 'kpts', '_kpts', 'kpts_band', 'mesh', 'frozen'}
+    def to_gpu(method, out=None):
+        '''Convert a method to its corresponding GPU variant, and recursively
+        converts all attributes of a method to cupy objects or gpu4pyscf objects.
+        '''
+        # If a GPU class inherits a CPU code, the "to_gpu" method may be resolved
+        # and available in the GPU class. Skip the conversion in this case.
+        if method.__module__.startswith('gpu4pyscf'):
+            return method
+
+        if out is None:
+            if isinstance(method, (misc.SinglePointScanner, misc.GradScanner)):
+                method = method.undo_scanner()
+
+            from importlib import import_module
+            mod = import_module(method.__module__.replace('pyscf', 'gpu4pyscf'))
+            try:
+                cls = getattr(mod, method.__class__.__name__)
+            except AttributeError:
+                if hasattr(cls, 'from_cpu'):
+                    # the customized to_gpu function can be accessed at module
+                    # levelin gpu4pyscf.
+                    return cls.from_cpu(method)
+                raise
+
+            # Allow gpu4pyscf to customize the to_gpu method for PySCF classes.
+            if hasattr(mod, 'from_cpu'):
+                return mod.from_cpu(method)
+
+            # A temporary GPU instance. This ensures to initialize private
+            # attributes that are only available for GPU code.
+            cls = getattr(mod, method.__class__.__name__)
+            out = method.view(cls)
+
+        elif hasattr(out, 'from_cpu'):
+            out.__dict__.update(out.__class__.from_cpu(method).__dict__)
+            return out
+
+        cls_keys = set.union(*[getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]])
+        cpu_keys = set.union(*[getattr(cls, '_keys', ()) for cls in method.__class__.__mro__[:-1]])
+        # Discards keys that are only defined in CPU classes
+        discards = cpu_keys.difference(cls_keys)
+        for k in discards:
+            out.__dict__.pop(k, None)
+
+        for key, val in method.__dict__.items():
+            # Convert only the keys that are defined in the corresponding GPU class
+            if key in cls_keys and key not in misc._ATTRIBUTES_IN_NPARRAY:
+                if isinstance(val, np.ndarray):
+                    val = cupy.asarray(val)
+                elif hasattr(val, 'to_gpu'):
+                    val = val.to_gpu()
+            setattr(out, key, val)
+
+        for key in ['_scf', '_numint']:
+            val = getattr(method, key, None)
+            if hasattr(val, 'to_gpu'):
+                setattr(out, key, val.to_gpu())
+
+        if hasattr(out, 'reset'):
+            try:
+                out.reset()
+            except NotImplementedError:
+                pass
+        return out
+    lib.to_gpu = misc.to_gpu = to_gpu
+
+    from pyscf.solvent.grad import pcm as pcm_grad
+    if hasattr(pcm_grad, 'WithSolventGrad'):
+        def _pcm_grad_to_gpu(self):
+            from pyscf.tdscf.rhf import TDBase
+            from pyscf.solvent.pcm import PCM
+            assert isinstance(self.base.with_solvent, PCM)
+            if isinstance(self, TDBase):
+                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
+            return misc.to_gpu(self, self.base.to_gpu().Gradients())
+        pcm_grad.WithSolventGrad.to_gpu = _pcm_grad_to_gpu
+
+    from pyscf.solvent.hessian import pcm as pcm_hess
+    if hasattr(pcm_hess, 'WithSolventHess'):
+        def _pcm_hessian_to_gpu(self):
+            from pyscf.tdscf.rhf import TDBase
+            if isinstance(self, TDBase):
+                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
+            return misc.to_gpu(self, self.base.to_gpu().Hessian())
+        pcm_hess.WithSolventHess.to_gpu = _pcm_hessian_to_gpu
+
+    from pyscf.solvent.hessian import smd as smd_hess
+    if hasattr(smd_hess, 'WithSolventHess'):
+        def _smd_hessian_to_gpu(self):
+            return misc.to_gpu(self, self.base.to_gpu().Hessian())
+        smd_hess.WithSolventHess.to_gpu = _smd_hessian_to_gpu

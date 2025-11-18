@@ -119,16 +119,7 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
     init_guess_by_vsap = uks_cpu.UKS.init_guess_by_vsap
-
     to_hf = NotImplemented
-
-    def reset(self, mol=None):
-        hf.SCF.reset(self, mol)
-        self.grids.reset(mol)
-        self.nlcgrids.reset(mol)
-        self.cphf_grids.reset(mol)
-        self._numint.reset()
-        return self
 
     def nuc_grad_method(self):
         from gpu4pyscf.grad import uks as uks_grad

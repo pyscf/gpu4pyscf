@@ -107,7 +107,7 @@ class Hessian(rks_hess.Hessian):
 
     _keys = {'auxbasis_response',}
 
-    auxbasis_response = 1
+    auxbasis_response = 2
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     get_jk_mo = df_rhf_hess._get_jk_mo

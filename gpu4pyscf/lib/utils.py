@@ -73,19 +73,27 @@ def to_cpu(method, out=None):
         cls = getattr(mod, method.__class__.__name__)
         out = method.view(cls)
 
-    # Convert only the keys that are defined in the corresponding CPU class
-    cls_keys = [getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]]
-    out_keys = set(out.__dict__).union(*cls_keys)
-    # Only overwrite the attributes of the same name.
-    keys = out_keys.intersection(method.__dict__)
+    cls_keys = set.union(*[getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]])
+    gpu_keys = set.union(*[getattr(cls, '_keys', ()) for cls in method.__class__.__mro__[:-1]])
+    # Discards keys that are only defined in GPU classes
+    discards = gpu_keys.difference(cls_keys)
+    for k in discards:
+        out.__dict__.pop(k, None)
 
-    for key in keys:
-        val = getattr(method, key)
-        if hasattr(val, 'to_cpu'):
-            val = val.to_cpu()
-        elif isinstance(val, cupy.ndarray):
-            val = val.get()
+    for key, val in method.__dict__.items():
+        # Convert only the keys that are defined in the corresponding GPU class
+        if key in cls_keys:
+            if hasattr(val, 'to_cpu'):
+                val = val.to_cpu()
+            elif isinstance(val, cupy.ndarray):
+                val = val.get()
         setattr(out, key, val)
+
+    for key in ['_scf', '_numint']:
+        val = getattr(method, key, None)
+        if hasattr(val, 'to_cpu'):
+            setattr(out, key, val.to_cpu())
+
     if hasattr(out, 'reset'):
         try:
             out.reset()

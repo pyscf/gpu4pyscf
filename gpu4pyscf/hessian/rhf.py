@@ -133,8 +133,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    assert atmlst is None
-    atmlst = range(mol.natm)
+    if atmlst is None:
+        atmlst = range(mol.natm)
 
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = mocc.dot(mocc.T) * 2
@@ -951,6 +951,12 @@ class HessianBase(lib.StreamObject):
                  self.__class__, self.base.__class__)
         log.info('Max_memory %d MB (current use %d MB)',
                  self.max_memory, lib.current_memory()[0])
+        return self
+
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self.base.reset(mol)
         return self
 
 class Hessian(HessianBase):

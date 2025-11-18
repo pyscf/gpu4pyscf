@@ -19,7 +19,6 @@ import pytest
 from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
-from packaging import version
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
@@ -27,8 +26,6 @@ O       0.0000000000     0.0000000000     0.0000000000
 H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
-
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
 

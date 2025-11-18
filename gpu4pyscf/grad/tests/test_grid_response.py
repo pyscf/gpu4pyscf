@@ -19,19 +19,16 @@ import unittest
 import pytest
 from pyscf.dft import rks as cpu_rks
 from gpu4pyscf.dft import rks as gpu_rks
-from packaging import version
 
-atom = '''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-'''
-
-bas0='def2-tzvpp'
-grids_level = 5
-nlcgrids_level = 3
 def setUpModule():
     global mol_sph, mol_cart
+    atom = '''
+    O       0.0000000000    -0.0000000000     0.1174000000
+    H      -0.7570000000    -0.0000000000    -0.4696000000
+    H       0.7570000000     0.0000000000    -0.4696000000
+    '''
+
+    bas0='def2-tzvpp'
     mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000,
                       output='/dev/null', verbose=1)
 

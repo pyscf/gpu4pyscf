@@ -20,7 +20,6 @@ from pyscf import scf, dft, tdscf
 from pyscf.geomopt.geometric_solver import optimize
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
-from packaging import version
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
