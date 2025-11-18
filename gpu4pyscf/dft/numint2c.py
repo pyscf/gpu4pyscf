@@ -419,7 +419,7 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
 
 class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     '''Numerical integration methods for 2-component basis (used by GKS)'''
-    _keys = {'gdftopt'}
+    _keys = {'gdftopt', 'collinear', 'spin_samples', 'collinear_thrd', 'collinear_samples'}
     to_gpu = utils.to_gpu
     device = utils.device
 
@@ -474,14 +474,14 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
         '''
         raise NotImplementedError("Kxc calculation is not supported.")
 
-    def get_rho(self, mol, dm, grids, max_memory=2000):
+    def get_rho(self, mol, dm, grids, max_memory=2000, verbose=None):
         '''Density in real space
         '''
         nao = dm.shape[-1] // 2
         dm_a = dm[:nao,:nao].real
         dm_b = dm[nao:,nao:].real
         ni = self._to_numint1c()
-        return ni.get_rho(mol, dm_a+dm_b, grids, max_memory)
+        return ni.get_rho(mol, dm_a+dm_b, grids, max_memory, verbose)
 
     _gks_mcol_vxc = _gks_mcol_vxc
     _gks_mcol_fxc = _gks_mcol_fxc
