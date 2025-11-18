@@ -250,5 +250,5 @@ class GHF(hf.SCF):
         '''
         from gpu4pyscf.x2c.x2c import x2c1e_ghf
         return x2c1e_ghf(self)
-        
+    
     x2c = x2c1e
