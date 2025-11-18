@@ -195,9 +195,9 @@ class KnownValues(unittest.TestCase):
         shls_slice = (0, mol.nbas)
         
         v0_gpu = numint2c._mcol_lda_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 0)
+            mask_gpu, shls_slice, ao_loc, 0, compared_with_cpu=True)
         v1_gpu = numint2c._mcol_lda_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 1)
+            mask_gpu, shls_slice, ao_loc, 1, compared_with_cpu=True)
         v1_gpu = v1_gpu + v1_gpu.conj().T
 
         # --- Assertions (Always Run) ---
@@ -249,9 +249,9 @@ class KnownValues(unittest.TestCase):
         shls_slice = (0, mol.nbas)
         
         v0_gpu = numint2c._mcol_gga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 0)
+            mask_gpu, shls_slice, ao_loc, 0, compared_with_cpu=True)
         v1_gpu = numint2c._mcol_gga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 1)
+            mask_gpu, shls_slice, ao_loc, 1, compared_with_cpu=True)
         v1_gpu = v1_gpu + v1_gpu.conj().T
 
         # --- Assertions (Always Run) ---
@@ -303,9 +303,9 @@ class KnownValues(unittest.TestCase):
         shls_slice = (0, mol.nbas)
         
         v0_gpu = numint2c._mcol_mgga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 0)
+            mask_gpu, shls_slice, ao_loc, 0, compared_with_cpu=True)
         v1_gpu = numint2c._mcol_mgga_vxc_mat(mol, ao, cupy.asarray(weight), rho, vxc_gpu.copy(), 
-            mask_gpu, shls_slice, ao_loc, 1)
+            mask_gpu, shls_slice, ao_loc, 1, compared_with_cpu=True)
         v1_gpu = v1_gpu + v1_gpu.conj().T
 
         # --- Assertions (Always Run) ---

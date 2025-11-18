@@ -109,6 +109,7 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
 
     nelec = 0
     excsum = 0
+    # vmat = cp.zeros((n2c,n2c), dtype=cp.complex128)
     vmat_aa_real = cp.zeros((nao,nao), dtype=cp.float64)
     vmat_ab_real = cp.zeros((nao,nao), dtype=cp.float64)
     vmat_ba_real = cp.zeros((nao,nao), dtype=cp.float64)
@@ -145,16 +146,16 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
                 den = rho[0,0] * weight
             nelec += den.sum()
             excsum += cp.dot(den, exc)
-            vtmp = fmat(mol, ao, weight, rho, vxc, mask, shls_slice,
+            vtmpaa, vtmpab, vtmpba, vtmpbb = fmat(mol, ao, weight, rho, vxc, mask, shls_slice,
                             ao_loc, hermi)
-            add_sparse(vmat_aa_real, cp.ascontiguousarray(vtmp[:nao,:nao].real), mask)
-            add_sparse(vmat_ab_real, cp.ascontiguousarray(vtmp[:nao,nao:].real), mask)
-            add_sparse(vmat_ba_real, cp.ascontiguousarray(vtmp[nao:,:nao].real), mask)
-            add_sparse(vmat_bb_real, cp.ascontiguousarray(vtmp[nao:,nao:].real), mask)
-            add_sparse(vmat_aa_imag, cp.ascontiguousarray(vtmp[:nao,:nao].imag), mask)
-            add_sparse(vmat_ab_imag, cp.ascontiguousarray(vtmp[:nao,nao:].imag), mask)
-            add_sparse(vmat_ba_imag, cp.ascontiguousarray(vtmp[nao:,:nao].imag), mask)
-            add_sparse(vmat_bb_imag, cp.ascontiguousarray(vtmp[nao:,nao:].imag), mask)
+            add_sparse(vmat_aa_real, cp.ascontiguousarray(vtmpaa.real), mask)
+            add_sparse(vmat_ab_real, cp.ascontiguousarray(vtmpab.real), mask)
+            add_sparse(vmat_ba_real, cp.ascontiguousarray(vtmpba.real), mask)
+            add_sparse(vmat_bb_real, cp.ascontiguousarray(vtmpbb.real), mask)
+            add_sparse(vmat_aa_imag, cp.ascontiguousarray(vtmpaa.imag), mask)
+            add_sparse(vmat_ab_imag, cp.ascontiguousarray(vtmpab.imag), mask)
+            add_sparse(vmat_ba_imag, cp.ascontiguousarray(vtmpba.imag), mask)
+            add_sparse(vmat_bb_imag, cp.ascontiguousarray(vtmpbb.imag), mask)
 
         row1 = cp.concatenate([vmat_aa_real, vmat_ab_real], axis=1)
         row2 = cp.concatenate([vmat_ba_real, vmat_bb_real], axis=1)
@@ -164,7 +165,7 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
         row2 = cp.concatenate([vmat_ba_imag, vmat_bb_imag], axis=1)
         vmat_imag = cp.concatenate([row1, row2], axis=0)
 
-        vmat = vmat_real + 1j * vmat_imag          
+        vmat = vmat_real + 1j * vmat_imag
 
     elif xctype == 'HF':
         pass
@@ -216,7 +217,7 @@ def mcfun_eval_xc_adapter(ni, xc_code):
             collinear_samples=ni.collinear_samples)
     return eval_xc_eff
 
-def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi):
+def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, compared_with_cpu=False):
     '''Vxc matrix of multi-collinear LDA'''
     wv = weight * vxc
     if hermi:
@@ -245,13 +246,16 @@ def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi
     mataa = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
     aow = _scale_ao(ao, wr[0]-wmz[0], out=aow)  # Mz
     matbb = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
-    row1 = cp.concatenate([mataa, matab], axis=1)
-    row2 = cp.concatenate([matba, matbb], axis=1)
+    if compared_with_cpu:
+        row1 = cp.concatenate([mataa, matab], axis=1)
+        row2 = cp.concatenate([matba, matbb], axis=1)
 
-    mat = cp.concatenate([row1, row2], axis=0)
-    return mat
+        mat = cp.concatenate([row1, row2], axis=0)
+        return mat
+    else:
+        return mataa, matab, matba, matbb
 
-def _mcol_gga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi):
+def _mcol_gga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, compared_with_cpu=False):
     '''Vxc matrix of multi-collinear LDA'''
     wv = weight * vxc
     if hermi:
@@ -285,11 +289,14 @@ def _mcol_gga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi
         aow = _scale_ao(ao[1:4], (wr[1:4]-wmz[1:4]).conj(), out=aow)  # Mz
         matbb += _dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
 
-    row1 = cp.concatenate([mataa, matab], axis=1)
-    row2 = cp.concatenate([matba, matbb], axis=1)
+    if compared_with_cpu:
+        row1 = cp.concatenate([mataa, matab], axis=1)
+        row2 = cp.concatenate([matba, matbb], axis=1)
 
-    mat = cp.concatenate([row1, row2], axis=0)
-    return mat
+        mat = cp.concatenate([row1, row2], axis=0)
+        return mat
+    else:
+        return mataa, matab, matba, matbb
 
 def _tau_dot(mol, bra, ket, wv, mask, shls_slice, ao_loc):
     '''nabla_ao dot nabla_ao
@@ -303,7 +310,7 @@ def _tau_dot(mol, bra, ket, wv, mask, shls_slice, ao_loc):
     mat += _dot_ao_ao(mol, bra[3], aow, mask, shls_slice, ao_loc)
     return mat
 
-def _mcol_mgga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi):
+def _mcol_mgga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, compared_with_cpu=False):
     '''Vxc matrix of multi-collinear MGGA'''
     wv = weight * vxc
     tau_idx = 4
@@ -345,11 +352,14 @@ def _mcol_mgga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, herm
         aow = _scale_ao(ao[1:4], (wr[1:4]-wmz[1:4]).conj(), out=aow)  # Mz
         matbb += _dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
 
-    row1 = cp.concatenate([mataa, matab], axis=1)
-    row2 = cp.concatenate([matba, matbb], axis=1)
+    if compared_with_cpu:
+        row1 = cp.concatenate([mataa, matab], axis=1)
+        row2 = cp.concatenate([matba, matbb], axis=1)
 
-    mat = cp.concatenate([row1, row2], axis=0)
-    return mat
+        mat = cp.concatenate([row1, row2], axis=0)
+        return mat
+    else:
+        return mataa, matab, matba, matbb
 
 def _mcol_lda_fxc_mat(mol, ao, weight, rho0, rho1, fxc,
                       mask, shls_slice, ao_loc, hermi):
