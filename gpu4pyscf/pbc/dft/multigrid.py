@@ -687,10 +687,8 @@ def get_rho(ni, dm, kpts=None):
 
 def eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
+    assert cell.dimension == 3
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -702,6 +700,36 @@ def eval_nucG(cell, mesh):
     nucG = contract('qxy,qz->xyz', rho_xy, SIz).ravel()
     nucG *= tools.get_coulG(cell, Gv=Gv)
     return nucG
+
+def eval_nucG_SI_gradient(cell, mesh, rho_g):
+    ngrids = np.prod(mesh)
+    assert rho_g.shape == (ngrids,)
+
+    assert cell.dimension == 3
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    b = cell.reciprocal_vectors()
+    coords = cell.atom_coords()
+    rb = cp.asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    dSI_prefactor = -1j * Gv.T * rho_g.conj()
+    charges = -cell.atom_charges()
+    coulG = tools.get_coulG(cell, Gv=Gv)
+
+    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+
+    for i_atom in range(cell.natm):
+        SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
+        de[i_atom, :] = charges[i_atom] * (dSI_prefactor @ (coulG * SI))
+
+    grad_max_imag = cp.max(cp.abs(de.imag))
+    if grad_max_imag >= 1e-8:
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from nuclear repulsion term structure factor gradient")
+
+    de = de.real
+    de /= cell.vol
+    return de
 
 def get_nuc(ni, kpts=None):
     assert kpts is None or is_zero(kpts)
@@ -820,7 +848,7 @@ def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charg
 def eval_vpplocG(cell, mesh):
     '''PRB, 58, 3641 Eq (5)
     '''
-    assert cell.dimension != 2
+    assert cell.dimension == 3
     Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()

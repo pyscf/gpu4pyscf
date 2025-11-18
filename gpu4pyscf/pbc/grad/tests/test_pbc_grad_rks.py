@@ -25,7 +25,7 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 disp = 1e-4
 
 def setUpModule():
-    global cell, cell_orth
+    global cell, cell_orth, cell_no_pseudo
     cell = pyscf.M(
         # The original geometry of second carbon is [1.685068664391,1.685068664391,1.685068664391]
         # Henry distorted it to make the gradient non-zero
@@ -36,7 +36,9 @@ def setUpModule():
         3.370137329, 3.370137329, 0.000000000''',
         basis = 'gth-szv',
         pseudo = 'gth-pade',
-        unit = 'bohr')
+        unit = 'bohr',
+        output = '/dev/null',
+    )
 
     cell_orth = pyscf.M(
         atom = 'H 0 0 0; H 1. 1. 1.',
@@ -45,12 +47,31 @@ def setUpModule():
         verbose = 5,
         pseudo = 'gth-pade',
         unit = 'bohr',
-        output = '/dev/null')
+        output = '/dev/null',
+    )
+
+    cell_no_pseudo = pyscf.M(
+        atom = [['C', [0.0, 0.0, 0.0]], ['C', [1.695068664391,1.685068664391,1.685068664391]]],
+        a = '''
+            0.000000000, 3.370137329, 3.370137329
+            3.370137329, 0.000000000, 3.370137329
+            3.370137329, 3.370137329, 0.000000000
+        ''',
+        unit = 'bohr',
+        basis = [[0, [1.3, 1]], [0, [0.9, 1]], [1, [0.8, 1]]],
+        # pseudo = 'gth-pade',
+        verbose = 5,
+        output = '/dev/null',
+    )
 
 def tearDownModule():
-    global cell_orth, cell
+    global cell, cell_orth, cell_no_pseudo
+    cell.stdout.close()
+    del cell
     cell_orth.stdout.close()
-    del cell_orth, cell
+    del cell_orth
+    cell_no_pseudo.stdout.close()
+    del cell_no_pseudo
 
 def numerical_gradient(cell, xc):
     def get_energy(cell):
@@ -77,6 +98,7 @@ def numerical_gradient(cell, xc):
             Em = get_energy(cell_copy)
 
             gradient[i_atom, i_xyz] = (Ep - Em) / (2 * disp)
+    print(f"ref = np.{repr(gradient)}")
     return gradient
 
 class KnownValues(unittest.TestCase):
@@ -112,6 +134,18 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol = 1e-10
         mf.run()
         mf._numint = multigrid.MultiGridNumInt(cell)
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_lda_grad_no_pseudo(self):
+        # ref = numerical_gradient(cell_no_pseudo, xc='lda,vwn')
+        ref = np.array([[-2.11594107e-02, -1.06581410e-10,  1.17239551e-09],
+                        [ 2.11594103e-02,  3.55271368e-11, -4.97379915e-10]])
+        mf = cell_no_pseudo.RKS(xc='lda,vwn').to_gpu()
+        mf.conv_tol = 1e-10
+        mf.run()
+        mf._numint = multigrid.MultiGridNumInt(cell_no_pseudo)
         g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -171,6 +205,18 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    def test_hybrid_grad_without_pseudo(self):
+        # ref = numerical_gradient(cell_no_pseudo, xc='pbe0')
+        ref = np.array([[-2.16143961e-02, -9.59232693e-10,  3.55271368e-10],
+                        [ 2.16152227e-02, -1.20792265e-09,  3.09086090e-09]])
+        mf = cell_no_pseudo.RKS(xc='pbe0').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_no_pseudo)
+        mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
+        mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_no_pseudo)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skip('Insufficient GPU memory for rsjk.q_cond')

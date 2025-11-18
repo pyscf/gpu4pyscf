@@ -75,7 +75,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
         # Attention: The orbital derivative of vpploc term is in multigrid_v2.get_veff_ip1() function.
         rho_g = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0, kpts)
         rho_g = rho_g[0,0]
-        dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
+        if cell._pseudo:
+            dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
+        else:
+            dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
 
         dm_dmH = dm0 + dm0.transpose(0,2,1).conj()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
@@ -90,9 +93,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
             h1ao = hcore_deriv(ia)
             dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
 
-    dm0_cpu = dm0.get()
-    dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_cpu, kpts = kpts)
-    dh1e += cp.asarray(dh1e_pp_nonlocal)
+    if cell._pseudo:
+        dm0_cpu = dm0.get()
+        dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_cpu, kpts = kpts)
+        dh1e += cp.asarray(dh1e_pp_nonlocal)
 
     log.timer('gradients of 1e part', *t1)
 

@@ -58,7 +58,6 @@ class Gradients(rhf.GradientsBase):
 
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
         dm0_combined_spin = dm0[0] + dm0[1]
-        dm0_cpu = dm0_combined_spin.get()
 
         dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
         dme0_sf = (dme0[0] + dme0[1]).get()
@@ -107,9 +106,13 @@ class Gradients(rhf.GradientsBase):
         # the CPU code requires the attribute .rhoG
         rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
         rhoG = rhoG[0,0] + rhoG[1,0]
-        de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
+        dm0_cpu = dm0_combined_spin.get()
+        if cell._pseudo:
+            de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
+            de += vppnl_nuc_grad(cell, dm0_cpu)
+        else:
+            de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
         rhoG = None
-        de += vppnl_nuc_grad(cell, dm0_cpu)
         core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0].get()
         kinetic_contribution = _contract_vhf_dm(
             self, core_hamiltonian_gradient, dm0_cpu

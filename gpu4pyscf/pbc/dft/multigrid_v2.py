@@ -1533,8 +1533,10 @@ def get_veff_ip1(
         xc_for_fock[:, 0] += coulomb_on_g_mesh
 
     if with_pseudo_vloc_orbital_derivative:
-        assert cell._pseudo is not None
-        xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG(cell, mesh)
+        if cell._pseudo:
+            xc_for_fock[:, 0] += multigrid_v1.eval_vpplocG(cell, mesh)
+        else:
+            xc_for_fock[:, 0] += multigrid_v1.eval_nucG(cell, mesh)
 
     veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
         ni, xc_for_fock, dm_kpts, hermi, kpts_band, with_tau = (xc_type == "MGGA")
