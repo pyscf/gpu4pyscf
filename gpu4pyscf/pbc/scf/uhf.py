@@ -42,7 +42,11 @@ class UHF(pbchf.SCF):
 
     nelec = uhf_cpu.UHF.nelec
 
-    dump_flags = uhf_cpu.UHF.dump_flags
+    def dump_flags(self, verbose=None):
+        pbchf.SCF.dump_flags(self, verbose)
+        logger.info(self, 'number of electrons per cell  '
+                    'alpha = %d beta = %d', *self.nelec)
+        return self
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
                  kpt=None, kpts_band=None):

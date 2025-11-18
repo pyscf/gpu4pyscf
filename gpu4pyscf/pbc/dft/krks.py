@@ -188,6 +188,11 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
         khf.KRHF.__init__(self, cell, kpts, exxdiv=exxdiv)
         rks.KohnShamDFT.__init__(self, xc)
 
+    def dump_flags(self, verbose=None):
+        khf.KRHF.dump_flags(self, verbose)
+        rks.KohnShamDFT.dump_flags(self, verbose)
+        return self
+
     def get_hcore(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
@@ -208,7 +213,6 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
         from gpu4pyscf.pbc.grad.krks import Gradients
         return Gradients(self)
 
-    dump_flags = krks_cpu.KRKS.dump_flags
     get_veff = get_veff
     energy_elec = energy_elec
     get_rho = get_rho

@@ -22,8 +22,9 @@ __all__ = [
 
 import numpy as np
 import cupy as cp
-from pyscf.pbc.scf import khf as khf_cpu
 from pyscf import lib
+from pyscf.pbc.scf import khf as khf_cpu
+from pyscf.pbc import tools
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
     return_cupy_array, contract, tag_array, sandwich_dot)
@@ -42,21 +43,22 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f_kpts
 
-    if diis_start_cycle is None:
-        diis_start_cycle = mf.diis_start_cycle
-    if level_shift_factor is None:
-        level_shift_factor = mf.level_shift
-    if damp_factor is None:
-        damp_factor = mf.damp
     if s_kpts is None: s_kpts = mf.get_ovlp()
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
 
-    if 0 <= cycle < diis_start_cycle-1 and damp_factor and fock_last is not None:
-        f_kpts = [pbchf.damping(f, f_prev, damp_factor)
-                  for f,f_prev in zip(f_kpts,fock_last)]
+    if diis_start_cycle is None:
+        diis_start_cycle = mf.diis_start_cycle
+    if damp_factor is None:
+        damp_factor = mf.damp
+    if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+        f_kpts = cp.asarray([pbchf.damping(f, f_prev, damp_factor)
+                             for f,f_prev in zip(f_kpts,fock_last)])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
-    if level_shift_factor:
+
+    if level_shift_factor is None:
+        level_shift_factor = mf.level_shift
+    if level_shift_factor is not None:
         f_kpts = [pbchf.level_shift(s, dm_kpts[k], f_kpts[k], level_shift_factor)
                   for k, s in enumerate(s_kpts)]
     return cp.asarray(f_kpts)
@@ -245,6 +247,34 @@ class KSCF(pbchf.SCF):
         self.conv_tol = max(cell.precision * 10, 1e-8)
         self.exx_built = False
 
+    def dump_flags(self, verbose=None):
+        mol_hf.SCF.dump_flags(self, verbose)
+        log = logger.new_logger(self, verbose)
+        log.info('\n')
+        log.info('******** PBC SCF flags ********')
+        log.info('N kpts = %d', len(self.kpts))
+        log.debug('kpts = %s', self.kpts)
+        log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
+        cell = self.cell
+        if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
+            isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
+            madelung = tools.pbc.madelung(cell, self.kpts)
+            log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
+            nkpts = len(self.kpts)
+            # FIXME: consider the fractional num_electron or not? This maybe
+            # relates to the charged system.
+            nelectron = float(self.cell.tot_electrons(nkpts)) / nkpts
+            log.info('    Total energy shift due to Ewald probe charge'
+                     ' = -1/2 * Nelec*madelung = %.12g',
+                     madelung*nelectron * -.5)
+        if getattr(self, 'smearing_method', None) is not None:
+            log.info('Smearing method = %s', self.smearing_method)
+        log.info('DF object = %s', self.with_df)
+        if not getattr(self.with_df, 'build', None):
+            # .dump_flags() is called in pbc.df.build function
+            self.with_df.dump_flags(verbose)
+        return self
+
     kpts = khf_cpu.KSCF.kpts
     mol = pbchf.SCF.mol
     mo_energy_kpts = khf_cpu.KSCF.mo_energy_kpts
@@ -252,7 +282,6 @@ class KSCF(pbchf.SCF):
     mo_occ_kpts = khf_cpu.KSCF.mo_occ_kpts
 
     check_sanity = pbchf.SCF.check_sanity
-    dump_flags = khf_cpu.KSCF.dump_flags
     reset = pbchf.SCF.reset
 
     def build(self, cell=None):
