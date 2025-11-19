@@ -12,8 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+try:
+    import ase
+except ImportError:
+    ase = None
 import pyscf
+import pytest
 
+@pytest.mark.skipif(ase is None, reason='ASE not available')
 def test_ase_optimize_cell():
     cell = pyscf.M(
         atom='''
@@ -35,6 +41,7 @@ def test_ase_optimize_cell():
     assert abs(atom_coords[1,0] - 2.10721898) < 5e-4
     assert abs(atom_coords[1,0]*2 - a[0,1]) < 1e-7
 
+@pytest.mark.skipif(ase is None, reason='ASE not available')
 def test_ase_optimize_mol():
     from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
     mol = pyscf.M(
