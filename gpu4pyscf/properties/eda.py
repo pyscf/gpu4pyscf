@@ -609,14 +609,155 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
     eda_cache["interfragment_dfxc_energy"] = E_dispersion_free_frozen - E_dispersion_free_fragment_sum
     return E_dispersion
 
-def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
-                                field_order = 2, virtual_singular_value_threshold = 1e-4, uncoupled_ferf = False):
+def _get_eda_polarization_FERF_subspace_projector(mf_i, i_frag, field_order = 2, virtual_singular_value_threshold = 1e-4, uncoupled_ferf = False):
     """
     Attention: The result is very sensetive to virtual_singular_value_threshold!
                If a near-zero singular vector that does not belong to FERF virtual space
                is mixed into the FERF virtual space, the result can be off by 1 kJ/mol!
     """
+    # i_frag index is just for logging
 
+    cp.cuda.runtime.deviceSynchronize()
+    time_polarization_ferf_i_start = time.time()
+
+    assert type(field_order) is int
+    if field_order == 1:
+        logger.info(mf_i, "Dipole response included for FERF (nD)")
+    elif field_order == 2:
+        logger.info(mf_i, "Dipole and quadrupole response included for FERF (nDQ)")
+    elif field_order == 3:
+        logger.info(mf_i, "Dipole, quadrupole and octupole response included for FERF (nDQO)")
+    else:
+        raise ValueError(f"Incorrect field_order ({field_order}) specified for get_eda_polarization_energy()")
+
+    mo_coeff_i = mf_i.mo_coeff
+    assert mo_coeff_i.ndim == 2
+    mo_occ_i = mf_i.mo_occ
+    assert mo_occ_i.ndim == 1
+    mocc_i = mo_coeff_i[:, mo_occ_i >  0]
+    mvir_i = mo_coeff_i[:, mo_occ_i == 0]
+    mo_energy_i = mf_i.mo_energy
+
+    mass_i = mf_i.mol.atom_mass_list()
+    mass_i = np.asarray(mass_i, dtype = np.float32)
+    coords_i = mf_i.mol.atom_coords(unit = "B")
+    center_of_mass_i = (mass_i @ coords_i) / mass_i.sum()
+
+    with mf_i.mol.with_common_orig(center_of_mass_i):
+        assert field_order >= 1
+        dipole_integral = mf_i.mol.intor('int1e_r')
+        dipole_integral = cp.asarray(dipole_integral)
+        dipole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, dipole_integral @ mocc_i)
+        dipole_integral = None
+        multipole_integral_ai = dipole_integral_ai
+        dipole_integral_ai = None
+        if field_order >= 2:
+            quadrupole_integral = mf_i.mol.intor('int1e_rr')
+
+            quadrupole_integral_trace = quadrupole_integral[0] + quadrupole_integral[4] + quadrupole_integral[8]
+            quadrupole_integral[0] = quadrupole_integral[0] - quadrupole_integral_trace / 3
+            quadrupole_integral[4] = quadrupole_integral[4] - quadrupole_integral_trace / 3
+            quadrupole_integral[8] = quadrupole_integral[8] - quadrupole_integral_trace / 3
+            quadrupole_integral_trace = None
+            quadrupole_integral *= 1.5
+
+            quadrupole_integral_spherical = np.zeros([5, mf_i.mol.nao, mf_i.mol.nao])
+            quadrupole_integral_spherical[0] = (2.0/np.sqrt(3.0)) * quadrupole_integral[1] # xy
+            quadrupole_integral_spherical[1] = (2.0/np.sqrt(3.0)) * quadrupole_integral[5] # yz
+            quadrupole_integral_spherical[2] = quadrupole_integral[8] # z^2
+            quadrupole_integral_spherical[3] = (2.0/np.sqrt(3.0)) * quadrupole_integral[2] # xz
+            quadrupole_integral_spherical[4] = (1.0/np.sqrt(3.0)) * (quadrupole_integral[0] - quadrupole_integral[4]) # x^2 - y^2
+            quadrupole_integral = quadrupole_integral_spherical
+            quadrupole_integral_spherical = None
+
+            quadrupole_integral = cp.asarray(quadrupole_integral)
+            quadrupole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, quadrupole_integral @ mocc_i)
+            quadrupole_integral = None
+            multipole_integral_ai = cp.concatenate([multipole_integral_ai, quadrupole_integral_ai], axis=0)
+            quadrupole_integral_ai = None
+        if field_order >= 3:
+            raise NotImplementedError("EDA polarization term field response with octupole is not tested")
+            octupole_integral = mf_i.mol.intor('int1e_rrr')
+
+            octupole_integral_trace = octupole_integral[0] + octupole_integral[4] + octupole_integral[8] # xr^2
+            octupole_integral[0] -= octupole_integral_trace / 5
+            octupole_integral[4] -= octupole_integral_trace / 5
+            octupole_integral[8] -= octupole_integral_trace / 5
+            octupole_integral_trace = octupole_integral[1] + octupole_integral[13] + octupole_integral[17] # yr^2
+            octupole_integral[1] -= octupole_integral_trace / 5
+            octupole_integral[13] -= octupole_integral_trace / 5
+            octupole_integral[17] -= octupole_integral_trace / 5
+            octupole_integral_trace = octupole_integral[2] + octupole_integral[14] + octupole_integral[26] # zr^2
+            octupole_integral[2] -= octupole_integral_trace / 5
+            octupole_integral[14] -= octupole_integral_trace / 5
+            octupole_integral[26] -= octupole_integral_trace / 5
+            octupole_integral_trace = None
+            quadrupole_integral *= 2.5
+
+            octupole_integral_spherical = np.zeros([7, mf_i.mol.nao, mf_i.mol.nao])
+            octupole_integral_spherical[0] = (1.0/np.sqrt(10.0)) * (3 * octupole_integral[1] - octupole_integral[13]) # 3x^2y - y^3
+            octupole_integral_spherical[1] = (2.0*np.sqrt(3.0/5.0)) * octupole_integral[5] # xyz
+            octupole_integral_spherical[2] = np.sqrt(3.0/2.0) * octupole_integral[17] # yz^2
+            octupole_integral_spherical[3] = octupole_integral[26] # z^3
+            octupole_integral_spherical[4] = np.sqrt(3.0/2.0) * octupole_integral[8] # xz^2
+            octupole_integral_spherical[5] = np.sqrt(3.0/5.0) * (octupole_integral[2] - octupole_integral[14]) # x^2z - y^2z
+            octupole_integral_spherical[6] = (1.0/np.sqrt(10.0)) * (octupole_integral[0] - 3 * octupole_integral[4]) # x^3 - 3xy^2
+            octupole_integral = octupole_integral_spherical
+            octupole_integral_spherical = None
+
+            octupole_integral = cp.asarray(octupole_integral)
+            octupole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, octupole_integral @ mocc_i)
+            octupole_integral = None
+            multipole_integral_ai = cp.concatenate([multipole_integral_ai, octupole_integral_ai], axis=0)
+            octupole_integral_ai = None
+        if field_order >= 4:
+            raise NotImplementedError("EDA polarization term field response higher than 3rd order (octupole) is not implemented")
+
+    if not uncoupled_ferf:
+        from gpu4pyscf.properties.polarizability import gen_vind
+        fx = gen_vind(mf_i, mo_coeff_i, mo_occ_i, with_nlc = True)
+        kappa_ai, _ = cphf.solve(fx, mo_energy_i, mo_occ_i, multipole_integral_ai, max_cycle = mf_i.max_cycle, tol = mf_i.conv_tol_cpscf)
+    else:
+        nocc_i = mocc_i.shape[1]
+        epsilon_a = mo_energy_i[nocc_i:]
+        epsilon_i = mo_energy_i[:nocc_i]
+        epsilon_ai = 1.0 / (epsilon_a[:, cp.newaxis] - epsilon_i[cp.newaxis, :])
+        kappa_ai = multipole_integral_ai * -epsilon_ai
+        epsilon_ai = None
+    multipole_integral_ai = None
+
+    polarization_subspace = mocc_i.copy()
+    n_field = kappa_ai.shape[0]
+    for i_field in range(n_field):
+        kappa_ai_singularvector_left, kappa_ai_singularvalue, kappa_ai_singularvector_right = \
+            cp.linalg.svd(kappa_ai[i_field, :, :], full_matrices = False)
+        del kappa_ai_singularvector_right
+        kappa_ai_singularvector_left = kappa_ai_singularvector_left[:, kappa_ai_singularvalue > virtual_singular_value_threshold]
+        kappa_ai_singularvalue = None
+        C_kappa_pi = mvir_i @ kappa_ai_singularvector_left
+        kappa_ai_singularvector_left = None
+        polarization_subspace = cp.concatenate([polarization_subspace, C_kappa_pi], axis=1)
+        C_kappa_pi = None
+    kappa_ai = None
+
+    ### Don't use QR, it makes the result unstable.
+    polarization_subspace_singularvector_left, polarization_subspace_singularvalue, polarization_subspace_singularvector_right =  \
+        cp.linalg.svd(polarization_subspace, full_matrices = False)
+    del polarization_subspace_singularvector_right
+    G = polarization_subspace_singularvector_left[:, polarization_subspace_singularvalue > virtual_singular_value_threshold]
+    logger.info(mf_i, f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
+                      f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}, "
+                      f"the last {polarization_subspace_singularvalue.shape[0] - G.shape[1]} singular vectors are discarded.")
+    polarization_subspace_singularvalue = None
+    polarization_subspace_singularvector_left = None
+
+    cp.cuda.runtime.deviceSynchronize()
+    time_polarization_ferf_i_end = time.time()
+    logger.debug(mf_i, f"EDA polarization time: fragment {i_frag} FERF construction = {time_polarization_ferf_i_end - time_polarization_ferf_i_start} s")
+
+    return G
+
+def get_eda_polarization_energy(mf_list, _make_mf, eda_cache, G_projector_list):
     n_frag = len(mf_list)
     assert n_frag >= 1
 
@@ -634,152 +775,17 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
     cp.cuda.runtime.deviceSynchronize()
     time_polarization_start = time.time()
 
-    assert type(field_order) is int
-    if field_order == 1:
-        logger.info(mf_sum, "Dipole response included for FERF (nD)")
-    elif field_order == 2:
-        logger.info(mf_sum, "Dipole and quadrupole response included for FERF (nDQ)")
-    elif field_order == 3:
-        logger.info(mf_sum, "Dipole, quadrupole and octupole response included for FERF (nDQO)")
-    else:
-        raise ValueError(f"Incorrect field_order ({field_order}) specified for get_eda_polarization_energy()")
-
-    logger.info(mf_sum, "FERF Constrained Virtual Space Construction")
-    G_projector_list = []
     mocc_list = []
     for i_frag in range(n_frag):
-        cp.cuda.runtime.deviceSynchronize()
-        time_polarization_ferf_i_start = time.time()
-
         mf_i = mf_list[i_frag]
         mo_coeff_i = mf_i.mo_coeff
         assert mo_coeff_i.ndim == 2
         mo_occ_i = mf_i.mo_occ
         assert mo_occ_i.ndim == 1
         mocc_i = mo_coeff_i[:, mo_occ_i >  0]
-        mvir_i = mo_coeff_i[:, mo_occ_i == 0]
-        mo_energy_i = mf_i.mo_energy
-
         mocc_list.append(mocc_i)
 
-        mass_i = mf_i.mol.atom_mass_list()
-        mass_i = np.asarray(mass_i, dtype = np.float32)
-        coords_i = mf_i.mol.atom_coords(unit = "B")
-        center_of_mass_i = (mass_i @ coords_i) / mass_i.sum()
-
-        with mf_i.mol.with_common_orig(center_of_mass_i):
-            assert field_order >= 1
-            dipole_integral = mf_i.mol.intor('int1e_r')
-            dipole_integral = cp.asarray(dipole_integral)
-            dipole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, dipole_integral @ mocc_i)
-            dipole_integral = None
-            multipole_integral_ai = dipole_integral_ai
-            dipole_integral_ai = None
-            if field_order >= 2:
-                quadrupole_integral = mf_i.mol.intor('int1e_rr')
-
-                quadrupole_integral_trace = quadrupole_integral[0] + quadrupole_integral[4] + quadrupole_integral[8]
-                quadrupole_integral[0] = quadrupole_integral[0] - quadrupole_integral_trace / 3
-                quadrupole_integral[4] = quadrupole_integral[4] - quadrupole_integral_trace / 3
-                quadrupole_integral[8] = quadrupole_integral[8] - quadrupole_integral_trace / 3
-                quadrupole_integral_trace = None
-                quadrupole_integral *= 1.5
-
-                quadrupole_integral_spherical = np.zeros([5, mf_i.mol.nao, mf_i.mol.nao])
-                quadrupole_integral_spherical[0] = (2.0/np.sqrt(3.0)) * quadrupole_integral[1] # xy
-                quadrupole_integral_spherical[1] = (2.0/np.sqrt(3.0)) * quadrupole_integral[5] # yz
-                quadrupole_integral_spherical[2] = quadrupole_integral[8] # z^2
-                quadrupole_integral_spherical[3] = (2.0/np.sqrt(3.0)) * quadrupole_integral[2] # xz
-                quadrupole_integral_spherical[4] = (1.0/np.sqrt(3.0)) * (quadrupole_integral[0] - quadrupole_integral[4]) # x^2 - y^2
-                quadrupole_integral = quadrupole_integral_spherical
-                quadrupole_integral_spherical = None
-
-                quadrupole_integral = cp.asarray(quadrupole_integral)
-                quadrupole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, quadrupole_integral @ mocc_i)
-                quadrupole_integral = None
-                multipole_integral_ai = cp.concatenate([multipole_integral_ai, quadrupole_integral_ai], axis=0)
-                quadrupole_integral_ai = None
-            if field_order >= 3:
-                raise NotImplementedError("EDA polarization term field response with octupole is not tested")
-                octupole_integral = mf_i.mol.intor('int1e_rrr')
-
-                octupole_integral_trace = octupole_integral[0] + octupole_integral[4] + octupole_integral[8] # xr^2
-                octupole_integral[0] -= octupole_integral_trace / 5
-                octupole_integral[4] -= octupole_integral_trace / 5
-                octupole_integral[8] -= octupole_integral_trace / 5
-                octupole_integral_trace = octupole_integral[1] + octupole_integral[13] + octupole_integral[17] # yr^2
-                octupole_integral[1] -= octupole_integral_trace / 5
-                octupole_integral[13] -= octupole_integral_trace / 5
-                octupole_integral[17] -= octupole_integral_trace / 5
-                octupole_integral_trace = octupole_integral[2] + octupole_integral[14] + octupole_integral[26] # zr^2
-                octupole_integral[2] -= octupole_integral_trace / 5
-                octupole_integral[14] -= octupole_integral_trace / 5
-                octupole_integral[26] -= octupole_integral_trace / 5
-                octupole_integral_trace = None
-                quadrupole_integral *= 2.5
-
-                octupole_integral_spherical = np.zeros([7, mf_i.mol.nao, mf_i.mol.nao])
-                octupole_integral_spherical[0] = (1.0/np.sqrt(10.0)) * (3 * octupole_integral[1] - octupole_integral[13]) # 3x^2y - y^3
-                octupole_integral_spherical[1] = (2.0*np.sqrt(3.0/5.0)) * octupole_integral[5] # xyz
-                octupole_integral_spherical[2] = np.sqrt(3.0/2.0) * octupole_integral[17] # yz^2
-                octupole_integral_spherical[3] = octupole_integral[26] # z^3
-                octupole_integral_spherical[4] = np.sqrt(3.0/2.0) * octupole_integral[8] # xz^2
-                octupole_integral_spherical[5] = np.sqrt(3.0/5.0) * (octupole_integral[2] - octupole_integral[14]) # x^2z - y^2z
-                octupole_integral_spherical[6] = (1.0/np.sqrt(10.0)) * (octupole_integral[0] - 3 * octupole_integral[4]) # x^3 - 3xy^2
-                octupole_integral = octupole_integral_spherical
-                octupole_integral_spherical = None
-
-                octupole_integral = cp.asarray(octupole_integral)
-                octupole_integral_ai = -2 * contract('ap,dpj->daj', mvir_i.T, octupole_integral @ mocc_i)
-                octupole_integral = None
-                multipole_integral_ai = cp.concatenate([multipole_integral_ai, octupole_integral_ai], axis=0)
-                octupole_integral_ai = None
-            if field_order >= 4:
-                raise NotImplementedError("EDA polarization term field response higher than 3rd order (octupole) is not implemented")
-
-        if not uncoupled_ferf:
-            from gpu4pyscf.properties.polarizability import gen_vind
-            fx = gen_vind(mf_i, mo_coeff_i, mo_occ_i, with_nlc = True)
-            kappa_ai, _ = cphf.solve(fx, mo_energy_i, mo_occ_i, multipole_integral_ai, max_cycle = mf_i.max_cycle, tol = mf_i.conv_tol_cpscf)
-        else:
-            nocc_i = mocc_i.shape[1]
-            epsilon_a = mo_energy_i[nocc_i:]
-            epsilon_i = mo_energy_i[:nocc_i]
-            epsilon_ai = 1.0 / (epsilon_a[:, cp.newaxis] - epsilon_i[cp.newaxis, :])
-            kappa_ai = multipole_integral_ai * -epsilon_ai
-            epsilon_ai = None
-        multipole_integral_ai = None
-
-        polarization_subspace = mocc_i.copy()
-        n_field = kappa_ai.shape[0]
-        for i_field in range(n_field):
-            kappa_ai_singularvector_left, kappa_ai_singularvalue, kappa_ai_singularvector_right = \
-                cp.linalg.svd(kappa_ai[i_field, :, :], full_matrices = False)
-            del kappa_ai_singularvector_right
-            kappa_ai_singularvector_left = kappa_ai_singularvector_left[:, kappa_ai_singularvalue > virtual_singular_value_threshold]
-            kappa_ai_singularvalue = None
-            C_kappa_pi = mvir_i @ kappa_ai_singularvector_left
-            kappa_ai_singularvector_left = None
-            polarization_subspace = cp.concatenate([polarization_subspace, C_kappa_pi], axis=1)
-            C_kappa_pi = None
-        kappa_ai = None
-
-        ### Don't use QR, it makes the result unstable.
-        polarization_subspace_singularvector_left, polarization_subspace_singularvalue, polarization_subspace_singularvector_right =  \
-            cp.linalg.svd(polarization_subspace, full_matrices = False)
-        del polarization_subspace_singularvector_right
-        G = polarization_subspace_singularvector_left[:, polarization_subspace_singularvalue > virtual_singular_value_threshold]
-        logger.info(mf_sum, f"Fragment {i_frag} FERF cutoff = {virtual_singular_value_threshold}, "
-                            f"FERF singular value = {cp.array2string(polarization_subspace_singularvalue, precision = 1)}, "
-                            f"the last {polarization_subspace_singularvalue.shape[0] - G.shape[1]} singular vectors are discarded.")
-        polarization_subspace_singularvalue = None
-        polarization_subspace_singularvector_left = None
-
-        G_projector_list.append(G)
-
-        cp.cuda.runtime.deviceSynchronize()
-        time_polarization_ferf_i_end = time.time()
-        logger.debug(mf_sum, f"EDA polarization time: fragment {i_frag} FERF construction = {time_polarization_ferf_i_end - time_polarization_ferf_i_start} s")
+    assert len(G_projector_list) == n_frag
 
     nao_offsets        = np.cumsum([0] + [G.shape[0] for G in G_projector_list])
     nprojector_offsets = np.cumsum([0] + [G.shape[1] for G in G_projector_list])
@@ -791,10 +797,6 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
         G[nao_offsets[i_frag] : nao_offsets[i_frag + 1],
           nprojector_offsets[i_frag] : nprojector_offsets[i_frag + 1]] = G_projector_list[i_frag]
     G_projector_list = None
-
-    cp.cuda.runtime.deviceSynchronize()
-    time_polarization_ferf_end = time.time()
-    logger.debug(mf_sum, f"EDA polarization time: FERF construction total = {time_polarization_ferf_end - time_polarization_start} s")
 
     nocc_offsets = np.cumsum([0] + [mocc.shape[1] for mocc in mocc_list])
     nocc_sum = nocc_offsets[-1]
@@ -874,7 +876,7 @@ def get_eda_polarization_energy(mf_list, _make_mf, eda_cache,
 
     cp.cuda.runtime.deviceSynchronize()
     time_polarization_before_scf = time.time()
-    logger.debug(mf_sum, f"EDA polarization time: SCF preparation = {time_polarization_before_scf - time_polarization_ferf_end} s")
+    logger.debug(mf_sum, f"EDA polarization time: SCF preparation = {time_polarization_before_scf - time_polarization_start} s")
 
     for cycle in range(mf_sum.max_cycle):
         cp.cuda.runtime.deviceSynchronize()
@@ -1109,17 +1111,38 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
     mf_list = []
     frag_energy_list = []
     frag_gradient_list = []
+    eda_polairzation_ferf_subspace_projector_G_list = []
     for i_frag in range(n_frag):
-        frag_i_mf, frag_i_energy = _make_mf(mol_list[i_frag])
-        mf_list.append(frag_i_mf)
-        frag_energy_list.append(float(frag_i_energy))
+        cp.cuda.runtime.deviceSynchronize()
+        time_energy_i_start = time.time()
+
+        mf_i, frag_energy_i = _make_mf(mol_list[i_frag])
+        mf_list.append(mf_i)
+        frag_energy_list.append(float(frag_energy_i))
+
+        cp.cuda.runtime.deviceSynchronize()
+        time_energy_i_end = time.time()
+        logger.debug(mf_i, f"Fragment {i_frag} SCF time = {time_energy_i_end - time_energy_i_start} s")
+
         if if_compute_gradient:
-            frag_i_gradient = _get_gradient(frag_i_mf)
+            cp.cuda.runtime.deviceSynchronize()
+            time_gradient_i_start = time.time()
+
+            frag_i_gradient = _get_gradient(mf_i)
             frag_gradient_list.append(frag_i_gradient)
 
-        if hasattr(frag_i_mf, "with_df"):
+            cp.cuda.runtime.deviceSynchronize()
+            time_gradient_i_end = time.time()
+            logger.debug(mf_i, f"Fragment {i_frag} gradient time = {time_gradient_i_end - time_gradient_i_start} s")
+
+        # Why do we have to compute them here? Because FERF subspace construction requires solving CPHF for each fragment,
+        # Thus requires 3-center integrals in with_df of each fragment, which will be released soon.
+        eda_polairzation_ferf_subspace_projector_G_i = _get_eda_polarization_FERF_subspace_projector(mf_i, i_frag)
+        eda_polairzation_ferf_subspace_projector_G_list.append(eda_polairzation_ferf_subspace_projector_G_i)
+
+        if hasattr(mf_i, "with_df"):
             # This is a hack to save memory for df cderi, we will never need to build JK for fragments again
-            frag_i_mf.with_df = None
+            mf_i.with_df = None
 
     log = logger.new_logger(mf_list[0], verbose)
     if if_compute_gradient:
@@ -1130,7 +1153,7 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
     eda_electrostatic = get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache)
     eda_dispersion = get_eda_dispersion_energy(mf_list, _make_mf, eda_cache)
     eda_pauli = eda_cache["kinetic_energy_pressure"] + eda_cache["interfragment_dfxc_energy"]
-    eda_polarization = get_eda_polarization_energy(mf_list, _make_mf, eda_cache)
+    eda_polarization = get_eda_polarization_energy(mf_list, _make_mf, eda_cache, eda_polairzation_ferf_subspace_projector_G_list)
     eda_charge_transfer = get_eda_charge_transfer_energy(mf_list, _make_mf, eda_cache)
     eda_frozen = eda_cache["total_frozen_energy"] - sum(frag_energy_list)
     eda_frozen_reminder = eda_frozen - eda_dispersion - eda_electrostatic
