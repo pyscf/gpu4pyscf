@@ -26,6 +26,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
 from gpu4pyscf.tdscf._uhf_resp_sf import mcfun_eval_xc_adapter_sf
 from gpu4pyscf.grad import tdrks
+import os
 
 
 # TODO: meta-GGA should be supported.
@@ -491,8 +492,19 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
             rho_ab = (rhoa_slice, rhob_slice)
             rho_z = cp.array([rho_ab[0]+rho_ab[1],
                             rho_ab[0]-rho_ab[1]])
-            eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
-            fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
+            # TODO: no need to do kxc_sf for deriv=2
+            whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+            if deriv == 3:
+                if whether_use_gpu:
+                    eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
+                    fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
+                else:
+                    ni_cpu = ni.to_cpu()
+                    eval_xc_eff = mcfun_eval_xc_adapter_sf(ni_cpu, xc_code, td_grad.base.collinear_samples)
+                    fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
+            else:
+                eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
+                fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
             s_s = fxc_sf * weight
 
             rho1 = ni.eval_rho(_sorted_mol, ao[0], dmvo0_mask, mask, xctype)
@@ -525,7 +537,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
 
             rho = cp.array((ni.eval_rho2(_sorted_mol, ao[0], mo_coeff_mask_a, mo_occ[0], mask, xctype),
                             ni.eval_rho2(_sorted_mol, ao[0], mo_coeff_mask_b, mo_occ[1], mask, xctype)))
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv=deriv, spin=1)[1:]
+            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv=2, spin=1)[1:]
             if dmoo is not None:
                 dmoo0_mask = dmoo0[mask[:, None], mask]
                 dmoo1_mask = dmoo1[mask[:, None], mask]
@@ -558,8 +570,19 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
             rho_ab = (rhoa_slice, rhob_slice)
             rho_z = cp.array([rho_ab[0]+rho_ab[1],
                             rho_ab[0]-rho_ab[1]])
-            eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
-            fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
+            # TODO: no need to do kxc_sf for deriv=2
+            whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+            if deriv == 3:
+                if whether_use_gpu:
+                    eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
+                    fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
+                else:
+                    ni_cpu = ni.to_cpu()
+                    eval_xc_eff = mcfun_eval_xc_adapter_sf(ni_cpu, xc_code, td_grad.base.collinear_samples)
+                    fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
+            else:
+                eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, td_grad.base.collinear_samples)
+                fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[2:4]
 
             rho1 = ni.eval_rho(_sorted_mol, ao, dmvo0_mask, mask, xctype, hermi=0, with_lapl=False)
             wv_sf = uks_sf_gga_wv1(rho1,fxc_sf,weight)
@@ -584,7 +607,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
 
             rho = cp.stack([ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_a, mo_occ[0], mask, xctype),
                             ni.eval_rho2(_sorted_mol, ao, mo_coeff_mask_b, mo_occ[1], mask, xctype)])
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv=deriv, spin=1)[1:]
+            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv=2, spin=1)[1:]
             if dmoo is not None:
                 dmoo0_mask = dmoo0[mask[:, None], mask]
                 dmoo1_mask = dmoo1[mask[:, None], mask]

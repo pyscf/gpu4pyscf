@@ -21,6 +21,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.dft import numint2c, xc_deriv
+from pyscf.dft import numint as pyscf_numint
 from gpu4pyscf.dft import xc_deriv as xc_deriv_gpu
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.dft.numint import _scale_ao, _tau_dot, eval_rho, eval_rho2
@@ -187,7 +188,10 @@ def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
         s = cp.asarray(s)
     rho = cp.stack([(t + s) * .5, (t - s) * .5])
     spin = 1
-    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
+    if isinstance(ni, pyscf_numint.NumInt):
+        evfk = ni.eval_xc_eff(xc_code, rho.get(), deriv=deriv, xctype=xctype)
+    else:
+        evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
     evfk = list(evfk)
     for order in range(1, deriv+1):
         if evfk[order] is not None:
