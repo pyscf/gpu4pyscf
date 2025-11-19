@@ -665,6 +665,8 @@ class SCF(pyscf_lib.StreamObject):
         x = None
         if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
             x = cupy.asarray(self.overlap_canonical_decomposed_x)
+        if fock.dtype == cupy.complex128:
+            s = s.astype(cupy.complex128)
         if x is None:
             mo_energy, mo_coeff = eigh(fock, s)
             return mo_energy, mo_coeff
