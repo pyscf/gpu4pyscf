@@ -14,7 +14,7 @@
 
 import pyscf
 
-def test_ase_solver():
+def test_ase_optimize_cell():
     cell = pyscf.M(
         atom='''
     C 0.  0.  0.
@@ -34,3 +34,18 @@ def test_ase_solver():
     assert abs(atom_coords[0,0]) < 1e-5
     assert abs(atom_coords[1,0] - 2.10721898) < 1e-5
     assert abs(atom_coords[1,0]*2 - a[0,1]) < 1e-7
+
+def test_ase_optimize_mol():
+    from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
+    mol = pyscf.M(
+        atom = '''
+O      0.000    0.    0.
+H     -0.757    0.    0.58
+H      0.757    0.    0.58
+''', basis='def2-svp', output='/dev/null', verbose=5)
+
+    mf = mol.RHF().to_gpu().density_fit()
+    opt = GeometryOptimizer(mf).run()
+    mol = opt.mol
+    atom_coords = mol.atom_coords()
+    assert abs(atom_coords[2,0] - 1.42162605) < 1e-5

@@ -14,43 +14,58 @@
 # limitations under the License.
 
 '''
-Interface to ASE for lattice and atom position optimization
+Interface to ASE for the lattice and atomic positions optimization
 https://ase-lib.org/ase/optimize.html
 '''
 
-import numpy as np
 from ase.optimize import BFGS
 from ase.filters import UnitCellFilter, StrainFilter
 from pyscf import lib
+from pyscf.pbc import gto
 from pyscf.pbc.tools.pyscf_ase import pyscf_to_ase_atoms
 from gpu4pyscf.tools.ase_interface import PySCF
 
-def kernel(method, target='cell', logfile=None, fmax=0.05, max_steps=100,
+def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
            restart=False):
-    '''Optimize geometry using ASE.
+    '''Optimize the geometry using ASE.
 
     Kwargs:
-        target : string
-            'cell': Optimize both lattice and atom positions within the cell.
-            'lattice': Optimize lattice while while fixing the scaled atom positions.
-            'atoms': Optimize atom positions only
+        target : str
+            Determines which variables to optimize.
+            - 'cell': Optimize both the unit-cell lattice and atomic positions.
+            - 'lattice': Optimize the lattice while keeping scaled atomic positions fixed.
+            - 'atoms': Optimize atomic positions only
+            By default, this flag is set to 'cell' for PBC calculations and
+            'atoms' for molecular systems.
         logfile: file object, Path, or str
             File to save the ASE output
 
-    Addtional kwargs for ASE optimizer:
+    Parameters for ASE optimizer:
         fmax : float
-            Convergence criterion of the forces (unit eV/A^3) on atoms.
+            Convergence threshold for atomic forces (in eV/A^3).
         max_steps : int
-            Number of optimizer steps to be run.
+            Maximum number of optimization steps.
         restart : bool
-            Whether to restart from a previus optimization.
+            Whether to restart from a previous optimization state.
     '''
     assert not restart
-    cell = method.cell
-    atoms = pyscf_to_ase_atoms(cell)
-    atoms.calc = ase_calculator = PySCF(method=method)
+    if hasattr(method, 'cell'):
+        cell = method.cell
+    elif hasattr(method, 'mol'):
+        cell = method.mol
+    else:
+        raise RuntimeError(f'{method} not supported')
+    is_pbc = isinstance(cell, gto.Cell)
 
-    if target == 'cell':
+    atoms = pyscf_to_ase_atoms(cell)
+    atoms.calc = PySCF(method=method)
+
+    if target is None:
+        if is_pbc:
+            target = 'cell'
+        else:
+            target = 'atoms'
+    elif target == 'cell':
         atoms = UnitCellFilter(atoms)
     elif target == 'lattice':
         atoms = StrainFilter(atoms)
@@ -63,37 +78,42 @@ def kernel(method, target='cell', logfile=None, fmax=0.05, max_steps=100,
 
     if target == 'cell' or target == 'lattice':
         atoms = atoms.atoms
-    cell = cell.set_geom_(atoms.get_positions(), unit='Ang', a=atoms.cell, inplace=False)
+    if is_pbc:
+        cell = cell.set_geom_(atoms.get_positions(), unit='Ang', a=atoms.cell, inplace=False)
+    else:
+        cell = cell.set_geom_(atoms.get_positions(), unit='Ang', inplace=False)
     return converged, cell
 
 class GeometryOptimizer(lib.StreamObject):
-    '''Optimize the atom positions and lattice for the input method.
+    '''Optimize the atomic positions and lattice for the input method.
 
     Attributes:
         fmax : float
-            Convergence criterion of the forces on atoms.
+            Convergence threshold for atomic forces (in eV/A^3).
         max_steps : int
-            Number of optimizer steps to be run.
-        target : string
-            'cell': Optimize both lattice and atom positions within the cell.
-            'lattice': Optimize lattice while while fixing the scaled atom positions.
-            'atoms': Optimize atom positions only
+            Maximum number of optimization steps.
+        target : str
+            Determines which variables to optimize.
+            - 'cell': Optimize both the unit-cell lattice and atomic positions.
+            - 'lattice': Optimize the lattice while keeping scaled atomic positions fixed.
+            - 'atoms': Optimize atomic positions only.
+            By default, this flag is set to 'cell' for PBC calculations and
+            'atoms' for molecular systems.
         logfile: file object, Path, or str
             File to save the ASE output
-
 
     Saved results:
         converged : bool
             Whether the geometry optimization is converged
 
-    Note method.cell will be modified after calling the .kernel() method.
+    Note method.cell and method.mol will be modified after calling the .kernel() method.
     '''
     def __init__(self, method):
         self.method = method
         self.converged = False
         self.max_steps = 100
         self.fmax = 0.05
-        self.target = 'cell'
+        self.target = None
         self.logfile = None
 
     @property
@@ -109,9 +129,22 @@ class GeometryOptimizer(lib.StreamObject):
         assert hasattr(self.method, 'cell')
         self.method.cell = x
 
+    @property
+    def mol(self):
+        return self.method.mol
+
+    @mol.setter
+    def mol(self, x):
+        self.method.mol = x
+
     def kernel(self):
-        self.converged, self.cell = kernel(
+        self.converged, cell = kernel(
             self.method, self.target, self.logfile,
             fmax=self.fmax, max_steps=self.max_steps)
-        return self.cell
+        if isinstance(cell, gto.Cell):
+            self.cell = cell
+        else:
+            self.mol = cell
+        return cell
+
     optimize = kernel
