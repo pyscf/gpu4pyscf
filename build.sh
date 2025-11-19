@@ -9,7 +9,7 @@ export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 CURRENT_PATH=`pwd`
 
 mkdir -p /tmp/build
-cmake -B /tmp/build -S gpu4pyscf/lib -DCUDA_ARCHITECTURES=70 -DBUILD_LIBXC=OFF -DCMAKE_MESSAGE_LOG_LEVEL=WARNING
+cmake -B /tmp/build -S gpu4pyscf/lib -DCUDA_ARCHITECTURES="70-real;80" -DBUILD_LIBXC=OFF -DCMAKE_MESSAGE_LOG_LEVEL=WARNING
 cd /tmp/build
 make -j16
 cd $CURRENT_PATH

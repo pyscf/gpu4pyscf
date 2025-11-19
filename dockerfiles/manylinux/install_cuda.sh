@@ -78,14 +78,14 @@ function install_122 {
     ldconfig
 }
 
-function install_124 {
-    echo "Installing CUDA 12.4"
-    rm -rf /usr/local/cuda-12.4 /usr/local/cuda
-    # install CUDA 12.4 in the same container
-    wget -q https://developer.download.nvidia.com/compute/cuda/12.4.0/local_installers/cuda_12.4.0_550.54.14_linux.run
-    sh ./cuda_12.4.0_550.54.14_linux.run --toolkit --silent
-    rm -f cuda_12.4.0_550.54.14_linux.run
-    rm -f /usr/local/cuda && ln -s /usr/local/cuda-12.4 /usr/local/cuda
+function install_128 {
+    echo "Installing CUDA 12.8"
+    rm -rf /usr/local/cuda-12.8 /usr/local/cuda
+    # install CUDA 12.8 in the same container
+    wget -q https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_570.86.10_linux.run
+    sh ./cuda_12.8.0_570.86.10_linux.run --toolkit --silent
+    rm -f cuda_12.8.0_570.86.10_linux.run
+    rm -f /usr/local/cuda && ln -s /usr/local/cuda-12.8 /usr/local/cuda
     ldconfig
 }
 
@@ -164,18 +164,28 @@ function prune_121 {
     rm -rf /opt/nvidia
 }
 
-function prune_124 {
+function prune_128 {
   #####################################################################################
   # prune static libs
   #####################################################################################
-  echo "Pruning CUDA 12.4"
-  export CUDA_LIB_DIR="/usr/local/cuda-12.4/lib64"
-  rm -f $CUDA_LIB_DIR/*.a
+  echo "Pruning CUDA 12.8"
+  export NVPRUNE="/usr/local/cuda-12.8/bin/nvprune"
+  export CUDA_LIB_DIR="/usr/local/cuda-12.8/lib64"
+
+  export GENCODE="-gencode arch=compute_70,code=sm_70 -gencode arch=compute_75,code=sm_75 -gencode arch=compute_80,code=sm_80 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120"
+
+  if [[ -n "$OVERRIDE_GENCODE" ]]; then
+      export GENCODE=$OVERRIDE_GENCODE
+  fi
+
+  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "nvrtc" | grep -v "metis"  \
+    | xargs -I {} bash -c \
+              "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
 
   #####################################################################################
   # prune visual tools
   #####################################################################################
-  export CUDA_BASE="/usr/local/cuda-12.4/"
+  export CUDA_BASE="/usr/local/cuda-12.8/"
   rm -rf $CUDA_BASE/libnvvp $CUDA_BASE/nsight*
   rm -rf /opt/nvidia
 }
@@ -185,8 +195,18 @@ function prune_130 {
   # prune static libs
   #####################################################################################
   echo "Pruning CUDA 13.0"
+  export NVPRUNE="/usr/local/cuda-13.0/bin/nvprune"
   export CUDA_LIB_DIR="/usr/local/cuda-13.0/lib64"
-  rm -f $CUDA_LIB_DIR/*.a
+
+  export GENCODE="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120"
+
+  if [[ -n "$OVERRIDE_GENCODE" ]]; then
+      export GENCODE=$OVERRIDE_GENCODE
+  fi
+
+  ls $CUDA_LIB_DIR/ | grep "\.a" | grep -v "culibos" | grep -v "cudart" | grep -v "nvrtc" | grep -v "metis"  \
+    | xargs -I {} bash -c \
+              "echo {} && $NVPRUNE $GENCODE $CUDA_LIB_DIR/{} -o $CUDA_LIB_DIR/{}"
 
   #####################################################################################
   # prune visual tools
@@ -206,7 +226,7 @@ do
 	  ;;
     12.2*) install_122; prune_122
 	  ;;
-    12.4*) install_124; prune_124
+    12.8*) install_128; prune_128
 	  ;;
     13.0*) install_130; prune_130
 	  ;;

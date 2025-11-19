@@ -56,7 +56,6 @@ bdist_wheel.initialize_options = initialize_with_default_plat_name
 if 'sdist' in sys.argv:
     # The sdist release
     package_name = NAME
-    CUDA_VERSION = '11x'
 else:
     CUDA_VERSION = get_cuda_version()
     package_name = NAME + '-cuda' + CUDA_VERSION
