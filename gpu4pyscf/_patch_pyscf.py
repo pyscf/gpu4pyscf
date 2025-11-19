@@ -173,6 +173,7 @@ if pyscf_version <= 11:
     rhf.Hessian._keys = uhf.Hessian._keys = \
             rks.Hessian._keys = uks.Hessian._keys = {'auxbasis_response',}
 
+    from pyscf import lib
     from pyscf.lib import misc
     misc._ATTRIBUTES_IN_NPARRAY = {
         'kpt', 'kpts', '_kpts', 'kpts_band', 'mesh', 'frozen'}
