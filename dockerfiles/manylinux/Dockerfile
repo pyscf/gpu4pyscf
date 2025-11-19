@@ -3,7 +3,7 @@ ARG GPU_IMAGE=nvidia/cuda:${BASE_CUDA_VERSION}.0-devel-centos7
 FROM quay.io/pypa/manylinux2014_x86_64:2023-09-24-36b93e4 as base
 
 ENV LC_ALL en_US.UTF-8
-ENV LANG en_US.UTF-9
+ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
 RUN yum install -y wget curl perl util-linux xz bzip2 git patch which perl zlib-devel
