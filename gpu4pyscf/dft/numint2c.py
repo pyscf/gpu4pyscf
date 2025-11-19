@@ -217,7 +217,7 @@ def mcfun_eval_xc_adapter(ni, xc_code):
             collinear_samples=ni.collinear_samples)
     return eval_xc_eff
 
-def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, compared_with_cpu=False):
+def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, assemble_spin_components=False):
     '''Vxc matrix of multi-collinear LDA'''
     wv = weight * vxc
     if hermi:
@@ -246,7 +246,7 @@ def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi
     mataa = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
     aow = _scale_ao(ao, wr[0]-wmz[0], out=aow)  # Mz
     matbb = _dot_ao_ao(mol, ao, aow, mask, shls_slice, ao_loc)
-    if compared_with_cpu:
+    if assemble_spin_components:
         row1 = cp.concatenate([mataa, matab], axis=1)
         row2 = cp.concatenate([matba, matbb], axis=1)
 
@@ -255,7 +255,7 @@ def _mcol_lda_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi
     else:
         return mataa, matab, matba, matbb
 
-def _mcol_gga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, compared_with_cpu=False):
+def _mcol_gga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, assemble_spin_components=False):
     '''Vxc matrix of multi-collinear LDA'''
     wv = weight * vxc
     if hermi:
@@ -289,7 +289,7 @@ def _mcol_gga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi
         aow = _scale_ao(ao[1:4], (wr[1:4]-wmz[1:4]).conj(), out=aow)  # Mz
         matbb += _dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
 
-    if compared_with_cpu:
+    if assemble_spin_components:
         row1 = cp.concatenate([mataa, matab], axis=1)
         row2 = cp.concatenate([matba, matbb], axis=1)
 
@@ -310,7 +310,7 @@ def _tau_dot(mol, bra, ket, wv, mask, shls_slice, ao_loc):
     mat += _dot_ao_ao(mol, bra[3], aow, mask, shls_slice, ao_loc)
     return mat
 
-def _mcol_mgga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, compared_with_cpu=False):
+def _mcol_mgga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, hermi, assemble_spin_components=False):
     '''Vxc matrix of multi-collinear MGGA'''
     wv = weight * vxc
     tau_idx = 4
@@ -352,7 +352,7 @@ def _mcol_mgga_vxc_mat(mol, ao, weight, rho, vxc, mask, shls_slice, ao_loc, herm
         aow = _scale_ao(ao[1:4], (wr[1:4]-wmz[1:4]).conj(), out=aow)  # Mz
         matbb += _dot_ao_ao(mol, aow, ao[0], mask, shls_slice, ao_loc)
 
-    if compared_with_cpu:
+    if assemble_spin_components:
         row1 = cp.concatenate([mataa, matab], axis=1)
         row2 = cp.concatenate([matba, matbb], axis=1)
 
