@@ -15,6 +15,7 @@
 import numpy as np
 import cupy
 import pyscf
+from pyscf import lib
 
 pyscf_version = int(pyscf.__version__.split('.')[1])
 
@@ -38,7 +39,6 @@ if pyscf_version <= 10:
     GDF.to_gpu = _gdf_to_gpu
 
     # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.10
-    from pyscf import lib
     from pyscf.lib import logger
     from pyscf.gto import mole
     from pyscf.pbc.gto.cell import Cell
@@ -84,6 +84,7 @@ if pyscf_version <= 10:
                 atoms_or_coords = self.atom_coords() * _unit
 
         if a is not None:
+            a = np.asarray(a)
             logger.info(cell, 'Set new lattice vectors')
             logger.info(cell, '%s', a)
             cell.a = a

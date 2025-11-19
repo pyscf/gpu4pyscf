@@ -47,9 +47,8 @@ class PySCF(Calculator):
 
     default_parameters = {}
 
-    def __init__(self, restart=None, ignore_bad_restart_file=False,
-                 label='PySCF', atoms=None, directory='.', method=None,
-                 **kwargs):
+    def __init__(self, restart=None, label='PySCF', atoms=None, directory='.',
+                 method=None, **kwargs):
         """Construct PySCF-calculator object.
 
         Parameters
@@ -60,8 +59,8 @@ class PySCF(Calculator):
 
         method: A PySCF method class
         """
-        Calculator.__init__(self, restart, ignore_bad_restart_file,
-                            label, atoms, directory=directory, **kwargs)
+        Calculator.__init__(self, restart, label, atoms, directory=directory,
+                            **kwargs)
 
         if not isinstance(method, lib.StreamObject):
             raise RuntimeError(f'{method} must be an instance of a PySCF method')

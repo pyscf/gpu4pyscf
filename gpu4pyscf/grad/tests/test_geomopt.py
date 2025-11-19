@@ -34,14 +34,10 @@ grids_level = 8
 def setUpModule():
     global mol, mol1
     mol = pyscf.M(atom=atom, basis=bas, output='/dev/null')
-    mol.build()
-    mol.verbose = 1
 
     mol1 = pyscf.M(atom=atom, basis=bas, output='/dev/null')
     mol1.charge = 1
     mol1.spin = 1
-    mol1.build()
-    mol1.verbose = 1
 
 def tearDownModule():
     global mol, mol1
