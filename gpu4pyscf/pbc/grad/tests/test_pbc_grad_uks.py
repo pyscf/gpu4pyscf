@@ -25,7 +25,7 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 disp = 1e-4
 
 def setUpModule():
-    global cell, cell_orth
+    global cell, cell_orth, cell_no_pseudo
     cell = pyscf.M(
         # The original geometry of second carbon is [1.685068664391,1.685068664391,1.685068664391]
         # Henry distorted it to make the gradient non-zero
@@ -36,7 +36,9 @@ def setUpModule():
         3.370137329, 3.370137329, 0.000000000''',
         basis = 'gth-szv',
         pseudo = 'gth-pade',
-        unit = 'bohr')
+        unit = 'bohr',
+        output = '/dev/null',
+    )
 
     cell_orth = pyscf.M(
         atom = 'H 0 0 0; H 1. 1. 1.',
@@ -45,12 +47,27 @@ def setUpModule():
         verbose = 5,
         pseudo = 'gth-pade',
         unit = 'bohr',
-        output = '/dev/null')
+        output = '/dev/null',
+    )
+
+    cell_no_pseudo = pyscf.M(
+        atom = 'H 0 0 0; H 1. 1. 1.',
+        a = np.eye(3) * 3.5,
+        basis = [[0, [1.3, 1]], [1, [0.8, 1]]],
+        verbose = 5,
+        # pseudo = 'gth-pade',
+        unit = 'bohr',
+        output = '/dev/null',
+    )
 
 def tearDownModule():
-    global cell_orth, cell
+    global cell, cell_orth, cell_no_pseudo
+    cell.stdout.close()
+    del cell
     cell_orth.stdout.close()
-    del cell_orth, cell
+    del cell_orth
+    cell_no_pseudo.stdout.close()
+    del cell_no_pseudo
 
 def numerical_gradient(cell, xc):
     def get_energy(cell):
@@ -79,6 +96,7 @@ def numerical_gradient(cell, xc):
             Em = get_energy(cell_copy)
 
             gradient[i_atom, i_xyz] = (Ep - Em) / (2 * disp)
+    print(f"ref = np.{repr(gradient)}")
     return gradient
 
 class KnownValues(unittest.TestCase):
@@ -150,6 +168,18 @@ class KnownValues(unittest.TestCase):
         g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
+    @unittest.skipIf(num_devices > 1, '')
+    def test_mgga_grad_without_pseudo(self):
+        # ref = numerical_gradient(cell_no_pseudo, xc='r2scan')
+        ref = np.array([[-0.23043204, -0.23043204, -0.23043204],
+                        [ 0.23043227,  0.23043227,  0.23043227]])
+        mf = cell_no_pseudo.UKS(xc='r2scan').to_gpu()
+        mf.conv_tol = 1e-10
+        mf._numint = multigrid.MultiGridNumInt(cell_no_pseudo)
+        g_scan = mf.nuc_grad_method().as_scanner()
+        g = g_scan(cell_no_pseudo)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
+
     def test_hybrid_grad(self):
         # ref = numerical_gradient(cell_orth, xc='pbe0')
         ref = np.array([[-0.23059506, -0.23059506, -0.23059506],
@@ -185,6 +215,18 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell_orth)[1]
+        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    def test_wb97_grad_without_pseudo(self):
+        # ref = numerical_gradient(cell_no_pseudo, xc='wb97')
+        ref = np.array([[-0.22143687, -0.22143687, -0.22143687],
+                        [ 0.22165506,  0.22165506,  0.22165506]])
+        mf = cell_no_pseudo.UKS(xc='wb97').to_gpu()
+        mf._numint = multigrid.MultiGridNumInt(cell_no_pseudo)
+        mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
+        mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_no_pseudo)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     def test_camb3lyp_grad(self):

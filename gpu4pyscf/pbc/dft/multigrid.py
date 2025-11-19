@@ -687,10 +687,8 @@ def get_rho(ni, dm, kpts=None):
 
 def eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
+    assert cell.dimension == 3
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -702,6 +700,36 @@ def eval_nucG(cell, mesh):
     nucG = contract('qxy,qz->xyz', rho_xy, SIz).ravel()
     nucG *= tools.get_coulG(cell, Gv=Gv)
     return nucG
+
+def eval_nucG_SI_gradient(cell, mesh, rho_g):
+    ngrids = np.prod(mesh)
+    assert rho_g.shape == (ngrids,)
+
+    assert cell.dimension == 3
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    b = cell.reciprocal_vectors()
+    coords = cell.atom_coords()
+    rb = cp.asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    dSI_prefactor = -1j * Gv.T * rho_g.conj()
+    charges = -cell.atom_charges()
+    coulG = tools.get_coulG(cell, Gv=Gv)
+
+    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+
+    for i_atom in range(cell.natm):
+        SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
+        de[i_atom, :] = charges[i_atom] * (dSI_prefactor @ (coulG * SI))
+
+    grad_max_imag = cp.max(cp.abs(de.imag))
+    if grad_max_imag >= 1e-8:
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from nuclear repulsion term structure factor gradient")
+
+    de = de.real
+    de /= cell.vol
+    return de
 
 def get_nuc(ni, kpts=None):
     assert kpts is None or is_zero(kpts)
@@ -719,10 +747,108 @@ def get_nuc(ni, kpts=None):
         vne = vne[0]
     return vne
 
+_kernel_registery = {}
+
+def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charge,
+                                           mesh, G2, coulG, SIx, SIy, SIz, vlocG):
+    # Result will be appended to vlocG
+
+    fn_name = f"gth_loc_reciporcal_nexp_{nexp}_kernel"
+    if fn_name not in _kernel_registery:
+        C_declaration = ''
+        C_contribution = ''
+        if nexp >= 1:
+            C_declaration += ', const double cexp0'
+            C_contribution += 'cfacs += cexp0;'
+        if nexp >= 2:
+            C_declaration += ', const double cexp1'
+            C_contribution += 'cfacs += cexp1 * (3 - G2_red);'
+        if nexp >= 3:
+            C_declaration += ', const double cexp2'
+            C_contribution += 'cfacs += cexp2 * (15 - 10 * G2_red + G2_red * G2_red);'
+        if nexp >= 4:
+            C_declaration += ', const double cexp3'
+            C_contribution += 'cfacs += cexp3 * (105 - 105 * G2_red + 21 * G2_red * G2_red - G2_red * G2_red * G2_red);'
+        kernel_code = r'''
+            #include <cupy/complex.cuh>
+            extern "C" __global__
+            void ''' + fn_name + '''(
+                const double* __restrict__ grids_G2, const double* __restrict__ grids_coulG,
+                const complex<double>* __restrict__ grids_SIx, const complex<double>* __restrict__ grids_SIy, const complex<double>* __restrict__ grids_SIz,
+                complex<double>* __restrict__ grids_vlocG,
+                const int n_mesh_x, const int n_mesh_y, const int n_mesh_z, const int i_atom,
+                const double charge, const double rloc''' + C_declaration + r''')
+            {
+                const int i_grid = blockDim.x * blockIdx.x + threadIdx.x;
+                const int ngrids = n_mesh_x * n_mesh_y * n_mesh_z;
+                if (i_grid >= ngrids) return;
+
+                const double G2 = grids_G2[i_grid];
+                const double coulG = grids_coulG[i_grid];
+                const double G2_red = G2 * rloc * rloc;
+                const int i_grid_x = i_grid / (n_mesh_y * n_mesh_z);
+                const int i_grid_y = (i_grid - i_grid_x * (n_mesh_y * n_mesh_z)) / n_mesh_z;
+                const int i_grid_z = i_grid - i_grid_x * (n_mesh_y * n_mesh_z) - i_grid_y * n_mesh_z;
+                const complex<double> SIx = grids_SIx[i_atom * n_mesh_x + i_grid_x];
+                const complex<double> SIy = grids_SIy[i_atom * n_mesh_y + i_grid_y];
+                const complex<double> SIz = grids_SIz[i_atom * n_mesh_z + i_grid_z];
+                const complex<double> SI = SIx * SIy * SIz * exp(-0.5 * G2_red);
+                complex<double> vlocG = -charge * coulG * SI;
+
+                double cfacs = 0;
+                ''' + C_contribution + r'''
+                vlocG += 15.749609945722419 * rloc * rloc * rloc * cfacs * SI;
+
+                grids_vlocG[i_grid] += vlocG;
+            }
+        '''
+        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
+    kernel = _kernel_registery[fn_name]
+
+    ngrids = G2.shape[0]
+    assert G2.shape == (ngrids,) and G2.dtype == cp.float64
+    assert coulG.shape == (ngrids,) and coulG.dtype == cp.float64
+    assert SIx.shape == (natm, mesh[0]) and SIx.dtype == cp.complex128 and SIx.flags.c_contiguous
+    assert SIy.shape == (natm, mesh[1]) and SIy.dtype == cp.complex128 and SIy.flags.c_contiguous
+    assert SIz.shape == (natm, mesh[2]) and SIz.dtype == cp.complex128 and SIz.flags.c_contiguous
+    assert vlocG.shape == (ngrids,) and vlocG.dtype == cp.complex128
+    assert ngrids < np.iinfo(np.int32).max
+
+    kernel_parameters = [G2, coulG, SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
+                         cp.int32(i_atom), cp.float64(charge), cp.float64(rloc)]
+    if nexp >= 1:
+        kernel_parameters.append(cp.float64(cexp[0]))
+    if nexp >= 2:
+        kernel_parameters.append(cp.float64(cexp[1]))
+    if nexp >= 3:
+        kernel_parameters.append(cp.float64(cexp[2]))
+    if nexp >= 4:
+        kernel_parameters.append(cp.float64(cexp[3]))
+    kernel(((ngrids + 1024 - 1) // 1024, ), (1024, ), kernel_parameters)
+
+    # SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
+    # G2_red = G2 * rloc**2
+    # SI *= cp.exp(-0.5*G2_red)
+    # vlocG -= charge * coulG * SI
+
+    # # Add the C1, C2, C3, C4 contributions
+    # cfacs = 0
+    # if nexp >= 1:
+    #     cfacs += cexp[0]
+    # if nexp >= 2:
+    #     cfacs += cexp[1] * (3 - G2_red)
+    # if nexp >= 3:
+    #     cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
+    # if nexp >= 4:
+    #     cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
+    # vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
+
+    return vlocG
+
 def eval_vpplocG(cell, mesh):
-    '''PRB, 58, 3641 Eq (5) first term
+    '''PRB, 58, 3641 Eq (5)
     '''
-    assert cell.dimension != 2
+    assert cell.dimension == 3
     Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
@@ -738,8 +864,6 @@ def eval_vpplocG(cell, mesh):
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
     vlocG0 = 0
 
-    _kernel_registery = {}
-
     for ia in range(cell.natm):
         symb = cell.atom_symbol(ia)
         if symb not in cell._pseudo:
@@ -752,117 +876,31 @@ def eval_vpplocG(cell, mesh):
 
         vlocG0 += 2*np.pi*charges[ia]*rloc**2
 
-        fn_name = f"gth_loc_reciporcal_nexp_{nexp}_kernel"
-        if fn_name not in _kernel_registery:
-            C_declaration = ''
-            C_contribution = ''
-            if nexp >= 1:
-                C_declaration += ', const double cexp0'
-                C_contribution += 'cfacs += cexp0;'
-            if nexp >= 2:
-                C_declaration += ', const double cexp1'
-                C_contribution += 'cfacs += cexp1 * (3 - G2_red);'
-            if nexp >= 3:
-                C_declaration += ', const double cexp2'
-                C_contribution += 'cfacs += cexp2 * (15 - 10 * G2_red + G2_red * G2_red);'
-            if nexp >= 4:
-                C_declaration += ', const double cexp3'
-                C_contribution += 'cfacs += cexp3 * (105 - 105 * G2_red + 21 * G2_red * G2_red - G2_red * G2_red * G2_red);'
-            kernel_code = r'''
-                #include <cupy/complex.cuh>
-                extern "C" __global__
-                void ''' + fn_name + '''(
-                    const double* __restrict__ grids_G2, const double* __restrict__ grids_coulG,
-                    const complex<double>* __restrict__ grids_SIx, const complex<double>* __restrict__ grids_SIy, const complex<double>* __restrict__ grids_SIz,
-                    complex<double>* __restrict__ grids_vlocG,
-                    const int n_mesh_x, const int n_mesh_y, const int n_mesh_z, const int i_atom,
-                    const double charge, const double rloc''' + C_declaration + r''')
-                {
-                    const int i_grid = blockDim.x * blockIdx.x + threadIdx.x;
-                    const int ngrids = n_mesh_x * n_mesh_y * n_mesh_z;
-                    if (i_grid >= ngrids) return;
-
-                    const double G2 = grids_G2[i_grid];
-                    const double coulG = grids_coulG[i_grid];
-                    const double G2_red = G2 * rloc * rloc;
-                    const int i_grid_x = i_grid / (n_mesh_y * n_mesh_z);
-                    const int i_grid_y = (i_grid - i_grid_x * (n_mesh_y * n_mesh_z)) / n_mesh_z;
-                    const int i_grid_z = i_grid - i_grid_x * (n_mesh_y * n_mesh_z) - i_grid_y * n_mesh_z;
-                    const complex<double> SIx = grids_SIx[i_atom * n_mesh_x + i_grid_x];
-                    const complex<double> SIy = grids_SIy[i_atom * n_mesh_y + i_grid_y];
-                    const complex<double> SIz = grids_SIz[i_atom * n_mesh_z + i_grid_z];
-                    const complex<double> SI = SIx * SIy * SIz * exp(-0.5 * G2_red);
-                    complex<double> vlocG = -charge * coulG * SI;
-
-                    double cfacs = 0;
-                    ''' + C_contribution + r'''
-                    vlocG += 15.749609945722419 * rloc * rloc * rloc * cfacs * SI;
-
-                    grids_vlocG[i_grid] += vlocG;
-                }
-            '''
-            _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
-        kernel = _kernel_registery[fn_name]
-
-        ngrids = G2.shape[0]
-        assert G2.shape == (ngrids,) and G2.dtype == cp.float64
-        assert coulG.shape == (ngrids,) and coulG.dtype == cp.float64
-        assert SIx.shape == (cell.natm, mesh[0]) and SIx.dtype == cp.complex128 and SIx.flags.c_contiguous
-        assert SIy.shape == (cell.natm, mesh[1]) and SIy.dtype == cp.complex128 and SIy.flags.c_contiguous
-        assert SIz.shape == (cell.natm, mesh[2]) and SIz.dtype == cp.complex128 and SIz.flags.c_contiguous
-        assert vlocG.shape == (ngrids,) and vlocG.dtype == cp.complex128
-        assert ngrids < np.iinfo(np.int32).max
-
-        kernel_parameters = [G2, coulG, SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
-                             cp.int32(ia), cp.float64(charges[ia]), cp.float64(rloc)]
-        if nexp >= 1:
-            kernel_parameters.append(cp.float64(cexp[0]))
-        if nexp >= 2:
-            kernel_parameters.append(cp.float64(cexp[1]))
-        if nexp >= 3:
-            kernel_parameters.append(cp.float64(cexp[2]))
-        if nexp >= 4:
-            kernel_parameters.append(cp.float64(cexp[3]))
-        kernel(((ngrids + 1024 - 1) // 1024, ), (1024, ), kernel_parameters)
-
-        # SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
-        # G2_red = G2 * rloc**2
-        # SI *= cp.exp(-0.5*G2_red)
-        # vlocG -= charges[ia] * coulG * SI
-
-        # # Add the C1, C2, C3, C4 contributions
-        # cfacs = 0
-        # if nexp >= 1:
-        #     cfacs += cexp[0]
-        # if nexp >= 2:
-        #     cfacs += cexp[1] * (3 - G2_red)
-        # if nexp >= 3:
-        #     cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
-        # if nexp >= 4:
-        #     cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
-        # vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
+        _append_vpplocG_one_atom_without_gamma(ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, G2, coulG, SIx, SIy, SIz, vlocG)
 
     vlocG[0] += vlocG0
     return vlocG
 
-def eval_vpplocG_part1(cell, mesh):
-    assert cell.dimension != 2
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
+def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
+    ngrids = np.prod(mesh)
+    assert rho_g.shape == (ngrids,)
+
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
     SIx = cp.exp(-1j*rb[:,0,None] * basex)
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
-    G2 = contract('px,px->p', Gv, Gv)
+    dSI_prefactor = -1j * Gv.T * rho_g.conj()
+    G2 = batched_vec3_norm2(Gv)
     charges = cell.atom_charges()
 
     coulG = tools.get_coulG(cell, Gv=Gv)
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
-    vlocG0 = 0
+
+    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+
     for ia in range(cell.natm):
         symb = cell.atom_symbol(ia)
         if symb not in cell._pseudo:
@@ -873,13 +911,21 @@ def eval_vpplocG_part1(cell, mesh):
         if nexp == 0:
             continue
 
-        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
-        G2_red = G2 * rloc**2
-        SI *= cp.exp(-0.5*G2_red)
-        vlocG0 += 2*np.pi*charges[ia]*rloc**2
-        vlocG -= charges[ia] * coulG * SI
-    vlocG[0] += vlocG0
-    return vlocG
+        vlocG.fill(0)
+        _append_vpplocG_one_atom_without_gamma(ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, G2, coulG, SIx, SIy, SIz, vlocG)
+
+        vlocG0 = 2*np.pi*charges[ia]*rloc**2
+        vlocG[0] += vlocG0
+
+        de[ia, :] = dSI_prefactor @ vlocG
+
+    grad_max_imag = cp.max(cp.abs(de.imag))
+    if grad_max_imag >= 1e-8:
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential local term structure factor gradient")
+
+    de = de.real
+    de /= cell.vol
+    return de
 
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.

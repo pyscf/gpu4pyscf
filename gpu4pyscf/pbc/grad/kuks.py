@@ -60,8 +60,8 @@ def get_veff(ks_grad, dm=None, kpts=None):
 
     if not ni.libxc.is_hybrid_xc(mf.xc):
         if isinstance(mf._numint, multigrid_v2.MultiGridNumInt):
-            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
-            # The return value from get_veff() assumes a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
+            # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
             exc /= 2 * nkpts
             return exc
         exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
@@ -75,7 +75,7 @@ def get_veff(ks_grad, dm=None, kpts=None):
             raise NotImplementedError('Nuclear gradients for hybrid functional '
                                       'are only available via the rsjk method')
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
-            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo=False, kpts=kpts).get()
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
             # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
             exc /= 2 * nkpts
             j_factor = 0

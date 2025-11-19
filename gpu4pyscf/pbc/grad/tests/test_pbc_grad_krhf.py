@@ -14,6 +14,8 @@
 # limitations under the License.
 
 import unittest
+from packaging.version import Version
+import pyscf
 from pyscf import lib
 from pyscf.pbc import gto
 from pyscf.pbc.grad import krhf as krhf_cpu
@@ -136,6 +138,8 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
 
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
+                     'The meaning of get_hcore in *.pbc.grad has been changed in pyscf==2.12. It doesn\'t include pseudopotential nonlocal term anymore.')
     def test_hcore(self):
         kpts = cell.make_kpts([1,1,3])
         with lib.temporary_env(numint, MIN_BLK_SIZE=1024):

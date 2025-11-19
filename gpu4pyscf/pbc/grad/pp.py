@@ -13,128 +13,81 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import ctypes
-import numpy as np
-from pyscf import gto
-from pyscf.lib import logger
-from pyscf.pbc import tools
-from pyscf.pbc.lib.kpts import KPoints
-from pyscf.pbc.dft.multigrid.multigrid_pair import _eval_rhoG
-from pyscf.pbc.dft.multigrid.pp import fake_cell_vloc_part1
-import cupy as cp
+import numpy
+from gpu4pyscf.lib import logger
+from pyscf.pbc.lib.kpts_helper import gamma_point
+from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl, _contract_ppnl_nuc_grad
 
-from gpu4pyscf.pbc.tools.pbc import get_coulG, ifft
-from gpu4pyscf.pbc.df.ft_ao import libpbc
-
-
-# Henry's note 20250821:
-# The functions in this file, as well as functions in gpu4pyscf/lib/pbc/grid_integrate.c,
-# are direct copies of the corresponding functions in PySCF.
-# The reason is to get around with a version problem:
-# Interface function vpploc_part1_nuc_grad() supports non-orthogonal lattice since
-# pyscf==2.10.0, however we want gpu4pyscf to be compatable with older version of pyscf,
+# The following function is copied from pyscf/pbc/gto/pseudo/pp_int.py
+# It's updated to support k-point sampling after pyscf>2.11.0,
+# however we want gpu4pyscf to be compatable with older version of pyscf,
 # particularly pyscf==2.8.0, the version used by github CI.
-# So, we made a copy. Ugly, nasty, TODO: suppose to be replaced with GPU implementation.
+# So, we made a copy.
 
-
-def int_gauss_charge_v_rs(
-    v_rs,
-    comp,
-    atm,
-    bas,
-    env,
-    mesh,
-    dimension,
-    a,
-    b,
-    max_radius,
-):
-    if abs(a - np.diag(a.diagonal())).max() < 1e-12:
-        lattice_type = '_orth'
-        orth = True
+def vppnl_nuc_grad(cell, dm, kpts=None):
+    '''
+    Nuclear gradients of the non-local part of the GTH pseudo potential,
+    contracted with the density matrix.
+    '''
+    if kpts is None:
+        kpts_lst = numpy.zeros((1,3))
     else:
-        lattice_type = '_nonorth'
-        orth = False
+        kpts_lst = numpy.reshape(kpts, (-1,3))
 
-    fn_name = 'eval_mat_lda' + lattice_type
-    if comp == 3:
-        fn_name += '_ip1'
-    elif comp != 1:
-        raise NotImplementedError
+    fakecell, hl_blocks = fake_cell_vnl(cell)
+    intors = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
+    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
+    ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts_lst, intors, comp=3)
+    # int1e_ipovlp computes ip1 so multiply -1 to get ip2
+    if len(ppnl_half_ip2[0]) > 0:
+        for k, kpt in enumerate(kpts_lst):
+            ppnl_half_ip2[0][k] *= -1
 
-    out = np.zeros((len(atm), comp), order='C', dtype=np.double)
-    v_rs = np.asarray(v_rs, order='C', dtype=np.double)
-    atm = np.asarray(atm, order='C', dtype=np.int32)
-    bas = np.asarray(bas, order='C', dtype=np.int32)
-    env = np.asarray(env, order='C', dtype=np.double)
-    mesh = np.asarray(mesh, order='C', dtype=np.int32)
-    a = np.asarray(a, order='C', dtype=np.double)
-    b = np.asarray(b, order='C', dtype=np.double)
+    if gamma_point(kpts_lst):
+        grad = _contract_ppnl_nuc_grad(cell, fakecell, dm, hl_blocks,
+                                       ppnl_half, ppnl_half_ip2, kpts=kpts)
+        grad *= -2
+        return grad
 
-    libpbc.int_gauss_charge_v_rs(
-        getattr(libpbc, fn_name),
-        out.ctypes.data_as(ctypes.c_void_p),
-        v_rs.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_int(comp),
-        atm.ctypes.data_as(ctypes.c_void_p),
-        bas.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_int(len(bas)),
-        env.ctypes.data_as(ctypes.c_void_p),
-        mesh.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_int(dimension),
-        a.ctypes.data_as(ctypes.c_void_p),
-        b.ctypes.data_as(ctypes.c_void_p),
-        ctypes.c_double(max_radius),
-        ctypes.c_bool(orth)
-    )
-    return out
+    nkpts = len(kpts_lst)
+    nao = cell.nao_nr()
+    assert dm.shape == (nkpts, nao, nao)
+    dm_dmH = dm + dm.transpose(0,2,1).conj() # bra and ket
 
+    grad = numpy.zeros([cell.natm, 3], order='C', dtype=numpy.complex128)
 
-def vpploc_part1_nuc_grad(mydf, dm, kpts=np.zeros((1,3)), atm_id=None, precision=None):
-    if isinstance(kpts, KPoints):
-        raise NotImplementedError
-    t0 = (logger.process_clock(), logger.perf_counter())
-    cell = mydf.cell
-    fakecell, max_radius = fake_cell_vloc_part1(cell, atm_id=atm_id, precision=precision)
-    atm = fakecell._atm
-    bas = fakecell._bas
-    env = fakecell._env
+    buf1 = numpy.empty((3*9*nao), dtype=numpy.complex128)
+    buf2 = numpy.empty((3*3*9*nao), dtype=numpy.complex128)
 
-    a = cell.lattice_vectors()
-    b = np.linalg.inv(a.T)
+    dppnl = numpy.zeros((nkpts,3,nao,nao), dtype=numpy.complex128)
+    for k, kpt in enumerate(kpts_lst):
+        offset = [0] * 3
 
-    mesh = mydf.mesh
-    ngrids = np.prod(mesh)
-    comp = 3
+        for ib, hl in enumerate(hl_blocks):
+            l = fakecell.bas_angular(ib)
+            nd = 2 * l + 1
+            hl_dim = hl.shape[0]
+            ilp = numpy.ndarray((hl_dim,nd,nao), dtype=numpy.complex128, buffer=buf1)
+            dilp = numpy.ndarray((hl_dim,3,nd,nao), dtype=numpy.complex128, buffer=buf2)
+            for i in range(hl_dim):
+                p0 = offset[i]
+                ilp[i] = ppnl_half[i][k][p0:p0+nd]
+                dilp[i] = ppnl_half_ip2[i][k][:, p0:p0+nd]
+                offset[i] = p0 + nd
+            dppnl_k = numpy.einsum('idlp,ij,jlq->dpq', dilp.conj(), hl, ilp)
+            dppnl[k] += dppnl_k
 
-    if mydf.rhoG is None:
-        rhoG = _eval_rhoG(mydf, dm, hermi=1, kpts=kpts, deriv=0)
-    else:
-        rhoG = mydf.rhoG
-    rhoG = rhoG[...,0,:]
-    rhoG = rhoG.reshape(-1,ngrids)
-    if rhoG.shape[0] == 2: #unrestricted
-        rhoG = rhoG[0] + rhoG[1]
-    else:
-        assert rhoG.shape[0] == 1
-        rhoG = rhoG[0]
+            i_pp_atom = fakecell._bas[ib,0]
+            grad[i_pp_atom] += numpy.einsum('dpq,qp->d', dppnl_k, dm_dmH[k])
 
-    coulG = get_coulG(cell, mesh=mesh)
-    vG = rhoG * coulG
-    v_rs = ifft(vG, mesh).real.get()
+    aoslices = cell.aoslice_by_atom()
+    for ia in range(cell.natm):
+        p0, p1 = aoslices[ia][2:]
+        grad[ia] -= numpy.einsum('kdpq,kqp->d', dppnl[:,:,p0:p1,:], dm_dmH[:,:,p0:p1])
 
-    grad = int_gauss_charge_v_rs(
-        v_rs,
-        comp,
-        atm,
-        bas,
-        env,
-        mesh,
-        cell.dimension,
-        a,
-        b,
-        max_radius,
-    )
-    grad *= -1
-    t0 = logger.timer(mydf, 'vpploc_part1_nuc_grad', *t0)
+    grad_max_imag = numpy.max(numpy.abs(grad.imag))
+    if grad_max_imag >= 1e-8:
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential non-local term gradient.")
+    grad = grad.real
+
     return grad
