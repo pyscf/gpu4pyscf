@@ -87,7 +87,6 @@ if pyscf_version <= 10:
                     atoms_or_coords = self.atom_coords() * _unit
 
         if a is not None:
-            a = np.asarray(a)
             logger.info(cell, 'Set new lattice vectors')
             logger.info(cell, '%s', a)
             cell.a = a
