@@ -380,7 +380,7 @@ class GradientsBase(molgrad.GradientsBase):
     def optimizer(self):
         '''Geometry (atom positions and lattice) optimization solver
         '''
-        from gpu4pyscf.pbc.geomopt.ase_solver import GeometryOptimizer
+        from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
         return GeometryOptimizer(self.base)
 
 class Gradients(GradientsBase):

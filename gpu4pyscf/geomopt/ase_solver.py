@@ -62,9 +62,7 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
 
     if target is None:
         if is_pbc:
-            target = 'cell'
-        else:
-            target = 'atoms'
+            atoms = UnitCellFilter(atoms)
     elif target == 'cell':
         atoms = UnitCellFilter(atoms)
     elif target == 'lattice':
@@ -76,7 +74,7 @@ def kernel(method, target=None, logfile=None, fmax=0.05, max_steps=100,
     opt = BFGS(atoms, logfile=logfile)
     converged = opt.run(fmax=fmax, steps=max_steps)
 
-    if target == 'cell' or target == 'lattice':
+    if isinstance(atoms, (UnitCellFilter, StrainFilter)):
         atoms = atoms.atoms
     if is_pbc:
         cell = cell.set_geom_(atoms.get_positions(), unit='Ang', a=atoms.cell, inplace=False)

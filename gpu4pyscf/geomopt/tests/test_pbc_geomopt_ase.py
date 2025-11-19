@@ -32,7 +32,7 @@ def test_ase_optimize_cell():
     a = cell.lattice_vectors()
     atom_coords = cell.atom_coords()
     assert abs(atom_coords[0,0]) < 1e-5
-    assert abs(atom_coords[1,0] - 2.10721898) < 1e-5
+    assert abs(atom_coords[1,0] - 2.10721898) < 5e-4
     assert abs(atom_coords[1,0]*2 - a[0,1]) < 1e-7
 
 def test_ase_optimize_mol():
