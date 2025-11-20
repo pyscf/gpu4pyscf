@@ -253,9 +253,9 @@ class UHF(hf.SCF):
             e_a, c_a = self._eigh(fock[0], s)
             e_b, c_b = self._eigh(fock[1], s)
         else:
-            e_a, c_a = cupy.linalg.eigh(x.T @ fock[0] @ x)
+            e_a, c_a = cupy.linalg.eigh(x.T.conj() @ fock[0] @ x)
             c_a = x @ c_a
-            e_b, c_b = cupy.linalg.eigh(x.T @ fock[1] @ x)
+            e_b, c_b = cupy.linalg.eigh(x.T.conj() @ fock[1] @ x)
             c_b = x @ c_b
         return cupy.stack((e_a,e_b)), cupy.stack((c_a,c_b))
 

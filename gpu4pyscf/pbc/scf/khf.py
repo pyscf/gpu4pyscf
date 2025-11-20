@@ -27,7 +27,7 @@ from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, contract, tag_array, sandwich_dot)
+    return_cupy_array, contract, tag_array, sandwich_dot, eigh)
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc import df
@@ -389,10 +389,25 @@ class KSCF(pbchf.SCF):
         nkpts, nao = h_kpts.shape[:2]
         eig_kpts = cp.empty((nkpts, nao))
         mo_coeff_kpts = cp.empty((nkpts, nao, nao), dtype=h_kpts.dtype)
+
+        x_kpts = [None] * nkpts
+        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
+            x_kpts = [cp.asarray(x) for x in self.overlap_canonical_decomposed_x if x is not None]
+
         for k in range(nkpts):
-            e, c = self._eigh(h_kpts[k], s_kpts[k])
-            eig_kpts[k] = e
-            mo_coeff_kpts[k] = c
+            if x_kpts[k] is None:
+                e, c = eigh(h_kpts[k], s_kpts[k])
+                eig_kpts[k] = e
+                mo_coeff_kpts[k] = c
+            else:
+                xk = x_kpts[k]
+                ek, ck = cp.linalg.eigh(xk.T.conj() @ h_kpts[k] @ xk)
+                ck = xk @ ck
+                _, nmo_k = xk.shape
+                eig_kpts[k, :nmo_k] = ek
+                eig_kpts[k, nmo_k:] = float(cp.max(cp.abs(ek))) * 2 + 1e5
+                mo_coeff_kpts[k, :, :nmo_k] = ck
+                mo_coeff_kpts[k, :, nmo_k:] = 0
         return eig_kpts, mo_coeff_kpts
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):

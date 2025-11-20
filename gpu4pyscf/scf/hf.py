@@ -642,17 +642,38 @@ class SCF(pyscf_lib.StreamObject):
             overlap_zero_eigenvalue_threshold = getattr(__config__, 'scf_hf_overlap_zero_eigenvalue_threshold', 1e-8)
 
             if remove_overlap_zero_eigenvalue:
-                e, v = cupy.linalg.eigh(s1e)
-                mask = e > overlap_zero_eigenvalue_threshold
-                x = v[:,mask] / cupy.sqrt(e[mask])
+                if s1e.ndim == 2:
+                    e, v = cupy.linalg.eigh(s1e)
+                    mask = e > overlap_zero_eigenvalue_threshold
+                    x = v[:,mask] / cupy.sqrt(e[mask])
 
-                nao, nmo = x.shape
-                if nmo < nao:
-                    self.overlap_canonical_decomposed_x = x
-                    logger.warn(self, f"{nao - nmo} small eigenvector of overlap matrix removed "
-                                       "because of linear dependency between AOs.\n"
-                                       "The support for low-rank overlap matrix is not fully tested. "
-                                       "Please report any bug you encountered to the developers.")
+                    nao, nmo = x.shape
+                    if nmo < nao:
+                        self.overlap_canonical_decomposed_x = x
+                        logger.warn(self, f"{nao - nmo} small eigenvectors of overlap matrix removed "
+                                           "because of linear dependency between AOs.\n"
+                                           "The support for low-rank overlap matrix is not fully tested. "
+                                           "Please report any bug you encountered to the developers.")
+                else:
+                    nkpts = s1e.shape[0]
+                    x_kpts = []
+                    for k in range(nkpts):
+                        ek, vk = cupy.linalg.eigh(s1e[k])
+                        mask = ek > overlap_zero_eigenvalue_threshold
+                        xk = vk[:,mask] / cupy.sqrt(ek[mask])
+
+                        nao, nmo_k = xk.shape
+                        if nmo_k < nao:
+                            x_kpts.append(xk)
+                            logger.warn(self, f"For the {k}-th k point, {nao - nmo_k} small eigenvectors of overlap matrix removed "
+                                               "because of linear dependency between AOs.")
+                        else:
+                            x_kpts.append(None)
+
+                    if any([x is not None for x in x_kpts]):
+                        self.overlap_canonical_decomposed_x = x_kpts
+                        logger.warn(self, "The support for low-rank overlap matrix is not fully tested. "
+                                          "Please report any bug you encountered to the developers.")
 
         return super().check_sanity()
 
@@ -671,7 +692,7 @@ class SCF(pyscf_lib.StreamObject):
             mo_energy, mo_coeff = eigh(fock, s)
             return mo_energy, mo_coeff
         else:
-            mo_energy, C = cupy.linalg.eigh(x.T @ fock @ x)
+            mo_energy, C = cupy.linalg.eigh(x.T.conj() @ fock @ x)
             mo_coeff = x @ C
             return mo_energy, mo_coeff
 

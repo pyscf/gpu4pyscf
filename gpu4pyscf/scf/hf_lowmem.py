@@ -396,7 +396,7 @@ class RHF(hf.RHF):
             # memory after the eigh function to avoid this buffer being trapped by
             # small-sized arrays.
         else:
-            h_no_lindep = x.T @ h @ x
+            h_no_lindep = x.T.conj() @ h @ x
             e, c = cp.linalg.eigh(h_no_lindep)
             h_no_lindep = None
             c = x @ c

@@ -125,7 +125,7 @@ class ROHF(hf.RHF):
         if x is None:
             e, c = self._eigh(fock, s)
         else:
-            e, c = cupy.linalg.eigh(x.T @ fock @ x)
+            e, c = cupy.linalg.eigh(x.T.conj() @ fock @ x)
             c = x @ c
 
         if getattr(fock, 'focka', None) is not None:

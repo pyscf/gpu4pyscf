@@ -125,8 +125,7 @@ class SCF(mol_hf.SCF):
             isinstance(self.with_df, df.DF)):
             logger.warn(self, 'exxdiv %s is not supported in DF', self.exxdiv)
 
-        if self.verbose >= logger.DEBUG:
-            mol_hf.SCF.check_sanity(self)
+        mol_hf.SCF.check_sanity(self)
         return self
 
     @property
