@@ -38,6 +38,7 @@ if pyscf_version <= 10:
     from pyscf.pbc.df.df import GDF
     GDF.to_gpu = _gdf_to_gpu
 
+    from pyscf.pbc.gto.cell import Cell
     def get_lattice_Ls(cell, nimgs=None, rcut=None, dimension=None, discard=True):
         '''This version employs more strict criteria when discarding images in lattice sum.
         It can be replaced by the built-in version available in PySCF 2.10.
