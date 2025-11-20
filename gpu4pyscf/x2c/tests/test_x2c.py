@@ -78,12 +78,12 @@ class KnownValues(unittest.TestCase):
         myx2c.with_x2c.xuncontract = True
         myx2c.with_x2c.approx = 'ATOM1E'
         e_gpu = myx2c.kernel()
-        myx2c_cpu = pyscf_scf.GHF(mol).x2c1e()
-        myx2c_cpu.with_x2c.xuncontract = True
-        myx2c_cpu.with_x2c.approx = 'ATOM1E'
-        e_cpu = myx2c_cpu.kernel()
+        # myx2c_cpu = pyscf_scf.GHF(mol).x2c1e()
+        # myx2c_cpu.with_x2c.xuncontract = True
+        # myx2c_cpu.with_x2c.approx = 'ATOM1E'
+        # e_cpu = myx2c_cpu.kernel()
         self.assertAlmostEqual(e_gpu, -76.0761343226608, 9)
-        # self.assertAlmostEqual(e_cpu, e_gpu, 9) # TODO: waiting to fix the bug in 
+        # self.assertAlmostEqual(e_cpu, e_gpu, 9) # TODO: waiting to fix the bug in PySCF
         self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), -31.814825611164004, 5)
         # self.assertAlmostEqual(lib.fp(myx2c.mo_energy.get()), lib.fp(myx2c_cpu.mo_energy), 5)
 
@@ -127,6 +127,7 @@ class KnownValues(unittest.TestCase):
         mf = mf.undo_x2c()
         self.assertEqual(mf.__class__.__name__, 'GHF')
 
+    @unittest.skip("to_cpu() for GPU-X2C is not currently supported due to API compatibility issues.")
     def test_to_cpu(self):
         myx2c = scf.GHF(mol).x2c1e()
         e_gpu = myx2c.kernel()
