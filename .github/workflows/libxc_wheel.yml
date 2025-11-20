@@ -4,21 +4,41 @@ on:
   workflow_dispatch:
 
 jobs:
-  release-pypi-linux:
+  release-pypi-linux-cuda12:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        cuda-version:
-        - cuda118
-        - cuda121
     steps:
     - name: Checkout
       uses: actions/checkout@v3
     - name: Build wheels
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw \
-        wxj6000/manylinux2014:${{ matrix.cuda-version }} \
+        -e CUDA_ARCHITECTURES=70 \
+        pyscf/gpu4pyscf-pypa-manylinux2014:cuda128 \
+        bash -exc 'sh /gpu4pyscf/builder/build_libxc.sh'
+    - name: List available wheels
+      run: |
+        ls ${{ github.workspace }}/wheelhouse
+    - name: Publish to PyPI
+      run: |
+          pip install twine
+          export TWINE_USERNAME=__token__
+          export TWINE_PASSWORD="${{ secrets.PYPI_API_TOKEN }}"
+          twine upload --verbose "${{ github.workspace }}/wheelhouse/*"
+
+  release-pypi-linux-cuda13:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Build wheels
+      run: |
+        docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw \
+        -e CUDA_ARCHITECTURES="80-virtual;120-real" \
+        pyscf/gpu4pyscf-pypa-manylinux2014:cuda130 \
         bash -exc 'sh /gpu4pyscf/builder/build_libxc.sh'
     - name: List available wheels
       run: |

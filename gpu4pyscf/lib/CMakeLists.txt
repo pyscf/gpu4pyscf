@@ -119,53 +119,20 @@ if(BUILD_CUTLASS)
   set(cutlass_SOURCE_DIR ${SOURCE_DIR})
 endif()
 
-option(BUILD_GINT "Using gint" ON)
-if(BUILD_GINT)
-  add_subdirectory(gint)
-endif()
-
-option(BUILD_GVHF "Using gvhf" ON)
-if(BUILD_GVHF)
-  add_subdirectory(gvhf)
-endif()
-
-option(BUILD_GDFT "Using gdft" ON)
-if(BUILD_GDFT)
-  add_subdirectory(gdft)
-endif()
-
-
-option(BUILD_CUPY_HELPER "Using cupy_helper" ON)
-if(BUILD_CUPY_HELPER)
-  add_subdirectory(cupy_helper)
-endif()
+add_subdirectory(gint)
+add_subdirectory(gvhf)
+add_subdirectory(gdft)
+add_subdirectory(cupy_helper)
 
 option(BUILD_SOLVENT "Using SMD solvent" ON)
 if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
-
-option(BUILD_GINT_RYS "Using gint-rys" ON)
-if(BUILD_GINT_RYS)
-  add_subdirectory(gint-rys)
-endif()
-
-option(BUILD_GVHF_RYS "Using gvhf-rys" ON)
-if(BUILD_GVHF_RYS)
-  add_subdirectory(gvhf-rys)
-endif()
-
-option(BUILD_GVHF_MD "Using gvhf-md" ON)
-if(BUILD_GVHF_MD)
-  add_subdirectory(gvhf-md)
-endif()
-
-option(BUILD_PBC "Using pbc" ON)
-if(BUILD_PBC)
-  add_subdirectory(pbc)
-endif()
-
+add_subdirectory(gint-rys)
+add_subdirectory(gvhf-rys)
+add_subdirectory(gvhf-md)
+add_subdirectory(pbc)
 add_subdirectory(multigrid)
 add_subdirectory(ecp)
 
@@ -178,6 +145,7 @@ if(BUILD_LIBXC)
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
             -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
             -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
             -DCMAKE_INSTALL_LIBDIR:PATH=lib
