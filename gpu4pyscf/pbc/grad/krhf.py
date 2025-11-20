@@ -322,6 +322,12 @@ class GradientsBase(molgrad.GradientsBase):
         if cell is None: cell = self.cell
         return krhf_cpu.grad_nuc(cell, atmlst)
 
+    def optimizer(self):
+        '''Geometry (atom positions and lattice) optimization solver
+        '''
+        from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
+        return GeometryOptimizer(self.base)
+
 class Gradients(GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 

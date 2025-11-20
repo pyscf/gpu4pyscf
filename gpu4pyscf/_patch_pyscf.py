@@ -42,6 +42,14 @@ if pyscf_version <= 10:
     from pyscf.lib import logger
     from pyscf.gto import mole
     from pyscf.pbc.gto.cell import Cell
+    def _length_in_au(unit):
+        if isinstance(unit, str):
+            if mole.is_au(unit):
+                unit = 1.
+            else:
+                unit = 1/lib.param.BOHR
+        return unit
+
     def set_geom_(self, atoms_or_coords=None, unit=None, symmetry=None,
                   a=None, inplace=True):
         '''Update geometry and lattice parameters
@@ -70,18 +78,13 @@ if pyscf_version <= 10:
             cell = self.copy(deep=False)
             cell._env = cell._env.copy()
 
-        if unit is not None and cell.unit != unit:
-            if isinstance(unit, str):
-                if mole.is_au(unit):
-                    _unit = 1.
-                else:
-                    _unit = lib.param.BOHR
-            else:
-                _unit = unit
-            if a is None:
-                a = self.lattice_vectors() * _unit
-            if atoms_or_coords is None:
-                atoms_or_coords = self.atom_coords() * _unit
+        if unit is not None:
+            _unit = _length_in_au(unit)
+            if _unit != _length_in_au(cell.unit):
+                if a is None:
+                    a = self.lattice_vectors() * _unit
+                if atoms_or_coords is None:
+                    atoms_or_coords = self.atom_coords() * _unit
 
         if a is not None:
             logger.info(cell, 'Set new lattice vectors')

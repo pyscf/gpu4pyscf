@@ -35,6 +35,12 @@ class GradientsBase(mol_rhf.GradientsBase):
     get_ovlp = NotImplemented
     grad_nuc = cpu_rhf.GradientsBase.grad_nuc
 
+    def optimizer(self):
+        '''Geometry (atom positions and lattice) optimization solver
+        '''
+        from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
+        return GeometryOptimizer(self.base)
+
 
 class Gradients(GradientsBase):
 
