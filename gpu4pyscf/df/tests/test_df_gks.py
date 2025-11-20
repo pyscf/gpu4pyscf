@@ -21,6 +21,10 @@ from pyscf import dft as cpu_dft
 from pyscf.df import df_jk as cpu_df_jk
 from gpu4pyscf import dft as gpu_dft
 from gpu4pyscf.df import df_jk as gpu_df_jk
+try:
+    import mcfun
+except ImportError:
+    mcfun = None
 
 
 atom = '''
@@ -49,19 +53,22 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by PySCF
     '''
-    def test_ghf(self):
+    def test_gks(self):
         mf_gpu = gpu_dft.GKS(mol, xc='b3lyp').density_fit(auxbasis='def2-tzvpp-jkfit')
         mf_gpu.collinear = 'm'
         mf_gpu._numint.spin_samples = 6
         e_tot = mf_gpu.kernel()
-        mf_cpu = cpu_dft.GKS(mol, xc='b3lyp').density_fit(auxbasis='def2-tzvpp-jkfit')
-        mf_cpu.collinear = 'm'
-        mf_cpu._numint.spin_samples = 6
-        e_pyscf = mf_cpu.kernel()
+        if mcfun is None:
+            mf_cpu = cpu_dft.GKS(mol, xc='b3lyp').density_fit(auxbasis='def2-tzvpp-jkfit')
+            mf_cpu.collinear = 'm'
+            mf_cpu._numint.spin_samples = 6
+            e_pyscf = mf_cpu.kernel()
+            assert np.abs(e_tot - e_pyscf) < 1e-5
+            assert np.abs(lib.fp(mf_cpu.mo_energy) - lib.fp(mf_gpu.mo_energy.get())) < 1e-5
+        assert np.abs(e_tot - -75.99882822956384) < 1e-5
+        assert np.abs(-96.56444462841858 - lib.fp(mf_gpu.mo_energy.get())) < 1e-5
 
-        assert np.abs(e_tot - e_pyscf) < 1e-5
-        assert np.abs(lib.fp(mf_cpu.mo_energy) - lib.fp(mf_gpu.mo_energy.get())) < 1e-5
-
+    @unittest.skipIf(mcfun is None, "mcfun library not found.")
     def test_to_cpu(self):
         mf = gpu_dft.GKS(mol, xc='b3lyp').density_fit()
         mf.collinear = 'm'
