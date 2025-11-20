@@ -343,7 +343,7 @@ def _get_r(s, snesc):
     return r
 
 def _x2c1e_xmatrix(t, v, w, s, c):
-    """
+    r"""
     Solve to get the X2C-1e matrix.
         $$hC = MC\epsilon \quad \text{where} 
         h = \begin{pmatrix} h^{LL} & h^{LS} 
@@ -465,7 +465,7 @@ def _sigma_dot(mat):
 
 
 def solve_gen_eigh_cupy(h, m):
-    """
+    r"""
     Solves Hx = \lambda Mx using CuPy.
     Equivalent to numpy.linalg.eigh(h, m).
     
