@@ -21,11 +21,13 @@ import cupy as cp
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.dft import numint2c, xc_deriv
+from pyscf.dft import numint as pyscf_numint
 from gpu4pyscf.dft import xc_deriv as xc_deriv_gpu
 from gpu4pyscf.scf import hf, uhf
 from gpu4pyscf.dft.numint import _scale_ao, _tau_dot, eval_rho, eval_rho2
 from gpu4pyscf.lib.cupy_helper import transpose_sum, add_sparse, contract
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 
 MAX_GRIDS_PER_TASK = 8192 # Approximately (2,4,2,4,200,8192) ~ 800MB
@@ -71,16 +73,24 @@ def _eval_xc_sf(func, rho_tmz, deriv, collinear_samples):
         nvar = 1
     else:
         nvar = rho_tmz.shape[1]
-    # spin-flip part
-    fxc_sf = 0.0
+    fxc_sf = cp.zeros((nvar,nvar,ngrids))
+    kxc_sf = cp.zeros((nvar,nvar,2,nvar,ngrids))
+    
     rho = _project_spin_paxis2(rho_tmz, sgridz)
-    fxc = func(rho, deriv)[2]
-    fxc = fxc.reshape(2, nvar, 2, nvar, ngrids, weights.size)
-    if not isinstance(fxc, cp.ndarray):
-        fxc = cp.array(fxc)
-    fxc_sf += fxc[1,:,1].dot(weights)
+    xc_orig = func(rho, deriv)
+    if deriv > 1:
+        fxc = xc_orig[2].reshape(2, nvar, 2, nvar, ngrids, weights.size)
+        if not isinstance(fxc, cp.ndarray):
+            fxc = cp.array(fxc)
+        fxc_sf += fxc[1,:,1].dot(weights)
 
-    return None,None,fxc_sf
+    if deriv > 2:
+        kxc = xc_orig[3].reshape(2, nvar, 2, nvar, 2, nvar, ngrids, weights.size)
+        if not isinstance(kxc, cp.ndarray):
+            kxc = cp.array(kxc)
+        kxc_sf[:,:,0] += kxc[1,:,1,:,0].dot(weights)
+        kxc_sf[:,:,1] += kxc[1,:,1,:,1].dot(weights*sgridz)
+    return None,None,fxc_sf,kxc_sf
 
 
 def _project_spin_paxis2(rho_tm, sgridz=None):
@@ -178,7 +188,10 @@ def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
         s = cp.asarray(s)
     rho = cp.stack([(t + s) * .5, (t - s) * .5])
     spin = 1
-    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
+    if isinstance(ni, pyscf_numint.NumInt):
+        evfk = ni.eval_xc_eff(xc_code, rho.get(), deriv=deriv, xctype=xctype)
+    else:
+        evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
     evfk = list(evfk)
     for order in range(1, deriv+1):
         if evfk[order] is not None:
@@ -241,7 +254,13 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
         vxc, fxc = eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)[1:3]
         return rho_ab, vxc, fxc
     elif deriv == 3:
-        vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
+        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        if whether_use_gpu:
+            vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
+        else:
+            ni_cpu = ni.to_cpu()
+            eval_xc_eff = mcfun_eval_xc_adapter_sf(ni_cpu, xc_code, collinear_samples)
+            vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
         return rho_ab, vxc, fxc, kxc
 
 def nr_uks_fxc_sf(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
