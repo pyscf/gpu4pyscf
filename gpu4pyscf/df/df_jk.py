@@ -389,8 +389,9 @@ class _DFHF:
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()
         obj = utils.to_cpu(self, obj)
-        if isinstance(self, ghf.GHF):
+        if hasattr(self, 'collinear'):
             obj.collinear = self.collinear
+        if hasattr(self, 'spin_samples'):
             obj.spin_samples = self.spin_samples
         return obj
 

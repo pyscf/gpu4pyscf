@@ -286,16 +286,9 @@ class X2C1E_GSCF(_X2C_SCF):
     def to_ks(self, xc='HF'):
         raise NotImplementedError
 
+    # TODO: in PySCF 2.8.0, the reset is reset(self, mol)
     def to_cpu(self):
-        from pyscf.scf import ghf as ghf_cpu
-        mf_cpu = ghf_cpu.GHF(self.mol)
-        x2c1e_obj = mf_cpu.x2c1e()
-        cpu_x2c_helper = x2c1e_obj.with_x2c
-        utils.to_cpu(self.with_x2c, out=cpu_x2c_helper)
-        utils.to_cpu(self, out=x2c1e_obj)
-        x2c1e_obj.with_x2c = cpu_x2c_helper
-        
-        return x2c1e_obj
+        raise NotImplementedError("to_cpu() for GPU-X2C is not currently supported due to API compatibility issues.")
 
 
 def _uncontract_mol(mol, xuncontract=None, exp_drop=0.2):
