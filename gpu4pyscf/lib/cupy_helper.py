@@ -17,6 +17,7 @@ import sys
 import functools
 import ctypes
 import numpy as np
+import scipy.linalg
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger

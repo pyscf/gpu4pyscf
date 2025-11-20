@@ -676,7 +676,7 @@ class SCF(pyscf_lib.StreamObject):
             mo_energy, C = eigh(x.conj().T @ fock @ x)
             mo_coeff = x @ C
         return mo_energy, mo_coeff
-    eig = _eigh
+    _eigh = eig
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
