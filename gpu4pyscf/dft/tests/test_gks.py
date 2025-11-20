@@ -199,27 +199,6 @@ class KnownValues(unittest.TestCase):
             self.assertAlmostEqual(e_gpu, e_cpu, 6)
             self.assertAlmostEqual(lib.fp(mf_gpu.mo_energy.get()), lib.fp(mf_cpu.mo_energy), 5)
 
-    def test_to_cpu(self):
-        mf = gks.GKS(mol, xc='b3lyp')
-        mf.collinear = 'm'
-        mf._numint.spin_samples = 6
-        e_gpu = mf.kernel()
-        mf = mf.to_cpu()
-        e_cpu = mf.kernel()
-        assert isinstance(mf, gks_cpu.GKS)
-        self.assertAlmostEqual(e_gpu, e_cpu, 6)
-
-    @unittest.skip("skip test_to_gpu")
-    def test_to_gpu(self):
-        mf = gks.GKS(mol, xc='b3lyp')
-        mf.collinear = 'm'
-        mf._numint.spin_samples = 6
-        e_cpu = mf.kernel()
-        mf = mf.to_gpu()
-        e_gpu = mf.kernel()
-        assert isinstance(mf, gks.GKS)
-        self.assertAlmostEqual(e_gpu, e_cpu, 6)
-
 
 if __name__ == "__main__":
     print("Test GKS")

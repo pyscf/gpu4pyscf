@@ -132,7 +132,7 @@ class GHF(hf.SCF):
     scf = kernel = hf.RHF.kernel
     make_rdm2 = NotImplemented
     newton = NotImplemented
-    x2c = x2c1e = sfx2c1e = NotImplemented
+    sfx2c1e = NotImplemented
     to_rhf = NotImplemented
     to_uhf = NotImplemented
     to_ghf = NotImplemented
