@@ -174,6 +174,9 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
     virtual subspaces separatedly (without change occupancy).
     '''
+    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
+        raise NotImplementedError("Overlap matrix canonical decomposition (removing linear dependency for diffused orbitals) "
+                                  "not supported for canonicalize() function with k-point sampling")
     if fock is None:
         dm = mf.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
         fock = mf.get_fock(dm=dm)

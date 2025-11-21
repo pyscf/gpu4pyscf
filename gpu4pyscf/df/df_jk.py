@@ -134,7 +134,8 @@ class _DFHF:
             vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
                                          self.direct_scf_tol, omega)
         else:
-            vj, vk = super().get_jk(mol, dm, hermi, with_j, with_k, omega)
+            raise ValueError(f"with_df field not found in a df object (type = {type(self)}) during a get_jk() call.")
+            # vj, vk = super().get_jk(mol, dm, hermi, with_j, with_k, omega)
         return vj, vk
 
     def nuc_grad_method(self):

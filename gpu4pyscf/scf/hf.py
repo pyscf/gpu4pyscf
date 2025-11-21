@@ -32,6 +32,9 @@ from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 
+remove_overlap_zero_eigenvalue = getattr(__config__, 'scf_hf_remove_overlap_zero_eigenvalue', False)
+overlap_zero_eigenvalue_threshold = getattr(__config__, 'scf_hf_overlap_zero_eigenvalue_threshold', 1e-6)
+
 __all__ = [
     'get_jk', 'get_occ', 'get_grad', 'damping', 'level_shift', 'get_fock',
     'energy_elec', 'RHF', 'SCF'
@@ -229,7 +232,15 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis.rollback = mf.diis_space_rollback
         # CDIIS just require a C that's orthonormal (C.T@S@C==I), and X satisfies that.
         if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-            mf_diis.Corth = cupy.asarray(mf.overlap_canonical_decomposed_x)
+            if type(mf.overlap_canonical_decomposed_x) is list: # k point
+                nkpts = len(mf.overlap_canonical_decomposed_x)
+                mf_diis.Corth = cupy.zeros([nkpts, mol.nao, mol.nao], dtype = cupy.complex128)
+                for k in range(nkpts):
+                    xk = mf.overlap_canonical_decomposed_x[k]
+                    _, nmo_k = xk.shape
+                    mf_diis.Corth[k, :, :nmo_k] = xk
+            else:
+                mf_diis.Corth = cupy.asarray(mf.overlap_canonical_decomposed_x)
     else:
         mf_diis = None
 
@@ -638,14 +649,11 @@ class SCF(pyscf_lib.StreamObject):
             logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
                         'SCF may be inaccurate and hard to converge.', cupy.max(c))
 
-            remove_overlap_zero_eigenvalue = getattr(__config__, 'scf_hf_remove_overlap_zero_eigenvalue', False)
-            overlap_zero_eigenvalue_threshold = getattr(__config__, 'scf_hf_overlap_zero_eigenvalue_threshold', 1e-8)
-
             if remove_overlap_zero_eigenvalue:
-
                 if s1e.ndim == 2:
                     e, v = eigh(s1e)
                     mask = e > overlap_zero_eigenvalue_threshold
+                    x = v[:,mask] / cupy.sqrt(e[mask])
 
                     nao, nmo = x.shape
                     if nmo < nao:
@@ -662,15 +670,13 @@ class SCF(pyscf_lib.StreamObject):
                         mask = ek > overlap_zero_eigenvalue_threshold
                         xk = vk[:,mask] / cupy.sqrt(ek[mask])
 
+                        x_kpts.append(xk)
                         nao, nmo_k = xk.shape
                         if nmo_k < nao:
-                            x_kpts.append(xk)
                             logger.warn(self, f"For the {k}-th k point, {nao - nmo_k} small eigenvectors of overlap matrix removed "
                                                "because of linear dependency between AOs.")
-                        else:
-                            x_kpts.append(None)
 
-                    if any([x is not None for x in x_kpts]):
+                    if any([x.shape[1] < x.shape[0] for x in x_kpts]):
                         self.overlap_canonical_decomposed_x = x_kpts
                         logger.warn(self, "The support for low-rank overlap matrix is not fully tested. "
                                           "Please report any bug you encountered to the developers.")

@@ -168,6 +168,9 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf_kpts=None):
     return (e1+e_coul).real, e_coul.real
 
 def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
+    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
+        raise NotImplementedError("Overlap matrix canonical decomposition (removing linear dependency for diffused orbitals) "
+                                  "not supported for canonicalize() function with k-point sampling")
     if fock is None:
         dm = mf.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
         fock = mf.get_fock(dm=dm)
@@ -390,16 +393,17 @@ class KSCF(pbchf.SCF):
         eig_kpts = cp.empty((nkpts, nao))
         mo_coeff_kpts = cp.empty((nkpts, nao, nao), dtype=h_kpts.dtype)
 
-        x_kpts = [None] * nkpts
+        x_kpts = None
         if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
-            x_kpts = [cp.asarray(x) for x in self.overlap_canonical_decomposed_x if x is not None]
+            x_kpts = [cp.asarray(x) for x in self.overlap_canonical_decomposed_x]
 
-        for k in range(nkpts):
-            if x_kpts[k] is None:
+        if x_kpts is None:
+            for k in range(nkpts):
                 e, c = eigh(h_kpts[k], s_kpts[k])
                 eig_kpts[k] = e
                 mo_coeff_kpts[k] = c
-            else:
+        else:
+            for k in range(nkpts):
                 xk = x_kpts[k]
                 ek, ck = cp.linalg.eigh(xk.T.conj() @ h_kpts[k] @ xk)
                 ck = xk @ ck

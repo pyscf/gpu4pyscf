@@ -73,11 +73,12 @@ def tearDownModule():
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        gpu4pyscf.__config__.scf_hf_remove_overlap_zero_eigenvalue = True
+        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue == False
+        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = True
 
     @classmethod
     def tearDownClass(cls):
-        del gpu4pyscf.__config__.scf_hf_remove_overlap_zero_eigenvalue
+        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = False
 
     def test_rhf(self):
         mf = scf.RHF(mol)
