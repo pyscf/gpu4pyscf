@@ -22,6 +22,7 @@ from gpu4pyscf.lib.cupy_helper import (
     add_sparse, takebak, empty_mapped, dist_matrix,
     grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph,
     copy_array)
+from gpu4pyscf.lib import cusolver
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -273,6 +274,19 @@ class KnownValues(unittest.TestCase):
         dat = cupy_helper.condense('sum', a, loc_x, loc_y)
         ref = a.reshape(120,6,80,5).transpose(0,2,1,3).sum(axis=(2,3))
         assert abs(dat - ref).max() < 1e-12
+
+    def test_eigh(self):
+        a = cupy.random.rand(60, 60)
+        b = cupy.random.rand(60, 60)
+        a = a.dot(a.T)
+        b = cupy.eye(a.shape[0]) + b.dot(b.T) * .2
+        eref, cref = cupy_helper.eigh(a, b)
+        try:
+            bakup, cusolver.MAX_EIGH_DIM = cusolver.MAX_EIGH_DIM, 2
+            e, c = cupy_helper.eigh(a, b)
+        finally:
+            cusolver.MAX_EIGH_DIM = bakup
+        assert abs(eref - e).max() < 1e-12
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

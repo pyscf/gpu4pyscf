@@ -216,7 +216,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     # Skip SCF iterations. Compute only the total energy of the initial density
     if mf.max_cycle <= 0:
         fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
@@ -372,7 +372,7 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
         if cupy.any(idx) > 0:
             orb = mo_coeff[:,idx]
             f1 = orb.conj().T.dot(fock).dot(orb)
-            e, c = cupy.linalg.eigh(f1)
+            e, c = eigh(f1)
             mo[:,idx] = orb.dot(c)
             mo_e[idx] = e
     return mo_e, mo
@@ -642,7 +642,7 @@ class SCF(pyscf_lib.StreamObject):
             overlap_zero_eigenvalue_threshold = getattr(__config__, 'scf_hf_overlap_zero_eigenvalue_threshold', 1e-8)
 
             if remove_overlap_zero_eigenvalue:
-                e, v = cupy.linalg.eigh(s1e)
+                e, v = eigh(s1e)
                 mask = e > overlap_zero_eigenvalue_threshold
                 x = v[:,mask] / cupy.sqrt(e[mask])
 
@@ -661,19 +661,26 @@ class SCF(pyscf_lib.StreamObject):
         self.check_sanity()
         return self
 
-    def eig(self, fock, s):
+    def eig(self, fock, s, overwrite=False):
+        '''
+        Solve generalized eigenvalue problem.
+
+        When overwrite is specified, both fock and s matrices are overwritten.
+        '''
         x = None
         if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
-            x = cupy.asarray(self.overlap_canonical_decomposed_x)
-        if fock.dtype == cupy.complex128:
-            s = s.astype(cupy.complex128)
+            x = asarray(self.overlap_canonical_decomposed_x)
         if x is None:
-            mo_energy, mo_coeff = eigh(fock, s)
-            return mo_energy, mo_coeff
+            if fock.dtype != s.dtype:
+                s = s.astype(fock.dtype)
+            # In DIIS, fock and overlap matrices are temporarily constructed
+            # and discarded, they can be overwritten in the eigh solver.
+            mo_energy, mo_coeff = eigh(fock, s, overwrite=overwrite)
         else:
-            mo_energy, C = cupy.linalg.eigh(x.T @ fock @ x)
+            mo_energy, C = eigh(x.conj().T @ fock @ x)
             mo_coeff = x @ C
-            return mo_energy, mo_coeff
+        return mo_energy, mo_coeff
+    _eigh = eig
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
@@ -725,7 +732,6 @@ class SCF(pyscf_lib.StreamObject):
     energy_tot               = energy_tot
     energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
-    _eigh                    = staticmethod(eigh)
     do_disp                  = hf_cpu.SCF.do_disp
     get_dispersion           = hf_cpu.SCF.get_dispersion
     kernel = scf             = scf

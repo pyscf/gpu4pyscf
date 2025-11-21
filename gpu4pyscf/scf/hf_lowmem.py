@@ -21,7 +21,7 @@ import numpy as np
 import cupy as cp
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
-from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril, eigh
+from gpu4pyscf.lib.cupy_helper import asarray, pack_tril, unpack_tril
 from gpu4pyscf import lib
 from gpu4pyscf.scf import diis, jk, j_engine, hf
 from gpu4pyscf.lib import logger
@@ -77,7 +77,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         if mf.mo_coeff is None:
             s1e = mf.get_ovlp(mol)
             fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-            mf.mo_energy, mf.mo_coeff = mf.eig(fock, s1e)
+            mf.mo_energy, mf.mo_coeff = mf.eig(fock, s1e, overwrite=True)
             fock = s1e = None
             mf.mo_occ = mf.get_occ(mf.mo_energy, mf.mo_coeff)
             mf.converged = scf_conv
@@ -118,7 +118,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis) # on GPU
         t1 = log.timer_debug1('DIIS', *t1)
         cp.get_default_memory_pool().free_all_blocks()
-        mo_energy, mo_coeff = mf.eig(fock, s1e) # on GPU
+        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True) # on GPU
         fock = s1e = None
         t1 = log.timer_debug1('eig', *t1)
 
@@ -152,7 +152,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         fock = mf.get_fock(h1e, s1e, vhf)
 
         cp.get_default_memory_pool().free_all_blocks()
-        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True)
         fock = s1e = None
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_wfn(mo_coeff, mo_occ), dm
@@ -383,28 +383,6 @@ class RHF(hf.RHF):
         self.scf_summary['e2'] = e_coul
         logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
         return e_tot, e_coul
-
-    def _eigh(self, h, s):
-        x = None
-        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
-            x = asarray(self.overlap_canonical_decomposed_x)
-        if x is None:
-            # In DIIS, fock and overlap matrices are temporarily constructed and
-            # discarded, they can be overwritten in the eigh solver.
-            e, c = eigh(h, s, overwrite=True)
-            # eigh allocates a large memory buffer "work". Immediately free the cupy
-            # memory after the eigh function to avoid this buffer being trapped by
-            # small-sized arrays.
-        else:
-            h_no_lindep = x.T @ h @ x
-            e, c = cp.linalg.eigh(h_no_lindep)
-            h_no_lindep = None
-            c = x @ c
-            x = None
-        cp.get_default_memory_pool().free_all_blocks()
-        return e, c
-
-    eig = _eigh
 
     def to_cpu(self):
         raise NotImplementedError
