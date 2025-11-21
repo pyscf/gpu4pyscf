@@ -75,7 +75,6 @@ class ROHF(hf.RHF):
     nelec = rohf_cpu.ROHF.nelec
     check_sanity = hf.SCF.check_sanity
     get_jk = hf._get_jk
-    _eigh = staticmethod(hf.eigh)
     scf = kernel = hf.RHF.kernel
     # FIXME: Needs more tests for get_fock and get_occ
     get_occ = hf.return_cupy_array(rohf_cpu.ROHF.get_occ)
@@ -118,6 +117,7 @@ class ROHF(hf.RHF):
         dm_b = cupy.dot(mo_coeff*mo_occb, mo_coeff.conj().T)
         return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
+<<<<<<< HEAD
     def eig(self, fock, s):
         x = None
         if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
@@ -128,6 +128,10 @@ class ROHF(hf.RHF):
             e, c = cupy.linalg.eigh(x.T.conj() @ fock @ x)
             c = x @ c
 
+=======
+    def eig(self, fock, s, overwrite=False):
+        e, c = self._eigh(fock, s, overwrite)
+>>>>>>> master
         if getattr(fock, 'focka', None) is not None:
             mo_ea = contract('pi,pi->i', c.conj(), fock.focka.dot(c)).real
             mo_eb = contract('pi,pi->i', c.conj(), fock.fockb.dot(c)).real

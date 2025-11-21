@@ -38,7 +38,6 @@ class GHF(hf.SCF):
     with_soc = None
     _keys = {'with_soc'}
 
-    _eigh = staticmethod(hf.eigh)
     scf = kernel = hf.RHF.kernel
     make_rdm2 = NotImplemented
     newton = NotImplemented

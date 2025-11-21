@@ -159,7 +159,7 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
         if cupy.any(idx) > 0:
             orb = mo_coeff[:,idx]
             f1 = orb.conj().T.dot(fock).dot(orb)
-            e, c = cupy.linalg.eigh(f1)
+            e, c = eigh(f1)
             es[idx] = e
             cs[:,idx] = cupy.dot(orb, c)
 
@@ -245,18 +245,9 @@ class UHF(hf.SCF):
             mo_occ = self.mo_occ
         return make_rdm1(mo_coeff, mo_occ, **kwargs)
 
-    def eig(self, fock, s):
-        x = None
-        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
-            x = cupy.asarray(self.overlap_canonical_decomposed_x)
-        if x is None:
-            e_a, c_a = self._eigh(fock[0], s)
-            e_b, c_b = self._eigh(fock[1], s)
-        else:
-            e_a, c_a = cupy.linalg.eigh(x.T.conj() @ fock[0] @ x)
-            c_a = x @ c_a
-            e_b, c_b = cupy.linalg.eigh(x.T.conj() @ fock[1] @ x)
-            c_b = x @ c_b
+    def eig(self, fock, s, overwrite=False):
+        e_a, c_a = self._eigh(fock[0], s, overwrite)
+        e_b, c_b = self._eigh(fock[1], s, overwrite)
         return cupy.stack((e_a,e_b)), cupy.stack((c_a,c_b))
 
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):

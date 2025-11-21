@@ -17,17 +17,22 @@ import sys
 import functools
 import ctypes
 import numpy as np
+import scipy.linalg
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
-from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
+from gpu4pyscf.lib import cusolver
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
+
+# cusolver is unable to handle large arrays due to workspace size limit (see
+# MAX_EIGH_DIM in cusolver.py). Use scipy.linalg.eigh to handle large arrays.
+SCIPY_EIGH_FOR_LARGE_ARRAYS = True
 
 _kernel_registery = {}
 
@@ -825,7 +830,7 @@ def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
     '''
     a = cupy.asarray(a)
-    w, v = cupy.linalg.eigh(a)
+    w, v = eigh(a)
     mask = w > lindep
     v1 = v[:,mask]
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
@@ -842,6 +847,21 @@ def cond(a, sympos=False):
     Returns:
     float: The condition number of the matrix.
     """
+    if a.shape[0] > cusolver.MAX_EIGH_DIM:
+        if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+            raise RuntimeError(
+                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
+        a = a.get()
+        if sympos:
+            s = scipy.linalg.eigvalsh(a)
+            if s[0] <= 0:
+                raise RuntimeError('matrix is not positive definite')
+            return s[-1] / s[0]
+        else:
+            _, s, _ = scipy.linalg.svd(a)
+            cond_number = s[0] / s[-1]
+            return cond_number
+
     if sympos:
         s = cupy.linalg.eigvalsh(a)
         if s[0] <= 0:
@@ -1157,3 +1177,29 @@ def batched_vec3_norm2(batched_vec3):
     kernel(((n + 1024 - 1) // 1024,), (1024,), (batched_vec3, batched_norm2, cupy.int32(n)))
 
     return batched_norm2
+
+cholesky = cusolver.cholesky
+
+def eigh(a, b=None, overwrite=False):
+    '''
+    Solve a standard or generalized eigenvalue problem for a complex
+    Hermitian or real symmetric matrix.
+
+    Note: both a and b matrices are overwritten when overwrite is specified.
+    '''
+    if a.shape[0] > cusolver.MAX_EIGH_DIM:
+        if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+            raise RuntimeError(
+                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
+        a = a.get()
+        if b is not None:
+            b = b.get()
+        e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
+        e = asarray(e)
+        c = asarray(c)
+        return e, c
+
+    if b is not None:
+        return cusolver.eigh(a, b, overwrite)
+
+    return cupy.linalg.eigh(a)

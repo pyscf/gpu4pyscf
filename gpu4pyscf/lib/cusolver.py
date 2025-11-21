@@ -24,6 +24,10 @@ from cupy.cuda import device
 libcusolver = find_library('cusolver')
 libcusolver = ctypes.CDLL(libcusolver)
 
+# workspace size (lwork) provided by the cusolver*_bufferSize is an 32-bit
+# integer. For arrays above this dimension, the workspace size would overflow.
+MAX_EIGH_DIM = 23150
+
 CUSOLVER_EIG_TYPE_1 = 1
 CUSOLVER_EIG_TYPE_2 = 2
 CUSOLVER_EIG_TYPE_3 = 3
