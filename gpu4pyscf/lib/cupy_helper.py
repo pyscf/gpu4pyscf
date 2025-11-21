@@ -1184,6 +1184,8 @@ def eigh(a, b=None, overwrite=False):
     '''
     Solve a standard or generalized eigenvalue problem for a complex
     Hermitian or real symmetric matrix.
+
+    Note: both a and b matrices are overwritten when overwrite is specified.
     '''
     if a.shape[0] > cusolver.MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:

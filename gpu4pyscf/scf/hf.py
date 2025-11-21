@@ -240,7 +240,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         chkfile.save_mol(mol, mf.chkfile)
 
     fock_last = None
-    overwrite = mf.damp is None
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
         mo_coeff = mo_occ = mo_energy = fock = None
@@ -249,7 +248,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis, fock_last=fock_last)
         t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite)
+        mo_energy, mo_coeff = mf.eig(fock, s1e)
         if mf.damp is not None:
             fock_last = fock
         fock = None
@@ -283,7 +282,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
     if scf_conv and mf.level_shift is not None:
         # An extra diagonalization, to remove level shift
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True)
+        mo_energy, mo_coeff = mf.eig(fock, s1e)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_rdm1(mo_coeff, mo_occ), dm
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
@@ -663,6 +662,11 @@ class SCF(pyscf_lib.StreamObject):
         return self
 
     def eig(self, fock, s, overwrite=False):
+        '''
+        Solve generalized eigenvalue problem.
+
+        When overwrite is specified, both fock and s matrices are overwritten.
+        '''
         x = None
         if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
             x = asarray(self.overlap_canonical_decomposed_x)

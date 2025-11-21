@@ -93,7 +93,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         # the input matrices. The input can be overwritten so as to reduce GPU
         # memory footprint.
         s1e = asarray(mf.get_ovlp(mol))
-        c = mf.eig(unpack_tril(asarray(h1e)), s1e, overwrite=True)[1]
+        c = mf.eig(unpack_tril(asarray(h1e)), s1e)[1]
         mf_diis.Corth = c.get()
         s1e = c = None
     else:
