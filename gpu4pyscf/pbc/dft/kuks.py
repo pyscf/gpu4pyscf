@@ -60,6 +60,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         ks.initialize_grids(cell, dm, kpts)
         n, exc, vxc = ni.nr_uks(cell, ks.grids, ks.xc, dm, 0, hermi, kpts, kpts_band)
         if ks.do_nlc():
+            raise NotImplementedError("VV10 not implemented for periodic system")
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
@@ -75,12 +76,12 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
     vj, vk = krks._get_jk(ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc,
                           dm_last, vhf_last)
     if not j_in_xc:
-        vxc += vj[0] + vj[1]
+        vxc = vxc + vj[0] + vj[1]
         ecoul = None
         if ground_state:
             ecoul = float(cp.einsum('nKij,mKji->', dm, vj).real.get()) * .5 * weight
     if hybrid:
-        vxc -= vk
+        vxc = vxc - vk
         if ground_state:
             exc -= float(cp.einsum('nKij,nKji->', dm, vk).real.get()) * .5 * weight
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)

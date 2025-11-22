@@ -73,7 +73,7 @@ def tearDownModule():
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue == False
+        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is False
         gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = True
 
     @classmethod

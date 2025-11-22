@@ -68,6 +68,13 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         ks.initialize_grids(cell, dm, kpt)
         n, exc, vxc = ni.nr_uks(cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band)
         if ks.do_nlc():
+            warning_message = "ATTENTION!!! VV10 is only valid for open boundary, and it is incorrect for actual periodic system! " \
+                              "Lattice summation is not performed for the double integration. " \
+                              "Please use only under open boundary, i.e. neighbor images are well separated, and " \
+                              "all atoms belonging to one image is placed in the same image in the input."
+            log.warn(warning_message)
+            print(warning_message) # This is an important warning, so print even if verbose == 0.
+
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:

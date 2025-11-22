@@ -854,20 +854,21 @@ def cond(a, sympos=False):
         a = a.get()
         if sympos:
             s = scipy.linalg.eigvalsh(a)
-            if s[0] <= 0:
-                raise RuntimeError('matrix is not positive definite')
-            return s[-1] / s[0]
-        else:
-            _, s, _ = scipy.linalg.svd(a)
-            cond_number = s[0] / s[-1]
-            return cond_number
+            if s[0] > 0:
+                return s[-1] / s[0]
+            else:
+                print(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
+        _, s, _ = scipy.linalg.svd(a)
+        cond_number = s[0] / s[-1]
+        return cond_number
 
-    if sympos:
-        s = cupy.linalg.eigvalsh(a)
-        if s[0] <= 0:
-            raise RuntimeError('matrix is not positive definite')
-        return s[-1] / s[0]
     else:
+        if sympos:
+            s = cupy.linalg.eigvalsh(a)
+            if s[0] > 0:
+                return s[-1] / s[0]
+            else:
+                print(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
         _, s, _ = cupy.linalg.svd(a)
         cond_number = s[0] / s[-1]
         return cond_number
