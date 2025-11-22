@@ -836,7 +836,7 @@ def pinv(a, lindep=1e-10):
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
 
-def cond(a, sympos=False):
+def cond(a, sympos=False, verbose=logger.WARN):
     """
     Calculate the condition number of a matrix.
 
@@ -847,6 +847,11 @@ def cond(a, sympos=False):
     Returns:
     float: The condition number of the matrix.
     """
+    if isinstance(verbose, logger.Logger):
+        log = verbose
+    else:
+        log = logger.Logger(sys.stdout, verbose)
+
     if a.shape[0] > cusolver.MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
             raise RuntimeError(
@@ -857,7 +862,7 @@ def cond(a, sympos=False):
             if s[0] > 0:
                 return s[-1] / s[0]
             else:
-                print(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
+                log.warn(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
         _, s, _ = scipy.linalg.svd(a)
         cond_number = s[0] / s[-1]
         return cond_number
@@ -868,7 +873,7 @@ def cond(a, sympos=False):
             if s[0] > 0:
                 return s[-1] / s[0]
             else:
-                print(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
+                log.warn(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
         _, s, _ = cupy.linalg.svd(a)
         cond_number = s[0] / s[-1]
         return cond_number
