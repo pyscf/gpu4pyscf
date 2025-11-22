@@ -136,10 +136,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         for (int batch_kl = 0; batch_kl < 21; ++batch_kl) {
             int task_kl0 = blockIdx.y * 336 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -159,7 +159,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             int kl_loc0 = pair_kl_loc[task_kl];
             if (pair_ij_mapping == pair_kl_mapping) {
                 if (task_ij == task_kl) fac *= .5;
-                if (task_ij < task_kl) fac = 0.;
+                else if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
             double xij = Rp_cache[tx+0];
@@ -443,7 +443,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         for (int batch_kl = 0; batch_kl < 21; ++batch_kl) {
             int task_kl0 = blockIdx.y * 336 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -821,10 +821,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         for (int batch_kl = 0; batch_kl < 6; ++batch_kl) {
             int task_kl0 = blockIdx.y * 96 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -844,7 +844,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
             int kl_loc0 = pair_kl_loc[task_kl];
             if (pair_ij_mapping == pair_kl_mapping) {
                 if (task_ij == task_kl) fac *= .5;
-                if (task_ij < task_kl) fac = 0.;
+                else if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
             double xij = Rp_cache[tx+0];
@@ -1593,7 +1593,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 8) {
         for (int batch_kl = 0; batch_kl < 16; ++batch_kl) {
             int task_kl0 = blockIdx.y * 256 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -2127,7 +2127,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         for (int batch_kl = 0; batch_kl < 10; ++batch_kl) {
             int task_kl0 = blockIdx.y * 160 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -3160,10 +3160,10 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         for (int batch_kl = 0; batch_kl < 4; ++batch_kl) {
             int task_kl0 = blockIdx.y * 64 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+16 <= task_kl0) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -3183,7 +3183,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
             int kl_loc0 = pair_kl_loc[task_kl];
             if (pair_ij_mapping == pair_kl_mapping) {
                 if (task_ij == task_kl) fac *= .5;
-                if (task_ij < task_kl) fac = 0.;
+                else if (task_ij < task_kl) fac = 0.;
             }
             __syncthreads();
             double xij = Rp_cache[tx+0];
@@ -5337,7 +5337,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         for (int batch_kl = 0; batch_kl < 21; ++batch_kl) {
             int task_kl0 = blockIdx.y * 336 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -5988,7 +5988,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 4) {
         for (int batch_kl = 0; batch_kl < 6; ++batch_kl) {
             int task_kl0 = blockIdx.y * 96 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -7884,7 +7884,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         for (int batch_kl = 0; batch_kl < 24; ++batch_kl) {
             int task_kl0 = blockIdx.y * 384 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -8470,7 +8470,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         for (int batch_kl = 0; batch_kl < 9; ++batch_kl) {
             int task_kl0 = blockIdx.y * 144 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
@@ -10111,7 +10111,7 @@ for (int dm_offset = 0; dm_offset < jk.n_dm; dm_offset += 2) {
         for (int batch_kl = 0; batch_kl < 12; ++batch_kl) {
             int task_kl0 = blockIdx.y * 192 + batch_kl * 16;
             if (task_kl0 >= npairs_kl) {
-                continue;
+                break;
             }
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
