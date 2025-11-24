@@ -12,9 +12,80 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import cupy as cp
 import scipy, cupyx
-import time
+import gc, psutil, os
+
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
+
+# def cuasarray(a):
+#     return cp.asarray(a, blocking=True)
+
+
+def get_avail_gpumem(device_id=0):
+    device = cp.cuda.Device(device_id)
+    free_mem, _total_mem = device.mem_info
+    return free_mem
+
+
+def gpu_mem_info(words):
+    cp.cuda.PinnedMemoryPool().free_all_blocks()
+    cp.get_default_memory_pool().free_all_blocks()
+    device = cp.cuda.Device()
+    free_mem, total_mem = device.mem_info
+    used_mem = total_mem - free_mem
+    memory_info = f"{words:39s} GPU MEM: {used_mem/1024**3:.2f} / {total_mem/1024**3:.2f} GB, free: {free_mem/1024**3:.2f} GB"
+    return memory_info
+
+def cpu_mem_info(words):
+    process = psutil.Process(os.getpid())
+    
+
+    memory_info = process.memory_full_info()
+    
+
+    uss = memory_info.uss / 1024**3  
+    rss = memory_info.rss / 1024**3  
+    # vms = memory_info.vms / 1024**3  
+    
+
+    system = psutil.virtual_memory()
+    # available = system.available / 1024**3  
+    total = system.total / 1024**3
+    
+    return f"{words:39s} *** : USS={uss:.1f} GB, RSS={rss:.1f}GB | System: {total:.1f} GB"
+
+def get_avail_cpumem():
+    process = psutil.Process(os.getpid())
+    system = psutil.virtual_memory()
+
+    rss = process.memory_info().rss
+    total = system.total
+    free_mem = total - rss
+    return free_mem
+
+
+def release_memory(device_id=None):
+    '''Releases GPU and pinned memory pools safely in async context.'''
+    if device_id is not None:
+        with cp.cuda.Device(device_id):  # 确保上下文
+            # 先同步 stream 如果 async（避免 race）
+            cp.cuda.Stream.null.synchronize()  # 或你的 stream.synchronize()
+            
+            mempool = cp.get_default_memory_pool()
+            pinned_pool = cp.cuda.PinnedMemoryPool()
+            
+            # 只 free 用于块（检查前）
+            if mempool.used_bytes() > 0:
+                mempool.free_all_blocks()
+            if pinned_pool.n_free_blocks() > 0:  # 检查 pinned
+                pinned_pool.free_all_blocks()
+    else:
+        # 当前 device
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.cuda.PinnedMemoryPool().free_all_blocks()
 
 
 def TDA_diag_initial_guess(V_holder, N_states, hdiag):
@@ -108,8 +179,12 @@ def Gram_Schmidt_bvec(A, bvec):
        suppose A is orthonormalized
     '''
     if A.shape[0] != 0:
-        projections_coeff = cp.dot(A, bvec.T)
-        bvec -= cp.dot(projections_coeff.T, A)
+        # projections_coeff = cp.dot(A, bvec.T)
+        # bvec -= cp.dot(projections_coeff.T, A)
+        projections_coeff = contract('ab,cb->ac', A, bvec)
+        tmp = contract('ac,ab->cb',projections_coeff, A)
+        bvec -= tmp
+
     return bvec
 
 def VW_Gram_Schmidt(x, y, V, W):
@@ -211,19 +286,149 @@ size_new    |------------------------------------------------|
     '''
 
 
-    V_current = cp.asarray(V_holder[:size_new,:])
-    W_new = cp.asarray(W_holder[size_old:size_new, :])
+    # V_current = cuasarray(V_holder[:size_new,:])
+    print(cpu_mem_info(' gen_VW 1'))
+    W_slice = W_holder[size_old:size_new, :]
+    W_new = cuasarray(W_slice)
+    del W_slice
+    release_memory()    
+    print(cpu_mem_info(' gen_VW 2'))
+    
+    sub_A_tmp = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_new, factor=0.6)
+    print(cpu_mem_info(' gen_VW 3'))
 
-    sub_A_holder[:size_new, size_old:size_new] = cp.dot(V_current, W_new.T)
+    sub_A_holder[:size_new, size_old:size_new] = sub_A_tmp
+    del sub_A_tmp, W_new
+    release_memory()
 
     if symmetry:
-        # pass
-        sub_A_holder[size_old:size_new, :size_old] = sub_A_holder[:size_old, size_old:size_new].T
+        sub_A_tmp = sub_A_holder[:size_old, size_old:size_new].T
+        sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
+        del sub_A_tmp
+        release_memory()      
     else:
-        sub_A_holder[size_old:size_new, :size_old] = cp.dot(cp.asarray(V_holder[size_old:size_new,:]), cp.asarray(W_holder[:size_old,:]).T)
+        V_new  = cuasarray(V_holder[size_old:size_new,:])
+        # WT_tmp = cuasarray(W_holder[:size_old,:]).T
+        sub_A_tmp = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.6).T
+        sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
+        del V_new, sub_A_tmp
+        release_memory()
+    # return sub_A_holder
+    print(cpu_mem_info(' gen_VW 4'))
 
-    return sub_A_holder
 
+def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
+    '''
+    A: np.ndarray (m , n)
+    B.T: cp.ndarray (l, n)
+    a = n_occ * n_vir
+    return A.dot(B.T)
+    '''
+    _,n = A.shape
+    l,n = B.shape
+
+    # assert l == size_bound
+    m0 = get_avail_cpumem()
+
+    print(cpu_mem_info('   Vchunk_W 1'))
+    
+    AB = cp.empty((size_bound, l), dtype=B.dtype)
+
+    chunk_bytes_gpu = (n + l) * B.itemsize 
+    chunk_bytes_cpu = n * A.itemsize 
+    # print('chunk_size_bytes_gpu', chunk_size_bytes_gpu/1024**3)
+    # print('chunk_size_bytes_cpu', chunk_size_bytes_cpu/1024**3)
+
+    # Estimate the optimal chunk size based on available GPU memory
+    chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
+
+    chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
+    print('chunk_size_gpu, chunk_size_cpu', chunk_size_gpu, chunk_size_cpu)
+    chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
+    print(cpu_mem_info('   Vchunk_W 2'))
+    print(f'  each chunk need {chunk_size*n*A.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
+    # print('dot_product_Vchunk_W chunk_size', chunk_size)
+    for p0 in range(0, size_bound, chunk_size):
+        p1 = min(p0 + chunk_size, size_bound)
+
+        A_chunk = cuasarray(A[p0:p1, :])
+        print(cpu_mem_info(f'   Vchunk_W upload Aslice P0 {p0}'))
+
+        # AB_chunk = A_chunk.dot(B)
+        AB_chunk = contract('mn,ln->ml',A_chunk,B)
+        print(cpu_mem_info(f'   Vchunk_W Aslice contract {p0}'))
+
+        AB[p0:p1,:] = AB_chunk
+        # cp.cuda.get_current_stream().synchronize()
+
+        del  A_chunk, AB_chunk
+        gc.collect()
+        release_memory()
+        print(cpu_mem_info(f'   Vchunk_W end of p0 {p0}'))
+
+    m1 = get_avail_cpumem()
+    m_diff = m1 - m0
+    if m_diff > 1024*2:
+        print(f' !!!!!!!!!!!! dot_product_Vchunk_W MEM leak {m_diff/1024**3:.2f} GB  !!!!!!!!!!!!')
+    return AB
+
+
+def dot_product_xchunk_V(A, B, size_bound, factor=0.8):
+
+    '''
+    A: cp.ndarray (m,n)
+    B: np.ndarray(n,l)
+    n = size_bound
+    return A.dot(B)
+    '''
+    m,n = A.shape
+    _,l = B.shape
+    assert n == size_bound
+    m0 = get_avail_cpumem()
+
+    # print('dot_product_xchunk_V A.shape B.shape', A.shape, B.shape)
+    print(cpu_mem_info('   xchunk_V 1'))
+
+    AB = cp.zeros((m, l), dtype=A.dtype)
+
+    print(cpu_mem_info('   xchunk_V 2'))
+
+
+    chunk_bytes_gpu = (m+l) * A.itemsize 
+    chunk_bytes_cpu = l * B.itemsize 
+
+    # Estimate the optimal chunk size based on available GPU memory
+    chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
+    chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
+
+    # print('dot_product_xchunk_V chunk_size', chunk_size)
+    chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
+    print(f'  each chunk need {chunk_size*l*B.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
+
+    for p0 in range(0, size_bound, chunk_size):
+        p1 = min(p0 + chunk_size, size_bound)
+
+        B_chunk = cuasarray( B[p0:p1, :])
+   
+        print(cpu_mem_info(f'   xchunk_V B_slice cuasarray(B_slice)'))
+
+        AB_chunk = A[:,p0:p1].dot(B_chunk)
+        del B_chunk
+        gc.collect()
+        release_memory()
+
+        AB += AB_chunk
+        
+        del AB_chunk
+        release_memory()
+        gc.collect()
+        print(cpu_mem_info(f'   xchunk_V iter end'))
+
+    m1 = get_avail_cpumem()
+    m_diff = m1 - m0
+    if m_diff > 1024*2:
+        print(f' !!!!!!!!!!!! dot_product_xchunk_V MEM leak {m_diff/1024**3:.2f} GB')
+    return AB
 
 
 def gen_VP(sub_rhs_holder, V_holder, rhs, size_old, size_new):
@@ -268,15 +473,23 @@ def gen_sub_ab(V_holder, W_holder, U1_holder, U2_holder,
 
     '''
 
-    VU1_holder = gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
-    VU2_holder = gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
-    WU1_holder = gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
-    WU2_holder = gen_VW(WU2_holder, W_holder, U2_holder, size_old, size_new, symmetry=False)
+    # VU1_holder = gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
+    # VU2_holder = gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
+    # WU1_holder = gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
+    # WU2_holder = gen_VW(WU2_holder, W_holder, U2_holder, size_old, size_new, symmetry=False)
 
-    VV_holder = gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
-    WW_holder = gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
-    VW_holder = gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
+    # VV_holder = gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
+    # WW_holder = gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
+    # VW_holder = gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
+    gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
+    gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
+    gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
+    gen_VW(WU2_holder, W_holder, U2_holder, size_old, size_new, symmetry=False)
 
+    gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
+    gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
+    gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
+    
     sub_A = VU1_holder[:size_new, :size_new] + WU2_holder[:size_new, :size_new]
     sub_A = utriangle_symmetrize(sub_A)
 
@@ -300,7 +513,7 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
     nvec = cp.shape(vecs)[0]
     for j in range(nvec):
         vec = vecs[j, :].reshape(1,-1)
-        V_vecs = cp.asarray(V[:count, :])
+        V_vecs = cuasarray(V[:count, :])
         vec = Gram_Schmidt_bvec(V_vecs, vec)   #single orthonormalize
         if double:
             vec = Gram_Schmidt_bvec(V_vecs, vec)   #double orthonormalize
@@ -312,25 +525,36 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
             else:
                 V[count,:] = vec[0,:].get()
             count += 1
+        del vec, V_vecs
+        release_memory()
     new_count = count
-    return V, new_count
+    return new_count
 
-def nKs_fill_holder(V, count, vecs, double = True):
+def nKs_fill_holder(V, count, vecs, double=True):
     '''V is a vectors holder
        count is the amount of vectors that already sit in the holder
        nvec is amount of new vectors intended to fill in the V
        count will be final amount of vectors in V
     '''
-    nvec = cp.shape(vecs)[0]
+    nvec = vecs.shape[0]
     for j in range(nvec):
-        vec = vecs[j, :].reshape(1,-1)
+        vec = vecs[j,:].reshape(1,-1)
         norm = cp.linalg.norm(vec)
-        if  norm > 1e-14:
+        if  norm > 1e-17:
             vec = vec/norm
-            V[count,:] = vec[0,:]
+            if isinstance(V, cp.ndarray):
+                V[count,:] = vec
+                del vec
+            else:
+                vec_cpu = vec.get()
+                V[count,:] = vec_cpu
+                del vec, vec_cpu
+            gc.collect()
+            release_memory()
             count += 1
+
     new_count = count
-    return V, new_count
+    return new_count
 
 def S_symmetry_orthogonal(x,y):
     '''symmetrically orthogonalize the vectors |x,y> and |y,x>
@@ -711,7 +935,7 @@ def TDDFT_subspace_linear_solver(a, b, sigma, pi, p, q, omega):
 #     R = cp.dot(B_neg_tmp,rhs)
 
 #     Z = scipy.linalg.solve_sylvester(M.get(), -cp.diag(omega).get(), R.get())
-#     Z = cp.asarray(Z)
+#     Z = cuasarray(Z)
 
 #     T = cp.dot(B_neg_tmp, Z)
 #     x = T[:half_size,:]
@@ -753,7 +977,7 @@ def TDDFT_subspace_linear_solver1(a, b, sigma, pi, p, q, omega):
     R = cp.dot(B_inv,rhs)
 
     T = scipy.linalg.solve_sylvester(M.get(), -cp.diag(omega).get(), R.get())
-    T = cp.asarray(T)
+    T = cuasarray(T)
     T *= rhs_norm
 
     x = T[:half_size,:]
@@ -829,8 +1053,8 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
                 |---------------|-----------------｜-----------------｜
     '''
 
-    V_current = cp.asarray(V_holder[:,:size_new])
-    W_new = cp.asarray(W_holder[:,size_old:size_new])
+    V_current = cuasarray(V_holder[:,:size_new])
+    W_new = cuasarray(W_holder[:,size_old:size_new])
     sub_A_holder[:size_new,size_old:size_new] = cp.dot(V_current.T, W_new)
 
     if symmetry:
@@ -841,8 +1065,8 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
             also explicitly compute the lower triangle,
             either equal upper triangle.T or recompute
             '''
-            V_new = cp.asarray(V_holder[:,size_old:size_new])
-            W_old = cp.asarray(W_holder[:,:size_old])
+            V_new = cuasarray(V_holder[:,size_old:size_new])
+            W_old = cuasarray(W_holder[:,:size_old])
             sub_A_holder[size_old:size_new,:size_old] = cp.dot(V_new.T, W_old)
         elif up_triangle:
             '''

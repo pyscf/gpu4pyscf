@@ -111,7 +111,7 @@ class KnownValues(unittest.TestCase):
     def test_tda_wb97x(self):
         """Test TDA-ris method with wB97x functional"""
         mf = self.mf_wb97x
-        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False, store_Tpq=True,
+        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False, store_Tpq_J=False,
                       Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
