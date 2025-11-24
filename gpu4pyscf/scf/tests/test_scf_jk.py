@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+import ctypes
 import numpy as np
 import numpy as cp
 import pyscf
@@ -269,3 +270,93 @@ def test_vhfopt_coeff():
     vhfopt = jk._VHFOpt(mol).build()
     ref = group_basis(mol, tile=vhfopt.tile)[1]
     assert abs(vhfopt.coeff - ref).max() < 1e-12
+
+def q_cond_reference(mol, direct_scf_tol=1e-13):
+    #assert isinstance(mol, SortedMole)
+    nbas = mol.nbas
+    ao_loc = mol.ao_loc
+    q_cond = np.empty((nbas,nbas))
+    intor = mol._add_suffix('int2e')
+    with mol.with_integral_screen(direct_scf_tol**2):
+        jk._vhf.libcvhf.CVHFnr_int2e_q_cond(
+            getattr(jk._vhf.libcvhf, intor), lib.c_null_ptr(),
+            q_cond.ctypes, ao_loc.ctypes,
+            mol._atm.ctypes, ctypes.c_int(mol.natm),
+            mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+    q_cond = np.log(q_cond + 1e-300).astype(np.float32)
+
+    s_estimator = None
+    if mol.omega < 0:
+        # CVHFnr_sr_int2e_q_cond in pyscf has bugs in upper bound estimator.
+        # Use the local version of s_estimator instead
+
+        # FIXME: To avoid changing the CUDA kernel function signature,
+        # temporarily attach the extra information to the s_estimator array and
+        # pass it along with s_estimator.
+        # This is a workaround and should be addressed in the future.
+        s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
+        # The most diffuse pGTO in each shell is used to estimate the
+        # asymptotic value of SR integrals. In a contracted shell, the
+        # diffuse_ctr_coef for the diffuse_exps may only represent a portion
+        # of the AO basis. Using this ctr_coef can introduce errors in the SR
+        # integral estimation. The diffuse pGTO is normalized to approximate the
+        # entire shell.
+        diffuse_exps, _ = jk.extract_pgto_params(mol, 'diffuse')
+        l = mol._bas[:,gto.ANG_OF]
+        diffuse_ctr_coef = gto.gto_norm(l, diffuse_exps)
+        diffuse_exps = diffuse_exps.astype(np.float32)
+        diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
+        s_estimator[nbas] = diffuse_exps
+        s_estimator[nbas+1] = diffuse_ctr_coef
+        jk.libvhf_rys.sr_eri_s_estimator(
+            s_estimator.ctypes, ctypes.c_float(mol.omega),
+            diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
+            mol._atm.ctypes, ctypes.c_int(mol.natm),
+            mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+    return q_cond, s_estimator
+
+def test_q_cond():
+    from gpu4pyscf.gto.mole import group_basis
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        O   -3.2258  -0.1262  2.6126
+        H   -5.7987   0.2177  4.1423
+        H   -5.8042  -1.0067  4.1503
+        ''',
+        basis='def2-tzvp'
+    )
+
+    jkopt = jk._VHFOpt(mol).build()
+    sorted_mol = group_basis(mol)[0]
+    qref, sref = q_cond_reference(sorted_mol)
+    q_cond = jkopt.q_cond.get()
+    qref[qref < -30] = -30
+    q_cond[q_cond < -30] = -30
+    assert abs(qref - q_cond).max() < 5e-5
+
+    mol.omega = .25
+    jkopt = jk._VHFOpt(mol).build()
+    sorted_mol = group_basis(mol)[0]
+    qref, sref = q_cond_reference(sorted_mol)
+    q_cond = jkopt.q_cond.get()
+    qref[qref < -30] = -30
+    q_cond[q_cond < -30] = -30
+    assert abs(qref - q_cond).max() < 5e-5
+
+    mol.omega = -.3
+    jkopt = jk._VHFOpt(mol).build()
+    sorted_mol = group_basis(mol)[0]
+    qref, sref = q_cond_reference(sorted_mol)
+    q_cond = jkopt.q_cond.get()
+    qref[qref < -30] = -30
+    q_cond[q_cond < -30] = -30
+    assert abs(qref - q_cond).max() < 5e-5
+    #if mol.omega < 0:
+    #    s_estimator = jkopt.s_estimator[:mol.nbas].get()
+    #    print((s_estimator - sref[:mol.nbas]).min())

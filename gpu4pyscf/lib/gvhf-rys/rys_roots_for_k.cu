@@ -18,11 +18,9 @@
 
 __device__ __forceinline__
 void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
-                     double omega, double lr_factor, double sr_factor)
+                     double omega, double lr_factor, double sr_factor,
+                     int block_size, int stride, int rt_id)
 {
-    int block_size = blockDim.x;
-    int rt_id = threadIdx.y;
-    int stride = blockDim.y;
     double theta_rr = theta * rr;
     if (omega == 0) {
         rys_roots(nroots, theta_rr, rw, block_size, rt_id, stride);
@@ -56,4 +54,15 @@ void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
             rw1[(irys*2+1)*block_size] *= full_factor;
         }
     }
+}
+
+__device__ __forceinline__
+void rys_roots_for_k(int nroots, double theta, double rr, double *rw,
+                     double omega, double lr_factor, double sr_factor)
+{
+    int block_size = blockDim.x;
+    int stride = blockDim.y;
+    int rt_id = threadIdx.y;
+    rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                    block_size, stride, rt_id);
 }
