@@ -1,3 +1,48 @@
+v1.5.0 (2025-11-24)
+-------------------
+* New Features (PBC systems)
+  - PBC GDF extended to k-mesh computations; k-point GDF integrals stored in host memory with compression.
+  - Multigrid algorithm supports PBC k-point SCF and band structure calculations.
+  - Add the .analyze() method for PBC gamma-point and k-mesh DFT to summarize results and charge populations.
+  - Fermi and Gaussian smearing for PBC and molecular DFT.
+  - PBC RSJK algorithm for J/K matrix evaluation (J via MD J-engine; K via Rys quadrature).
+  - Analytical nuclear gradients using RSJK and AFTDF for PBC gamma-point HF, k-mesh HF, and hybrid DFT.
+  - Stress tensor evaluation using RSJK and AFTDF for PBC gamma-point HF, k-mesh HF, and hybrid DFT.
+  - Geometry optimizer for PBC DFT.
+* New Features (molecular systems)
+  - Support for QMMM point charges and external electric fields.
+  - 3c2e integrals contracted with density matrices and auxiliary vectors for memory-efficient DF Coulomb matrix evaluation.
+  - DFT Hessian second-derivative grid response.
+  - Minimum energy crossing point (MECP) search functionality.
+  - PCM support for TDDFT derivative coupling calculations.
+  - Basic GKS and two-component numerical integration, including GPU-accelerated multi-collinear functionals.
+  - Multi-collinear spin-flip TDA/TDDFT excitation energies and analytical gradients.
+* Improvements (PBC systems)
+  - Linear-dependency handling for basis functions in molecular and PBC DFT calculations.
+  - Refactored PBC nuclear gradients for more efficient GTH pseudopotential evaluation.
+  - Faster GTH pseudopotential evaluation using the multigrid algorithm on large systems.
+* Improvements (molecular systems)
+  - Optimized DFT numerical integration memory usage, achieving ~20% performance gains.
+  - Refactored and optimized molecular four-center-integral J/K builder, achieving 50-100% speed-up.
+  - Improved phase determination method for NACV.
+  - More numerically stable Hessian integrals for large-exponent GTOs.
+  - MD J-engine optimized with reduced CUDA register pressure.
+  - Third-order XC derivatives can be evaluated on GPU (requires gpu4pyscf-libxc 0.7).
+  - Default auxbasis_response level increased to 2 for Hessian calculations with DF integrals.
+  - Dimension checks for eigh, enabling scipy fallback for large arrays (size > 21350).
+* Fixes
+  - Handle eps=inf in solvent models.
+  - Fixed an edge case in EDA electrostatics when cross-fragment nocc is 1.
+  - Fixed EDA crash caused by fragments accessing JK matrices after DF 3-index tensors were freed.
+  - Workaround for CUDA 13 compiler bugs affecting ECP kernels (disabling compilier optimizations)
+  - Molecular and PBC 3c2e integral dimension issues for generally contracted basis sets.
+  - Removed pre-allocated streams that caused inconsistent synchronization.
+  - SMD Hessian.
+  - UHF crash when level_shift is enabled.
+* API updates
+  - Fix to_gpu/to_cpu interface in SMD, TDDFT, and PCM-TDDFT
+  - Added from_cpu hook on the GPU side, allowing pyscf to invoke this hook in its to_gpu method.
+
 v1.4.3 (2025-08-20)
 -------------------
 * New Features
