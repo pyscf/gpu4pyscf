@@ -201,9 +201,8 @@ def _eval_xc_lebedev(func, rho_tm, deriv, spin_samples,
     sgrids, weights = _make_sph_samples(spin_samples)
     sgrids = cp.asarray(sgrids)
     weights = cp.asarray(weights)
-    blksize = int(cp.ceil(1e4 / ngrids)) * 8
-    # import pdb
-    # pdb.set_trace()
+    blksize = int(cp.ceil(5e5 / ngrids)) * 8
+
     if rho_tm.ndim == 2:
         nvar = 1
     else:
