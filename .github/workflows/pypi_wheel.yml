@@ -66,7 +66,7 @@ jobs:
     - name: Build wheels
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw --workdir=/gpu4pyscf \
-        -e CMAKE_CONFIGURE_ARGS="-DCUDA_ARCHITECTURES=80-virtual -DBUILD_LIBXC=OFF" \
+        -e CMAKE_CONFIGURE_ARGS="-DCUDA_ARCHITECTURES=80;120-real -DBUILD_LIBXC=OFF" \
         ${{ env.img }} \
         bash -exc 'sh /gpu4pyscf/builder/build_wheels.sh'
     - name: List available wheels
