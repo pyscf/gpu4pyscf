@@ -58,7 +58,7 @@ class KnownValues(unittest.TestCase):
         mf_gpu.collinear = 'm'
         mf_gpu._numint.spin_samples = 6
         e_tot = mf_gpu.kernel()
-        if mcfun is None:
+        if mcfun is not None:
             mf_cpu = cpu_dft.GKS(mol, xc='b3lyp').density_fit(auxbasis='def2-tzvpp-jkfit')
             mf_cpu.collinear = 'm'
             mf_cpu._numint.spin_samples = 6
