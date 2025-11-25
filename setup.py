@@ -124,6 +124,7 @@ setup(
     version=VERSION,
     description=DESCRIPTION,
     license=LICENSE,
+    license_files=('LICENSE',),
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     package_dir={'gpu4pyscf': 'gpu4pyscf'},  # packages are under directory pyscf
