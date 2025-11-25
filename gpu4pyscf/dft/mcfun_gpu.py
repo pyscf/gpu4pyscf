@@ -16,9 +16,10 @@
 import warnings
 import cupy as cp
 import numpy as np
+from gpu4pyscf.lib.cupy_helper import contract
 from pyscf.dft.LebedevGrid import MakeAngularGrid
 
-MAX_GRIDS_PER_TASK = 4096
+MAX_GRIDS_PER_TASK = 65536
 
 def eval_xc_eff(func, rho_tm, deriv=1, spin_samples=770,
                 collinear_threshold=None, collinear_samples=200):
@@ -156,7 +157,7 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
     omega = omega.reshape(3, ngrids)
     if deriv > 0:
         vxc = xc_orig[1].reshape(2, nvar, ngrids)
-        vxc_eff = cp.vstack((vxc[:1], cp.einsum('xg,rg->rxg', vxc[1], omega)))
+        vxc_eff = cp.vstack((vxc[:1], contract('xg,rg->rxg', vxc[1], omega)))
 
     if deriv > 1:
         # spin-conserve part
