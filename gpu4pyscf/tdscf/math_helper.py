@@ -287,34 +287,33 @@ size_new    |------------------------------------------------|
 
 
     # V_current = cuasarray(V_holder[:size_new,:])
-    print(cpu_mem_info(' gen_VW 1'))
-    W_slice = W_holder[size_old:size_new, :]
-    W_new = cuasarray(W_slice)
-    del W_slice
+    # print(cpu_mem_info(' gen_VW 1'))
+    W_new = cuasarray(W_holder[size_old:size_new, :])
     release_memory()    
-    print(cpu_mem_info(' gen_VW 2'))
+    # print(cpu_mem_info(' gen_VW 2'))
     
     sub_A_tmp = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_new, factor=0.6)
-    print(cpu_mem_info(' gen_VW 3'))
+    # print(cpu_mem_info(' gen_VW 3'))
 
     sub_A_holder[:size_new, size_old:size_new] = sub_A_tmp
     del sub_A_tmp, W_new
     release_memory()
 
-    if symmetry:
-        sub_A_tmp = sub_A_holder[:size_old, size_old:size_new].T
-        sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
-        del sub_A_tmp
-        release_memory()      
-    else:
-        V_new  = cuasarray(V_holder[size_old:size_new,:])
-        # WT_tmp = cuasarray(W_holder[:size_old,:]).T
-        sub_A_tmp = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.6).T
-        sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
-        del V_new, sub_A_tmp
-        release_memory()
+    if size_old > 0:
+        if symmetry:
+            sub_A_tmp = sub_A_holder[:size_old, size_old:size_new].T
+            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
+            del sub_A_tmp
+            release_memory()      
+        else:
+            V_new  = cuasarray(V_holder[size_old:size_new,:])
+            # WT_tmp = cuasarray(W_holder[:size_old,:]).T
+            sub_A_tmp = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.6).T
+            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
+            del V_new, sub_A_tmp
+            release_memory()
     # return sub_A_holder
-    print(cpu_mem_info(' gen_VW 4'))
+    # print(cpu_mem_info(' gen_VW 4'))
 
 
 def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
@@ -330,7 +329,7 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     # assert l == size_bound
     m0 = get_avail_cpumem()
 
-    print(cpu_mem_info('   Vchunk_W 1'))
+    # print(cpu_mem_info('   Vchunk_W 1'))
     
     AB = cp.empty((size_bound, l), dtype=B.dtype)
 
@@ -343,20 +342,20 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
 
     chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
-    print('chunk_size_gpu, chunk_size_cpu', chunk_size_gpu, chunk_size_cpu)
+    # print('chunk_size_gpu, chunk_size_cpu, size_bound', chunk_size_gpu, chunk_size_cpu, size_bound)
     chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
-    print(cpu_mem_info('   Vchunk_W 2'))
-    print(f'  each chunk need {chunk_size*n*A.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
+    # print(cpu_mem_info('   Vchunk_W 2'))
+    # print(f'  each chunk need {chunk_size*n*A.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
     # print('dot_product_Vchunk_W chunk_size', chunk_size)
     for p0 in range(0, size_bound, chunk_size):
         p1 = min(p0 + chunk_size, size_bound)
 
         A_chunk = cuasarray(A[p0:p1, :])
-        print(cpu_mem_info(f'   Vchunk_W upload Aslice P0 {p0}'))
+        # print(cpu_mem_info(f'   Vchunk_W upload Aslice P0 {p0}'))
 
         # AB_chunk = A_chunk.dot(B)
         AB_chunk = contract('mn,ln->ml',A_chunk,B)
-        print(cpu_mem_info(f'   Vchunk_W Aslice contract {p0}'))
+        # print(cpu_mem_info(f'   Vchunk_W Aslice contract {p0}'))
 
         AB[p0:p1,:] = AB_chunk
         # cp.cuda.get_current_stream().synchronize()
@@ -364,12 +363,14 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
         del  A_chunk, AB_chunk
         gc.collect()
         release_memory()
-        print(cpu_mem_info(f'   Vchunk_W end of p0 {p0}'))
+        # print(cpu_mem_info(f'   Vchunk_W end of p0 {p0}'))
 
     m1 = get_avail_cpumem()
     m_diff = m1 - m0
     if m_diff > 1024*2:
-        print(f' !!!!!!!!!!!! dot_product_Vchunk_W MEM leak {m_diff/1024**3:.2f} GB  !!!!!!!!!!!!')
+        # print(f' !!!!!!!!!!!! dot_product_Vchunk_W MEM leak {m_diff/1024**3:.2f} GB  !!!!!!!!!!!!')
+        pass
+
     return AB
 
 
@@ -387,11 +388,11 @@ def dot_product_xchunk_V(A, B, size_bound, factor=0.8):
     m0 = get_avail_cpumem()
 
     # print('dot_product_xchunk_V A.shape B.shape', A.shape, B.shape)
-    print(cpu_mem_info('   xchunk_V 1'))
+    # print(cpu_mem_info('   xchunk_V 1'))
 
     AB = cp.zeros((m, l), dtype=A.dtype)
 
-    print(cpu_mem_info('   xchunk_V 2'))
+    # print(cpu_mem_info('   xchunk_V 2'))
 
 
     chunk_bytes_gpu = (m+l) * A.itemsize 
@@ -403,14 +404,14 @@ def dot_product_xchunk_V(A, B, size_bound, factor=0.8):
 
     # print('dot_product_xchunk_V chunk_size', chunk_size)
     chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
-    print(f'  each chunk need {chunk_size*l*B.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
+    # print(f'  each chunk need {chunk_size*l*B.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
 
     for p0 in range(0, size_bound, chunk_size):
         p1 = min(p0 + chunk_size, size_bound)
 
         B_chunk = cuasarray( B[p0:p1, :])
    
-        print(cpu_mem_info(f'   xchunk_V B_slice cuasarray(B_slice)'))
+        # print(cpu_mem_info(f'   xchunk_V B_slice cuasarray(B_slice)'))
 
         AB_chunk = A[:,p0:p1].dot(B_chunk)
         del B_chunk
@@ -427,7 +428,8 @@ def dot_product_xchunk_V(A, B, size_bound, factor=0.8):
     m1 = get_avail_cpumem()
     m_diff = m1 - m0
     if m_diff > 1024*2:
-        print(f' !!!!!!!!!!!! dot_product_xchunk_V MEM leak {m_diff/1024**3:.2f} GB')
+        # print(f' !!!!!!!!!!!! dot_product_xchunk_V MEM leak {m_diff/1024**3:.2f} GB')
+        pass
     return AB
 
 

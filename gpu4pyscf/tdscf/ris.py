@@ -77,145 +77,6 @@ Please cite the TDDFT-ris method:
 LINEAR_EPSILON = 1e-8
 
 
-
-import gc
-import cupy as cp
-import weakref
-from collections import deque
-from typing import List, Tuple, Any
-
-# --------------------------------------------------------------
-# 配置区（可自行修改）
-MAX_DEPTH = 10          # 递归深度上限
-MIN_MIB   = 1000        # 只显示 ≥ X MiB 的数组
-TOP_N     = 20         # 显示前 N 个（0 = 全部）
-# --------------------------------------------------------------
-
-def _human_bytes(nbytes: int) -> str:
-    """Convert bytes → MiB (2 d.p.)"""
-    return f"{nbytes / (1024**2):.2f}"
-
-def _is_cupy_array(obj) -> bool:
-    return isinstance(obj, cp.ndarray)
-
-def _safe_get_size(obj) -> float:
-    try:
-        return obj.nbytes / (1024 ** 2)
-    except Exception:
-        return 0.0
-
-def _iter_container(obj, path: str, depth: int, queue, visited):
-    """BFS 遍历容器（list/dict/tuple/set/class __dict__）"""
-    if depth > MAX_DEPTH or id(obj) in visited:
-        return
-    visited.add(id(obj))
-
-    if isinstance(obj, (list, tuple, set)):
-        for i, v in enumerate(obj):
-            queue.append((v, f"{path}[{i}]", depth + 1))
-    elif isinstance(obj, dict):
-        for k, v in obj.items():
-            queue.append((v, f"{path}[{repr(k)}]", depth + 1))
-    elif hasattr(obj, '__dict__'):
-        for k, v in obj.__dict__.items():
-            queue.append((v, f"{path}.{k}" if path else k, depth + 1))
-
-def find_all_cupy_arrays() -> List[Tuple[str, tuple, object, float]]:
-    """
-    Return list of (location_path, shape, dtype, size_MiB)
-    """
-    results = []
-    visited = set()
-
-    # ---------- 1. 先直接从 gc.get_objects() 抓所有 cupy.ndarray ----------
-    for obj in gc.get_objects():
-        if not _is_cupy_array(obj):
-            continue
-        size = _safe_get_size(obj)
-        if size < MIN_MIB:
-            continue
-        results.append(("<GC>", obj.shape, obj.dtype, size, weakref.ref(obj)))
-
-    # ---------- 2. BFS 遍历当前调用栈的 locals / globals ----------
-    import inspect
-    frame = inspect.currentframe().f_back   # 调用者的 frame
-    queue = deque()
-
-    try:
-        while frame:
-            # locals
-            for name, obj in frame.f_locals.items():
-                if _is_cupy_array(obj):
-                    sz = _safe_get_size(obj)
-                    if sz >= MIN_MIB:
-                        results.append((name, obj.shape, obj.dtype, sz, weakref.ref(obj)))
-                else:
-                    queue.append((obj, name, 1))
-
-            # globals（过滤内置）
-            for name, obj in frame.f_globals.items():
-                if name in {'__builtins__', '__doc__', '__loader__', '__name__', '__package__', '__spec__'}:
-                    continue
-                if _is_cupy_array(obj):
-                    sz = _safe_get_size(obj)
-                    if sz >= MIN_MIB:
-                        results.append((name, obj.shape, obj.dtype, sz, weakref.ref(obj)))
-                else:
-                    queue.append((obj, name, 1))
-
-            # BFS 处理队列
-            while queue:
-                obj, path, depth = queue.popleft()
-                _iter_container(obj, path, depth, queue, visited)
-
-            frame = frame.f_back
-    finally:
-        del frame, queue
-
-    # ---------- 3. 去重（同一个数组可能被多条路径引用） ----------
-    seen = {}
-    uniq = []
-    for loc, shape, dtype, size, ref in results:
-        obj = ref()
-        if obj is None:
-            continue
-        key = id(obj)
-        if key not in seen:
-            seen[key] = True
-            uniq.append((loc, shape, dtype, size))
-
-    # 按大小倒序
-    uniq.sort(key=lambda x: x[3], reverse=True)
-    return uniq[:TOP_N] if TOP_N else uniq
-
-
-def print_cupy_memory_safe(top_n: int = TOP_N, min_mib: float = MIN_MIB):
-    """
-    Safe version: no recursion explosion, works in Jupyter / scripts / deep nests.
-    """
-    global TOP_N, MIN_MIB
-    TOP_N, MIN_MIB = top_n, min_mib
-
-    arrays = find_all_cupy_arrays()
-    print(f"{'Rank':>4} | {'Location':<45} | {'Shape':<22} | {'Dtype':<10} | {'Memory (MiB)':>12}")
-    print("-" * 110)
-
-    if not arrays:
-        print(f"No CuPy arrays ≥ {min_mib:.1f} MiB found (depth≤{MAX_DEPTH}).")
-        return
-
-    for i, (loc, shape, dtype, size) in enumerate(arrays, 1):
-        shape_str = str(shape) if shape else "?"
-        print(f"{i:>4} | {loc:<45} | {shape_str:<22} | {str(dtype):<10} | {size:>12.2f}")
-
-    # 补充显存池总览
-    pool = cp.get_default_memory_pool()
-    used = pool.used_bytes() / (1024**2)
-    total = pool.total_bytes() / (1024**2)
-    print(f"\nCuPy memory pool: {used:.2f} MiB used / {total:.2f} MiB total")
-
-
-
 def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=False):
     '''
     Args:
@@ -456,6 +317,11 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
     upper_inv_eri2c = aux_coeff_lower_inv_eri2c.T
 
+    if 'K' in calc:
+        eri2c_inv = aux_coeff_lower_inv_eri2c.dot(upper_inv_eri2c)
+        if in_ram:
+            eri2c_inv = eri2c_inv.get()
+
     if in_ram:
         # aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
         upper_inv_eri2c = upper_inv_eri2c.get()
@@ -545,7 +411,6 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             last_reported = 0
             progress = int(100.0 * p1 / naux)
 
-            # 每20%输出一次，防跳过 + 防重复
             if progress % 20 == 0 and progress != last_reported:
                 log.last_reported = progress
                 log.info(f'get_Tpq batch {p0}-{p1} / {naux} done ({progress} percent)')
@@ -561,23 +426,21 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     if calc == 'J':
         Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
-        del Pia
-        gc.collect()
         return Tia
 
     if calc == 'K':
-        Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
-        Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
-        del Pij, Pab
-        gc.collect()
+        # Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
+        # Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
+        Tij = tmp_einsum('PQ,Qij->Pij', eri2c_inv, Pij)
+        Tab = Pab
         return Tij, Tab
 
     if calc == 'JK':
         Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
-        Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
-        Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
-        del Pia, Pij, Pab
-        gc.collect()
+        # Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
+        # Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
+        Tij = tmp_einsum('PQ,Qij->Pij', eri2c_inv, Pij)
+        Tab = Pab
         return Tia, Tij, Tab
      
 def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c, 
