@@ -1182,7 +1182,7 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
             nshl_pair = len(idx)
             bas_ij_idx.append(idx)
             sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = gout_stride_lookup[li, lj] * 8
+            nsp_per_block = THREADS // gout_stride_lookup[li, lj] * 8
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
     ovlp_mask = None
     shl_pair_offsets.append(np.int32(sp1))
