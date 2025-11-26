@@ -226,7 +226,11 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         veff0momI = cp.zeros((nmo, nmo))
         veff0momJ = cp.zeros((nmo, nmo))
 
-    vresp = mf.gen_response(singlet=None, hermi=1)
+    if td_nac.ris_zvector_solver:
+        vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, singlet=None, hermi=1)
+    else:
+        vresp = mf.gen_response(singlet=None, hermi=1)
+    # vresp = mf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
@@ -441,6 +445,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
 
 class NAC(tdrks_nac.NAC):
+
+    _keys = {'ris_zvector_solver'}
+
+    def __init__(self, td):
+        super().__init__(td)
+        self.ris_zvector_solver = False
 
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):

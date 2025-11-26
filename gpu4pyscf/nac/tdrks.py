@@ -84,7 +84,26 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
-        vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+        if td_nac.ris_zvector_solver:
+            from gpu4pyscf.dft import rks
+            from gpu4pyscf.tdscf.ris import get_auxmol
+            from gpu4pyscf.grad import tdrks_ris
+
+            theta = td_nac.base.theta
+            J_fit = td_nac.base.J_fit
+            K_fit = td_nac.base.K_fit
+            auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+            if K_fit == J_fit and (omega == 0 or omega is None):
+                auxmol_K = auxmol_J
+            else:
+                auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+            mf_J = rks.RKS(mol).density_fit()
+            mf_J.with_df.auxmol = auxmol_J
+            mf_K = rks.RKS(mol).density_fit()
+            mf_K.with_df.auxmol = auxmol_K
+            vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
+        else:
+            vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
     else:
         vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 

@@ -88,15 +88,19 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
 
 
 def setUpModule():
-    global mol
+    global mol, mol1
     mol = pyscf.M(
         atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
+    mol1 = pyscf.M(
+        atom=atom, basis='def2tzvp', max_memory=32000, output="/dev/null", verbose=1)
 
 
 def tearDownModule():
-    global mol
+    global mol, mol1
     mol.stdout.close()
     del mol
+    mol1.stdout.close()
+    del mol1
 
 
 def benchmark_with_finite_diff(
@@ -202,7 +206,6 @@ class KnownValues(unittest.TestCase):
         _check_grad(mol, xc="camb3lyp", tol=1e-4, lindep=1.0e-6, tda=False)
 
     def test_grad_b3lyp_tda_singlet_ref(self):
-        mol = pyscf.M(atom=atom, basis='ccpvdz')
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
 
@@ -217,6 +220,63 @@ class KnownValues(unittest.TestCase):
             [[ 9.66144236e-12,  9.47508727e-09,  1.16603260e-01],
              [ 6.12953685e-11,  7.88236258e-02, -5.83042819e-02],
              [-7.09570935e-11, -7.88236353e-02, -5.83042889e-02]])
+
+        assert np.linalg.norm(ref_g - g.de) < 1.0E-4
+
+    def test_grad_pbe_tda_singlet_ris_zvector_solver_ref(self):
+        mf = dft.RKS(mol1, xc='pbe').to_gpu()
+        mf.kernel()
+
+        td = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td.conv_tol = 1.0E-4
+        td.Ktrunc = 0.0
+        td.kernel()
+        g = td.nuc_grad_method()
+        g.ris_zvector_solver = True
+        g.kernel()
+
+        ref_g = np.array(
+            [[ 0.0000000000, -0.0000000000,  0.0982593394],
+             [-0.0000000000,  0.0686807019, -0.0491299527],
+             [-0.0000000000, -0.0686807019, -0.0491299527]])
+
+        assert np.linalg.norm(ref_g - g.de) < 1.0E-4
+
+    def test_grad_pbe0_tda_singlet_ris_zvector_solver_ref(self):
+        mf = dft.RKS(mol1, xc='pbe0').to_gpu()
+        mf.kernel()
+
+        td = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td.conv_tol = 1.0E-4
+        td.Ktrunc = 0.0
+        td.kernel()
+        g = td.nuc_grad_method()
+        g.ris_zvector_solver = True
+        g.kernel()
+
+        ref_g = np.array(
+            [[ 0.0000000000,  0.0000000106,  0.0867692424],
+             [-0.0000000000,  0.0627885665, -0.0433848347],
+             [-0.0000000000, -0.0627885772, -0.0433848427]])
+
+        assert np.linalg.norm(ref_g - g.de) < 1.0E-4
+
+    def test_grad_camb3lyp_tda_singlet_ris_zvector_solver_ref(self):
+        mf = dft.RKS(mol1, xc='camb3lyp').to_gpu()
+        mf.kernel()
+
+        td = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td.conv_tol = 1.0E-4
+        td.Ktrunc = 0.0
+        td.kernel()
+        g = td.nuc_grad_method()
+        g.ris_zvector_solver = True
+        g.kernel()
+
+        ref_g = np.array(
+            [[ 0.0000000000,  0.0000000106,  0.0811051291],
+             [-0.0000000000,  0.0599317271, -0.0405527495],
+             [-0.0000000000, -0.0599317378, -0.0405527575]])
 
         assert np.linalg.norm(ref_g - g.de) < 1.0E-4
 
