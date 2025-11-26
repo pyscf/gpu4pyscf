@@ -202,12 +202,16 @@ def _eval_xc_lebedev(func, rho_tm, deriv, spin_samples,
     sgrids, weights = _make_sph_samples(spin_samples)
     sgrids = cp.asarray(sgrids)
     weights = cp.asarray(weights)
-    blksize = int(cp.ceil(5e5 / ngrids)) * 8
 
     if rho_tm.ndim == 2:
         nvar = 1
     else:
         nvar = rho_tm.shape[1]
+    if nvar >=5:
+        ndim = 2
+    else:
+        ndim = 4
+    blksize = int(cp.ceil(ndim*1e5 / ngrids)) * 8
     exc_eff = vxc_eff = fxc_eff = kxc_eff = 0
     for p0, p1 in _prange(0, weights.size, blksize):
         nsg = p1 - p0
