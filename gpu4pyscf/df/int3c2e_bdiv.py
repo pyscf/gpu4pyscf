@@ -231,6 +231,7 @@ class Int3c2eOpt:
         _bas_cpu = self._bas
         _env_cpu = self._env
         mol = self.sorted_mol
+        omega = mol.omega
         aux_loc = self.sorted_auxmol.ao_loc
         naux = aux_loc[-1]
 
@@ -265,7 +266,7 @@ class Int3c2eOpt:
                 ksh0, ksh1 = l_ctr_aux_offsets[k:k+2]
                 shls_slice = ish0, ish1, jsh0, jsh1, ksh0, ksh1
                 lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
-                scheme = int3c2e_scheme(li, lj, lk)
+                scheme = int3c2e_scheme(li, lj, lk, omega)
                 log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
                 err = kern(
                     ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
@@ -311,7 +312,8 @@ class Int3c2eOpt:
         nao_pair = self.ao_pair_loc[-1]
 
         # nst_lookup stores the nst_per_block for each (li,lj,lk) pattern
-        nst_lookup = asarray(create_nst_lookup_table(), dtype=np.int32)
+        omega = self.sorted_mol.omega
+        nst_lookup = asarray(create_nst_lookup_table(omega), dtype=np.int32)
 
         shl_pair_idx = asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
         shl_pair_offsets = asarray(self.shl_pair_offsets, dtype=np.int32)
@@ -654,9 +656,11 @@ def init_constant(mol):
     if err != 0:
         raise RuntimeError('CUDA kernel initialization')
 
-def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
+def int3c2e_scheme(li, lj, lk, omega=0, shm_size=SHM_SIZE):
     order = li + lj + lk
-    nroots = (order//2 + 1) * 2
+    nroots = order//2 + 1
+    if omega < 0:
+        nroots *= 2
 
     g_size = (li+1)*(lj+1)*(lk+1)
     unit = g_size*3 + nroots*2 + 7
@@ -676,20 +680,20 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     gout_stride = THREADS // nst_per_block
     return nst_per_block, gout_stride
 
-def create_nst_lookup_table():
-    nst_lookup = np.empty([L_AUX_MAX+1]*3, dtype=np.int32)
+def create_nst_lookup_table(omega=0):
+    nst_lookup = np.zeros([L_AUX_MAX+1]*3, dtype=np.int32)
     for lk in range(L_AUX_MAX+1):
         for li in range(lk+1):
             for lj in range(li+1):
-                nst_lookup[lk,li,lj] = int3c2e_scheme(li, lj, lk)[0]
+                nst_lookup[lk,li,lj] = int3c2e_scheme(li, lj, lk, omega)[0]
     idx = np.arange(L_AUX_MAX+1)
     z, y, x = np.sort(np.meshgrid(idx, idx, idx), axis=0)
     nst_lookup = nst_lookup[x, y, z]
     return nst_lookup[:,:LMAX+1,:LMAX+1]
 
 def estimate_shl_ovlp(mol):
-    # consider only the most diffused component of a basis
-    exps, cs = extract_pgto_params(mol, 'diffused')
+    # consider only the most diffuse component of a basis
+    exps, cs = extract_pgto_params(mol, 'diffuse')
     exps = cp.asarray(exps)
     cs = cp.asarray(cs)
     ls = cp.asarray(mol._bas[:,ANG_OF])

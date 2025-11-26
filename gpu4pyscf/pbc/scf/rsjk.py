@@ -153,7 +153,6 @@ class PBCJKMatrixOpt:
                 supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                 supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
         q_cond = np.log(q_cond + 1e-300).astype(np.float32)
-        self.q_cond_cpu = q_cond
 
         diffuse_exps, _ = extract_pgto_params(supmol, 'diffuse')
         # The most diffuse pGTO in each shell is used to estimate the
@@ -181,36 +180,12 @@ class PBCJKMatrixOpt:
             diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
             supmol._atm.ctypes, ctypes.c_int(supmol.natm),
             supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
-        self.s_estimator_cpu = s_estimator
 
-        self.q_cond_cpu, self.s_estimator_cpu = self._filter_q_cond(
+        self.q_cond_cpu, self.s_estimator_cpu = _filter_q_cond(
             supmol, q_cond, s_estimator, self.rys_envs,
             self.estimate_cutoff_with_penalty())
         log.timer('Initialize q_cond', *cput0)
         return self
-
-    def _filter_q_cond(self, supmol, q_cond, s_estimator, rys_envs, cutoff):
-        '''adjust q_cond, screening remote pairs'''
-        sorted_cell = supmol.cell
-        nbas = supmol.nbas
-        diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
-        diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
-        diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
-
-        s_diag = s_estimator[:nbas,:nbas].diagonal()
-        s_max_per_atom = cp.array(s_diag[diffuse_idx], dtype=np.float32)
-
-        s_estimator = asarray(s_estimator)
-        q_cond = asarray(q_cond)
-        libpbc.filter_q_cond_by_distance(
-            ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-            ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
-            ctypes.byref(rys_envs),
-            ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
-            ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(math.log(cutoff)),
-            ctypes.c_int(sorted_cell.natm), ctypes.c_int(supmol.nbas))
-        return q_cond, s_estimator
 
     def reset(self, cell):
         self.cell = cell
@@ -1035,12 +1010,13 @@ class ExtendedMole(gto.Mole):
         self.Ts_ji_lookup = None
 
     @classmethod
-    def from_cell(cls, cell, omega, verbose=None):
+    def from_cell(cls, cell, omega, rcut=None, verbose=None):
         log = logger.new_logger(cell, verbose)
         if cell.dimension == 0:
             raise NotImplementedError
 
-        rcut = estimate_rcut(cell, omega)
+        if rcut is None:
+            rcut = estimate_rcut(cell, omega)
         rcut_max = rcut.max()
         Ls = cell.get_lattice_Ls(rcut=rcut.max())
         Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
@@ -1162,7 +1138,7 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
 
     sh_cell0 = cp.asarray(supmol.bas_mask_idx) % nbas_cell0
     sh_cell0 = cp.append(sh_cell0, 0)
-    q_cond = q_cond.ravel()
+    q_cond_mask = q_cond.ravel() > cutoff
     pair_mappings = {}
     for i in range(n_groups):
         for j in range(i+1):
@@ -1175,7 +1151,7 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
                 pair_ij = pair_ij[(ish < nbas) & (jsh < nbas) & (ish_cell0 >= jsh_cell0)]
             else:
                 pair_ij = pair_ij[(ish < nbas) & (jsh < nbas)]
-            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
+            pair_ij = pair_ij[q_cond_mask[pair_ij]]
             pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
     return pair_mappings
 
@@ -1231,3 +1207,28 @@ def _dm_cond_from_compressed_dm(supmol, dms):
     nbas = cell.nbas
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
     return dm_cond
+
+def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
+    '''adjust q_cond, screening remote pairs'''
+    sorted_cell = supmol.cell
+    nbas = supmol.nbas
+    diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
+    diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
+    diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+
+    s_diag = s_estimator[:nbas,:nbas].diagonal()
+    s_max_per_atom = cp.array(s_diag[diffuse_idx], dtype=np.float32)
+
+    assert s_estimator.dtype == np.float32
+    assert q_cond.dtype == np.float32
+    s_estimator = asarray(s_estimator)
+    q_cond = asarray(q_cond)
+    libpbc.filter_q_cond_by_distance(
+        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+        ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+        ctypes.byref(rys_envs),
+        ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+        ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
+        ctypes.c_float(math.log(precision)),
+        ctypes.c_int(sorted_cell.natm), ctypes.c_int(supmol.nbas))
+    return q_cond, s_estimator

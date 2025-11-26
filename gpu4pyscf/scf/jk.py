@@ -957,7 +957,7 @@ class RysIntEnvVars(ctypes.Structure):
 
     @property
     def device(self):
-        return self._env_ref_holder[0].device
+        return self._env_ref_holder[2].device
 
 def _scale_sp_ctr_coeff(mol):
     # Match normalization factors of s, p functions in libcint
