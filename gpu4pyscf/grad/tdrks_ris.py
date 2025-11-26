@@ -48,12 +48,8 @@ def gen_response_ris(mf, mf_J, mf_K, mo_coeff=None, mo_occ=None,
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-    if singlet is None:
-        spin = 0
-    else:
+    if singlet is not None:
         raise ValueError('TDDFT ris solver only supports singlet state')
-
-    dm0 = None
 
     if singlet is None:
         # Without specify singlet, used in ground state orbital hessian
