@@ -271,10 +271,10 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
 
 
 class _VHFOpt:
-    def __init__(self, mol, cutoff=1e-13, tile=TILE):
+    def __init__(self, mol, direct_scf_tol=1e-13, tile=TILE):
         self.mol = mol
         self.sorted_mol = None
-        self.direct_scf_tol = cutoff
+        self.direct_scf_tol = direct_scf_tol
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
         self.h_shls = None
@@ -1121,6 +1121,13 @@ def _nearest_power2(n, return_leq=True):
         return_leq specifies that the return is less or equal than n.
         Otherwise, the return is greater or equal than n.
     '''
+    if isinstance(n, np.ndarray):
+        n = n.astype(int, copy=False)
+        if return_leq:
+            return 2 ** np.log2(n).astype(int)
+        else:
+            return 2 ** np.ceil(np.log2(n)).astype(int)
+
     n = int(n)
     assert n > 0
     if return_leq:
@@ -1129,50 +1136,44 @@ def _nearest_power2(n, return_leq=True):
         return 1 << ((n-1).bit_length())
 
 def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
-    gout_stride_lookup = np.empty([LMAX+1,LMAX+1], dtype=np.int32)
+    '''A fast routine to estimate the Schwarz inequality condition sqrt(absmax( (ij|ij) )).
+    Note the high angular momentum bases are excluded.
+    '''
+    from gpu4pyscf.pbc.gto import int1e
     gout_width = 60
-    shm_size = SHM_SIZE
-    uniq_l = uniq_l_ctr[:,0]
-    lmax = uniq_l.max()
-    ls = np.arange(lmax+1)
-    nf = (ls+1) * (ls+2) // 2
-    max_shm_size = 0
     omega = mol.omega
-    for li in range(lmax+1):
-        for lj in range(li+1):
-            lij = li + lj
-            nroots = lij + 1
-            if omega < 0:
-                nroots *= 2
-            unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
-            nsp_max = _nearest_power2(shm_size // (unit*4))
-            gout_size = nf[li] * nf[lj]
-            gout_stride = (gout_size+gout_width-1) / gout_width
-            gout_stride = _nearest_power2(gout_stride, return_leq=False)
-            nsp_per_block = min(nsp_max, THREADS // gout_stride)
-            gout_stride = THREADS // nsp_per_block
-            gout_stride_lookup[li,lj] = gout_stride_lookup[lj,li] = gout_stride
-            max_shm_size = max(max_shm_size, nsp_per_block*unit*4)
+    ls = np.arange(LMAX+1)
+    li = ls[:,None]
+    lj = ls
+    lij = li + lj
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nroots = lij + 1
+    if omega < 0:
+        nroots *= 2
+    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
+    nsp_max = _nearest_power2(SHM_SIZE // (unit*4))
+    gout_size = nfi * nfj
+    gout_stride = (gout_size+gout_width-1) // gout_width
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+    nsp_per_block = THREADS // gout_stride
+    # min(nsp_per_block, nsp_max)
+    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+    gout_stride = THREADS // nsp_per_block
+    shm_size = nsp_per_block * (unit * 4)
+    max_shm_size = shm_size.max()
 
-    # important shell-pairs based on distance
-    nbas = mol.nbas
-    ovlp_mask = cp.zeros((nbas,nbas), dtype=bool)
-    exps, cs = extract_pgto_params(mol, 'diffuse')
-    exps = cp.asarray(exps, dtype=np.float32)
-    theta_ij = exps[:,None] * exps
-    theta_ij /= exps[:,None] + exps
-    bas_coords = cp.asarray(mol.atom_coords()[mol._bas[:,gto.ATOM_OF]])
-    rr = cp.asarray(dist_matrix(bas_coords, bas_coords), dtype=np.float32)
-    rr **= 2
-    theta_rr = theta_ij * rr
-    norm_penalty = 10
-    ovlp_mask = theta_rr < norm_penalty - 2*math.log(precision)
-
+    ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
+    nbas = np.uint32(mol.nbas)
+    assert nbas < 65535
+    uniq_l = uniq_l_ctr[:,0]
     bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
     shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
     sp0 = sp1 = 0
     for i, li in enumerate(uniq_l):
         for j, lj in enumerate(uniq_l[:i+1]):
+            if li > LMAX or lj > LMAX:
+                continue
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
             ish = cp.arange(ish0, ish1, dtype=np.uint32)
@@ -1182,7 +1183,7 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
             nshl_pair = len(idx)
             bas_ij_idx.append(idx)
             sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = THREADS // gout_stride_lookup[li, lj] * 8
+            nsp_per_block = THREADS // gout_stride[li, lj] * 8
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
     ovlp_mask = None
     shl_pair_offsets.append(np.int32(sp1))
@@ -1207,7 +1208,7 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         lr_factor = 0
     if omega > 0:
         sr_factor = 0
-    gout_stride_lookup = cp.asarray(gout_stride_lookup, dtype=np.int32)
+    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     libvhf_rys.int2e_qcond_estimator(
         ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
         s_out_ptr,
@@ -1216,7 +1217,7 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_int(nbatches_shl_pair),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))

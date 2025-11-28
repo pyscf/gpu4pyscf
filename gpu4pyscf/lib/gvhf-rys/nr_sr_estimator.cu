@@ -50,7 +50,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     double *env = envs.env;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    if (li >= LMAX || lj >= LMAX) {
+    if (li > LMAX || lj > LMAX) {
         return;
     }
     int nfi = (li + 1) * (li + 2) / 2;

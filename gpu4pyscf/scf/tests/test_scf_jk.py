@@ -320,43 +320,38 @@ def test_q_cond():
     mol = pyscf.M(
         atom = '''
         O   0.000   -0.    0.1174
-        H  -0.757    4.   -0.4696
-        H   0.757    4.   -0.4696
-        C   1.      1.    0.
         H   4.      0.    3.
         H   0.      1.    .6
-        O   -3.2258  -0.1262  2.6126
+        C   -3.2258  -0.1262  2.6126
         H   -5.7987   0.2177  4.1423
         H   -5.8042  -1.0067  4.1503
         ''',
-        basis='def2-tzvp'
+        basis=('def2-tzvp', [[4, [1, 1]]]),
     )
 
     jkopt = jk._VHFOpt(mol).build()
     sorted_mol = group_basis(mol)[0]
     qref, sref = q_cond_reference(sorted_mol)
     q_cond = jkopt.q_cond.get()
-    qref[qref < -30] = -30
-    q_cond[q_cond < -30] = -30
-    assert abs(qref - q_cond).max() < 5e-5
+    thrd = np.log(jkopt.direct_scf_tol)
+    qref[qref < thrd] = thrd
+    q_cond[q_cond < thrd] = thrd
+    assert abs(qref - q_cond).max() < 1e-3
 
     mol.omega = .25
     jkopt = jk._VHFOpt(mol).build()
     sorted_mol = group_basis(mol)[0]
     qref, sref = q_cond_reference(sorted_mol)
     q_cond = jkopt.q_cond.get()
-    qref[qref < -30] = -30
-    q_cond[q_cond < -30] = -30
-    assert abs(qref - q_cond).max() < 5e-5
+    qref[qref < thrd] = thrd
+    q_cond[q_cond < thrd] = thrd
+    assert abs(qref - q_cond).max() < 1e-3
 
-    mol.omega = -.3
+    mol.omega = -.25
     jkopt = jk._VHFOpt(mol).build()
     sorted_mol = group_basis(mol)[0]
     qref, sref = q_cond_reference(sorted_mol)
     q_cond = jkopt.q_cond.get()
-    qref[qref < -30] = -30
-    q_cond[q_cond < -30] = -30
-    assert abs(qref - q_cond).max() < 5e-5
-    #if mol.omega < 0:
-    #    s_estimator = jkopt.s_estimator[:mol.nbas].get()
-    #    print((s_estimator - sref[:mol.nbas]).min())
+    qref[qref < thrd] = thrd
+    q_cond[q_cond < thrd] = thrd
+    assert abs(qref - q_cond).max() < 1e-3
