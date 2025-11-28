@@ -715,6 +715,10 @@ class NAC_Scanner(lib.GradScanner):
     def __call__(self, mol_or_geom, states=None, **kwargs):
         mol0 = self.mol.copy()
         mo_coeff0 = self.base._scf.mo_coeff
+        mo_occ = cp.asarray(self.base._scf.mo_occ)
+        nao, nmo = mo_coeff0.shape
+        nocc = int((mo_occ > 0).sum())
+        nvir = nmo - nocc
 
         if isinstance(mol_or_geom, gto.MoleBase):
             assert mol_or_geom.__class__ == gto.Mole
@@ -729,8 +733,28 @@ class NAC_Scanner(lib.GradScanner):
         else:
             self.states = states
         if states[0] != 0:
-            xi0, yi0 = self.base.xy[states[0]-1]
-        xj0, yj0 = self.base.xy[states[1]-1]
+            if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+                if self.base.xy[1] is not None:
+                    xi0 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
+                    yi0 = self.base.xy[1][states[0]-1]*np.sqrt(0.5)
+                else:
+                    xi0 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
+                    yi0 = self.base.xy[0][states[0]-1]*0.0
+            else:
+                xi0, yi0 = self.base.xy[states[0]-1]
+            xi0 = xi0.reshape(nocc, nvir)
+            yi0 = yi0.reshape(nocc, nvir)
+        if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+            if self.base.xy[1] is not None:
+                xj0 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
+                yj0 = self.base.xy[1][states[1]-1]*np.sqrt(0.5)
+            else:
+                xj0 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
+                yj0 = self.base.xy[0][states[1]-1]*0.0
+        else:
+            xj0, yj0 = self.base.xy[states[1]-1]
+        xj0 = xj0.reshape(nocc, nvir)
+        yj0 = yj0.reshape(nocc, nvir)
 
         td_scanner = self.base
 
@@ -743,13 +767,31 @@ class NAC_Scanner(lib.GradScanner):
         s = cp.asarray(s)
         mo2_reordered, matching_indices, sign_array = match_and_reorder_mos(s, mo_coeff0, mo_coeff, threshold=0.4)
         if states[0] != 0:
-            xi1, yi1 = self.base.xy[states[0]-1]
-        xj1, yj1 = self.base.xy[states[1]-1]
+            if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+                if self.base.xy[1] is not None:
+                    xi1 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
+                    yi1 = self.base.xy[1][states[0]-1]*np.sqrt(0.5)
+                else:
+                    xi1 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
+                    yi1 = self.base.xy[0][states[0]-1]*0.0
+            else:
+                xi1, yi1 = self.base.xy[states[0]-1]
+            xi1 = xi1.reshape(nocc, nvir)
+            yi1 = yi1.reshape(nocc, nvir)
+        if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+            if self.base.xy[1] is not None:
+                xj1 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
+                yj1 = self.base.xy[1][states[1]-1]*np.sqrt(0.5)
+            else:
+                xj1 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
+                yj1 = self.base.xy[0][states[1]-1]*0.0
+        else:
+            xj1, yj1 = self.base.xy[states[1]-1]
+        xj1 = xj1.reshape(nocc, nvir)
+        yj1 = yj1.reshape(nocc, nvir)
+        
         mo2_reordered = cp.asarray(mo2_reordered)
         mo_coeff0 = cp.asarray(mo_coeff0)
-        mo_occ = cp.asarray(self.base._scf.mo_occ)
-        nao, nmo = mo_coeff.shape
-        nocc = int((mo_occ > 0).sum())
 
         # for the first state
         if states[0] != 0: # excited state

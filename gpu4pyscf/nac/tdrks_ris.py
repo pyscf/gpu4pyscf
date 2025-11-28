@@ -485,8 +485,6 @@ class NAC(tdrks_nac.NAC):
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
-    as_scanner = NotImplemented
-
     def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
 
         logger.warn(self, "This module is under development!!")
