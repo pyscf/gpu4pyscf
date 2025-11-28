@@ -71,6 +71,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     nvir = nmo - nocc
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
+    log = logger.new_logger(td_nac, verbose)
 
     xI, yI = x_yI
     xI = cp.asarray(xI).reshape(nocc, nvir).T
@@ -85,6 +86,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
         if td_nac.ris_zvector_solver:
+            log.note('Use ris-approximated Z-vector solver')
             from gpu4pyscf.dft import rks
             from gpu4pyscf.tdscf.ris import get_auxmol
             from gpu4pyscf.grad import tdrks_ris
@@ -103,8 +105,11 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
             mf_K.with_df.auxmol = auxmol_K
             vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
         else:
+            log.note('Use standard Z-vector solver')
             vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
     else:
+        if td_nac.ris_zvector_solver:
+            raise NotImplementedError('Ris-approximated Z-vector solver is not supported for standard TDDFT or TDA')
         vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):

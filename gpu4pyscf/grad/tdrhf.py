@@ -323,7 +323,6 @@ class Gradients(rhf_grad.GradientsBase):
         )
         log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
         log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
-        log.info("chkfile = %s", self.chkfile)
         log.info("State ID = %d", self.state)
         log.info("\n")
         return self

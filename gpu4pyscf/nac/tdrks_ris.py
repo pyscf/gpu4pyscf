@@ -227,8 +227,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         veff0momJ = cp.zeros((nmo, nmo))
 
     if td_nac.ris_zvector_solver:
+        log.note('Use ris-approximated Z-vector solver')
         vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, singlet=None, hermi=1)
     else:
+        log.note('Use standard Z-vector solver')
         vresp = mf.gen_response(singlet=None, hermi=1)
     # vresp = mf.gen_response(singlet=None, hermi=1)
 
@@ -445,6 +447,33 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
 
 class NAC(tdrks_nac.NAC):
+    """
+    Non-Adiabatic Couplings (NAC) for TDRKS using the RIS approximation.
+
+    This class implements the analytical NAC calculation between TDRKS excited states
+    (or between excited state and ground state) utilizing the Resolution of Identity (RI)
+    approximation for both Coulomb and Exchange integrals.
+
+    Attributes:
+        ris_zvector_solver: Solves the Z-vector equation (Lagrangian multipliers) 
+        specific to the RIS approximation.
+
+    Notes:
+        The TDDFT or TDA is computed ** using the RIS approximation **.
+        The Z-vector solver implementation here has two versions:
+        1. Standard Z-vector solver: Solves the Z-vector equation using the standard method.
+        2. RIS approximation Z-vector solver: Solves the Z-vector equation using the RIS approximation, 
+            when ris_zvector_solver is True.
+
+    References:
+        For the detailed derivation of the RIS gradient and Z-vector equation, 
+        please refer to the following paper:
+        
+        [1] "Analytical Excited-State Gradients and Derivative
+            Couplings in TDDFT with Minimal Auxiliary Basis Set
+            Approximation and GPU Acceleration", 
+            ArXiv:2511.18233
+    """
 
     _keys = {'ris_zvector_solver'}
 

@@ -207,8 +207,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     # set singlet=None, generate function for CPHF type response kernel
     # TODO: LR-PCM TDDFT
     if td_grad.ris_zvector_solver:
+        log.note('Use ris-approximated Z-vector solver')
         vresp = gen_response_ris(mf, mf_J, mf_K, singlet=None, hermi=1)
     else:
+        log.note('Use standard Z-vector solver')
         vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
@@ -365,6 +367,33 @@ def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omeg
 
 
 class Gradients(tdrhf.Gradients):
+    """
+    Analytical gradients for TDRKS using the RIS approximation.
+
+    This class implements the analytical gradient calculation between TDRKS excited states
+    (or between excited state and ground state) utilizing the Resolution of Identity (RI)
+    approximation for both Coulomb and Exchange integrals.
+
+    Attributes:
+        ris_zvector_solver: Solves the Z-vector equation (Lagrangian multipliers) 
+        specific to the RIS approximation.
+
+    Notes:
+        The TDDFT or TDA is computed ** using the RIS approximation **.
+        The Z-vector solver implementation here has two versions:
+        1. Standard Z-vector solver: Solves the Z-vector equation using the standard method.
+        2. RIS approximation Z-vector solver: Solves the Z-vector equation using the RIS approximation, 
+            when ris_zvector_solver is True.
+
+    References:
+        For the detailed derivation of the RIS gradient and Z-vector equation, 
+        please refer to the following paper:
+        
+        [1] "Analytical Excited-State Gradients and Derivative
+            Couplings in TDDFT with Minimal Auxiliary Basis Set
+            Approximation and GPU Acceleration", 
+            ArXiv:2511.18233
+    """
 
     _keys = {'ris_zvector_solver'}
 
