@@ -108,7 +108,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
             log.note('Use standard Z-vector solver')
             vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
     else:
-        if td_nac.ris_zvector_solver:
+        if getattr(td_nac, 'ris_zvector_solver', None) is not None:
             raise NotImplementedError('Ris-approximated Z-vector solver is not supported for standard TDDFT or TDA')
         vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 

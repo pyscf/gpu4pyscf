@@ -740,10 +740,10 @@ class NAC_Scanner(lib.GradScanner):
                 else:
                     xi0 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
                     yi0 = self.base.xy[0][states[0]-1]*0.0
+                xi0 = xi0.reshape(nocc, nvir)
+                yi0 = yi0.reshape(nocc, nvir)
             else:
                 xi0, yi0 = self.base.xy[states[0]-1]
-            xi0 = xi0.reshape(nocc, nvir)
-            yi0 = yi0.reshape(nocc, nvir)
         if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
             if self.base.xy[1] is not None:
                 xj0 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
@@ -751,10 +751,10 @@ class NAC_Scanner(lib.GradScanner):
             else:
                 xj0 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
                 yj0 = self.base.xy[0][states[1]-1]*0.0
+            xj0 = xj0.reshape(nocc, nvir)
+            yj0 = yj0.reshape(nocc, nvir)
         else:
             xj0, yj0 = self.base.xy[states[1]-1]
-        xj0 = xj0.reshape(nocc, nvir)
-        yj0 = yj0.reshape(nocc, nvir)
 
         td_scanner = self.base
 
@@ -774,10 +774,10 @@ class NAC_Scanner(lib.GradScanner):
                 else:
                     xi1 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
                     yi1 = self.base.xy[0][states[0]-1]*0.0
+                xi1 = xi1.reshape(nocc, nvir)
+                yi1 = yi1.reshape(nocc, nvir)
             else:
                 xi1, yi1 = self.base.xy[states[0]-1]
-            xi1 = xi1.reshape(nocc, nvir)
-            yi1 = yi1.reshape(nocc, nvir)
         if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
             if self.base.xy[1] is not None:
                 xj1 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
@@ -785,10 +785,10 @@ class NAC_Scanner(lib.GradScanner):
             else:
                 xj1 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
                 yj1 = self.base.xy[0][states[1]-1]*0.0
+            xj1 = xj1.reshape(nocc, nvir)
+            yj1 = yj1.reshape(nocc, nvir)
         else:
             xj1, yj1 = self.base.xy[states[1]-1]
-        xj1 = xj1.reshape(nocc, nvir)
-        yj1 = yj1.reshape(nocc, nvir)
         
         mo2_reordered = cp.asarray(mo2_reordered)
         mo_coeff0 = cp.asarray(mo_coeff0)
