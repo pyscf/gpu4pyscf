@@ -15,7 +15,7 @@
 import numpy as np
 import cupy as cp
 from scipy.optimize import root
-from pyscf import scf, lib as pyscf_lib
+from pyscf import lib as pyscf_lib
 from gpu4pyscf import dft, lib
 
 class CDFT_UKS(dft.UKS):
@@ -36,7 +36,7 @@ class CDFT_UKS(dft.UKS):
         
         self.n_constraints = len(self.charge_targets) + len(self.spin_targets)
         
-        # Initial guess for Lagrange multipliers V (CPU array for scipy)
+        # Initial guess for Lagrange multipliers V
         self.v_lagrange = np.zeros(self.n_constraints)
         
         # Microiteration parameters
@@ -93,7 +93,7 @@ class CDFT_UKS(dft.UKS):
         projectors = [cp.zeros((nao, nao)) for _ in range(mol.natm)]
         
         # Initialize Grids if not present
-        if not self.grids.coords:
+        if self.grids.coords is None:
             self.grids.build()
             
         # Access low-level grid data
@@ -108,8 +108,9 @@ class CDFT_UKS(dft.UKS):
         
         print(f"CDFT: Building Voronoi projectors on GPU using {n_grids} grid points...")
         
+        # TODO: using block loop in DFT
         for p0, p1 in pyscf_lib.prange(0, n_grids, blksize):
-            # 1. Load batch to GPU
+            # 1. Load batch
             coords_batch = cp.asarray(coords_all[p0:p1])
             weights_batch = cp.asarray(weights_all[p0:p1])
             
@@ -153,9 +154,9 @@ class CDFT_UKS(dft.UKS):
         self.atom_projectors = projectors
         return self.atom_projectors
 
-    def get_constraint_potential_gpu(self, v_vec_cpu):
+    def get_constraint_potential(self, v_vec):
         '''
-        Constructs V_const matrix on GPU based on CPU multipliers.
+        Constructs V_const matrix based on multipliers.
         '''
         if self.atom_projectors is None:
             self.build_atom_projectors()
@@ -168,7 +169,7 @@ class CDFT_UKS(dft.UKS):
         
         # 1. Charge Constraints (V_alpha = V_beta = +V)
         for i, atom_group in enumerate(self.charge_groups):
-            v = float(v_vec_cpu[idx])
+            v = float(v_vec[idx])
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
                 vc_a += v * w
@@ -177,7 +178,7 @@ class CDFT_UKS(dft.UKS):
             
         # 2. Spin Constraints (V_alpha = +V, V_beta = -V)
         for i, atom_group in enumerate(self.spin_groups):
-            v = float(v_vec_cpu[idx])
+            v = float(v_vec[idx])
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
                 vc_a += v * w
@@ -186,26 +187,27 @@ class CDFT_UKS(dft.UKS):
             
         return (vc_a, vc_b)
 
-    def _micro_objective_func(self, v_vec_cpu, f_std_a_gpu, f_std_b_gpu, s_gpu):
+    def _micro_objective_func(self, v_vec, f_std_a, f_std_b, s):
         '''
         Objective function for scipy.optimize.root.
-        Input: v_vec (CPU numpy array)
-        Output: errors (CPU numpy array)
+        Input: v_vec
+        Output: errors
         '''
-        # Build total Fock on GPU: F_tot = F_std + V_const
-        vc_a, vc_b = self.get_constraint_potential_gpu(v_vec_cpu)
-        f_tot_a = f_std_a_gpu + vc_a
-        f_tot_b = f_std_b_gpu + vc_b
+        # Build total Fock: F_tot = F_std + V_const
+        vc_a, vc_b = self.get_constraint_potential(v_vec)
+        f_tot_a = f_std_a + vc_a
+        f_tot_b = f_std_b + vc_b
         
-        # Solve eigenvalue problem on GPU
+        # Solve eigenvalue problem
         # GPU4PySCF's eig solver handles S implicitly via generalized diagonalization
-        mo_e_a, mo_c_a = self.eig(f_tot_a, s_gpu)
-        mo_e_b, mo_c_b = self.eig(f_tot_b, s_gpu)
-        
-        # Get occupation and density on GPU
-        mo_occ_a, mo_occ_b = self.get_occ((mo_e_a, mo_e_b), self.mo_coeff)
-        dm_a = self.make_rdm1( (mo_c_a, mo_c_b), (mo_occ_a, mo_occ_b) )[0]
-        dm_b = self.make_rdm1( (mo_c_a, mo_c_b), (mo_occ_a, mo_occ_b) )[1]
+        mo_e, mo_c = self.eig((f_tot_a, f_tot_b), s)
+        mo_e_a, mo_e_b = mo_e
+        mo_c_a, mo_c_b = mo_c
+        # Get occupation and density
+        mo_occ_a, mo_occ_b = self.get_occ((mo_e_a.get(), mo_e_b.get()), None)
+        dm_a, dm_b = self.make_rdm1( 
+            (mo_c_a, mo_c_b), 
+            (cp.asarray(mo_occ_a), cp.asarray(mo_occ_b)) )
         
         errors = []
         
@@ -216,8 +218,8 @@ class CDFT_UKS(dft.UKS):
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
                 # Tr(P * W) is the integrated population
-                val_gpu = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
-                n_val += float(val_gpu)
+                val = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
+                n_val += float(val)
             errors.append(n_val - target)
             
         # Calculate Spin Errors
@@ -226,27 +228,29 @@ class CDFT_UKS(dft.UKS):
             m_val = 0.0
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
-                val_gpu = cp.trace(dm_a @ w) - cp.trace(dm_b @ w)
-                m_val += float(val_gpu)
+                val = cp.trace(dm_a @ w) - cp.trace(dm_b @ w)
+                m_val += float(val)
             errors.append(m_val - target)
-            
+        
+        print("errors:", errors)
         return np.array(errors)
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
-                 diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
+                 diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
+                 fock_last=None):
         '''
         Override get_fock to inject the CDFT microiterations.
-        Most matrices here (h1e, vhf, dm) are CuPy arrays (GPU).
+        Most matrices here (h1e, vhf, dm) are cupy arrays.
         '''
-        # 1. Standard Fock Construction (GPU)
+        # 1. Standard Fock Construction
         f_std = super().get_fock(h1e, s1e, vhf, dm, cycle, diis, diis_start_cycle,
-                                 level_shift_factor, damp_factor)
+                                 level_shift_factor, damp_factor, fock_last)
         
         if self.n_constraints == 0:
             return f_std
 
         # 2. Microiterations
-        s_gpu = self.get_ovlp()
+        s = self.get_ovlp()
         
         # Handle f_std format (ensure tuple for UKS)
         if isinstance(f_std, tuple):
@@ -256,21 +260,24 @@ class CDFT_UKS(dft.UKS):
         else:
             f_std_a = f_std_b = f_std
 
-        # Run optimization using scipy (CPU) calling objective (GPU)
+        # Run optimization using scipy calling objective
         res = root(
             fun=self._micro_objective_func,
-            x0=self.v_lagrange, # CPU array
-            args=(f_std_a, f_std_b, s_gpu), # GPU arrays passed as constant args
+            x0=self.v_lagrange,
+            args=(f_std_a, f_std_b, s), # arrays passed as constant args
             method='hybr',
             tol=self.micro_tol,
             options={'maxfev': self.micro_max_cycle}
         )
+        if not res.success:
+            print(f"Microiteration failed: {res.message}")
         
-        # Update stored Lagrange multipliers (CPU)
+        # Update stored Lagrange multipliers
         self.v_lagrange = res.x
+        print("Optimal Lagrange multipliers:", self.v_lagrange)
         
-        # 3. Add optimized V_const to Fock (GPU)
-        vc_a, vc_b = self.get_constraint_potential_gpu(self.v_lagrange)
+        # 3. Add optimized V_const to Fock
+        vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
         
         return (f_std_a + vc_a, f_std_b + vc_b)
 
@@ -280,42 +287,3 @@ class CDFT_UKS(dft.UKS):
         '''
         return super().energy_elec(dm, h1e, vhf)
 
-
-if __name__ == '__main__':
-    print("Initializing GPU4PySCF...")
-    
-    mol = gto.Mole()
-    mol.atom = 'N 0 0 0; N 0 0 3.0' 
-    mol.basis = 'def2-svp'
-    mol.charge = 0
-    mol.spin = 0
-    mol.verbose = 4
-    mol.build()
-
-    # Define Constraints (List of Lists)
-    # Constrain Left N (atom 0) to 6.5 electrons
-    # Constrain Right N (atom 1) to 7.5 electrons
-    charge_constraints = [ [0, 1], [6.5, 7.5] ]
-    
-    # Initialize CDFT on GPU
-    mf = CDFT_UKS(mol, charge_constraints=charge_constraints)
-    mf.xc = 'b3lyp'
-    
-    print(">>> Starting Voronoi-CDFT Calculation (GPU)...")
-    mf.kernel()
-    
-    print("\n>>> Analysis of Results")
-    print(f"Converged Lagrange Multipliers V (CPU): {mf.v_lagrange}")
-    
-    # Verification
-    dm_gpu = mf.make_rdm1()
-    projs_gpu = mf.build_atom_projectors()
-    
-    # Calculate populations on GPU
-    n_left_gpu = cp.trace(dm_gpu[0] @ projs_gpu[0]) + cp.trace(dm_gpu[1] @ projs_gpu[0])
-    n_right_gpu = cp.trace(dm_gpu[0] @ projs_gpu[1]) + cp.trace(dm_gpu[1] @ projs_gpu[1])
-    
-    print(f"Target N (Left):  {charge_constraints[1][0]}")
-    print(f"Result N (Left):  {float(n_left_gpu):.6f}")
-    print(f"Target N (Right): {charge_constraints[1][1]}")
-    print(f"Result N (Right): {float(n_right_gpu):.6f}")
