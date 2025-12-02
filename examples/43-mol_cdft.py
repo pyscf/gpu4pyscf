@@ -33,6 +33,7 @@ charge_constraints = [ [0, 1], [8.1, 0.95] ]
     
 # Initialize CDFT
 mf = CDFT_UKS(mol, charge_constraints=charge_constraints)
+mf.grids.atom_grid = (99, 590)
 mf.xc = 'b3lyp'
 mf.kernel()
 

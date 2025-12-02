@@ -17,8 +17,10 @@ import cupy as cp
 from scipy.optimize import root
 from gpu4pyscf.scf.hf import damping, level_shift
 from pyscf import lib as pyscf_lib
+from pyscf import gto
 from gpu4pyscf import dft, lib
 from gpu4pyscf.lib import logger
+from gpu4pyscf.dft import radi
 
 class CDFT_UKS(dft.UKS):
     '''
@@ -39,7 +41,7 @@ class CDFT_UKS(dft.UKS):
         self.n_constraints = len(self.charge_targets) + len(self.spin_targets)
         
         # Initial guess for Lagrange multipliers V
-        self.v_lagrange = np.zeros(self.n_constraints)
+        self.v_lagrange = np.zeros(self.n_constraints) + 0.01
         
         # Microiteration parameters
         self.micro_tol = 1e-4
@@ -74,76 +76,187 @@ class CDFT_UKS(dft.UKS):
                 
         return normalized_groups, targets
 
+    # def build_atom_projectors(self):
+    #     r'''
+    #     Constructs constraint weight matrices 'w' on GPU using Voronoi division.
+        
+    #     Method:
+    #     1. Generate DFT integration grid.
+    #     2. For each grid point, assign it to the nearest atom (Voronoi cell).
+    #     3. Integrate AO products over these regions: 
+    #        W_A_munu = Sum_k weight_k * mask_A(r_k) * phi_mu(r_k) * phi_nu(r_k)
+    #     '''
+    #     if self.atom_projectors is not None:
+    #         return self.atom_projectors
+
+    #     mol = self.mol
+    #     nao = mol.nao_nr()
+    #     atom_coords = cp.asarray(mol.atom_coords())
+
+    #     # Initialize projectors for all atoms (List of CuPy arrays)
+    #     projectors = [cp.zeros((nao, nao)) for _ in range(mol.natm)]
+
+    #     # Initialize Grids if not present
+    #     if self.grids.coords is None:
+    #         self.grids.build()
+
+    #     # Access low-level grid data
+    #     coords_all = self.grids.coords
+    #     weights_all = self.grids.weights
+
+    #     # Use NumInt for AO evaluation
+    #     ni = self._numint
+
+    #     blksize = 4000
+    #     n_grids = weights_all.shape[0]
+
+    #     logger.debug(self, f"CDFT: Building Voronoi projectors on GPU using {n_grids} grid points...")
+
+    #     # TODO: using block loop in DFT
+    #     # TODO: Becke grid should be used.
+    #     for p0, p1 in pyscf_lib.prange(0, n_grids, blksize):
+    #         # 1. Load batch
+    #         coords_batch = cp.asarray(coords_all[p0:p1])
+    #         weights_batch = cp.asarray(weights_all[p0:p1])
+
+    #         # 2. Evaluate AO on grid: (N_grid, N_ao)
+    #         ao_batch = ni.eval_ao(mol, coords_batch, deriv=0)
+
+    #         # 3. Voronoi Assignment (Find nearest atom for each grid point)
+    #         # Calculate distance squared: |r - R|^2 = r^2 + R^2 - 2rR
+    #         r_sq = cp.sum(coords_batch**2, axis=1)[:, None] # (N_grid, 1)
+    #         R_sq = cp.sum(atom_coords**2, axis=1)[None, :]  # (1, N_atom)
+    #         interaction = coords_batch @ atom_coords.T      # (N_grid, N_atom)
+    #         dist_sq = r_sq + R_sq - 2 * interaction
+
+    #         # Index of the nearest atom for each grid point
+    #         nearest_atom_idxs = cp.argmin(dist_sq, axis=1)
+
+    #         # Loop only over atoms present in this batch might be an optim, 
+    #         # but looping all atoms is safer code-wise.
+    #         for atom_id in range(mol.natm):
+    #             # Create boolean mask: 1 if grid point belongs to atom_id
+    #             mask = (nearest_atom_idxs == atom_id)
+
+    #             # If no grid points in this batch belong to this atom, skip
+    #             if not cp.any(mask):
+    #                 continue
+
+    #             # Effective weights for this atom
+    #             w_eff = weights_batch * mask
+
+    #             ao_weighted = ao_batch * w_eff[:, None]
+    #             projectors[atom_id] += ao_batch.T @ ao_weighted
+
+    #     self.atom_projectors = projectors
+    #     return self.atom_projectors
+
     def build_atom_projectors(self):
         r'''
-        Constructs constraint weight matrices 'w' on GPU using Voronoi division.
+        Constructs constraint weight matrices 'w' on GPU using Becke partitioning.
         
-        Method:
-        1. Generate DFT integration grid.
-        2. For each grid point, assign it to the nearest atom (Voronoi cell).
-        3. Integrate AO products over these regions: 
-           W_A_munu = Sum_k weight_k * mask_A(r_k) * phi_mu(r_k) * phi_nu(r_k)
+        This implementation strictly follows the logic from the reference 'gen_grid_partition'
+        function (from 'grids_response_cc'), preserving the exact mathematical steps,
+        loop structures, and data dimensions.
         '''
-        if self.atom_projectors is not None:
-            return self.atom_projectors
+
 
         mol = self.mol
         nao = mol.nao_nr()
-        atom_coords = cp.asarray(mol.atom_coords())
         
-        # Initialize projectors for all atoms (List of CuPy arrays)
+        atm_coords = np.asarray(mol.atom_coords(), order='C')
+        atm_dist = gto.inter_distance(mol, atm_coords)
+        atm_dist = cp.asarray(atm_dist)
+        atm_coords = cp.asarray(atm_coords)
+
+        # ---------------------------------------------------------------------
+        # Define Radii Adjustment Function
+        # Logic copied from the reference '_radii_adjust'
+        # ---------------------------------------------------------------------
+        grids = self.grids
+        atomic_radii = grids.atomic_radii
+        radii_adjust_method = grids.radii_adjust
+
+        def _radii_adjust(mol, atomic_radii):
+            charges = mol.atom_charges()
+            if radii_adjust_method == radi.treutler_atomic_radii_adjust:
+                rad = np.sqrt(atomic_radii[charges]) + 1e-200
+            elif radii_adjust_method == radi.becke_atomic_radii_adjust:
+                rad = atomic_radii[charges] + 1e-200
+            else:
+                fadjust = lambda i, j, g: g
+                return fadjust
+
+            rr = rad.reshape(-1,1) * (1./rad)
+            a = .25 * (rr.T - rr)
+            a[a<-.5] = -.5
+            a[a>0.5] = 0.5
+            
+            a_gpu = cp.asarray(a)
+
+            def fadjust(i, j, g):
+                # Apply the coordinate transformation: nu = mu + a_ij * (1 - mu^2)
+                return g + a_gpu[i,j]*(1-g**2)
+            return fadjust
+
+        fadjust = _radii_adjust(mol, atomic_radii)
+
+        # Initialize projectors list
         projectors = [cp.zeros((nao, nao)) for _ in range(mol.natm)]
-        
-        # Initialize Grids if not present
+
+        # Ensure grids are built
         if self.grids.coords is None:
             self.grids.build()
             
-        # Access low-level grid data
         coords_all = self.grids.coords
         weights_all = self.grids.weights
-        
-        # Use NumInt for AO evaluation
         ni = self._numint
         
+        # Batch processing
         blksize = 4000
-        n_grids = weights_all.shape[0]
+        n_grids_total = weights_all.shape[0]
         
-        logger.debug(self, f"CDFT: Building Voronoi projectors on GPU using {n_grids} grid points...")
+        logger.debug(self, f"CDFT: Building Becke projectors (Ref-logic) on GPU using {n_grids_total} grid points...")
         
-        # TODO: using block loop in DFT
-        # TODO: Becke grid should be used.
-        for p0, p1 in pyscf_lib.prange(0, n_grids, blksize):
-            # 1. Load batch
+        for p0, p1 in pyscf_lib.prange(0, n_grids_total, blksize):
             coords_batch = cp.asarray(coords_all[p0:p1])
             weights_batch = cp.asarray(weights_all[p0:p1])
-            
-            # 2. Evaluate AO on grid: (N_grid, N_ao)
+            ngrids_batch = coords_batch.shape[0]
             ao_batch = ni.eval_ao(mol, coords_batch, deriv=0)
             
-            # 3. Voronoi Assignment (Find nearest atom for each grid point)
-            # Calculate distance squared: |r - R|^2 = r^2 + R^2 - 2rR
-            r_sq = cp.sum(coords_batch**2, axis=1)[:, None] # (N_grid, 1)
-            R_sq = cp.sum(atom_coords**2, axis=1)[None, :]  # (1, N_atom)
-            interaction = coords_batch @ atom_coords.T      # (N_grid, N_atom)
-            dist_sq = r_sq + R_sq - 2 * interaction
+            grid_dist = []
             
-            # Index of the nearest atom for each grid point
-            nearest_atom_idxs = cp.argmin(dist_sq, axis=1)
+            # 1. Calculate distances using Python loop over atoms (No vectorization optimization)
+            for ia in range(mol.natm):
+                # v = r_atom - r_grid
+                v = (atm_coords[ia] - coords_batch).T
+                normv = cp.linalg.norm(v, axis=0) + 1e-200
+                grid_dist.append(normv)
             
-            # Loop only over atoms present in this batch might be an optim, 
-            # but looping all atoms is safer code-wise.
+            pbecke = cp.ones((mol.natm, ngrids_batch))
+            
+            # 2. Iterate over atom pairs to compute fuzzy cell weights
+            for ia in range(mol.natm):
+                for ib in range(ia):
+                    # Calculate hyperbolic coordinate mu_ij
+                    g = 1/atm_dist[ia,ib] * (grid_dist[ia]-grid_dist[ib])
+                    # Apply radii adjustment
+                    p0 = fadjust(ia, ib, g)
+                    p1 = (3 - p0**2) * p0 * .5
+                    p2 = (3 - p1**2) * p1 * .5
+                    p3 = (3 - p2**2) * p2 * .5
+
+                    s_uab = .5 * (1 - p3 + 1e-200)
+                    s_uba = .5 * (1 + p3 + 1e-200)
+
+                    pbecke[ia] *= s_uab
+                    pbecke[ib] *= s_uba
+            
+            z = 1./pbecke.sum(axis=0)
+
             for atom_id in range(mol.natm):
-                # Create boolean mask: 1 if grid point belongs to atom_id
-                mask = (nearest_atom_idxs == atom_id)
-                
-                # If no grid points in this batch belong to this atom, skip
-                if not cp.any(mask):
-                    continue
-                
-                # Effective weights for this atom
-                w_eff = weights_batch * mask
-                
-                ao_weighted = ao_batch * w_eff[:, None]
+                w_atom = weights_batch * pbecke[atom_id] * z
+                ao_weighted = ao_batch * w_atom[:, None]
                 projectors[atom_id] += ao_batch.T @ ao_weighted
         
         self.atom_projectors = projectors
