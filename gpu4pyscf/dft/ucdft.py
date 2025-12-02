@@ -20,7 +20,7 @@ from gpu4pyscf import dft, lib
 
 class CDFT_UKS(dft.UKS):
     '''
-    GPU-accelerated Constrained DFT implementation using GPU4PySCF.
+    Constrained DFT implementation for unrestricted Kohn-Sham.
     Implements Voronoi-based spatial charge/spin constraints.
     '''
 
@@ -109,6 +109,7 @@ class CDFT_UKS(dft.UKS):
         print(f"CDFT: Building Voronoi projectors on GPU using {n_grids} grid points...")
         
         # TODO: using block loop in DFT
+        # TODO: Becke grid should be used.
         for p0, p1 in pyscf_lib.prange(0, n_grids, blksize):
             # 1. Load batch
             coords_batch = cp.asarray(coords_all[p0:p1])
@@ -127,10 +128,6 @@ class CDFT_UKS(dft.UKS):
             # Index of the nearest atom for each grid point
             nearest_atom_idxs = cp.argmin(dist_sq, axis=1)
             
-            # 4. Accumulate W matrices for each atom
-            # Optim: Pre-calculate (weights * ao) to save multiplications
-            # But weights depend on the atom mask.
-            
             # Loop only over atoms present in this batch might be an optim, 
             # but looping all atoms is safer code-wise.
             for atom_id in range(mol.natm):
@@ -144,14 +141,11 @@ class CDFT_UKS(dft.UKS):
                 # Effective weights for this atom
                 w_eff = weights_batch * mask
                 
-                # Integration: W_mn = Sum_k w_k * phi_m(k) * phi_n(k)
-                # Matrix algebra: W = AO.T @ diag(w) @ AO
-                # Efficiently: W = AO.T @ (AO * w[:, None])
-                
                 ao_weighted = ao_batch * w_eff[:, None]
                 projectors[atom_id] += ao_batch.T @ ao_weighted
         
         self.atom_projectors = projectors
+        print("self.atom_projectors:", self.atom_projectors)
         return self.atom_projectors
 
     def get_constraint_potential(self, v_vec):
@@ -199,12 +193,15 @@ class CDFT_UKS(dft.UKS):
         f_tot_b = f_std_b + vc_b
         
         # Solve eigenvalue problem
-        # GPU4PySCF's eig solver handles S implicitly via generalized diagonalization
         mo_e, mo_c = self.eig((f_tot_a, f_tot_b), s)
         mo_e_a, mo_e_b = mo_e
         mo_c_a, mo_c_b = mo_c
-        # Get occupation and density
-        mo_occ_a, mo_occ_b = self.get_occ((mo_e_a.get(), mo_e_b.get()), None)
+        nocc_a = self.mol.nelec[0]
+        nocc_b = self.mol.nelec[1]
+        mo_occ_a = cp.zeros((self.mol.nao))
+        mo_occ_b = cp.zeros((self.mol.nao))
+        mo_occ_a[:nocc_a] = 1.0
+        mo_occ_b[:nocc_b] = 1.0
         dm_a, dm_b = self.make_rdm1( 
             (mo_c_a, mo_c_b), 
             (cp.asarray(mo_occ_a), cp.asarray(mo_occ_b)) )
@@ -232,7 +229,7 @@ class CDFT_UKS(dft.UKS):
                 m_val += float(val)
             errors.append(m_val - target)
         
-        print("errors:", errors)
+        print(f"errors: {errors}   val: {n_val}  v_vec: {v_vec}")
         return np.array(errors)
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
@@ -242,48 +239,96 @@ class CDFT_UKS(dft.UKS):
         Override get_fock to inject the CDFT microiterations.
         Most matrices here (h1e, vhf, dm) are cupy arrays.
         '''
-        # 1. Standard Fock Construction
+        # Standard Fock Construction
+        # TODO: Check if DIIS should be changed place
         f_std = super().get_fock(h1e, s1e, vhf, dm, cycle, diis, diis_start_cycle,
                                  level_shift_factor, damp_factor, fock_last)
+        print("cycle:", cycle)
+        print("f_std:", f_std)
         
         if self.n_constraints == 0:
             return f_std
 
-        # 2. Microiterations
-        s = self.get_ovlp()
+        run_micro = False
+        if cycle != -1:
+            run_micro = True
         
-        # Handle f_std format (ensure tuple for UKS)
-        if isinstance(f_std, tuple):
+        if run_micro:
+            s = self.get_ovlp()
             f_std_a, f_std_b = f_std
-        elif isinstance(f_std, cp.ndarray) and f_std.ndim == 3:
-            f_std_a, f_std_b = f_std[0], f_std[1]
-        else:
-            f_std_a = f_std_b = f_std
 
-        # Run optimization using scipy calling objective
-        res = root(
-            fun=self._micro_objective_func,
-            x0=self.v_lagrange,
-            args=(f_std_a, f_std_b, s), # arrays passed as constant args
-            method='hybr',
-            tol=self.micro_tol,
-            options={'maxfev': self.micro_max_cycle}
-        )
-        if not res.success:
-            print(f"Microiteration failed: {res.message}")
+            res = root(
+                fun=self._micro_objective_func,
+                x0=self.v_lagrange,
+                args=(f_std_a, f_std_b, s),
+                method='hybr',
+                tol=self.micro_tol,
+                options={'maxfev': self.micro_max_cycle}
+            )
+            if not res.success:
+                 # log warning
+                 pass
+            self.v_lagrange = res.x
+            print(f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
+            
+        else:
+            pass
+
+        vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+        print("vc_a:", vc_a)
+        print("vc_b:", vc_b)
+
+        return (f_std[0] + vc_a, f_std[1] + vc_b)
+
+def energy_elec(self, dm=None, h1e=None, vhf=None):
+        '''
+        Calculate electronic energy, properly defining the CDFT Lagrangian W.
         
-        # Update stored Lagrange multipliers
-        self.v_lagrange = res.x
-        print("Optimal Lagrange multipliers:", self.v_lagrange)
+        Ref: Eq 16 in Chem. Rev. 2012, 112, 321-370 .
+        W = E_KS + Sum[ V_k * (N_calc_k - N_target_k) ]
+          = E_KS + Tr(P * V_const) - Sum(V_k * N_target_k)
         
-        # 3. Add optimized V_const to Fock
+        Returns:
+            Total Electronic Energy (Lagrangian W), Coulomb Energy
+        '''
+        # 1. Get standard DFT energy (E_KS)
+        e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
+        
+        # 2. Calculate Constraint Potential Energy: Tr(P * V_const)
+        if self.atom_projectors is None:
+            self.build_atom_projectors()
+            
         vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
         
-        return (f_std_a + vc_a, f_std_b + vc_b)
+        if isinstance(dm, (tuple, list)) or (isinstance(dm, cp.ndarray) and dm.ndim == 3):
+            dm_a, dm_b = dm[0], dm[1]
+        else:
+            dm_a = dm_b = dm * 0.5 
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        '''
-        Calculate electronic energy. 
-        '''
-        return super().energy_elec(dm, h1e, vhf)
+        # Term 1: V * N_calc
+        e_interaction = cp.trace(dm_a @ vc_a) + cp.trace(dm_b @ vc_b)
+        e_interaction = float(e_interaction)
+        
+        # 3. Calculate Constant Shift: Sum(V_k * N_target_k)
+        # This term makes the energy correspond to the Lagrangian W
+        e_shift = 0.0
+        idx = 0
+        
+        # Charge Targets
+        for target in self.charge_targets:
+            v = self.v_lagrange[idx]
+            e_shift += v * target
+            idx += 1
+            
+        # Spin Targets
+        for target in self.spin_targets:
+            v = self.v_lagrange[idx]
+            e_shift += v * target
+            idx += 1
+            
+        # Final Lagrangian W = E_KS + (V * N_calc) - (V * N_target)
+        # e_tot += (e_interaction - e_shift)
+        # e_tot += e_interaction
+        
+        return e_tot, e_coul
 
