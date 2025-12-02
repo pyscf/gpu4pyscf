@@ -356,7 +356,7 @@ class CDFT_UKS(dft.UKS):
 
     #     return (f_std[0] + vc_a, f_std[1] + vc_b)
 
-def energy_elec(self, dm=None, h1e=None, vhf=None):
+    def energy_elec(self, dm=None, h1e=None, vhf=None):
         '''
         Calculate electronic energy, properly defining the CDFT Lagrangian W.
         
