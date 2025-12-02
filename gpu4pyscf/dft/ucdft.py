@@ -15,8 +15,10 @@
 import numpy as np
 import cupy as cp
 from scipy.optimize import root
+from gpu4pyscf.scf.hf import damping, level_shift
 from pyscf import lib as pyscf_lib
 from gpu4pyscf import dft, lib
+from gpu4pyscf.lib import logger
 
 class CDFT_UKS(dft.UKS):
     '''
@@ -106,7 +108,7 @@ class CDFT_UKS(dft.UKS):
         blksize = 4000
         n_grids = weights_all.shape[0]
         
-        print(f"CDFT: Building Voronoi projectors on GPU using {n_grids} grid points...")
+        logger.debug(self, f"CDFT: Building Voronoi projectors on GPU using {n_grids} grid points...")
         
         # TODO: using block loop in DFT
         # TODO: Becke grid should be used.
@@ -145,7 +147,6 @@ class CDFT_UKS(dft.UKS):
                 projectors[atom_id] += ao_batch.T @ ao_weighted
         
         self.atom_projectors = projectors
-        print("self.atom_projectors:", self.atom_projectors)
         return self.atom_projectors
 
     def get_constraint_potential(self, v_vec):
@@ -229,56 +230,131 @@ class CDFT_UKS(dft.UKS):
                 m_val += float(val)
             errors.append(m_val - target)
         
-        print(f"errors: {errors}   val: {n_val}  v_vec: {v_vec}")
+        logger.debug(self, f"errors: {errors}   val: {n_val}  v_vec: {v_vec}")
         return np.array(errors)
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
-                 diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
-                 fock_last=None):
-        '''
-        Override get_fock to inject the CDFT microiterations.
-        Most matrices here (h1e, vhf, dm) are cupy arrays.
-        '''
-        # Standard Fock Construction
-        # TODO: Check if DIIS should be changed place
-        f_std = super().get_fock(h1e, s1e, vhf, dm, cycle, diis, diis_start_cycle,
-                                 level_shift_factor, damp_factor, fock_last)
-        print("cycle:", cycle)
-        print("f_std:", f_std)
+             diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
+             fock_last=None):
+        if h1e is None: h1e = self.get_hcore()
+        if vhf is None: vhf = self.get_veff(self.mol, dm)
+        if s1e is None: s1e = self.get_ovlp()
+        h1e = cp.asarray(h1e)
+        vhf = cp.asarray(vhf)
+        f = h1e + vhf
+        if f.ndim == 2:
+            f = (f, f)
         
-        if self.n_constraints == 0:
-            return f_std
+        # Begin to change
+        if self.n_constraints != 0:
+            run_micro = False
+            if cycle != -1:
+                run_micro = True
+            if run_micro:
+                f_a, f_b = f
 
-        run_micro = False
-        if cycle != -1:
-            run_micro = True
+                res = root(
+                    fun=self._micro_objective_func,
+                    x0=self.v_lagrange,
+                    args=(f_a, f_b, s1e),
+                    method='hybr',
+                    tol=self.micro_tol,
+                    options={'maxfev': self.micro_max_cycle}
+                )
+                if not res.success:
+                    # log warning
+                    pass
+                self.v_lagrange = res.x
+                logger.debug(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
+                
+            else:
+                pass
+
+            vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+
+            f = cp.stack((f[0] + vc_a, 
+                          f[1] + vc_b))
+        # End to change
+
+        if cycle < 0 and diis is None:  # Not inside the SCF iteration
+            return f
+
+        if dm is None: dm = self.make_rdm1()
+        s1e = cp.asarray(s1e)
+        dm = cp.asarray(dm)
+
+        if diis_start_cycle is None:
+            diis_start_cycle = self.diis_start_cycle
+        if damp_factor is None:
+            damp_factor = self.damp
+        if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+            if isinstance(damp_factor, (tuple, list, np.ndarray)):
+                dampa, dampb = damp_factor
+            else:
+                dampa = dampb = damp_factor
+            f = cp.asarray((damping(f[0], fock_last[0], dampa),
+                            damping(f[1], fock_last[1], dampb)))
+        if diis and cycle >= diis_start_cycle:
+            f = diis.update(s1e, dm, f)
+
+        if level_shift_factor is None:
+            level_shift_factor = self.level_shift
+        if level_shift_factor is not None:
+            if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
+                shifta, shiftb = level_shift_factor
+            else:
+                shifta = shiftb = level_shift_factor
+            f = (level_shift(s1e, dm[0], f[0], shifta),
+                level_shift(s1e, dm[1], f[1], shiftb))
+        return f
+
+    # def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
+    #              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
+    #              fock_last=None):
+    #     '''
+    #     Override get_fock to inject the CDFT microiterations.
+    #     Most matrices here (h1e, vhf, dm) are cupy arrays.
+    #     '''
+    #     # Standard Fock Construction
+    #     # TODO: Check if DIIS should be changed place
+    #     f_std = super().get_fock(h1e, s1e, vhf, dm, cycle, diis, diis_start_cycle,
+    #                              level_shift_factor, damp_factor, fock_last)
+    #     print("cycle:", cycle)
+    #     print("f_std:", f_std)
         
-        if run_micro:
-            s = self.get_ovlp()
-            f_std_a, f_std_b = f_std
+    #     if self.n_constraints == 0:
+    #         return f_std
 
-            res = root(
-                fun=self._micro_objective_func,
-                x0=self.v_lagrange,
-                args=(f_std_a, f_std_b, s),
-                method='hybr',
-                tol=self.micro_tol,
-                options={'maxfev': self.micro_max_cycle}
-            )
-            if not res.success:
-                 # log warning
-                 pass
-            self.v_lagrange = res.x
-            print(f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
+    #     run_micro = False
+    #     if cycle != -1:
+    #         run_micro = True
+        
+    #     if run_micro:
+    #         s = self.get_ovlp()
+    #         f_std_a, f_std_b = f_std
+
+    #         res = root(
+    #             fun=self._micro_objective_func,
+    #             x0=self.v_lagrange,
+    #             args=(f_std_a, f_std_b, s),
+    #             method='hybr',
+    #             tol=self.micro_tol,
+    #             options={'maxfev': self.micro_max_cycle}
+    #         )
+    #         if not res.success:
+    #             # log warning
+    #             pass
+    #         self.v_lagrange = res.x
+    #         print(f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
             
-        else:
-            pass
+    #     else:
+    #         pass
 
-        vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
-        print("vc_a:", vc_a)
-        print("vc_b:", vc_b)
+    #     vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+    #     print("vc_a:", vc_a)
+    #     print("vc_b:", vc_b)
 
-        return (f_std[0] + vc_a, f_std[1] + vc_b)
+    #     return (f_std[0] + vc_a, f_std[1] + vc_b)
 
 def energy_elec(self, dm=None, h1e=None, vhf=None):
         '''

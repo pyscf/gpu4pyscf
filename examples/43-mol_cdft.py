@@ -29,21 +29,11 @@ mol.build()
 # Define Constraints (List of Lists)
 # Constrain Left N (atom 0) to 6.5 electrons
 # Constrain Right N (atom 1) to 7.5 electrons
-charge_constraints = [ [0], [8.1] ]
+charge_constraints = [ [0, 1], [8.1, 0.95] ]
     
 # Initialize CDFT
 mf = CDFT_UKS(mol, charge_constraints=charge_constraints)
-# mf.grids.atom_grid = (99,590)
-# mf.grids.coords = cp.array(
-#     [
-#         [0.1, 0.1, 0.1],
-#         [0.0, -0.757*2, 0.587*2],
-#         [0.0, 0.757*2, 0.587*2],
-#     ]
-# )
-# mf.grids.weights = cp.array([1.0, 1.0, 1.0])
 mf.xc = 'b3lyp'
-print(">>> Starting Voronoi-CDFT Calculation...")
 mf.kernel()
 
 print("\n>>> Analysis of Results")
@@ -54,8 +44,15 @@ dm = mf.make_rdm1()
 projs = mf.build_atom_projectors()
 
 # Calculate populations
-n_left = cp.trace(dm[0] @ projs[0]) + cp.trace(dm[1] @ projs[0])
+O_charge = cp.trace(dm[0] @ projs[0]) + cp.trace(dm[1] @ projs[0])
+H1_charge = cp.trace(dm[0] @ projs[1]) + cp.trace(dm[1] @ projs[1])
+H2_charge = cp.trace(dm[0] @ projs[2]) + cp.trace(dm[1] @ projs[2])
+
+
 
 print(f"Number of projs: {len(projs)}")
-print(f"Target N (Left):  {charge_constraints[1][0]}")
-print(f"Result N (Left):  {float(n_left):.6f}")
+print(f"Target O:  {charge_constraints[1][0]}")
+print(f"Result O:  {float(O_charge):.6f}")
+print(f"Target H1:  {charge_constraints[1][1]}")
+print(f"Result H1:  {float(H1_charge):.6f}")
+print(f"Result H2:  {float(H2_charge):.6f}")
