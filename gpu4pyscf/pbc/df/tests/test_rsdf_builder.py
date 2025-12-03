@@ -320,7 +320,7 @@ C    D
             else:
                 _ref = ref[kj, ki].conj().transpose(0,2,1)
             print(ki, kj)
-            assert abs(_ref - out[ki]).max() < 1e-11
+            assert abs(_ref - out[ki]).max() < 5e-13
 
 def test_kpts_compressed1():
     from pyscf.pbc.df import df as df_cpu
@@ -349,7 +349,7 @@ def test_kpts_compressed1():
             else:
                 _ref = ref[kj, ki].conj().transpose(0,2,1)
             print(ki, kj)
-            assert abs(_ref - out[ki]).max() < 1e-10
+            assert abs(_ref - out[ki]).max() < 3e-11
 
 def test_kpts_compressed_general_contraction():
     cell = pyscf.M(

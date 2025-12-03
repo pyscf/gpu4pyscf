@@ -50,12 +50,14 @@ libpbc.conc_img_idx.restype = ctypes.c_int
 libpbc.aopair_fill_triu.restype = ctypes.c_int
 libpbc.PBCsr_int3c2e_latsum23.restype = ctypes.c_int
 libpbc.PBCsr_int3c2e_latsum23_init.restype = ctypes.c_int
+libpbc.PBCsr_int3c2e_ejk_ip1.restype = ctypes.c_int
+libpbc.PBCsr_int3c2e_ejk_ip1_init.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 54
 THREADS = 256
-PAGES_PER_BLOCK = 1048576
+PAGES_PER_BLOCK = 131072
 PAGE_SIZE = 32 * 4 # Bytes
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
@@ -238,40 +240,37 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
     bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
 
-    def _create_gout_stride_lookup_table(lmax):
-        # based on the shm_size, find optimal gout_stride for each (li,lj)
-        # pattern, store them in the gout_stride_lookup
-        gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
-        gout_width = 43 # should be identical to the setting fill_int2c2e.cu
-        shm_size = SHM_SIZE - 1024 # More variables allocated in shm
-        ls = np.arange(lmax+1)
-        nf = (ls+1) * (ls+2) // 2
-        max_shm_size = 0
-        for li in range(lmax+1):
-            for lj in range(lmax+1):
-                nroots = ((li + lj) // 2 + 1) * 2
-                g_size = (li+1)*(lj+1)
-                unit = g_size*3 + nroots*2 + 4
-                nsp_max = _nearest_power2(shm_size // (unit*8))
-
-                gout_size = nf[li] * nf[lj]
-                gout_stride = (gout_size+gout_width-1) / gout_width
-                # Round up to the next 2^n
-                gout_stride = _nearest_power2(gout_stride, return_leq=False)
-
-                nsp_per_block = min(nsp_max, THREADS // gout_stride)
-                gout_stride_lookup[li, lj] = THREADS // nsp_per_block
-                max_shm_size = max(max_shm_size, nsp_per_block*unit*8)
-        return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
-
-    gout_stride_lookup, shm_size = _create_gout_stride_lookup_table(lmax)
+    # based on the shm_size, find optimal gout_stride for each (li,lj)
+    # pattern, store them in the gout_stride_lookup
+    ls = np.arange(L_AUX_MAX+1)
+    nf = (ls+1) * (ls+2) // 2
+    li = ls[:,None]
+    lj = ls
+    nfi = nf[:,None]
+    nfj = nf
+    nroots = ((li + lj) // 2 + 1)
+    nroots *= 2 # for short-range Coulomb
+    g_size = (li+1)*(lj+1)
+    unit = g_size*3 + nroots*2 + 4
+    shm_size = SHM_SIZE - 1024 # More variables allocated in shm
+    nsp_max = _nearest_power2(shm_size // (unit*8))
+    gout_size = nfi * nfj
+    gout_width = 43 # should be identical to the setting fill_int2c2e.cu
+    gout_stride = (gout_size+gout_width-1) / gout_width
+    # Round up to the next 2^n
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+    nsp_per_block = THREADS // gout_stride
+    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
+    gout_stride_lookup = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+    shm_size = nsp_per_block * (unit*8)
+    max_shm_size = shm_size.max()
 
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     nao_cart, nao = coeff.shape
     out = cp.empty((bvk_ncells, nao_cart, nao_cart))
     err = libpbc.fill_int2c2e(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
+        ctypes.byref(int3c2e_envs), ctypes.c_int(max_shm_size),
         ctypes.c_int(nbatches_shl_pair),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
@@ -458,6 +457,7 @@ class SRInt3c2eOpt:
         self.rcut = None
         self._int3c2e_envs = None
         self.bvkcell = None
+        self.bvk_auxcell = None
         self.bvkmesh_Ls = None
 
     def build(self, verbose=None):
@@ -479,6 +479,7 @@ class SRInt3c2eOpt:
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             bvk_auxcell._bas[:,PTR_BAS_COORD] = bvk_auxcell._atm[bvk_auxcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
+        self.bvk_auxcell = bvk_auxcell
 
         self.rcut = rcut = estimate_rcut(pcell, auxcell, self.omega).max()
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=rcut))
@@ -900,8 +901,9 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
                 img_idx = offsets = bas_ij = pair_mapping = c_pair_idx = cp.zeros(0, dtype=np.int32)
                 return img_idx, offsets, bas_ij, pair_mapping, c_pair_idx
 
-            counts_sorting = (-ovlp_img_counts[bas_ij]).argsort()
-            bas_ij = bas_ij[counts_sorting]
+            #counts_sorting = (-ovlp_img_counts[bas_ij]).argsort()
+            #bas_ij = bas_ij[counts_sorting]
+            #counts_sorting = None
             ovlp_img_counts = ovlp_img_counts[bas_ij]
             img_offsets = cp.empty(ovlp_npairs+1, dtype=np.uint32)
             img_offsets[0] = 0
@@ -923,7 +925,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             log.debug1('pairs=%d tot_imgs=%d. lattice-sum: largest=%d, medium=%d',
                        ovlp_npairs, tot_imgs, ovlp_img_counts[0],
                        ovlp_img_counts[ovlp_npairs//2])
-            ovlp_img_counts = counts_sorting = None
+            ovlp_img_counts = None
 
             # bas_ij stores the non-negligible primitive-pair indices.
             # p2c_mapping converts the bas_ij to contracted GTO-pair indices.
@@ -986,7 +988,6 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
 
         ls = np.arange(8)
         nfcart = (ls + 1) * (ls + 2) // 2
-        kern = libpbc.PBCsr_int3c2e_latsum23
 
         if cutoff is None:
             cutoff = self.estimate_cutoff_with_penalty()
@@ -994,9 +995,36 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             img_idx_cache = self.make_img_idx_cache(cutoff)
         log_cutoff = math.log(cutoff)
 
+        # int3c2e_scheme
+        li = np.arange(LMAX+1)[:,None]
+        lj = np.arange(LMAX+1)
+        lk = np.arange(L_AUX_MAX+1)[:,None,None]
+        order = li + lj + lk
+        nroots = (order//2 + 1) * 2
+        g_size = (li+1)*(lj+1)*(lk+1)
+        unit = g_size*3 + nroots*2 + 7
+        nsp_max = SHM_SIZE // (unit*8)
+        nsp_max = _nearest_power2(nsp_max)
+        nfi = (li + 1) * (li + 2) // 2
+        nfj = (lj + 1) * (lj + 2) // 2
+        nfk = (lk + 1) * (lk + 2) // 2
+        gout_size = nfi * nfj * nfk
+        gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
+        # Round up to the next 2^n
+        gout_stride = _nearest_power2(gout_stride, return_leq=False)
+        nsp_per_block = THREADS // gout_stride
+        nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+        gout_stride = THREADS // nsp_per_block
+
+        exps, coef = extract_pgto_params(bvkcell, 'diffuse')
+        aux_exps, aux_coef = extract_pgto_params(self.bvk_auxcell, 'diffuse')
+        diffuse_exps = cp.asarray(np.append(exps, aux_exps), dtype=np.float32)
+        diffuse_coefs = cp.asarray(np.append(coef, aux_coef), dtype=np.float32)
+
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
 
+        kern = libpbc.PBCsr_int3c2e_latsum23
         int3c2e_envs = self.int3c2e_envs
 
         def evaluate_j3c(li, lj, k):
@@ -1021,13 +1049,13 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
 
             shls_slice = ish0, ish1, jsh0, jsh1, ksh0, ksh1
             lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
-            scheme = int3c2e_scheme(li, lj, lk)
+            scheme = (nsp_per_block[lk,li,lj], gout_stride[lk,li,lj])
             log.debug2(f'prim_pairs={n_prim_pairs} int3c2e_scheme for %s: %s', lll, scheme)
             err = kern(
                 ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                (ctypes.c_int*3)(*scheme),
+                (ctypes.c_int*2)(*scheme),
                 (ctypes.c_int*6)(*shls_slice),
                 ctypes.c_int(nbas_aux),
                 ctypes.c_int(n_prim_pairs),
@@ -1036,6 +1064,8 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
                 ctypes.cast(pair_mapping.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff),
                 _atm_cpu.ctypes, ctypes.c_int(bvkcell.natm),
                 _bas_cpu.ctypes, ctypes.c_int(bvkcell.nbas), _env_cpu.ctypes)
@@ -1097,7 +1127,7 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
 
     # Align nksh*gout_stride to warp size
     if gout_stride < 32:
-        nksh_per_block = 32 // gout_stride
+        nksh_per_block = min(32 // gout_stride, nksp_max)
         nsp_per_block = min(THREADS // 32, nksp_max // nksh_per_block)
     else:
         nksh_per_block = THREADS // gout_stride

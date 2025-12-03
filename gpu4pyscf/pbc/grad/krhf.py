@@ -82,10 +82,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 
         dm_dmH = dm0 + dm0.transpose(0,2,1).conj()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        aoslices = cell.aoslice_by_atom()
-        for ia in range(natm):
-            p0, p1 = aoslices[ia, 2:]
-            dh1e[ia] -= cp.einsum('kxij,kji->x', dh1e_kin[:,:,p0:p1,:], dm_dmH[:,:,p0:p1]).real
+        dh1e -= _contract_h1e_dm(cell, dh1e_kin, dm_dmH)
     else:
         hcore_deriv = mf_grad.hcore_generator(cell, kpts)
         dh1e = cp.empty([natm, 3])
@@ -220,6 +217,19 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         hcore[:,:,:,p0:p1] -= h1[:,:,p0:p1].transpose(0,1,3,2).conj()
         return hcore
     return hcore_deriv
+
+def _contract_h1e_dm(cell, h1e, dm):
+    assert h1e.ndim == dm.ndim + 1
+    de = cp.empty((cell.natm, 3))
+    aoslices = cell.aoslice_by_atom()
+    for i, (p0, p1) in enumerate(aoslices[:,2:]):
+        if dm.ndim == 2: # RHF
+            de[i] = cp.einsum('xij,ji->x', h1e[:,p0:p1], dm[:,p0:p1]).real
+        elif dm.ndim == 3: # KRHF or UHF
+            de[i] = cp.einsum('kxij,kji->x', h1e[:,:,p0:p1], dm[:,:,p0:p1]).real
+        else: # dm.ndim == 4 KUHF
+            de[i] = cp.einsum('skxij,skji->x', h1e[:,:,:,p0:p1], dm[:,:,p0:p1]).real
+    return de
 
 class GradientsBase(molgrad.GradientsBase):
     '''

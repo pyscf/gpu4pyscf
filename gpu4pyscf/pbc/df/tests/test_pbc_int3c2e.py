@@ -224,5 +224,3 @@ C    D
 
     dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
-
-test_int3c2e_gamma_point()

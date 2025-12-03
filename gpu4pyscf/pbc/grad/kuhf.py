@@ -68,10 +68,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
         dm_dmH = dm0_sf + dm0_sf.transpose(0,2,1).conj()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        aoslices = cell.aoslice_by_atom()
-        for ia in range(natm):
-            p0, p1 = aoslices[ia, 2:]
-            dh1e[ia] -= cp.einsum('kxij,kji->x', dh1e_kin[:,:,p0:p1,:], dm_dmH[:,:,p0:p1]).real
+        dh1e -= krhf_grad._contract_h1e_dm(cell, dh1e_kin, dm_dmH)
     else:
         hcore_deriv = mf_grad.hcore_generator(cell, kpts)
         dh1e = cp.empty([natm, 3])

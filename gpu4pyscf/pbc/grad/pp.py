@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import numpy
+import cupy as cp
 from gpu4pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl, _contract_ppnl_nuc_grad
@@ -34,6 +35,7 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     else:
         kpts_lst = numpy.reshape(kpts, (-1,3))
 
+    dm = cp.asnumpy(dm)
     fakecell, hl_blocks = fake_cell_vnl(cell)
     intors = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
     ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)

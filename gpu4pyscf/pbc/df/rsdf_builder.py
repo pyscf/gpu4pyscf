@@ -1385,6 +1385,7 @@ def _kpts_to_kmesh(cell, auxcell, omega, kpts):
 
 def _precontract_j2c_aux_coeff(auxcell, aux_coeff, kpts, omega, with_long_range,
                                linear_dep_threshold, kmesh=None):
+    # FIXME: cd_j2c keys conj(k) is too misleading. return cd_j2c dict with keys for <|k>!
     if kmesh is None:
         j2c = _get_2c2e(auxcell, kpts, omega, with_long_range, kmesh)
     else:

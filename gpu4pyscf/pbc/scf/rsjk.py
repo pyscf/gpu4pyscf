@@ -870,6 +870,7 @@ class PBCJKMatrixOpt:
 
         if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            from gpu4pyscf.pbc.grad.krhf import _contract_vhf_dm
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             dm0 = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
@@ -896,10 +897,7 @@ class PBCJKMatrixOpt:
                 k_dm *= k_factor * wcoulG_for_k / nkpts
 
             aoslices = cell.aoslice_by_atom()
-            ejk_G0 = cp.zeros_like(ejk)
-            for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                ejk_G0[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
-                ejk_G0[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
+            ejk_G0 = _contract_vhf_dm(cell, s1, j_dm-k_dm)
             ejk += ejk_G0 / nkpts
 
             int1e_opt_v2 = int1e._Int1eOptV2(cell)
