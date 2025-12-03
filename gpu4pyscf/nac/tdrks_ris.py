@@ -31,7 +31,7 @@ from pyscf import __config__
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac import tdrks as tdrks_nac
 from pyscf.data.nist import HARTREE2EV
-from gpu4pyscf.tdscf.ris import get_auxmol
+from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
 
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -455,15 +455,15 @@ class NAC(tdrks_nac.NAC):
     approximation for both Coulomb and Exchange integrals.
 
     Attributes:
-        ris_zvector_solver: Solves the Z-vector equation (Lagrangian multipliers) 
-        specific to the RIS approximation.
+        ris_zvector_solver: Enables approximate solution for the Z-vector
+            equation (Lagrangian multipliers) using the RIS approximate integrals.
 
-    Notes:
-        The TDDFT or TDA is computed ** using the RIS approximation **.
-        The Z-vector solver implementation here has two versions:
-        1. Standard Z-vector solver: Solves the Z-vector equation using the standard method.
-        2. RIS approximation Z-vector solver: Solves the Z-vector equation using the RIS approximation, 
-            when ris_zvector_solver is True.
+            Although the integrals in TDDFT or TDA linear response are evaluated
+            using the RIS approximation, the ground-state orbital response from
+            the Z-vector equation requires the exact integrals used in the
+            ground-state SCF procedure. Solving Z-vector equation dominates the
+            cost of NAC computation. This step can be accelerated by Using RIS
+            approximate integrals, enabled by the ris_zvector_solver parameter.
 
     References:
         For the detailed derivation of the RIS gradient and Z-vector equation, 
@@ -514,10 +514,7 @@ class NAC(tdrks_nac.NAC):
                 raise ValueError(f"Excited state exceeds the number of states {nstates}.")
             elif I == 0:
                 logger.info(self, f"NACV between ground and excited state {J}.")
-                if self.base.xy[1] is not None:
-                    xy_I = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[1][J-1]*np.sqrt(0.5))
-                else:
-                    xy_I = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[0][J-1]*0.0)
+                xy_I = rescale_spin_free_amplitudes(self.base.xy, J-1)
                 E_I = self.base.energies[J-1]/HARTREE2EV
                 E_I = float(E_I)
                 self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
@@ -525,16 +522,10 @@ class NAC(tdrks_nac.NAC):
                 self._finalize()
             else:
                 logger.info(self, f"NACV between excited state {I} and {J}.")
-                if self.base.xy[1] is not None:
-                    xy_I = (self.base.xy[0][I-1]*np.sqrt(0.5), self.base.xy[1][I-1]*np.sqrt(0.5))
-                else:
-                    xy_I = (self.base.xy[0][I-1]*np.sqrt(0.5), self.base.xy[0][I-1]*0.0)
+                xy_I = rescale_spin_free_amplitudes(self.base.xy, I-1)
                 E_I = self.base.energies[I-1]/HARTREE2EV
                 E_I = float(E_I)
-                if self.base.xy[1] is not None:
-                    xy_J = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[1][J-1]*np.sqrt(0.5))
-                else:
-                    xy_J = (self.base.xy[0][J-1]*np.sqrt(0.5), self.base.xy[0][J-1]*0.0)
+                xy_J = rescale_spin_free_amplitudes(self.base.xy, J-1)
                 E_J = self.base.energies[J-1]/HARTREE2EV
                 E_J = float(E_J)
                 self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
