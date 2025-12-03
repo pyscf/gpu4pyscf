@@ -106,7 +106,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     }
 
     double gout[GOUT_WIDTH];
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     if (gout_id == 0) {
