@@ -84,3 +84,11 @@ print(np.linalg.norm(g.de - g_ris.de))
 """
 0.007065933384199997
 """
+
+"""
+Using the ris-approximated Z-vector solver rather than the standard Z-vector solver.
+"""
+g_ris = td_ris.nuc_grad_method()
+g_ris.ris_zvector_solver = True # Use ris-approximated Z-vector solver
+g_ris.state=1
+g_ris.kernel()

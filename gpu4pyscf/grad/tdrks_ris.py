@@ -28,6 +28,51 @@ from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
 from gpu4pyscf.tdscf.ris import get_auxmol
+from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
+
+
+def gen_response_ris(mf, mf_J, mf_K, mo_coeff=None, mo_occ=None,
+                      singlet=None, hermi=0):
+    '''Generate a function to compute the product of RHF response function and
+    RHF density matrices.
+
+    Kwargs:
+        singlet (None or boolean) : If singlet is None, response function for
+            orbital hessian or CPHF will be generated. If singlet is boolean,
+            it is used in TDDFT response kernel.
+    '''
+    if mo_coeff is None: mo_coeff = mf.mo_coeff
+    if mo_occ is None: mo_occ = mf.mo_occ
+    mol = mf.mol
+    ni = mf._numint
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+
+    if singlet is not None:
+        raise ValueError('TDDFT ris solver only supports singlet state')
+
+    if singlet is None:
+        # Without specify singlet, used in ground state orbital hessian
+        def vind(dm1):
+            # The singlet hessian
+            v1 = cp.zeros_like(dm1)
+            if hybrid:
+                if hermi != 2:
+                    vj = mf_J.get_j(mol, dm1, hermi=hermi)
+                    vk = mf_K.get_k(mol, dm1, hermi=hermi)
+                    vk *= hyb
+                    if omega > 1e-10:  # For range separated Coulomb
+                        vk += mf_K.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                    v1 += vj - .5 * vk
+                else:
+                    vk = mf_K.get_k(mol, dm1, hermi=hermi)
+                    v1 -= .5 * hyb * vk
+            elif hermi != 2:
+                vj = mf_J.get_j(mol, dm1, hermi=hermi)
+                v1 += vj
+            return v1
+
+    return vind
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     """
@@ -161,7 +206,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     # set singlet=None, generate function for CPHF type response kernel
     # TODO: LR-PCM TDDFT
-    vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
+    if td_grad.ris_zvector_solver:
+        log.note('Use ris-approximated Z-vector solver')
+        vresp = gen_response_ris(mf, mf_J, mf_K, singlet=None, hermi=1)
+    else:
+        log.note('Use standard Z-vector solver')
+        vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
@@ -317,6 +367,40 @@ def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omeg
 
 
 class Gradients(tdrhf.Gradients):
+    """
+    Analytical gradients for TDRKS using the RIS approximation.
+
+    This class implements the analytical gradient calculation between TDRKS excited states
+    (or between excited state and ground state) utilizing the Resolution of Identity (RI)
+    approximation for both Coulomb and Exchange integrals.
+
+    Attributes:
+        ris_zvector_solver: Solves the Z-vector equation (Lagrangian multipliers) 
+        specific to the RIS approximation.
+
+    Notes:
+        The TDDFT or TDA is computed ** using the RIS approximation **.
+        The Z-vector solver implementation here has two versions:
+        1. Standard Z-vector solver: Solves the Z-vector equation using the standard method.
+        2. RIS approximation Z-vector solver: Solves the Z-vector equation using the RIS approximation, 
+            when ris_zvector_solver is True.
+
+    References:
+        For the detailed derivation of the RIS gradient and Z-vector equation, 
+        please refer to the following paper:
+        
+        [1] "Analytical Excited-State Gradients and Derivative
+            Couplings in TDDFT with Minimal Auxiliary Basis Set
+            Approximation and GPU Acceleration", 
+            ArXiv:2511.18233
+    """
+
+    _keys = {'ris_zvector_solver'}
+
+    def __init__(self, td):
+        super().__init__(td)
+        self.ris_zvector_solver = False
+
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
         Args:
@@ -356,12 +440,16 @@ class Gradients(tdrhf.Gradients):
             self.check_sanity()
         if self.verbose >= logger.INFO:
             self.dump_flags()
+        if self.verbose >= logger.DEBUG and self.ris_zvector_solver:
+            log.debug('Using ris-approximated zvector solver')
+        
         de = self.grad_elec(xy, singlet, atmlst, verbose=self.verbose)
         self.de = de = de + self.grad_nuc(atmlst=atmlst)
         if self.mol.symmetry:
             self.de = self.symmetrize(self.de, atmlst)
         self._finalize()
         return self.de
+
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.info):
         return grad_elec(self, xy, singlet=singlet, atmlst=atmlst, verbose=self.verbose)

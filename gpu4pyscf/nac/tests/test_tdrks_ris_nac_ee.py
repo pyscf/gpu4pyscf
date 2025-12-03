@@ -63,8 +63,6 @@ class KnownValues(unittest.TestCase):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
-        td = mf.TDA().set(nstates=5)
-        td.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
         td_ris.conv_tol = 1.0E-4
@@ -197,6 +195,87 @@ class KnownValues(unittest.TestCase):
             [[ 5.48922915e-16, -9.00876449e-02, -2.47854031e-09],
              [-1.15755555e-15,  4.50438148e-02, -3.53895964e-02],
              [ 4.84556048e-16,  4.50438185e-02,  3.53895989e-02],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_pbe_tda_singlet_vs_ref_ris_zvector_solver(self):
+        mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris.conv_tol = 1.0E-4
+        td_ris.Ktrunc = 0.0
+        td_ris.kernel()
+        nac_ris = td_ris.nac_method()
+        nac_ris.states=(1,2)
+        nac_ris.ris_zvector_solver = True
+        nac_ris.kernel()
+
+        ref_de = np.array(
+            [[ 0.0000000000, -0.0941080765, -0.0000000000],
+             [-0.0000000000,  0.0540026157, -0.0355220643],
+             [ 0.0000000000,  0.0540026157,  0.0355220643],])
+        ref_de_etf = np.array(
+            [[ 0.0000000000, -0.0931219594, -0.0000000000],
+             [-0.0000000000,  0.0465609593, -0.0370296058],
+             [ 0.0000000000,  0.0465609593,  0.0370296058],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_pbe0_tda_singlet_vs_ref_ris_zvector_solver(self):
+        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris.conv_tol = 1.0E-4
+        td_ris.Ktrunc = 0.0
+        td_ris.kernel()
+        nac_ris = td_ris.nac_method()
+        nac_ris.states=(1,2)
+        nac_ris.ris_zvector_solver = True
+        nac_ris.kernel()
+
+        ref_de = np.array(
+            [[-0.0000000000, -0.1017318256, -0.0000000014],
+             [ 0.0000000000,  0.0579454885, -0.0387517422],
+             [ 0.0000000000,  0.0579454908,  0.0387517436],])
+        ref_de_etf = np.array(
+            [[-0.0000000000, -0.1013903631, -0.0000000015],
+             [ 0.0000000000,  0.0506951632, -0.0401688078],
+             [-0.0000000000,  0.0506951657,  0.0401688093],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
+    def test_nac_camb3lyp_tda_singlet_vs_ref_ris_zvector_solver(self):
+        mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris.conv_tol = 1.0E-4
+        td_ris.Ktrunc = 0.0
+        td_ris.kernel()
+        nac_ris = td_ris.nac_method()
+        nac_ris.states=(1,2)
+        nac_ris.ris_zvector_solver = True
+        nac_ris.kernel()
+
+        ref_de = np.array(
+            [[ 0.0000000000, -0.0909942185, -0.0000000010],
+             [-0.0000000000,  0.0528867701, -0.0344111229],
+             [ 0.0000000000,  0.0528867724,  0.0344111239],])
+        ref_de_etf = np.array(
+            [[ 0.0000000000, -0.0906362599, -0.0000000011],
+             [-0.0000000000,  0.0453181227, -0.0359291095],
+             [ 0.0000000000,  0.0453181251,  0.0359291106],])
 
         # compare with previous calculation resusts
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
