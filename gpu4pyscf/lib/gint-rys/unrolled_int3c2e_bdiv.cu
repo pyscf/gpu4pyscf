@@ -46,7 +46,7 @@ void int3c2e_bdiv_000(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -175,7 +175,7 @@ void int3c2e_bdiv_100(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -319,7 +319,7 @@ void int3c2e_bdiv_110(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -491,7 +491,7 @@ void int3c2e_bdiv_200(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -648,7 +648,7 @@ void int3c2e_bdiv_210(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -853,7 +853,7 @@ void int3c2e_bdiv_220(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -1127,7 +1127,7 @@ void int3c2e_bdiv_001(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -1271,7 +1271,7 @@ void int3c2e_bdiv_101(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -1444,7 +1444,7 @@ void int3c2e_bdiv_111(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -1690,7 +1690,7 @@ void int3c2e_bdiv_201(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -1897,7 +1897,7 @@ void int3c2e_bdiv_211(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -2240,7 +2240,7 @@ void int3c2e_bdiv_221(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     double *gz = gy + 1152;
     double *Rpq = gz + 1152;
     double *rjri = Rpq + 192;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     if (gout_id == 0) {
@@ -2742,7 +2742,7 @@ void int3c2e_bdiv_002(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -2899,7 +2899,7 @@ void int3c2e_bdiv_102(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -3106,7 +3106,7 @@ void int3c2e_bdiv_112(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -3449,7 +3449,7 @@ void int3c2e_bdiv_202(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     extern __shared__ double rw_buffer[];
     double *rw = rw_buffer + st_id;
     double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     int nst = nshl_pair * nksh;
@@ -3724,7 +3724,7 @@ void int3c2e_bdiv_212(double *out, Int3c2eEnvVars& envs, BDiv3c2eBounds& bounds)
     double *gz = gy + 1152;
     double *Rpq = gz + 1152;
     double *rjri = Rpq + 192;
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     if (gout_id == 0) {
