@@ -475,8 +475,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         t0 = log.init_timer()
         # sub_A_holder = math_helper.gen_VW(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetry=True)
         math_helper.gen_VW(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetry=True)
-        log.info(gpu_mem_info(f'                      sub_A_holder updated'))
-        log.info(cpu_mem_info('     '))
+        # log.info(gpu_mem_info(f'                      sub_A_holder updated'))
+        # log.info(cpu_mem_info('     '))
         
         sub_A = sub_A_holder[:size_new, :size_new]
         if problem_type in ['linear','shifted_linear']:
@@ -553,7 +553,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(cpu_mem_info('     before AX = math_helper.dot_product_xchunk_V'))
 
         xT = x.T
-        print('xT.dtype', xT.dtype)
+
         AX = math_helper.dot_product_xchunk_V(xT, W_holder, size_bound=size_new, factor=0.4)
         log.info(cpu_mem_info('     after AX = math_helper.dot_product_xchunk_V'))
 

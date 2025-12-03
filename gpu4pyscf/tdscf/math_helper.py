@@ -423,7 +423,7 @@ def dot_product_xchunk_V(A, B, size_bound, factor=0.8):
         del AB_chunk
         release_memory()
         gc.collect()
-        print(cpu_mem_info(f'   xchunk_V iter end'))
+        # print(cpu_mem_info(f'   xchunk_V iter end'))
 
     m1 = get_avail_cpumem()
     m_diff = m1 - m0
