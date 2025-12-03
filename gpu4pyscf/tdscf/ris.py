@@ -114,7 +114,7 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=Fals
                 aux_basis[atom_index].append([1, [exp_alpha, 1.0]])
             if 'd' in fitting_basis:
                 aux_basis[atom_index].append([2, [exp_alpha, 1.0]])
-    # print(aux_basis)
+
     return aux_basis
 
 def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
@@ -198,9 +198,9 @@ def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_pT: cp.ndarray, C_q: cp.ndarray, i
     size_p,nao = C_pT.shape
     nao, size_q = C_q.shape
 
-    eri3c = eri3c.reshape(nao,  nao * nauxao)  # (u, vP)
+    # eri3c = eri3c.reshape(nao,  nao * nauxao)  # (u, vP)
     tmp = C_pT.dot(eri3c)  #(p,u) (u, vP) -> p,vP
-    tmp = tmp.reshape(size_p, nao, nauxao)
+    # tmp = tmp.reshape(size_p, nao, nauxao)
     # tmp = contract('uvP,up->Ppv', eri3c, C_p)
     Ppq_gpu = contract('pvP,vq->Ppq', tmp, C_q)
 
@@ -214,6 +214,33 @@ def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_pT: cp.ndarray, C_q: cp.ndarray, i
     else:
         return Ppq_gpu
     
+
+   
+def get_uvCupCvq_to_Ppq(eri3c: cp.ndarray, C_pT: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
+    '''    
+    eri3c : (uv|1) , 
+    C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
+
+    Ppq = einsum("uvP,up,vq->Ppq", eri3c, Cp, C_q)
+    '''
+    nao, nao = eri3c.shape
+    size_p,nao = C_pT.shape
+    nao, size_q = C_q.shape
+
+
+    tmp = C_pT.dot(eri3c)  #(p,u) (u, v) -> p,v
+
+    Ppq_gpu = tmp.dot(C_q)
+
+    del tmp
+
+    if in_ram:
+        Ppq_cpu = Ppq_gpu.get()
+        del Ppq_gpu
+        return Ppq_cpu
+        
+    else:
+        return Ppq_gpu
 
 
 
@@ -348,7 +375,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
 
     bytes_per_aux = ( n_eri3c_per_aux + n_eri3c_unzip_per_aux + n_Ppq_per_aux) * cp_int3c_dtype.itemsize  
-    batch_size = min(naux, max(1, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
+    batch_size = min(naux, max(16, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
     log.info(f'batch_size for int3c2e_bdiv_generator (in aux dimension): {batch_size}')
 
     log.info(f'eri3c per aux dimension will take {byte_eri3c / (1024 ** 2):.0f} MB memory')
@@ -382,31 +409,54 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             p0, p1 = p1, p1 + eri3c_batch.shape[1]
             release_memory()
 
-            eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, aux_batch_size), dtype=cp_int3c_dtype, order='F')
-            eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
-            eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
-            
-            eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, aux_batch_size)
 
-            DEBUG = False 
-            if DEBUG:
-                from pyscf.df import incore
-                ref = incore.aux_e2(mol, auxmol)
-
-                aux_coeff = cuasarray(int3c2e_opt.aux_coeff)
-                out = contract('uvP,PQ->uvQ', eri3c_unzip_batch, aux_coeff)
-                out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
-                log.warn(f'-------------eri3c DEBUG: out vs .incore.aux_e2(mol, auxmol) {abs(out.get()-ref).max()}')
-                assert abs(out.get()-ref).max() < 1e-10
+            if aux_batch_size > 16:
+                eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, aux_batch_size), dtype=cp_int3c_dtype, order='F')
+                eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
+                eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
                 
+                eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, aux_batch_size)
 
-            '''Puv -> Ppq, AO->MO transform '''
-            if 'J' in calc:
-                Pia[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_q, in_ram=in_ram)
+                DEBUG = False 
+                if DEBUG:
+                    from pyscf.df import incore
+                    ref = incore.aux_e2(mol, auxmol)
 
-            if 'K' in calc:
-                Pij[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_p, in_ram=in_ram)
-                Pab[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_qT,C_q, in_ram=in_ram)
+                    aux_coeff = cuasarray(int3c2e_opt.aux_coeff)
+                    out = contract('uvP,PQ->uvQ', eri3c_unzip_batch, aux_coeff)
+                    out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
+                    log.warn(f'-------------eri3c DEBUG: out vs .incore.aux_e2(mol, auxmol) {abs(out.get()-ref).max()}')
+                    assert abs(out.get()-ref).max() < 1e-10
+                    
+
+                '''Puv -> Ppq, AO->MO transform '''
+                if 'J' in calc:
+                    Pia[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_q, in_ram=in_ram)
+
+                if 'K' in calc:
+                    Pij[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_p, in_ram=in_ram)
+                    Pab[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_qT,C_q, in_ram=in_ram)
+
+            else:
+                ''' iterate over each aux function in the batch to save memory '''
+                for aux_idx in range(aux_batch_size):
+                    eri3c_aux_idx = eri3c_batch[:, aux_idx]  # (naopair, )
+                    eri3c_unzip_idx = cp.zeros((nao_orig*nao_orig,), dtype=cp_int3c_dtype, order='F')
+                    eri3c_unzip_idx[ao_pair_mapping] = eri3c_aux_idx
+                    eri3c_unzip_idx[cols*nao_orig+rows] = eri3c_aux_idx
+                
+                    eri3c_unzip_idx = eri3c_unzip_idx.reshape(nao_orig, nao_orig)
+
+
+                    '''Puv -> Ppq, AO->MO transform '''
+                    if 'J' in calc:
+                        Pia[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_q, in_ram=in_ram)
+
+                    if 'K' in calc:
+                        Pij[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_p, in_ram=in_ram)
+                        Pab[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_qT,C_q, in_ram=in_ram)
+
+
 
             last_reported = 0
             progress = int(100.0 * p1 / naux)
@@ -813,11 +863,11 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         T_right = cp.empty((n_state, nauxao),dtype=cp_int3c_dtype)
         # cpu0 = log.init_timer()
 
-        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=96):
+        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=48):
             # cpu1 = log.init_timer()
-            eri3c_batch_ = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
-            eri3c_batch = cuasarray(eri3c_batch_, dtype=cp_int3c_dtype, order='F')
-            del eri3c_batch_
+            eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+            eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
+            # del eri3c_batch_
             release_memory()
 
             aopair, aux_batch_size = eri3c_batch.shape
@@ -839,10 +889,10 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         T_left = cp.zeros((len(ao_pair_mapping), n_state),dtype=cp_int3c_dtype, order='F')
         p1 = 0
         # (z|P)mP -> zm
-        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=96):
-            eri3c_batch_ = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
-            eri3c_batch = cuasarray(eri3c_batch_, dtype=cp_int3c_dtype, order='F')
-            del eri3c_batch_
+        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=48):
+            eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+            eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
+            # del eri3c_batch_
             release_memory()
 
             p0, p1 = p1, p1 + eri3c_batch.shape[1]
@@ -861,7 +911,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
 
         for i in range(n_state):
             #(uv|m)
-            J_buffer.fill(0)                                      # 快速清零
+            J_buffer.fill(0)                                    
             J_buffer[rows, cols] = T_left[:, i]
             J_buffer[cols, rows] = T_left[:, i]
             cp.dot(C_pT, J_buffer, out=temp_buffer)
@@ -1894,7 +1944,6 @@ class RisBase(lib.StreamObject):
             if self.single:
                 delta_hdiag = cuasarray(delta_hdiag, dtype=cp.float32)
 
-            # print(delta_hdiag)
             self.delta_hdiag = delta_hdiag
             self.hdiag = cuasarray(delta_hdiag.reshape(-1))
 
@@ -2061,7 +2110,7 @@ class RisBase(lib.StreamObject):
             rest_occ, rest_vir = true_K_diag.shape
             log.info(f'rest_occ, rest_vir = {rest_occ, rest_vir}')
             diff = true_K_diag - K_diag[self.n_occ - self.rest_occ:, :self.rest_vir]
-            print(f'true_K_diag - K_diag norm {cp.linalg.norm(diff)}')
+            log.info(f'true_K_diag - K_diag norm {cp.linalg.norm(diff)}')
             assert cp.linalg.norm(diff) < 1e-3
 
         K_diag[self.n_occ - self.rest_occ:, :self.rest_vir] = 0
