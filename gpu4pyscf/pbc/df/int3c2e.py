@@ -169,7 +169,6 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
     sorted_cell.omega = omega
     uniq_l = uniq_l_ctr[:,0]
-    lmax = uniq_l.max()
 
     if bvk_kmesh is None:
         if kpts is None:
@@ -306,122 +305,20 @@ def fill_triu_bvk_conj(a, nao, bvk_kmesh):
 
 def to_primitive_bas(cell):
     '''Decontract the cell basis sets into primitive bases'''
-    bas_templates = {}
-    prim_bas = []
-    prim_env = cell._env.copy()
-    shell_offset = 0
-    # Mapping from the primitive shell to the shell in the original cell.
-    prim_to_ctr_mapping = []
-    aoslices = cell.aoslice_by_atom()
-    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
-        ptr_coord = cell._atm[ia,PTR_COORD]
-        key = tuple(cell._bas[ib0:ib1,PTR_COEFF])
-        if key in bas_templates:
-            bas_of_ia, local_shell_mapping = bas_templates[key]
-            bas_of_ia = bas_of_ia.copy()
-            bas_of_ia[:,ATOM_OF] = ia
-            bas_of_ia[:,PTR_BAS_COORD] = ptr_coord
-        else:
-            # Generate the template for decontracted basis
-            local_shell_mapping = []
-            off = 0
-            bas_of_ia = []
-            for shell in cell._bas[ib0:ib1]:
-                l = shell[ANG_OF]
-                nctr = shell[NCTR_OF]
-                nprim = shell[NPRIM_OF]
-                pexp = shell[PTR_EXP]
-                pcoeff = shell[PTR_COEFF]
-                bs = np.empty((nprim*nctr, BAS_SLOTS), dtype=np.int32)
-                bs[:,ATOM_OF] = ia
-                bs[:,ANG_OF] = l
-                bs[:,NPRIM_OF] = 1
-                bs[:,NCTR_OF] = 1
-                bs[:,PTR_EXP] = np.hstack([np.arange(pexp, pexp+nprim)] * nctr)
-                bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr)
-                bs[:,PTR_BAS_COORD] = ptr_coord
-                bas_of_ia.append(bs)
-                idx = np.repeat(np.arange(off, off+nctr), nprim)
-                local_shell_mapping.append(idx)
-                off += nctr
-
-            '''TODO
-            # partition the contracted GTO into a compact subset and
-            # multiple primitive shells
-            for shell in cell._bas[ib0:ib1]:
-                l = shell[ANG_OF]
-                nprim = shell[NPRIM_OF]
-                nctr = shell[NCTR_OF]
-                pexp = shell[PTR_EXP]
-                es = prim_env[pexp:pexp+nprim]
-                diffuse_idx = np.where(es < 2.)[0]
-                n_diffuse = len(diffuse_idx)
-                for ic in range(nctr):
-                    pcoeff = shell[PTR_COEFF] + ic * nprim
-                    bs = shell.copy()
-                    bs[NCTR_OF] = 1
-                    bs[PTR_COEFF] = pcoeff
-                    bs[PTR_BAS_COORD] = ptr_coord
-                    if nprim == 1 or n_diffuse == 0:
-                        bas_of_ia.append(bs)
-                        local_shell_mapping.append(off+ic)
-                        continue
-
-                    cs = prim_env[pcoeff:pcoeff+nprim]
-                    compact_idx = np.where(es >= 2)[0]
-                    n_compact = len(compact_idx)
-                    idx = np.hstack(compact_idx, diffuse_idx)
-                    prim_env[pexp:pexp+nprim] = es[idx]
-                    prim_env[pcoeff:pcoeff+n_compact] = cs[compact_idx]
-                    prim_env[pcoeff+n_compact:pcoeff+nprim] = cs[diffuse_idx]
-                    if n_compact > 0:
-                        # put compact pGTOs in one shell
-                        bs[NPRIM_OF] = n_compact
-                        bas_of_ia.append(bs.copy())
-                        local_shell_mapping.append(off+ic)
-                        pexp += n_compact
-                        pcoeff += n_compact
-                    # each diffuse pGTO as one shell
-                    bs[NPRIM_OF] = 1
-                    for m in range(n_diffuse):
-                        bs[PTR_EXP] = pexp + m
-                        bs[PTR_COEFF] = pexp + m
-                        bas_of_ia.append(bs.copy())
-                        local_shell_mapping.append(off+ic)
-                off += nctr
-                '''
-
-            if bas_of_ia:
-                bas_of_ia = np.vstack(bas_of_ia)
-                local_shell_mapping = np.hstack(local_shell_mapping)
-                bas_templates[key] = (bas_of_ia, local_shell_mapping)
-
-        if len(bas_of_ia) > 0:
-            prim_bas.append(bas_of_ia)
-            prim_to_ctr_mapping.append(shell_offset + local_shell_mapping)
-            shells_in_atm = cell._bas[ib0:ib1,NCTR_OF].sum()
-            shell_offset += shells_in_atm
-
-    pcell = cell.copy()
-    pcell._bas = np.asarray(np.vstack(prim_bas), dtype=np.int32)
-    pcell._env = prim_env
-    prim_to_ctr_mapping = np.asarray(np.hstack(prim_to_ctr_mapping), dtype=np.int32)
-
-    sorted_cell, ao_idx, _, _, _, ft_cell_mapping = group_basis(
+    sorted_cell, ao_idx, _, _, _, bas_mapping = group_basis(
         cell, tile=1, return_bas_mapping=True, sparse_coeff=True)
-    # prim_to_ctr_mapping map the primitive shells to the contracted shells of
-    # the original cell.  sorted_cell in ft_ao and other modules are sorted
-    # according to the (l, n-contraction) pattern. Each entry of ft_cell_mapping
-    # maps the shell of the original cell to the shell in sorted_cell.
-    prim_to_ctr_mapping = ft_cell_mapping[prim_to_ctr_mapping]
-
-    # Regroup the pcell shells based on angular momentum
-    p_ls = pcell._bas[:,ANG_OF]
-    lmax = p_ls.max()
-    sorted_idx = np.hstack([np.where(p_ls==l)[0] for l in range(lmax+1)])
-    pcell._bas = pcell._bas[sorted_idx]
-    p2c_mapping = prim_to_ctr_mapping[sorted_idx]
-    return pcell, sorted_cell, p2c_mapping, ao_idx
+    nprim = sorted_cell._bas[:,NPRIM_OF]
+    p_bas = np.repeat(sorted_cell._bas, nprim, axis=0)
+    p_bas[:,NCTR_OF] = 1
+    p_bas[:,NPRIM_OF] = 1
+    nprim_offsets = np.append(0, np.cumsum(nprim[:-1]))
+    relative_idx = np.arange(len(p_bas)) - np.repeat(nprim_offsets, nprim)
+    p_bas[:,PTR_EXP] += relative_idx
+    p_bas[:,PTR_COEFF] += relative_idx
+    pcell = sorted_cell.copy()
+    pcell._bas = p_bas
+    prim_to_ctr_mapping = np.repeat(np.arange(sorted_cell.nbas), nprim)
+    return pcell, sorted_cell, prim_to_ctr_mapping, ao_idx
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
@@ -511,6 +408,11 @@ class SRInt3c2eOpt:
         err = libpbc.PBCsr_int3c2e_latsum23_init(ctypes.c_int(SHM_SIZE))
         if err != 0:
             raise RuntimeError('CUDA kernel initialization')
+
+        exps, coef = extract_pgto_params(bvkcell, 'diffuse')
+        aux_exps, aux_coef = extract_pgto_params(self.bvk_auxcell, 'diffuse')
+        self.diffuse_exps = np.asarray(np.append(exps, aux_exps), dtype=np.float32)
+        self.diffuse_coefs = np.asarray(np.append(coef, aux_coef), dtype=np.float32)
 
         log.debug1('prim_l_counts %s', self.cell0_prim_l_counts)
         log.debug1('ctr_l_counts %s', self.cell0_ctr_l_counts)
@@ -807,10 +709,10 @@ class SRInt3c2eOpt:
             return c_pair_idx, eri3c
         return evaluate_j3c
 
-    def int3c2e_generator(self, verbose=None, img_idx_cache=None):
+    def int3c2e_generator(self, img_idx_cache=None, verbose=None):
         log = logger.new_logger(self.cell, verbose)
         cput0 = log.init_timer()
-        evaluate = self.int3c2e_evaluator(verbose, img_idx_cache)
+        evaluate = self.int3c2e_evaluator(img_idx_cache, verbose)
         t1 = log.timer_debug1('initialize int3c2e_kernel', *cput0)
         timing_collection = {}
         kern_counts = 0
@@ -971,7 +873,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             img_idx_cache[li, lj] = gen_img_idx(li, lj)
         return img_idx_cache
 
-    def int3c2e_evaluator(self, verbose=None, img_idx_cache=None, cutoff=None):
+    def int3c2e_evaluator(self, img_idx_cache=None, cutoff=None, verbose=None):
         log = logger.new_logger(self.cell, verbose)
         if self.bvkmesh_Ls is None:
             self.build(verbose)
@@ -1016,10 +918,8 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
         gout_stride = THREADS // nsp_per_block
 
-        exps, coef = extract_pgto_params(bvkcell, 'diffuse')
-        aux_exps, aux_coef = extract_pgto_params(self.bvk_auxcell, 'diffuse')
-        diffuse_exps = cp.asarray(np.append(exps, aux_exps), dtype=np.float32)
-        diffuse_coefs = cp.asarray(np.append(coef, aux_coef), dtype=np.float32)
+        diffuse_exps = cp.asarray(self.diffuse_exps)
+        diffuse_coefs = cp.asarray(self.diffuse_coefs)
 
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
@@ -1074,7 +974,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             return c_pair_idx, eri3c
         return evaluate_j3c
 
-    def int3c2e_generator(self, verbose=None, img_idx_cache=None):
+    def int3c2e_generator(self, img_idx_cache=None, verbose=None):
         log = logger.new_logger(self.cell, verbose)
         cput0 = log.init_timer()
         evaluate = self.int3c2e_evaluator(verbose, img_idx_cache)
@@ -1103,6 +1003,93 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             log.timer('int3c2e', *cput0)
             for ll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', ll, t)
+
+    def contract_dm(self, dm, img_idx_cache=None, cutoff=None, verbose=None):
+        assert dm.dtype == np.float64
+        assert dm.flags.c_contiguous
+        if self.bvkmesh_Ls is None:
+            self.build(verbose)
+        bvk_ncells = np.prod(self.bvk_kmesh)
+        nbas_aux = self.sorted_auxcell.nbas
+
+        if cutoff is None:
+            cutoff = self.estimate_cutoff_with_penalty()
+        if img_idx_cache is None:
+            img_idx_cache = self.make_img_idx_cache(cutoff)
+        log_cutoff = math.log(cutoff)
+
+        # int3c2e_scheme
+        li = np.arange(LMAX+1)[:,None]
+        lj = np.arange(LMAX+1)
+        lk = np.arange(L_AUX_MAX+1)[:,None,None]
+        order = li + lj + lk
+        nroots = (order//2 + 1) * 2
+        g_size = (li+1)*(lj+1)*(lk+1)
+        unit = g_size*3 + nroots*2 + 7
+        nsp_max = SHM_SIZE // (unit*8)
+        nsp_max = _nearest_power2(nsp_max)
+        nsp_per_block = np.where(nsp_max < 256, nsp_max, 256),
+        gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+        shm_size = nsp_per_block * (unit*8)
+
+        sp_img_idx = []
+        sp_img_offsets = []
+        bas_ij_idx = []
+        offset_cum = 0
+        sp0 = sp1 = 0
+        shl_pair_offsets = []
+        for li, lj in img_idx_cache:
+            img_idx, img_offsets, bas_ij = img_idx_cache[li, lj][:3]
+            sp_img_idx.append(img_idx)
+            sp_img_offsets.append(offset_cum + img_offsets[:-1])
+            offset_cum = img_offsets[-1]
+            bas_ij_idx.append(bas_ij)
+            sp0, sp1 = sp1, sp1 + len(bas_ij)
+            shl_pair_offsets.append(cp.arange(
+                sp0, sp1, nsp_per_block[0,li,lj], dtype=np.int32))
+        sp_img_idx = cp.asarray(cp.hstack(sp_img_idx), dtype=np.int32)
+        sp_img_offsets.append(img_offsets[-1:])
+        sp_img_offsets = cp.asarray(cp.hstack(sp_img_offsets), dtype=np.int32)
+        bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.int32)
+        shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
+
+        diffuse_exps = cp.asarray(self.diffuse_exps)
+        diffuse_coefs = cp.asarray(self.diffuse_coefs)
+
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
+
+        sorted_cell = self.sorted_cell
+        ao_loc = sorted_cell.ao_loc
+        nao = ao_loc[-1]
+        p2c_ao_loc = ao_loc[self.prim_to_ctr_mapping]
+        ao_loc = np.arange(bvk_ncells, dtype=np.int32)[:,None] * nao + p2c_ao_loc
+        aux_loc = self.bvk_auxcell.ao_loc
+        naux = aux_loc[-1]
+        ao_loc = np.append(ao_loc.ravel(), bvk_ncells*nao + aux_loc)
+        ao_loc = cp.asarray(ao_loc, dtype=np.int32)
+        int3c2e_envs = self.int3c2e_envs.copy()
+        int3c2e_envs.ao_loc = ao_loc.data.ptr
+
+        jaux = cp.zeros(naux)
+        err = libpbc.PBCcontract_int3c2e_dm(
+            ctypes.cast(jaux.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs),
+            ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size.max()),
+            ctypes.c_int(nbas_aux),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('contract_int3c2e_dm failed')
+        return jaux
 
 def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)

@@ -1007,7 +1007,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         _img_idx_cache = {k: [cp.asarray(x) for x in v]
                           for k, v in img_idx_cache.items()}
         evaluate = int3c2e_opt.int3c2e_evaluator(
-            verbose=log, img_idx_cache=_img_idx_cache)
+            img_idx_cache=_img_idx_cache, verbose=log)
         buf = empty_mapped(naux*buflen)
         for li, lj in tasks:
             c_pair_idx, j3c_tmp = evaluate(li, lj)
@@ -1139,7 +1139,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         _img_idx_cache = {k: [cp.asarray(x) for x in v]
                           for k, v in img_idx_cache.items()}
         evaluate = int3c2e_opt.int3c2e_evaluator(
-            verbose=log, img_idx_cache=_img_idx_cache)
+            img_idx_cache=_img_idx_cache, verbose=log)
         buf = empty_mapped(naux_cart*buflen)
         for li, lj in tasks:
             c_pair_idx = img_idx_cache[li, lj][4]
@@ -1285,7 +1285,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         _img_idx_cache = {k: [cp.asarray(x) for x in v]
                           for k, v in img_idx_cache.items()}
         evaluate = int3c2e_opt.int3c2e_evaluator(
-            verbose=log, img_idx_cache=_img_idx_cache)
+            img_idx_cache=_img_idx_cache, verbose=log)
 
         expLkz = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
         expLkz = expLkz.view(np.float64).reshape(bvk_ncells,nkpts,2)
