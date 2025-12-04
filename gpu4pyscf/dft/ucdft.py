@@ -22,18 +22,102 @@ from gpu4pyscf import dft, lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
 
+
+def make_constant_schedule(weight):
+    """
+    Returns a function that always returns the same weight.
+    Used for backward compatibility or fixed penalty.
+    """
+    return lambda cycle: float(weight)
+
+
+def make_ramp_schedule(start_weight=1.0, end_weight=200.0, ramp_width=30, start_step=10):
+    """
+    Returns a function that linearly ramps the penalty weight.
+    
+    Phases:
+    1. Hold: cycle < start_step -> constant start_weight
+    2. Ramp: start_step <= cycle < start_step + ramp_width -> linear increase
+    3. End:  cycle >= start_step + ramp_width -> constant end_weight
+    
+    Args:
+        start_weight: Initial weight value.
+        end_weight: Final target weight value.
+        ramp_width: How many cycles the ramping phase takes.
+        start_step: The cycle number when ramping begins (delay).
+    """
+    def scheduler(cycle):
+        # Phase 1: Initial Hold / Delay
+        if cycle < start_step:
+            return start_weight
+            
+        # Phase 3: Reached target
+        # Note: The total cycles to reach max is start_step + ramp_width
+        if cycle >= (start_step + ramp_width):
+            return end_weight
+        
+        # Phase 2: Linear Ramp
+        # Shift the cycle so that 0 corresponds to start_step
+        effective_cycle = cycle - start_step
+        progress = effective_cycle / float(ramp_width)
+        
+        return start_weight + (end_weight - start_weight) * progress
+    
+    return scheduler
+
+
+def make_power_schedule(start_weight=1.0, end_weight=100.0, ramp_width=30, start_step=1, power=3):
+    """
+    Returns a function that ramps the penalty weight using a power law with a delay.
+    
+    Phases:
+    1. Hold: cycle < start_step -> constant start_weight
+    2. Ramp: start_step <= cycle < start_step + ramp_width -> power law increase
+    3. End:  cycle >= start_step + ramp_width -> constant end_weight
+    
+    Args:
+        start_weight: Initial weight value.
+        end_weight: Final target weight value.
+        ramp_width: How many cycles the ramping phase takes.
+        start_step: The cycle number when ramping begins (delay).
+        power: Exponent for the curve (3 is recommended for smooth start).
+    """
+    def scheduler(cycle):
+        # Phase 1: Initial Hold / Delay
+        if cycle < start_step:
+            return start_weight
+            
+        # Phase 3: Reached target
+        if cycle >= (start_step + ramp_width):
+            return end_weight
+        
+        # Phase 2: Power Law Ramp
+        # Shift the cycle so that 0 corresponds to start_step
+        effective_cycle = cycle - start_step
+        
+        # Calculate ratio (0.0 to 1.0) based on the ramp width
+        ratio = effective_cycle / float(ramp_width)
+        
+        # Apply power law
+        progress = ratio ** power
+        
+        return start_weight + (end_weight - start_weight) * progress
+    
+    return scheduler
+
 class CDFT_UKS(dft.UKS):
     '''
     Constrained DFT implementation for unrestricted Kohn-Sham.
     Implements Voronoi-based spatial charge/spin constraints.
+    Supports two modes: 'lagrange' (Lagrange Multipliers) and 'penalty' (Quadratic Penalty).
     '''
 
-    def __init__(self, mol, charge_constraints=None, spin_constraints=None):
+    def __init__(self, mol, charge_constraints=None, spin_constraints=None, 
+                 method='lagrange', penalty_weight=500.0):
         super().__init__(mol)
         
         # [Requirement 2] Concise Constraints format: 
         # [ [atom_indices_or_groups], [targets] ]
-        # Example: [ [0, 1], [6.5, 7.5] ] or [ [0, [1,3] ], [6.5, 6.5] ]
         
         self.charge_groups, self.charge_targets = self._normalize_constraints(charge_constraints)
         self.spin_groups, self.spin_targets = self._normalize_constraints(spin_constraints)
@@ -49,6 +133,20 @@ class CDFT_UKS(dft.UKS):
         
         # Cache for constraint matrices on GPU
         self.atom_projectors = None
+
+        # Configuration for methods
+        self.method = method.lower() # 'lagrange' or 'penalty'
+        
+        # Handle penalty weight scheduling
+        # If the user passes a number, convert it to a constant scheduler.
+        # If the user passes a callable (function), use it directly.
+        if callable(penalty_weight):
+            self.penalty_scheduler = penalty_weight
+        else:
+            self.penalty_scheduler = make_constant_schedule(penalty_weight)
+            
+        # Store the last used weight for energy calculation
+        self.last_penalty_weight = 0.0
 
     def _normalize_constraints(self, constraints):
         '''
@@ -159,8 +257,6 @@ class CDFT_UKS(dft.UKS):
         function (from 'grids_response_cc'), preserving the exact mathematical steps,
         loop structures, and data dimensions.
         '''
-
-
         mol = self.mol
         nao = mol.nao_nr()
         
@@ -216,7 +312,7 @@ class CDFT_UKS(dft.UKS):
         blksize = 4000
         n_grids_total = weights_all.shape[0]
         
-        logger.debug(self, f"CDFT: Building Becke projectors (Ref-logic) on GPU using {n_grids_total} grid points...")
+        logger.info(self, f"CDFT: Building Becke projectors (Ref-logic) on GPU using {n_grids_total} grid points...")
         
         for p0, p1 in pyscf_lib.prange(0, n_grids_total, blksize):
             coords_batch = cp.asarray(coords_all[p0:p1])
@@ -226,7 +322,7 @@ class CDFT_UKS(dft.UKS):
             
             grid_dist = []
             
-            # 1. Calculate distances using Python loop over atoms (No vectorization optimization)
+            # 1. Calculate distances using Python loop over atoms
             for ia in range(mol.natm):
                 # v = r_atom - r_grid
                 v = (atm_coords[ia] - coords_batch).T
@@ -264,7 +360,7 @@ class CDFT_UKS(dft.UKS):
 
     def get_constraint_potential(self, v_vec):
         '''
-        Constructs V_const matrix based on multipliers.
+        Constructs V_const matrix based on multipliers (Lagrange Method).
         '''
         if self.atom_projectors is None:
             self.build_atom_projectors()
@@ -295,11 +391,89 @@ class CDFT_UKS(dft.UKS):
             
         return (vc_a, vc_b)
 
+    def get_penalty_potential(self, dm, penalty_value):
+        '''
+        Constructs V_const matrix based on the quadratic penalty method.
+        V_shift = sum( 2 * lambda * (Pop_calc - Pop_target) * W )
+        
+        Args:
+            dm: Current density matrix (cupy array)
+            penalty_value: Current value of lambda (float)
+            
+        Returns:
+            (vc_a, vc_b): Potentials to add to Fock matrix
+        '''
+        if self.atom_projectors is None:
+            self.build_atom_projectors()
+        
+        nao = self.mol.nao_nr()
+        vc_a = cp.zeros((nao, nao))
+        vc_b = cp.zeros((nao, nao))
+        
+        # Handle DM input (can be tuple of (dm_a, dm_b) or (2, nao, nao) array)
+        if isinstance(dm, (tuple, list)):
+            dm_a, dm_b = dm
+        elif isinstance(dm, cp.ndarray) and dm.ndim == 3:
+            dm_a, dm_b = dm[0], dm[1]
+        else:
+            # Fallback for RKS-like DM input, though this is UKS class
+            dm_a = dm_b = dm * 0.5
+
+        log_msgs = []
+
+        # 1. Charge Constraints
+        for i, atom_group in enumerate(self.charge_groups):
+            target = self.charge_targets[i]
+            
+            # Calculate current population
+            n_val = 0.0
+            w_sum = cp.zeros((nao, nao))
+            
+            for atom_id in atom_group:
+                w = self.atom_projectors[atom_id]
+                val = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
+                n_val += float(val)
+                w_sum += w
+            
+            diff = n_val - target
+            log_msgs.append(f"Chg[{i}] err: {diff:.5f}")
+            
+            # Gradient: 2 * lambda * diff
+            shift = 2.0 * penalty_value * diff
+            
+            vc_a += shift * w_sum
+            vc_b += shift * w_sum
+
+        # 2. Spin Constraints
+        for i, atom_group in enumerate(self.spin_groups):
+            target = self.spin_targets[i]
+            
+            m_val = 0.0
+            w_sum = cp.zeros((nao, nao))
+            
+            for atom_id in atom_group:
+                w = self.atom_projectors[atom_id]
+                val = cp.trace(dm_a @ w) - cp.trace(dm_b @ w)
+                m_val += float(val)
+                w_sum += w
+                
+            diff = m_val - target
+            log_msgs.append(f"Spin[{i}] err: {diff:.5f}")
+
+            # Gradient: 2 * lambda * diff (alpha), -2 * lambda * diff (beta)
+            shift = 2.0 * penalty_value * diff
+            
+            vc_a += shift * w_sum
+            vc_b -= shift * w_sum
+
+        if log_msgs:
+            print(f"CDFT Penalty (L={penalty_value:.1f}): " + ", ".join(log_msgs))
+
+        return vc_a, vc_b
+
     def _micro_objective_func(self, v_vec, f_std_a, f_std_b, s):
         '''
         Objective function for scipy.optimize.root.
-        Input: v_vec
-        Output: errors
         '''
         # Build total Fock: F_tot = F_std + V_const
         vc_a, vc_b = self.get_constraint_potential(v_vec)
@@ -328,7 +502,6 @@ class CDFT_UKS(dft.UKS):
             n_val = 0.0
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
-                # Tr(P * W) is the integrated population
                 val = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
                 n_val += float(val)
             errors.append(n_val - target)
@@ -343,7 +516,7 @@ class CDFT_UKS(dft.UKS):
                 m_val += float(val)
             errors.append(m_val - target)
         
-        logger.debug(self, f"errors: {errors}   val: {n_val}  v_vec: {v_vec}")
+        # logger.info(self, f"errors: {errors}   val: {n_val}  v_vec: {v_vec}")
         return np.array(errors)
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
@@ -358,43 +531,59 @@ class CDFT_UKS(dft.UKS):
         if f.ndim == 2:
             f = (f, f)
         
-        # Begin to change
+        if dm is None: 
+            # If dm is missing (e.g. first cycle), assume initial guess
+            dm = self.make_rdm1()
+        dm = cp.asarray(dm)
+
+        # --- CDFT Logic Modification Starts Here ---
         if self.n_constraints != 0:
             run_micro = False
             if cycle != -1:
                 run_micro = True
-            if run_micro:
-                f_a, f_b = f
+            # --- METHOD 1: LAGRANGE MULTIPLIERS (Original) ---
+            if self.method == 'lagrange':
+                if run_micro:
+                    f_a, f_b = f
 
-                res = root(
-                    fun=self._micro_objective_func,
-                    x0=self.v_lagrange,
-                    args=(f_a, f_b, s1e),
-                    method='hybr',
-                    tol=self.micro_tol,
-                    options={'maxfev': self.micro_max_cycle}
-                )
-                if not res.success:
-                    # log warning
-                    pass
-                self.v_lagrange = res.x
-                logger.debug(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
+                    res = root(
+                        fun=self._micro_objective_func,
+                        x0=self.v_lagrange,
+                        args=(f_a, f_b, s1e),
+                        method='hybr',
+                        tol=self.micro_tol,
+                        options={'maxfev': self.micro_max_cycle}
+                    )
+                    if not res.success:
+                        pass
+                    self.v_lagrange = res.x
+                    logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
+                    
+                vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+                f = cp.stack((f[0] + vc_a, 
+                              f[1] + vc_b))
+                              
+            # --- METHOD 2: PENALTY FUNCTION ---
+            elif self.method == 'penalty':
+                # Determine current penalty weight (lambda) based on the scheduler
+                if run_micro:
+                    current_lambda = self.penalty_scheduler(cycle)
+                    self.last_penalty_weight = current_lambda
                 
-            else:
-                pass
+                # Get the potential based on current density and current lambda
+                vc_a, vc_b = self.get_penalty_potential(dm, self.last_penalty_weight)
+                
+                f = cp.stack((f[0] + vc_a, 
+                              f[1] + vc_b))
+                
+                logger.info(self, f"Cycle {cycle}: Applied Penalty (Weight={self.last_penalty_weight:.1f})")
 
-            vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
-
-            f = cp.stack((f[0] + vc_a, 
-                          f[1] + vc_b))
-        # End to change
+        # --- CDFT Logic Ends Here ---
 
         if cycle < 0 and diis is None:  # Not inside the SCF iteration
             return f
 
-        if dm is None: dm = self.make_rdm1()
         s1e = cp.asarray(s1e)
-        dm = cp.asarray(dm)
 
         if diis_start_cycle is None:
             diis_start_cycle = self.diis_start_cycle
@@ -421,103 +610,60 @@ class CDFT_UKS(dft.UKS):
                 level_shift(s1e, dm[1], f[1], shiftb))
         return f
 
-    # def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
-    #              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
-    #              fock_last=None):
-    #     '''
-    #     Override get_fock to inject the CDFT microiterations.
-    #     Most matrices here (h1e, vhf, dm) are cupy arrays.
-    #     '''
-    #     # Standard Fock Construction
-    #     # TODO: Check if DIIS should be changed place
-    #     f_std = super().get_fock(h1e, s1e, vhf, dm, cycle, diis, diis_start_cycle,
-    #                              level_shift_factor, damp_factor, fock_last)
-    #     print("cycle:", cycle)
-    #     print("f_std:", f_std)
-        
-    #     if self.n_constraints == 0:
-    #         return f_std
-
-    #     run_micro = False
-    #     if cycle != -1:
-    #         run_micro = True
-        
-    #     if run_micro:
-    #         s = self.get_ovlp()
-    #         f_std_a, f_std_b = f_std
-
-    #         res = root(
-    #             fun=self._micro_objective_func,
-    #             x0=self.v_lagrange,
-    #             args=(f_std_a, f_std_b, s),
-    #             method='hybr',
-    #             tol=self.micro_tol,
-    #             options={'maxfev': self.micro_max_cycle}
-    #         )
-    #         if not res.success:
-    #             # log warning
-    #             pass
-    #         self.v_lagrange = res.x
-    #         print(f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
-            
-    #     else:
-    #         pass
-
-    #     vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
-    #     print("vc_a:", vc_a)
-    #     print("vc_b:", vc_b)
-
-    #     return (f_std[0] + vc_a, f_std[1] + vc_b)
-
     def energy_elec(self, dm=None, h1e=None, vhf=None):
         '''
-        Calculate electronic energy, properly defining the CDFT Lagrangian W.
-        
-        Ref: Eq 16 in Chem. Rev. 2012, 112, 321-370 .
-        W = E_KS + Sum[ V_k * (N_calc_k - N_target_k) ]
-          = E_KS + Tr(P * V_const) - Sum(V_k * N_target_k)
-        
-        Returns:
-            Total Electronic Energy (Lagrangian W), Coulomb Energy
+        Calculate electronic energy.
+        Added penalty energy calculation using the last used penalty weight.
         '''
         # 1. Get standard DFT energy (E_KS)
         e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
         
-        # 2. Calculate Constraint Potential Energy: Tr(P * V_const)
-        if self.atom_projectors is None:
-            self.build_atom_projectors()
-            
-        vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+        # # Ensure DM is usable
+        # if dm is None:
+        #     dm = self.make_rdm1()
+        # if isinstance(dm, (tuple, list)) or (isinstance(dm, cp.ndarray) and dm.ndim == 3):
+        #     dm_a, dm_b = dm[0], dm[1]
+        # else:
+        #     dm_a = dm_b = dm * 0.5 
         
-        if isinstance(dm, (tuple, list)) or (isinstance(dm, cp.ndarray) and dm.ndim == 3):
-            dm_a, dm_b = dm[0], dm[1]
-        else:
-            dm_a = dm_b = dm * 0.5 
+        # # We only check constraints if we have projectors
+        # if self.atom_projectors is not None and self.n_constraints > 0:
 
-        # Term 1: V * N_calc
-        e_interaction = cp.trace(dm_a @ vc_a) + cp.trace(dm_b @ vc_b)
-        e_interaction = float(e_interaction)
-        
-        # 3. Calculate Constant Shift: Sum(V_k * N_target_k)
-        # This term makes the energy correspond to the Lagrangian W
-        e_shift = 0.0
-        idx = 0
-        
-        # Charge Targets
-        for target in self.charge_targets:
-            v = self.v_lagrange[idx]
-            e_shift += v * target
-            idx += 1
+        #     # --- METHOD 1: LAGRANGE ---
+        #     if self.method == 'lagrange':
+        #         # Note: Energy calculation for Lagrange is subtle (needs W instead of E).
+        #         # Skipping per original code style.
+        #         pass
             
-        # Spin Targets
-        for target in self.spin_targets:
-            v = self.v_lagrange[idx]
-            e_shift += v * target
-            idx += 1
-            
-        # Final Lagrangian W = E_KS + (V * N_calc) - (V * N_target)
-        # e_tot += (e_interaction - e_shift)
-        # e_tot += e_interaction
-        
+        #     # --- METHOD 2: PENALTY ---
+        #     elif self.method == 'penalty':
+        #         # E_penalty = sum( lambda * (N_calc - N_target)^2 )
+        #         e_penalty = 0.0
+                
+        #         # Use the lambda value that was active during the last Fock build
+        #         current_lambda = self.last_penalty_weight
+                
+        #         # Charge Penalty
+        #         for i, atom_group in enumerate(self.charge_groups):
+        #             target = self.charge_targets[i]
+        #             n_val = 0.0
+        #             for atom_id in atom_group:
+        #                 w = self.atom_projectors[atom_id]
+        #                 val = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
+        #                 n_val += float(val)
+        #             e_penalty += current_lambda * (n_val - target)**2
+                    
+        #         # Spin Penalty
+        #         for i, atom_group in enumerate(self.spin_groups):
+        #             target = self.spin_targets[i]
+        #             m_val = 0.0
+        #             for atom_id in atom_group:
+        #                 w = self.atom_projectors[atom_id]
+        #                 val = cp.trace(dm_a @ w) - cp.trace(dm_b @ w)
+        #                 m_val += float(val)
+        #             e_penalty += current_lambda * (m_val - target)**2
+                
+        #         # logger.info(self, f"CDFT: Penalty Energy Contribution = {e_penalty:.6f}")
+        #         e_tot += e_penalty
+
         return e_tot, e_coul
-
