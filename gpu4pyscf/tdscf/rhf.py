@@ -418,11 +418,11 @@ class TDBase(lib.StreamObject):
     def nuc_grad_method(self):
         return self.Gradients()
 
-    def Gradients(self):
+    def NAC(self):
         raise NotImplementedError
 
     def nac_method(self):
-        raise NotImplementedError
+        return self.NAC()
 
     as_scanner = as_scanner
 
@@ -583,7 +583,7 @@ class TDA(TDBase):
             from gpu4pyscf.grad import tdrhf
             return tdrhf.Gradients(self)
 
-    def nac_method(self):
+    def NAC(self):
         if getattr(self._scf, 'with_df', None):
             from gpu4pyscf.df.nac import tdrhf
             return tdrhf.NAC(self)
@@ -714,7 +714,7 @@ class TDHF(TDBase):
         return self.e, self.xy
 
     Gradients = TDA.Gradients
-    nac_method = TDA.nac_method
+    NAC = TDA.NAC
 
     def to_cpu(self):
         out = utils.to_cpu(self)
