@@ -631,6 +631,7 @@ class SCF(pyscf_lib.StreamObject):
         self.mo_occ = None
         self.e_tot = 0
         self.converged = False
+        self.cycles = 0
         self.scf_summary = {}
 
         self.overlap_canonical_decomposed_x = None
