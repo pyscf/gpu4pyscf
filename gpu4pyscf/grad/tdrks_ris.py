@@ -27,7 +27,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
-from gpu4pyscf.tdscf.ris import get_auxmol
+from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
 from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
 
 
@@ -375,15 +375,18 @@ class Gradients(tdrhf.Gradients):
     approximation for both Coulomb and Exchange integrals.
 
     Attributes:
-        ris_zvector_solver: Solves the Z-vector equation (Lagrangian multipliers) 
-        specific to the RIS approximation.
+        ris_zvector_solver: Enables approximate solution for the Z-vector
+            equation (Lagrangian multipliers) using the RIS approximate integrals.
 
-    Notes:
-        The TDDFT or TDA is computed ** using the RIS approximation **.
-        The Z-vector solver implementation here has two versions:
-        1. Standard Z-vector solver: Solves the Z-vector equation using the standard method.
-        2. RIS approximation Z-vector solver: Solves the Z-vector equation using the RIS approximation, 
-            when ris_zvector_solver is True.
+            Although the integrals in TDDFT or TDA linear response are evaluated
+            using the RIS approximation, the ground-state orbital response from
+            the Z-vector equation requires the exact integrals used in the
+            ground-state SCF procedure. Solving Z-vector equation dominates the
+            cost of gradient computation. This step can be accelerated by using
+            RIS approximate integrals, enabled by the ris_zvector_solver parameter.
+            However, this approximation breaks strict consistency between
+            excited-state energies and gradients. It should therefore be used
+            with caution in geometry-optimization tasks.
 
     References:
         For the detailed derivation of the RIS gradient and Z-vector equation, 
@@ -424,10 +427,7 @@ class Gradients(tdrhf.Gradients):
                     "state=0 found in the input. Gradients of ground state is computed.",
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
-            if self.base.xy[1] is not None:
-                xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[1][state-1]*np.sqrt(0.5))
-            else:
-                xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[0][state-1]*0.0)
+            xy = rescale_spin_free_amplitudes(self.base.xy, state-1)
 
         if singlet is None:
             singlet = self.base.singlet
