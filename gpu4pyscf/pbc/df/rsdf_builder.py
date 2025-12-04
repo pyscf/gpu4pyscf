@@ -1385,15 +1385,12 @@ def _kpts_to_kmesh(cell, auxcell, omega, kpts):
 
 def _precontract_j2c_aux_coeff(auxcell, aux_coeff, kpts, omega, with_long_range,
                                linear_dep_threshold, kmesh=None):
-    # FIXME: cd_j2c keys conj(k) is too misleading. return cd_j2c dict with keys for <|k>!
     if kmesh is None:
         j2c = _get_2c2e(auxcell, kpts, omega, with_long_range, kmesh)
     else:
         kpt_iters = list(kk_adapted_iter(kmesh))
-        # The unique k-points under time-reversal symmetry.
-        # The fitting basis for (ij|P) has kpt_P = -(kpt_j - kpt_i).
-        # uniq_kpts corresponds to the k-conserved kP = -(kj-ki)
-        uniq_kpts = kpts[[x[1] for x in kpt_iters]]
+        # uniq_kpts corresponds to (kj-ki)
+        uniq_kpts = kpts[[x[0] for x in kpt_iters]]
         j2c = _get_2c2e(auxcell, uniq_kpts, omega, with_long_range, kmesh)
         # DF metric for self-conjugated k-point should be real
         j2c = [j2c_k.real if kp == kp_conj else j2c_k
@@ -1406,7 +1403,10 @@ def _precontract_j2c_aux_coeff(auxcell, aux_coeff, kpts, omega, with_long_range,
     cd_j2c_cache = []
     negative_metric_size = {}
     for j2c_idx, j2c_k in enumerate(j2c):
-        # ED to get the transformation for |aux[-(kj-ki)]>
+        # The three-index tensor to construct is
+        # cd_j2c^{-1} aux_cart2sph.T (aux[-(kj-ki)]|i,j)
+        # The first two terms (cd_j2c^{-1} and aux_cart2sph.T).T can be
+        # precomputed and cached.
         cd_j2c, cd_j2c_negative, j2ctag = decompose_j2c(
             j2c_k, prefer_ed, linear_dep_threshold)
 
@@ -1418,10 +1418,11 @@ def _precontract_j2c_aux_coeff(auxcell, aux_coeff, kpts, omega, with_long_range,
             negative_metric_size[j2c_idx] = cd_j2c_negative.shape[1]
 
         if j2ctag == 'ED':
-            cd_j2c = aux_coeff.dot(cd_j2c)
+            # For ED, cd_j2c^{-1} ~ (ED_eigenvectors * eigvals^{-.5})^\dagger
+            cd_j2c = aux_coeff.dot(cd_j2c.conj())
         else:
-            #:cd_j2c = aux_coeff.dot(cp.linalg.inv(cd_j2c.conj().T))
-            cd_j2c = solve_triangular(cd_j2c.conj(), aux_coeff.T, lower=True).T
+            #:cd_j2c = aux_coeff.dot(cp.linalg.inv(cd_j2c.T))
+            cd_j2c = solve_triangular(cd_j2c, aux_coeff.T, lower=True).T
         cd_j2c_cache.append(cd_j2c)
     return cd_j2c_cache, negative_metric_size
 
@@ -1462,7 +1463,7 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
         return out.reshape(1,naux,nao,nao)
 
     assert expLk.dtype == np.complex128
-    # Searching adapted k indices for (ij|aux)
+    # Searching adapted k indices for (aux|ij)
     ki_idx, kj_idx = np.where(kk_conserv == k_idx)
     if cderi_tril.dtype == np.complex128:
         out = ndarray((nkpts,naux,nao,nao), dtype=np.complex128, buffer=out)
