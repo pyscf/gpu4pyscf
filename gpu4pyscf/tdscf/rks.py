@@ -42,11 +42,10 @@ class TDA(tdhf_gpu.TDA):
         else:
             from gpu4pyscf.nac import tdrks
             return tdrks.NAC(self)
-    nac_method = NAC
 
 class TDDFT(tdhf_gpu.TDHF):
     Gradients = TDA.Gradients
-    nac_method = TDA.nac_method
+    NAC = TDA.NAC
 
 TDRKS = TDDFT
 
