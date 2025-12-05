@@ -607,61 +607,6 @@ def _ft_pair_and_diag_indices(ft_opt, bas_ij_cache):
     diag_addresses = np.hstack(diag_addresses)
     return aopair_offsets_lookup, ao_pair_mapping, diag_addresses
 
-def _int3c2e_pair_and_diag_indices(int3c2e_opt, img_idx_cache):
-    # LR int3c2e from ft_ao would generate more nao_pairs than the SR int3c2e!
-    cell = int3c2e_opt.cell
-    bvk_ncells = np.prod(int3c2e_opt.bvk_kmesh)
-    nao = cell.nao
-    bvk_nao = bvk_ncells * nao
-    # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
-    # the original cell
-    sorted_ao_loc = int3c2e_opt.sorted_cell.ao_loc_nr(cart=cell.cart)
-    ao_loc = int3c2e_opt.ao_idx[sorted_ao_loc[:-1]]
-
-    # ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
-    # which allows the decompression for the CUDA kernel generated compressed_eri3c:
-    # sparse_eri3c[ao_pair_mapping] => compressed_eri3c
-    ao_pair_mapping = []
-
-    c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
-    c_l_offsets = np.append(0, np.cumsum(c_shell_counts))
-    lmax = cell._bas[:,ANG_OF].max()
-    uniq_l = np.arange(lmax+1)
-    if cell.cart:
-        nf = (uniq_l + 1) * (uniq_l + 2) // 2
-    else:
-        nf = uniq_l * 2 + 1
-    # Determine the addresses of the non-vanished pairs and the diagonal indices
-    # within these elements.
-    diag_addresses = [] # addresses wrt the compressed indices
-    p0 = p1 = 0
-    for i, j in img_idx_cache:
-        pair_idx = img_idx_cache[i, j][4]
-        n_pairs = len(pair_idx)
-        p0, p1 = p1, p1 + nf[i] * nf[j] * n_pairs
-
-        i0, i1 = c_l_offsets[i:i+2]
-        j0, j1 = c_l_offsets[j:j+2]
-        nctri = c_shell_counts[i]
-        nctrj = c_shell_counts[j]
-        pair_idx = cp.asnumpy(pair_idx)
-        ish, J, jsh = np.unravel_index(pair_idx, (nctri, bvk_ncells, nctrj))
-        ish += i0
-        jsh += j0
-        # Note: corresponding to the storage order (npairs,nfj,nfi,nGv)
-        iaddr = ao_loc[ish,None] + np.arange(nf[i])
-        jaddr = ao_loc[jsh,None] + np.arange(nf[j])
-        ao_pair_mapping.append((iaddr[:,None,:] * bvk_nao + J[:,None,None] * nao +
-                                jaddr[:,:,None]).ravel())
-        if i == j:
-            ii = np.where(ish == jsh)[0]
-            addr = p0 + ii[:,None] * nf[i]**2 + np.arange(nf[i]**2)
-            diag_addresses.append(addr.ravel())
-
-    ao_pair_mapping = np.hstack(ao_pair_mapping)
-    diag_addresses = np.hstack(diag_addresses)
-    return ao_pair_mapping, diag_addresses
-
 # The long-range part of the cderi for gamma point. The cderi 3-index tensor is compressed.
 def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
     cell = ft_opt.cell
@@ -984,8 +929,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         nao_pairs = len(ao_pair_mapping)
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
-        ao_pair_mapping, diag_addresses = _int3c2e_pair_and_diag_indices(
-            int3c2e_opt, img_idx_cache)
+        ao_pair_mapping, diag_addresses = int3c2e_opt._pair_and_diag_indices(img_idx_cache)
         nao_pairs = len(ao_pair_mapping)
         cderi = empty_mapped((naux, nao_pairs))
 
@@ -1115,8 +1059,7 @@ def compressed_cderi_j_only(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         nao_pairs = len(ao_pair_mapping)
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
-        ao_pair_mapping, diag_addresses = _int3c2e_pair_and_diag_indices(
-            int3c2e_opt, img_idx_cache)
+        ao_pair_mapping, diag_addresses = int3c2e_opt._pair_and_diag_indices(img_idx_cache)
         nao_pairs = len(ao_pair_mapping)
         cderi = empty_mapped((naux, nao_pairs))
 
@@ -1257,8 +1200,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         # LR int3c2e would generate more nao_pairs than the SR int3c2e!
         t1 = log.timer_debug1('LR int3c2e', *t1)
     else:
-        ao_pair_mapping, diag_addresses = _int3c2e_pair_and_diag_indices(
-            int3c2e_opt, img_idx_cache)
+        ao_pair_mapping, diag_addresses = int3c2e_opt._pair_and_diag_indices(img_idx_cache)
         nao_pairs = len(ao_pair_mapping)
         cderi = {}
         for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):

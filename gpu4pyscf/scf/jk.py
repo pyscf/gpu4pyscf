@@ -155,7 +155,7 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
                          l_ctr_offsets, ao_idx, l_ctr_paddings=None):
     '''
     Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
-    Fused kernel to perform 'ip,npq,qj->nij'
+    Fused kernel to perform 'pi,nij,qj->npq'
     '''
     spherical_matrix = cp.asarray(spherical_matrix)
     spherical_matrix_ndim = spherical_matrix.ndim
@@ -214,7 +214,7 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
                          l_ctr_offsets, ao_idx, l_ctr_paddings=None):
     '''
     Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
-    Fused kernel to perform 'ip,npq,qj->nij'
+    Fused kernel to perform 'pi,npq,qj->nij'
     '''
     cartesian_matrix = cp.asarray(cartesian_matrix)
     cartesian_matrix_ndim = cartesian_matrix.ndim
@@ -269,6 +269,62 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
         out = out[0]
     return out
 
+def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
+                      l_ctr_offsets, ao_idx, l_ctr_paddings=None):
+    '''
+    Sort AO and perform sph2cart transformation (if needed) for the second last axis
+    Fused kernel to perform 'pi,nij->npj'
+    '''
+    right_matrix = cp.asarray(right_matrix, order='C')
+    ndim = right_matrix.ndim
+    if ndim == 2:
+        right_matrix = right_matrix[None]
+    nao, n_second = right_matrix.shape[1:]
+    assert nao == mol.nao
+    n_cartesian = sorted_mol.nao
+
+    output_complex = False
+    if right_matrix.dtype == np.complex128:
+        right_matrix = right_matrix.view(np.float64)
+        right_matrix = right_matrix.reshape(-1,nao,n_second,2)
+        right_matrix = right_matrix.transpose(3,0,1,2).reshape(-1,nao,n_second)
+        output_complex = True
+    else:
+        assert right_matrix.dtype == np.float64
+    counts = len(right_matrix)
+
+    l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
+    l_ctr_l = np.asarray(uniq_l_ctr[:,0].copy(), dtype = np.int32)
+    if l_ctr_paddings is None:
+        l_ctr_pad_counts = np.zeros_like(l_ctr_count)
+    else:
+        l_ctr_pad_counts = np.asarray(l_ctr_paddings, dtype=np.int32)
+    ao_idx = cp.asarray(ao_idx, dtype=np.int32)
+    stream = cp.cuda.get_current_stream()
+
+    out = cp.zeros((counts, n_cartesian, n_second), order = "C")
+    for i in range(counts):
+        libgint.cart2sph_C_mat_with_padding(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out[i].data.ptr, ctypes.c_void_p),
+            ctypes.cast(right_matrix[i].data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_second),
+            ctypes.c_int(l_ctr_l.shape[0]),
+            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
+            ctypes.c_bool(mol.cart),
+        )
+
+    if output_complex:
+        outR, outI = out.reshape(2, -1, n_cartesian, n_second)
+        out = outR.astype(np.complex128)
+        out.imag = outI
+
+    if ndim == 2:
+        out = out[0]
+    return out
 
 class _VHFOpt:
     def __init__(self, mol, direct_scf_tol=1e-13, tile=TILE):
@@ -383,40 +439,12 @@ class _VHFOpt:
 
     def apply_coeff_C_mat(self, right_matrix):
         '''
-        Sort AO and perform cart2sph transformation (if needed) for the second last axis
+        Sort AO and perform sph2cart transformation (if needed) for the second last axis
         Fused kernel to perform 'ip,npq->niq'
         '''
-        right_matrix = cp.asarray(right_matrix)
-        assert right_matrix.ndim == 2
-        assert right_matrix.shape[0] == self.mol.nao
-        n_cartesian = self.sorted_mol.nao
-        n_second = right_matrix.shape[1]
-
-        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
-        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
-        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
-        cupy_ao_idx = self.cupy_ao_idx
-        stream = cp.cuda.get_current_stream()
-
-        # ref = self.coeff @ right_matrix
-
-        right_matrix = cp.ascontiguousarray(right_matrix)
-
-        out = cp.zeros((n_cartesian, n_second), order = "C")
-        libgint.cart2sph_C_mat_with_padding(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(right_matrix.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(n_second),
-            ctypes.c_int(l_ctr_l.shape[0]),
-            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
-            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
-            self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
-            ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
-            ctypes.c_bool(self.mol.cart),
-        )
-
-        return out
+        return apply_coeff_C_mat(
+            right_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
+            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
 
     @multi_gpu.property(cache='_q_cond')
     def q_cond(self):

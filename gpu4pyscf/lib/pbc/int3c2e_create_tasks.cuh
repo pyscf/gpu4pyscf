@@ -46,7 +46,7 @@ void _filter_images(int& num_pages, ImgIdxPage *page_pool, PBCIntEnvVars &envs,
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    int bas_ij = bas_ij_idx[pair_ij];
+    uint32_t bas_ij = bas_ij_idx[pair_ij];
     int nbas = envs.cell0_nbas * envs.bvk_ncells;
     int ish = bas_ij / nbas;
     int jsh = bas_ij % nbas;

@@ -296,6 +296,7 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
         l_ctr_offsets = np.cumsum(l_ctr_counts)[:-1]
         if_pad_bas_per_l_ctr = np.split(if_pad_bas, l_ctr_offsets)
         l_ctr_pad_counts = np.array([np.sum(if_pad) for if_pad in if_pad_bas_per_l_ctr])
+        l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
         if return_bas_mapping:
             return mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts, sorted_idx.argsort()
         else:

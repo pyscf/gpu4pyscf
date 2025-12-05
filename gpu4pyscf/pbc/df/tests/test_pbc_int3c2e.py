@@ -19,6 +19,7 @@ import cupy as cp
 import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
+from gpu4pyscf.pbc.df import int3c2e
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -224,3 +225,105 @@ C    D
 
     dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
+
+def test_contract_dm():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    P
+    102.9917624900           1.0000000000
+C    P
+     28.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    omega = -0.2
+
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(nao, nao) - .5
+    dm = dm.dot(dm.T)
+    opt = int3c2e.SRInt3c2eOpt_v2(cell, auxcell, omega).build()
+    jaux = opt.contract_dm(dm)
+
+    j3c = sr_aux_e2(cell, auxcell, omega)
+    ref = cp.einsum('pqr,qp->r', j3c, dm)
+    assert abs(jaux - ref).max() < 1e-10
+
+    np.random.seed(9)
+    auxvec = np.random.rand(auxcell.nao)
+    vj = opt.contract_auxvec(auxvec)
+    ref = cp.einsum('pqr,r->pq', j3c, auxvec)
+    assert abs(vj - ref).max() < 1e-11
+
+def test_contract_dm_kpts():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    P
+    102.9917624900           1.0000000000
+C    P
+     28.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    omega = -0.2
+
+    kmesh = [3,1,4]
+    kpts = cell.make_kpts(kmesh)
+    nkpts = len(kpts)
+    dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    opt = int3c2e.SRInt3c2eOpt_v2(cell, auxcell, omega, kmesh).build()
+    jaux = opt.contract_dm(dm, kpts=kpts)
+
+    j3c = sr_aux_e2(cell, auxcell, omega, kpts, kmesh, j_only=True)
+    ref = cp.einsum('kpqr,kqp->r', j3c, dm) / nkpts
+    assert abs(jaux - ref).max() < 1e-10
+
+    np.random.seed(9)
+    auxvec = np.random.rand(auxcell.nao)
+    vj = opt.contract_auxvec(auxvec, kpts=kpts)
+    ref = cp.einsum('kpqr,r->kpq', j3c, auxvec)
+    assert abs(vj - ref).max() < 1e-11
