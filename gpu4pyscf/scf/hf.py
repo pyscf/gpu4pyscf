@@ -251,6 +251,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         chkfile.save_mol(mol, mf.chkfile)
 
     fock_last = None
+    mf.cycles = 0
     for cycle in range(mf.max_cycle):
         t0 = log.init_timer()
         mo_coeff = mo_occ = mo_energy = fock = None
@@ -284,6 +285,9 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         if dump_chk:
             mf.dump_chk(locals())
 
+        if callable(callback):
+            callback(locals())
+
         e_diff = abs(e_tot-last_hf_e)
         if(e_diff < conv_tol and norm_gorb < conv_tol_grad):
             scf_conv = True
@@ -291,6 +295,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     else:
         log.warn("SCF failed to converge")
 
+    mf.cycles = cycle + 1
     if scf_conv and mf.level_shift is not None:
         # An extra diagonalization, to remove level shift
         mo_energy, mo_coeff = mf.eig(fock, s1e)
@@ -626,6 +631,7 @@ class SCF(pyscf_lib.StreamObject):
         self.mo_occ = None
         self.e_tot = 0
         self.converged = False
+        self.cycles = 0
         self.scf_summary = {}
 
         self.overlap_canonical_decomposed_x = None
