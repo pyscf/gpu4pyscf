@@ -278,8 +278,6 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.RHF.dump_flags(self, verbose)
         return KohnShamDFT.dump_flags(self, verbose)
 
-    reset = KohnShamDFT.reset
-
     def Gradients(self):
         from gpu4pyscf.grad import rks as rks_grad
         return rks_grad.Gradients(self)
