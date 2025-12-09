@@ -143,8 +143,8 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         Rpq[0*nsp_per_block] = 0;
         Rpq[1*nsp_per_block] = 0;
         Rpq[2*nsp_per_block] = 0;
-        // Important to initialize Rpq[3]. An nan value would cause illegal
-        // addresses in the rys_roots function
+        // Rpq[3] must be initialized. An uninitialized Rpq[3] might be nan,
+        // which would cause illegal addresses in the rys_roots function
         Rpq[3*nsp_per_block] = 0;
     }
 

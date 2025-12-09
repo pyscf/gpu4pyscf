@@ -120,8 +120,8 @@ void contract_int3c2e_dm_kernel(double *out, double *dm,
         Rpq[0*nsp_per_block] = 0;
         Rpq[1*nsp_per_block] = 0;
         Rpq[2*nsp_per_block] = 0;
-        // Important to initialize Rpq[3]. An nan value would cause illegal
-        // addresses in the rys_roots function
+        // Rpq[3] must be initialized. An uninitialized Rpq[3] might be nan,
+        // which would cause illegal addresses in the rys_roots function
         Rpq[3*nsp_per_block] = 0;
     }
 
@@ -462,8 +462,8 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
         Rpq[0*nsp_per_block] = 0;
         Rpq[1*nsp_per_block] = 0;
         Rpq[2*nsp_per_block] = 0;
-        // Important to initialize Rpq[3]. An nan value would cause illegal
-        // addresses in the rys_roots function
+        // Rpq[3] must be initialized. An uninitialized Rpq[3] might be nan,
+        // which would cause illegal addresses in the rys_roots function
         Rpq[3*nsp_per_block] = 0;
     }
 
