@@ -569,6 +569,11 @@ class CDFT_UKS(dft.UKS):
                 if run_micro:
                     current_lambda = self.penalty_scheduler(cycle)
                     self.last_penalty_weight = current_lambda
+                elif self.last_penalty_weight == 0.0:
+                    current_lambda = self.penalty_scheduler(0) # Assume initial lambda from scheduler
+                    # TODO: This may also be set for soscf
+                    self.last_penalty_weight = current_lambda
+                    logger.debug(self, f"Cycle {cycle}: Auto-initialized Penalty Weight to {current_lambda}")
                 
                 # Get the potential based on current density and current lambda
                 vc_a, vc_b = self.get_penalty_potential(dm, self.last_penalty_weight)
@@ -617,53 +622,12 @@ class CDFT_UKS(dft.UKS):
         '''
         # 1. Get standard DFT energy (E_KS)
         e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
-        
-        # # Ensure DM is usable
-        # if dm is None:
-        #     dm = self.make_rdm1()
-        # if isinstance(dm, (tuple, list)) or (isinstance(dm, cp.ndarray) and dm.ndim == 3):
-        #     dm_a, dm_b = dm[0], dm[1]
-        # else:
-        #     dm_a = dm_b = dm * 0.5 
-        
-        # # We only check constraints if we have projectors
-        # if self.atom_projectors is not None and self.n_constraints > 0:
-
-        #     # --- METHOD 1: LAGRANGE ---
-        #     if self.method == 'lagrange':
-        #         # Note: Energy calculation for Lagrange is subtle (needs W instead of E).
-        #         # Skipping per original code style.
-        #         pass
-            
-        #     # --- METHOD 2: PENALTY ---
-        #     elif self.method == 'penalty':
-        #         # E_penalty = sum( lambda * (N_calc - N_target)^2 )
-        #         e_penalty = 0.0
-                
-        #         # Use the lambda value that was active during the last Fock build
-        #         current_lambda = self.last_penalty_weight
-                
-        #         # Charge Penalty
-        #         for i, atom_group in enumerate(self.charge_groups):
-        #             target = self.charge_targets[i]
-        #             n_val = 0.0
-        #             for atom_id in atom_group:
-        #                 w = self.atom_projectors[atom_id]
-        #                 val = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
-        #                 n_val += float(val)
-        #             e_penalty += current_lambda * (n_val - target)**2
-                    
-        #         # Spin Penalty
-        #         for i, atom_group in enumerate(self.spin_groups):
-        #             target = self.spin_targets[i]
-        #             m_val = 0.0
-        #             for atom_id in atom_group:
-        #                 w = self.atom_projectors[atom_id]
-        #                 val = cp.trace(dm_a @ w) - cp.trace(dm_b @ w)
-        #                 m_val += float(val)
-        #             e_penalty += current_lambda * (m_val - target)**2
-                
-        #         # logger.info(self, f"CDFT: Penalty Energy Contribution = {e_penalty:.6f}")
-        #         e_tot += e_penalty
-
         return e_tot, e_coul
+
+    def newton_fock_only(self):
+        from gpu4pyscf.scf.soscf import newton
+        return newton(self)
+
+    def newton(self):
+        from gpu4pyscf.dft.cdft_soscf import newton_cdft
+        return newton_cdft(self)
