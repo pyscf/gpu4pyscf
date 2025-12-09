@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import unittest
-import ctypes
 import numpy as np
 import cupy as cp
 import pyscf
@@ -23,7 +22,6 @@ from gpu4pyscf.pbc.df import int3c2e
 from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
-from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 
 def test_int3c2e_gamma_point():
@@ -226,7 +224,7 @@ C    D
     dat = sr_int2c2e(cell, -omega, kpts=kpts, bvk_kmesh=kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
-def test_contract_dm():
+def test_contract_dm_gamma_point():
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1

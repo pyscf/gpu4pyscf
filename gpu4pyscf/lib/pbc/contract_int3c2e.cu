@@ -113,6 +113,17 @@ void contract_int3c2e_dm_kernel(double *out, double *dm,
         expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
     }
+    if (gout_id == 0) {
+        rjri[0*nsp_per_block] = 0;
+        rjri[1*nsp_per_block] = 0;
+        rjri[2*nsp_per_block] = 0;
+        Rpq[0*nsp_per_block] = 0;
+        Rpq[1*nsp_per_block] = 0;
+        Rpq[2*nsp_per_block] = 0;
+        // Important to initialize Rpq[3]. An nan value would cause illegal
+        // addresses in the rys_roots function
+        Rpq[3*nsp_per_block] = 0;
+    }
 
     __shared__ int num_pages, img_max;
 
@@ -259,7 +270,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm,
                             int lij3 = (lij+1)*3;
                             double rt_ak  = rt_aa * aij;
                             double b00 = .5 * rt_aa;
-                            double b01 = .5/ak  * (1 - rt_ak );
+                            double b01 = .5/ak  * (1 - rt_ak);
                             for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
                                 __syncthreads();
                                 int i = n / 3; //for i in range(lij+1):
@@ -366,19 +377,16 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
     int ncells = envs.bvk_ncells;
     int nbas = envs.cell0_nbas * ncells;
     int pair_ij = blockIdx.x;
-    __shared__ int kidx0, kidx1;
-    if (thread_id == 0) {
-        kidx0 = ksh_offsets[ksh_block_id];
-        kidx1 = ksh_offsets[ksh_block_id+1];
-    }
-
     int *bas = envs.bas;
     int *ao_loc = envs.ao_loc;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
+    __shared__ int kidx0, kidx1;
     __shared__ int ish, jsh, li, lj, lij, nroots;
     __shared__ int lk, nfk, kprim;
     if (thread_id == 0) {
+        kidx0 = ksh_offsets[ksh_block_id];
+        kidx1 = ksh_offsets[ksh_block_id+1];
         uint32_t bas_ij = bas_ij_idx[pair_ij];
         int ksh = ksh_idx[kidx0];
         ish = bas_ij / nbas;
@@ -446,6 +454,17 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
             cicj = 0;
         }
         omega = env[PTR_RANGE_OMEGA];
+    }
+    if (gout_id == 0) {
+        rjri[0*nsp_per_block] = 0;
+        rjri[1*nsp_per_block] = 0;
+        rjri[2*nsp_per_block] = 0;
+        Rpq[0*nsp_per_block] = 0;
+        Rpq[1*nsp_per_block] = 0;
+        Rpq[2*nsp_per_block] = 0;
+        // Important to initialize Rpq[3]. An nan value would cause illegal
+        // addresses in the rys_roots function
+        Rpq[3*nsp_per_block] = 0;
     }
 
     __shared__ int num_pages, img_max;

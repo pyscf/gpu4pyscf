@@ -24,7 +24,6 @@ import scipy
 import pyscf
 from pyscf import lib
 from pyscf.lib import parameters as param
-import gpu4pyscf
 
 def patch_cpu_kernel(cpu_kernel):
     '''Generate a decorator to patch cpu function to gpu function'''
@@ -114,6 +113,7 @@ def device(obj):
 #@patch_cpu_kernel(lib.misc.format_sys_info)
 def format_sys_info():
     '''Format a list of system information for printing.'''
+    import gpu4pyscf
     from cupyx._runtime import get_runtime_info
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 

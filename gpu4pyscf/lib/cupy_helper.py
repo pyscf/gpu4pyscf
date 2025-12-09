@@ -36,6 +36,7 @@ SCIPY_EIGH_FOR_LARGE_ARRAYS = True
 
 _kernel_registery = {}
 
+@functools.lru_cache
 def load_library(libname):
     try:
         _loaderpath = os.path.dirname(__file__)

@@ -368,6 +368,14 @@ def groupby(labels, a, op='argmin'):
         a_order = a.argsort()[::-1]
         _, idx = np.unique(labels[a_order], return_index=True)
         idx = a_order[idx]
+    elif op == 'sum':
+        labels, inv = np.unique(labels, return_inverse=True)
+        if a.ndim == 1:
+            summed = np.bincount(inv, weights=a)
+        else:
+            summed = np.zeros((len(labels), *a.shape[1:]), dtype=a.dtype)
+            np.add.at(summed, inv, a)
+        return summed
     else:
         raise NotImplementedError
 

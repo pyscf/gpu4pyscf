@@ -1060,7 +1060,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
                                   self.l_ctr_offsets, self.ao_idx)
         dm = transpose_sum(dm)
 
-        if kpts is None:
+        if kpts is None or is_zero(kpts):
             assert dm.dtype == np.float64
         else:
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
@@ -1077,6 +1077,9 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         log_cutoff = math.log(cutoff)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+        lmax = self.uniq_l_ctr[:,0].max()
+        laux = self.uniq_l_ctr_aux[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
         shl_pair_offsets, bas_ij_idx, img_idx, img_offsets = \
                 _aggregate_shl_pairs(img_idx_cache, nsp_per_block)
 
@@ -1108,7 +1111,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(shm_size.max()),
+            ctypes.c_int(shm_size_max),
             ctypes.c_int(nbas_aux),
             ctypes.c_int(len(shl_pair_offsets) - 1),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
@@ -1141,6 +1144,9 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         log_cutoff = math.log(cutoff)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(gout_width=60)
+        lmax = self.uniq_l_ctr[:,0].max()
+        laux = self.uniq_l_ctr_aux[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
         _, bas_ij_idx, img_idx, img_offsets = _aggregate_shl_pairs(
             img_idx_cache, nsp_per_block)
         ksh_offsets, ksh_idx = _aggregate_bas_idx(self.l_ctr_aux_offsets,
@@ -1172,7 +1178,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(shm_size.max()),
+            ctypes.c_int(shm_size_max),
             ctypes.c_int(len(bas_ij_idx)),
             ctypes.c_int(len(ksh_offsets) - 1),
             ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
@@ -1187,7 +1193,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         if err != 0:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 
-        if kpts is None:
+        if kpts is None or is_zero(kpts):
             vj = vj[:,0]
         else:
             nkpts = len(kpts)
@@ -1235,17 +1241,14 @@ def int3c2e_scheme1(li, lj, lk, shm_size=SHM_SIZE):
     gout_stride = THREADS // (nksh_per_block*nsp_per_block)
     return nksh_per_block, gout_stride, nsp_per_block
 
-def int3c2e_scheme(gout_width=None, shm_size=SHM_SIZE, deriv=None):
+def int3c2e_scheme(gout_width=None, shm_size=SHM_SIZE):
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    if deriv is None:
-        i1 = j1 = k1 = 0
-    else:
-        i1, j1, k1 = deriv
-    order = li + lj + lk + (i1 + j1 + k1)
-    nroots = (order//2 + 1) * 2
-    g_size = (li+1+i1)*(lj+1+j1)*(lk+1+k1)
+    order = li + lj + lk
+    nroots = order//2 + 1
+    nroots *= 2 # for short-range
+    g_size = (li+1)*(lj+1)*(lk+1)
     unit = g_size*3 + nroots*2 + 7
     nsp_max = _nearest_power2(shm_size // (unit*8))
     nsp_per_block = THREADS
@@ -1339,7 +1342,7 @@ def _aggregate_shl_pairs(img_idx_cache, nsp_per_block):
     shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
     return shl_pair_offsets, bas_ij_idx, sp_img_idx, sp_img_offsets
 
-def _aggregate_bas_idx(l_ctr_offsets, bvk_ncells, nbas):
+def _aggregate_bas_idx(l_ctr_offsets, bvk_ncells, nbas, batch_size=256):
     ksh_offsets = []
     ksh_idx = []
     k0 = k1 = 0
@@ -1348,7 +1351,7 @@ def _aggregate_bas_idx(l_ctr_offsets, bvk_ncells, nbas):
         idx = (bvk_bas_offsets + cp.arange(ksh0, ksh1, dtype=np.int32)).ravel()
         ksh_idx.append(idx)
         k0, k1 = k1, k1 + len(idx)
-        ksh_offsets.append(cp.arange(k0, k1, 256, dtype=np.int32))
+        ksh_offsets.append(cp.arange(k0, k1, batch_size, dtype=np.int32))
     ksh_offsets.append(np.int32(k1))
     ksh_offsets = cp.asarray(cp.hstack(ksh_offsets), dtype=np.int32)
     ksh_idx = cp.asarray(cp.hstack(ksh_idx), dtype=np.int32)

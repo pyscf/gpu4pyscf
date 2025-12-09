@@ -20,7 +20,7 @@ Analytical nuclear gradients for RHF with kpoints sampling
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.gto.mole import PTR_ENV_START, ANG_OF
+from pyscf.gto.mole import PTR_ENV_START, ANG_OF, ATOM_OF
 from pyscf.pbc.grad import krhf as krhf_cpu
 from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
 from gpu4pyscf.lib import logger
@@ -36,6 +36,7 @@ from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
+from gpu4pyscf.gto.mole import groupby
 
 __all__ = ['Gradients']
 
@@ -80,6 +81,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
         else:
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
 
+        dh1e = dh1e.get()
         dm_dmH = dm0 + dm0.transpose(0,2,1).conj()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
         dh1e -= _contract_h1e_dm(cell, dh1e_kin, dm_dmH)
@@ -89,11 +91,12 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
         for ia in range(natm):
             h1ao = hcore_deriv(ia)
             dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0).real
+        dh1e = dh1e.get()
 
     if cell._pseudo:
         dm0_cpu = dm0.get()
         dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_cpu, kpts = kpts)
-        dh1e += cp.asarray(dh1e_pp_nonlocal)
+        dh1e += dh1e_pp_nonlocal
 
     log.timer('gradients of 1e part', *t1)
 
@@ -107,7 +110,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     ds = contract('kxij,kji->xi', s1, dme0).real
     ds = (-2 * ds).get()
     ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    de = (dh1e.get() + ds) / nkpts + dvhf + extra_force
+    de = (dh1e + ds) / nkpts + dvhf + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
@@ -220,15 +223,18 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
 
 def _contract_h1e_dm(cell, h1e, dm):
     assert h1e.ndim == dm.ndim + 1
-    de = cp.empty((cell.natm, 3))
-    aoslices = cell.aoslice_by_atom()
-    for i, (p0, p1) in enumerate(aoslices[:,2:]):
-        if dm.ndim == 2: # RHF
-            de[i] = cp.einsum('xij,ji->x', h1e[:,p0:p1], dm[:,p0:p1]).real
-        elif dm.ndim == 3: # KRHF or UHF
-            de[i] = cp.einsum('kxij,kji->x', h1e[:,:,p0:p1], dm[:,:,p0:p1]).real
-        else: # dm.ndim == 4 KUHF
-            de[i] = cp.einsum('skxij,skji->x', h1e[:,:,:,p0:p1], dm[:,:,p0:p1]).real
+    ao_loc = cell.ao_loc
+    dims = ao_loc[1:] - ao_loc[:-1]
+    atm_id_for_ao = np.repeat(cell._bas[:,ATOM_OF], dims)
+
+    if dm.ndim == 2: # RHF
+        de_partial = cp.einsum('xij,ji->ix', h1e, dm).real
+    elif dm.ndim == 3: # KRHF or UHF
+        de_partial = cp.einsum('kxij,kji->ix', h1e, dm).real
+    else: # dm.ndim == 4 KUHF
+        de_partial = cp.einsum('skxij,skji->ix', h1e, dm).real
+    de_partial = de_partial.get()
+    de = groupby(atm_id_for_ao, de_partial, op='sum')
     return de
 
 class GradientsBase(molgrad.GradientsBase):
