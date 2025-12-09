@@ -408,6 +408,10 @@ class SRInt3c2eOpt:
         bvk_ao_loc = bvkcell.ao_loc
         aux_loc = auxcell.ao_loc
         ao_loc = _conc_locs(bvk_ao_loc, aux_loc)
+        # TODO: in fill_int3c2e_v2, bvk_ao_loc for each shell in prim_cell
+        # should point to the AO offsets of the contracted shell in sorted_cell.
+        # p2c_ao_loc = sorted_cell.ao_loc[self.prim_to_ctr_mapping]
+        # bvk_ao_loc = np.arange(bvk_ncells, dtype=np.int32)[:,None] * sorted_cell.nao + p2c_ao_loc
         self._int3c2e_envs = PBCIntEnvVars.new(
             pcell.natm, pcell.nbas, bvk_ncells, nimgs, _atm, _bas, _env, ao_loc, Ls)
         err = libpbc.PBCsr_int3c2e_latsum23_init(ctypes.c_int(SHM_SIZE))
@@ -1089,16 +1093,20 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
 
-        # .dot(expLk) will perform a summation over all BvK cells for auxiliary
-        # dimension. This summation can be performed in advance by shifting aux_loc.
         sorted_cell = self.sorted_cell
         ao_loc = sorted_cell.ao_loc
+        aux_loc = self.sorted_auxcell.ao_loc
         nao = ao_loc[-1]
+        naux = aux_loc[-1]
+        # To address the density matrix (dm) represented in contracted GTOs,
+        # the ao_loc for prim_cell should point to the corresponding offsets of
+        # contracted shells.
         p2c_ao_loc = ao_loc[self.prim_to_ctr_mapping]
         ao_loc = np.arange(bvk_ncells, dtype=np.int32)[:,None] * nao + p2c_ao_loc
-        aux_loc = self.sorted_auxcell.ao_loc
-        naux = aux_loc[-1]
-        # points to the aux_loc of reference cell, corresponding to the aux_kpt=0
+        # .dot(expLk) will perform a summation over all BvK cells for auxiliary
+        # dimension. This summation can be performed in advance by shifting aux_loc.
+        # Each entry of the modified aux_loc points to the aux_loc of reference
+        # cell, corresponding to the aux_kpt=0
         aux_loc = np.repeat(bvk_ncells*nao + aux_loc[None,:-1], bvk_ncells, axis=0)
         ao_loc = np.hstack([ao_loc.ravel(), aux_loc.ravel(), bvk_ncells*nao+naux])
         ao_loc = cp.asarray(ao_loc, dtype=np.int32)
