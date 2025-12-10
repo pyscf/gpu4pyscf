@@ -371,7 +371,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     available_gpu_memory = get_avail_gpumem()
     n_eri3c_per_aux = naopair * 3 
     n_eri3c_unzip_per_aux = nao_orig * nao_orig * 1
-    n_Ppq_per_aux = nao_orig * siz_q * 1
+    n_Ppq_per_aux = siz_p * nao_orig  + siz_p * siz_q * 1
 
 
     bytes_per_aux = ( n_eri3c_per_aux + n_eri3c_unzip_per_aux + n_Ppq_per_aux) * cp_int3c_dtype.itemsize  
