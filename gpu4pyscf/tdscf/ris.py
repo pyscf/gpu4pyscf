@@ -15,6 +15,7 @@
 import numpy as np
 import cupy as cp
 import cupyx.scipy.linalg as cpx_linalg
+import gc
 
 from pyscf import gto, lib
 from gpu4pyscf import scf
@@ -167,12 +168,25 @@ def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in
         Ppq = Ppq.get()
     return Ppq
 
+def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
+    '''    
+    eri3c : (uv|P) , P = nauxao
+    C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
+
+    Ppq = einsum("uvP,up,vq->Ppq", eri3c, Cp, C_q)
+    '''
+    tmp = contract('uvP,up->Ppv', eri3c, C_p)
+    Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
+
+    if in_ram:
+        Ppq = Ppq.get()
+    return Ppq
 
 BLKSIZE = 256
 AUXBLKSIZE = 256
 
 
-def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+def get_Tpq_old(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
            calc='JK', aosym=True, omega=None, alpha=None, beta=None,
            group_size=BLKSIZE, group_size_aux=AUXBLKSIZE, log=None, 
            in_ram=True, single=True):
@@ -194,29 +208,15 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     intopt = VHFOpt(mol, auxmol, 'int2e')
     intopt.build(aosym=True, group_size=group_size, group_size_aux=group_size_aux,verbose=mol.verbose)
 
-    print('intopt._ao_idx', intopt._ao_idx.shape)
-
-    C_p_unsorted = C_p.copy()
-    C_q_unsorted = C_q.copy()
-
     C_p = C_p[intopt._ao_idx,:]
     C_q = C_q[intopt._ao_idx,:]
 
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
 
-    print('intopt._aux_ao_idx', intopt._aux_ao_idx.shape)
-
-    upper_inv_eri2c_unsorted = lower_inv_eri2c.T
-
-    eri2c = cp.asarray(auxmol.intor('int2c2e'))
-    eri2c = eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx]
-    L = cp.linalg.cholesky(eri2c)
-    L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
-    lower_inv_eri2c = L_inv.T
-
-    # upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
-    upper_inv_eri2c = lower_inv_eri2c.T
+    ''' upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx,:][:,intopt._aux_ao_idx].T '''
+    upper_inv_eri2c = lower_inv_eri2c[intopt._aux_ao_idx, intopt._aux_ao_idx[:,None]]
+    
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
@@ -273,12 +273,6 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             Pij[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p, in_ram=in_ram)
             Pab[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q, in_ram=in_ram)
 
-    # if 'J' in calc:
-    #     Pia = intopt.unsort_orbitals(Pia,aux_axis=[0])
-    # if 'K' in calc:
-    #     Pij = intopt.unsort_orbitals(Pij,aux_axis=[0])
-    #     Pab = intopt.unsort_orbitals(Pab,aux_axis=[0])
-
 
     if in_ram:
         def einsum2dot(_,a,b):
@@ -299,16 +293,8 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     if calc == 'J':
         Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
-       
-
-        # standard Tia_ref = \sum_{Puv} (P|Q) (Q|uv) C_ui Cva
-        eri_3c2e_ref = int3c2e.get_int3c2e(mol, auxmol, omega=0).transpose(2,0,1)
-        Pia_ref = get_PuvCupCvq_to_Ppq(eri_3c2e_ref, C_p_unsorted, C_q_unsorted)
-        Tia_ref = tmp_einsum('PQ, Qia->Pia', upper_inv_eri2c_unsorted, Pia_ref)
-        print('Tia - Tia_ref', cp.linalg.norm(cp.asarray(Tia)-cp.asarray(Tia_ref)))
-        assert cp.abs(cp.asarray(Tia)-cp.asarray(Tia_ref)).max() < 1e-7
+        Tia = intopt.unsort_orbitals(Tia,aux_axis=[0])
         return Tia
-        # return ref
 
     if calc == 'K':
         Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
@@ -321,130 +307,6 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         return Tia, Tij, Tab
    
-
-
-def compute_Tpq_on_gpu_general(mol, auxmol, C_p, C_q, lower_inv_eri2c,
-                                calc='JK', aosym=True, omega=None, alpha=None, beta=None,
-                                group_size=BLKSIZE, group_size_aux=AUXBLKSIZE):
-    """
-    (3c2e_{Puv}, C_{up}, C_{vq} -> Ppq)。
-
-    Parameters:
-        mol: pyscf.gto.Mole
-        auxmol: pyscf.gto.Mole
-        C_p: cupy.ndarray (nao, p)
-        C_q: cupy.ndarray  (nao, q)
-
-    Returns:
-        Tpq: cupy.ndarray (naux, nao, nao)
-    """
-
-    intopt = VHFOpt(mol, auxmol, 'int2e')
-    intopt.build(aosym=aosym, group_size=group_size, group_size_aux=group_size_aux)
-
-    nao = mol.nao
-    naux = auxmol.nao
-
-    siz_p = C_p.shape[1]
-    siz_q = C_q.shape[1]
-
-    if 'J' in calc:
-        Pia = cp.zeros((naux, siz_p, siz_q), dtype=cp.float32)
-
-    if 'K' in calc:
-        Pij = cp.zeros((naux, siz_p, siz_p), dtype=cp.float32)
-        Pab = cp.zeros((naux, siz_q, siz_q), dtype=cp.float32)
-
-    unsorted_ao_index = cp.argsort(intopt._ao_idx)
-    unsorted_aux_ao_index = cp.argsort(intopt._aux_ao_idx)
-    for cp_kl_id, _ in enumerate(intopt.aux_log_qs):
-        k0, k1 = intopt.aux_ao_loc[cp_kl_id], intopt.aux_ao_loc[cp_kl_id+1]
-
-        int3c_slice = cp.zeros((k1 - k0, nao, nao), dtype=cp.float32, order='C')
-
-        for cp_ij_id, _ in enumerate(intopt.log_qs):
-            cpi = intopt.cp_idx[cp_ij_id]
-            cpj = intopt.cp_jdx[cp_ij_id]
-            li = intopt.angular[cpi]
-            lj = intopt.angular[cpj]
-
-            int3c_slice_blk = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=0)
-
-            if not mol.cart:
-                int3c_slice_blk = cart2sph(int3c_slice_blk, axis=1, ang=lj)
-                int3c_slice_blk = cart2sph(int3c_slice_blk, axis=2, ang=li)
-
-
-            if omega and omega != 0:
-                int3c_slice_blk_omega = get_int3c2e_slice(intopt, cp_ij_id, cp_kl_id, omega=omega)
-
-                if not mol.cart:
-                    int3c_slice_blk_omega = cart2sph(int3c_slice_blk_omega, axis=1, ang=lj)
-                    int3c_slice_blk_omega = cart2sph(int3c_slice_blk_omega, axis=2, ang=li)
-                int3c_slice_blk = alpha * int3c_slice_blk +  beta * int3c_slice_blk_omega
-
-            int3c_slice_blk = cp.asarray(int3c_slice_blk, dtype=cp.float32, order='C')
-            i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-            j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
-
-            assert int3c_slice[:,j0:j1, i0:i1].shape == int3c_slice_blk.shape
-            int3c_slice[:,j0:j1, i0:i1] = int3c_slice_blk
-
-        if aosym:
-            row, col = cp.tril_indices(nao)
-            int3c_slice[:, row, col] = int3c_slice[:, col, row]
-
-
-        
-        int3c_slice = int3c_slice[:, unsorted_ao_index, :]
-        int3c_slice = int3c_slice[:, :, unsorted_ao_index]
-
-
-        if 'J' in calc:
-            Pia[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_q)
-
-        if 'K' in calc:
-
-            Pij[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_p,C_p)
-            Pab[k0:k1,:,:] = get_PuvCupCvq_to_Ppq(int3c_slice,C_q,C_q)
-
-    
-    if 'J' in calc:
-        Pia = Pia[unsorted_aux_ao_index,:,:]
-    if 'K' in calc:
-        Pij = Pij[unsorted_aux_ao_index,:,:]
-        Pab = Pab[unsorted_aux_ao_index,:,:]
-
-    # DEBUG = False
-    # if DEBUG:
- 
-    #     eri_3c2e = int3c2e.get_int3c2e(mol, auxmol, omega=0).transpose(2,0,1)
-
-    #     if omega and omega != 0:
-    #         eri_3c2e_erf = int3c2e.get_int3c2e(mol, auxmol, omega=omega).transpose(2,0,1)
-    #         eri_3c2e = alpha * eri_3c2e + beta * eri_3c2e_erf
-
-    #     Pia = get_PuvCupCvq_to_Ppq(eri_3c2e, C_p, C_q)
-    #     if calc == 'J':
-    #         Tia_ref = cp.einsum('PQ, Qpq', lower_inv_eri2c.T, Pia)
-            
-
-    if calc == 'J':
-        Tia = get_Ppq_to_Tpq(Pia, lower_inv_eri2c)
-        return Tia
-
-    if calc == 'K':
-        Tij = get_Ppq_to_Tpq(Pij, lower_inv_eri2c)
-        Tab = get_Ppq_to_Tpq(Pab, lower_inv_eri2c)
-        return Tij, Tab
-
-    if calc == 'JK':
-        Tia = get_Ppq_to_Tpq(Pia, lower_inv_eri2c)
-        Tij = get_Ppq_to_Tpq(Pij, lower_inv_eri2c)
-        Tab = get_Ppq_to_Tpq(Pab, lower_inv_eri2c)
-        return Tia, Tij, Tab
-
-
 def get_Tpq_bdiv_raw(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
            calc='JK', omega=None, alpha=None, beta=None,
            log=None, in_ram=True, single=True):
@@ -467,7 +329,7 @@ def get_Tpq_bdiv_raw(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     out = cp.zeros((nao*nao, naux))
     print('out.shape', out.shape)
-    
+     
     eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
     # eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
     eri3c = eri3c.dot(aux_coeff)
@@ -491,7 +353,7 @@ def get_Tpq_bdiv_raw(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     assert abs(out.get()-ref).max() < 1e-10
 
 
-def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+def get_Tpq_bdiv_success(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
            calc='JK', omega=None, alpha=None, beta=None,
            log=None, in_ram=True, single=True):
     # nao = mol.nao
@@ -501,10 +363,10 @@ def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     ao_idx = cp.asarray(int3c2e_opt.ao_idx)
     print('ao_idx.shape', ao_idx.shape)
 
-    # C_p = C_p[ao_idx,:]
-    # C_q = C_q[ao_idx,:]
+
     # C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
     # C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    upper_inv_eri2c = lower_inv_eri2c.T
 
     nao, nao_orig = int3c2e_opt.coeff.shape
     print('nao, nao_orig', nao, nao_orig) # 220 208
@@ -515,22 +377,18 @@ def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
     print('eri3c.shape', eri3c.shape)
-    # eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
-    print('orbital_pair_cart2sph eri3c.shape', eri3c.shape)
-    # eri3c = eri3c.dot(aux_coeff)  # (uv|P)
-    print('mol.cart', mol.cart)
+
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
 
     # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
     rows, cols = divmod(ao_pair_mapping, nao)
-    # rows, cols = divmod(ao_pair_mapping, nao_orig)
 
     out = cp.zeros((nao*nao, naux))
     # out = cp.zeros((nao_orig*nao_orig, naux))
 
-    out[ao_pair_mapping] = eri3c
+    # out[ao_pair_mapping] = eri3c
     out[rows*nao+cols] = out[cols*nao+rows] = eri3c
-    # out[cols*nao_orig+rows] = eri3c
+
     
     out = out.reshape(nao, nao, naux)
 
@@ -543,14 +401,19 @@ def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     out = contract('pqr,rk->pqk', out, aux_coeff)
     # out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
 
+    eric_compress, ao_idx_rows, ao_idx_cols = int3c2e_bdiv.compressed_aux_e2(mol, auxmol)
+    print('eri3c_compress.shape', eric_compress.shape)
+    print('ao_idx_rows.shape', ao_idx_rows.shape)
+    print('ao_idx_cols.shape', ao_idx_cols.shape)
+
     out = contract('pqk,qj->pjk', out, coeff)
     out = contract('pjk,pi->ijk', out, coeff)
 
     int3c2eref = int3c2e.get_int3c2e(mol, auxmol)
-    print('int3c2eref.shape',  int3c2eref.shape)
+    # print('int3c2eref.shape',  int3c2eref.shape)
     int3c2eref = cp.einsum('uvP->Puv',int3c2eref)
     int3c2e_bdiv_out = cp.einsum('uvP->Puv',out)
-    print('int3c2e_bdiv - int3c2eref', cp.linalg.norm(int3c2e_bdiv_out-int3c2eref)) # bingo!
+    print('int3c2e_bdiv_out - int3c2eref', cp.linalg.norm(int3c2e_bdiv_out-int3c2eref)) # bingo!
 
     # out = cp.einsum('Puv->uvP', ref)
     # out = get_int3c2e(mol, auxmol)
@@ -558,22 +421,314 @@ def get_Tpq_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     out = int3c2e_bdiv_out
     # tmp = contract('Puv,up->Ppv', out, C_p)
     # out = contract('Ppv,vq->Ppq', tmp, C_q)
-    out = contract('Puv,up->pvP', out, C_p)
-    out = contract('pvP,vq->Ppq', out, C_q)
+    out = contract('Puv,up->Ppv', out, C_p)
+    out = contract('Ppv,vq->Ppq', out, C_q)
 
-    # j2c = cp.asarray(int3c2e_opt.auxmol.intor('int2c2e'), order='C')
-    # print('int3c2e_opt.auxmol_int2c2e - auxmol_int2c2e', cp.linalg.norm(j2c-cp.asarray(auxmol.intor('int2c2e')))) # 0.0
-    
-    # cd_low = cp.linalg.cholesky(j2c)
-    
-    # cd_low = cpx_linalg.solve_triangular(cd_low, aux_coeff.T, lower=True, overwrite_b=True)
-    # cd_low = cpx_linalg.solve_triangular(cd_low, cp.eye(cd_low.shape[0]), lower=True, overwrite_b=True)
-
-    # print('cd_low - lower_inv_eri2c', cp.linalg.norm(cd_low - lower_inv_eri2c.T)) # 1e-7
-    Tpq = contract('PQ,Qpq->Ppq', lower_inv_eri2c.T, out)
+    Tpq = contract('PQ,Qpq->Ppq', upper_inv_eri2c, out)
 
     return Tpq
 
+def get_Tpq_bdiv_full(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+           calc='JK', omega=None, alpha=None, beta=None,
+           log=None, in_ram=True, single=True):
+    # nao = mol.nao
+    n_occ = C_p.shape[1]
+
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    ao_idx = cp.asarray(int3c2e_opt.ao_idx)
+    print('ao_idx.shape', ao_idx.shape)
+
+    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    # upper_inv_eri2c = lower_inv_eri2c.T
+
+    print('C_p.shape', C_p.shape)
+    print('C_q.shape', C_q.shape)
+
+    nao, nao_orig = int3c2e_opt.coeff.shape
+    print('nao, nao_orig', nao, nao_orig) # 220 208
+
+    aux_coeff = cp.array(int3c2e_opt.aux_coeff) # aux_coeff is contraction coeff of GTO, not the MO coeff
+    naux = aux_coeff.shape[0]
+    print('aux_coeff.shape', aux_coeff.shape)
+
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    print('eri3c.shape', eri3c.shape)
+    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
+    print('eri3c_orbital_pair_cart2sph', eri3c.shape)
+    eri3c = eri3c.dot(aux_coeff.dot(lower_inv_eri2c))
+    # eri3c = eri3c.dot(lower_inv_eri2c)
+    print('eri3c.shape', eri3c.shape)
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    out = cp.zeros((nao_orig*nao_orig, naux))
+    print('out.shape',out.shape)
+
+    out[ao_pair_mapping] = eri3c
+    rows, cols = divmod(ao_pair_mapping, nao_orig)
+    out[cols*nao_orig+rows] = eri3c
+    out = out.reshape(nao_orig, nao_orig, naux)
+    print('out.shape',out.shape)
+
+    # out = contract('uvP,PQ->Quv', out, aux_coeff.dot(upper_inv_eri2c))
+    # out = contract('uvP,PQ->Quv', out, upper_inv_eri2c)
+
+    out = contract('uvP,up->Ppv', out, C_p)
+    out = contract('Ppv,vq->Ppq', out, C_q)
+
+    return out
+
+
+def einsum2dot(_,a,b):
+    P, Q = a.shape
+    Q, p, q = b.shape
+
+    b = b.reshape(Q, p*q)
+
+    out = np.dot(a, b)
+
+    out = out.reshape(P, p, q)
+    return out
+
+def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+           calc='JK', aosym=True, omega=None, alpha=None, beta=None,
+           group_size=BLKSIZE, group_size_aux=AUXBLKSIZE, log=None, 
+           in_ram=True, single=True):
+    """
+    (3c2e_{Puv}, C_{up}, C_{vq} -> Ppq)。
+
+    Parameters:
+        mol: pyscf.gto.Mole
+        auxmol: pyscf.gto.Mole
+        C_p: cupy.ndarray (nao, p)
+        C_q: cupy.ndarray  (nao, q)
+
+    Returns:
+        Tpq: cupy.ndarray (naux, nao, nao)
+    """
+
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    nao, nao_orig = int3c2e_opt.coeff.shape
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    rows, cols = divmod(ao_pair_mapping, nao_orig)
+
+    # upper_inv_eri2c = lower_inv_eri2c.T
+
+    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+
+    siz_p = C_p.shape[1]
+    siz_q = C_q.shape[1]
+
+
+    aux_coeff = cp.array(int3c2e_opt.aux_coeff) # aux_coeff is contraction coeff of GTO, not the MO coeff
+    naux = aux_coeff.shape[0]
+    # print('aux_coeff.shape', aux_coeff.shape)
+
+    xp = np if in_ram else cp
+    log.info(f'xp {xp}')
+
+    P_dtype = xp.dtype(xp.float32 if single else xp.float64)
+    cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
+    print('cp_int3c_dtype', cp_int3c_dtype)
+    aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
+    aux_coeff_lower_inv_eri2c = cp.asarray(aux_coeff_lower_inv_eri2c, dtype=cp_int3c_dtype)
+    upper_inv_eri2c = aux_coeff_lower_inv_eri2c.T
+
+    if in_ram:
+        aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
+
+    if 'J' in calc:
+        Pia = xp.zeros((naux, siz_p, siz_q), dtype=P_dtype)
+
+    if 'K' in calc:
+        Pij = xp.zeros((naux, siz_p, siz_p), dtype=P_dtype)
+        Pab = xp.zeros((naux, siz_q, siz_q), dtype=P_dtype)
+
+    byte_eri3c = nao_orig * nao_orig * cp_int3c_dtype.itemsize
+    log.info(f'eri3c per aux dimension will take {byte_eri3c / (1024 ** 2):.0f} MB memory')
+
+
+    aux_offset = 0
+    batch_size = 16
+
+    for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
+        # print('eri3c_batch.shape', eri3c_batch.shape)
+        eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+        eri3c_batch = cp.asarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
+        # if in_ram:
+        #     eri3c_batch = eri3c_batch.get()
+        # print('eri3c_orbital_pair_cart2sph', eri3c_batch.shape)
+        aopair, aux_batch_size = eri3c_batch.shape
+
+        eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, aux_batch_size), order='F')
+
+        eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
+        eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
+
+        eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, aux_batch_size)
+        
+        '''Puv -> Ppq, AO->MO transform '''
+        if 'J' in calc:
+            Pia[aux_offset:aux_offset+aux_batch_size,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_p,C_q, in_ram=in_ram)
+
+        if 'K' in calc:
+            Pij[aux_offset:aux_offset+aux_batch_size,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_p,C_p, in_ram=in_ram)
+            Pab[aux_offset:aux_offset+aux_batch_size,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_q,C_q, in_ram=in_ram)
+        
+        log.info(f'batch {aux_offset}-{aux_offset+aux_batch_size} / {naux} done')
+
+        aux_offset += aux_batch_size
+
+    if in_ram:
+        tmp_einsum = einsum2dot 
+        upper_inv_eri2c = upper_inv_eri2c.get()
+
+    else:
+        tmp_einsum = contract
+
+    if calc == 'J':
+        Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+        # Tia = intopt.unsort_orbitals(Tia,aux_axis=[0])
+        return Tia
+
+    if calc == 'K':
+        Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
+        Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
+        return Tij, Tab
+
+    if calc == 'JK':
+        Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+        Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
+        Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
+        return Tia, Tij, Tab
+   
+
+def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+           calc='JK', omega=None, alpha=None, beta=None,
+           log=None, in_ram=True, single=True):
+
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    # ao_idx = cp.asarray(int3c2e_opt.ao_idx)
+    # print('ao_idx.shape', ao_idx.shape)
+
+    nao, nao_orig = int3c2e_opt.coeff.shape
+    print('nao, nao_orig', nao, nao_orig) # 220 208
+
+    xp = np if in_ram else cp
+    log.info(f'xp {xp}')
+    int3c_dtype    = xp.dtype(xp.float32 if single else xp.float64)
+    cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
+
+    
+    aux_coeff = cp.array(int3c2e_opt.aux_coeff) # aux_coeff is contraction coeff of GTO, not the MO coeff
+    nauxao = aux_coeff.shape[0]
+    # print('aux_coeff.shape', aux_coeff.shape)
+
+    aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
+    aux_coeff_lower_inv_eri2c = cp.asarray(aux_coeff_lower_inv_eri2c, dtype=cp_int3c_dtype, order='F')
+    if in_ram:
+        aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
+
+    # print('aux_coeff_lower_inv_eri2c.flag', aux_coeff_lower_inv_eri2c.flags)
+    have_holder = None
+
+
+    print('nauxao =', nauxao)
+    # eri3c = cp.empty((19667, nauxao), order='F')
+    aux_offset = 0
+    for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=100):
+        # print('eri3c_batch.shape', eri3c_batch.shape)
+        eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+        eri3c_batch = cp.asarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
+        if in_ram:
+            eri3c_batch = eri3c_batch.get()
+       
+        aopair, aux_batch_size = eri3c_batch.shape
+        if not have_holder:
+            byte_eri3c = aopair * nauxao * int3c_dtype.itemsize
+            log.info(f'eri3c will take {byte_eri3c / (1024 ** 2):.0f} MB memory')
+            eri3c = xp.empty((aopair, nauxao), order='F', dtype=int3c_dtype)
+            have_holder = True
+        eri3c[:, aux_offset:aux_offset+aux_batch_size] = eri3c_batch
+        log.info(f'batch {aux_offset}-{aux_offset+aux_batch_size} / {nauxao} done')
+        aux_offset += aux_batch_size
+
+    # tmp = aux_coeff.dot(lower_inv_eri2c).T
+    eri3c = eri3c.dot(aux_coeff_lower_inv_eri2c)
+    print('eri3c.shape', eri3c.shape)
+    return eri3c, int3c2e_opt
+
+def gen_iajb_MVP_bdiv(eri3c, int3c2e_opt, C_p, C_q): 
+    '''
+    (ia|jb)V = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
+             = Σ_P [ T_left_ia^P Σ_jb(T_right_jb^P V_jb^m) ]
+    (ia|jb) in RKS
+
+    V in shape (m, n_occ * n_vir)
+    '''
+
+    # def iajb_MVP(V):
+    #     T_right_jb_V = einsum("Pjb,mjb->Pm", T_right, V)
+    #     iajb_V = einsum("Pia,Pm->mia", T_left, T_right_jb_V)
+    #     return iajb_V
+    nao, nao_orig = int3c2e_opt.coeff.shape
+    nauxao = eri3c.shape[1]
+
+    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=False)
+    # print('ao_pair_mapping.shape', ao_pair_mapping.shape)
+
+    rows, cols = divmod(ao_pair_mapping, nao_orig)
+
+    def iajb_MVP(V):
+        '''
+        Optimized calculation of (ia|jb) = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
+        by chunking along the auxao dimension to reduce memory usage.
+
+        Parameters:
+            V (cupy.ndarray): Input tensor of shape (m, n_occ * n_vir).
+
+        Returns:
+            iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
+        '''
+
+        n_state, n_occ, n_vir = V.shape
+        # Initialize result tensor
+        iajb_V = cp.zeros((n_state, n_occ, n_vir), dtype=V.dtype)
+
+        aux_chunk_size = 5
+        # print('iajb chunks', len(range(0, nauxao, aux_chunk_size)))
+        print(get_memory_info('  iajb_V before slicing aux')) 
+        # Iterate over chunks of the auxao dimension
+        for aux_start in range(0, nauxao, aux_chunk_size):
+            aux_end = min(aux_start + aux_chunk_size, nauxao)
+            tmp_aux_chunk_size = aux_end - aux_start
+
+            eri3c_chunk = cp.asarray(eri3c[:, aux_start:aux_end], order='F')
+            
+            eri3c_unzip_chunk = cp.zeros((nao_orig*nao_orig, tmp_aux_chunk_size), order='F')
+
+            eri3c_unzip_chunk[ao_pair_mapping,   :] = eri3c_chunk
+            eri3c_unzip_chunk[cols*nao_orig+rows,:] = eri3c_chunk
+
+            eri3c_unzip_chunk = eri3c_unzip_chunk.reshape(nao_orig, nao_orig, tmp_aux_chunk_size)
+
+            tmp_Ppv = contract('uvP,up->Ppv', eri3c_unzip_chunk, C_p)
+            Tjb_chunk = contract('Ppv,vq->Ppq', tmp_Ppv, C_q)
+ 
+            Tjb_Vjb_chunk = contract("Pjb,mjb->Pm", Tjb_chunk, V)
+            Tia_chunk = Tjb_chunk  # Shape: (aux_range, n_occ, n_vir)
+            iajb_V += contract("Pia,Pm->mia", Tia_chunk, Tjb_Vjb_chunk)
+
+            # Release intermediate variables and clean up memory, must!
+            del eri3c_unzip_chunk, Tjb_chunk, Tia_chunk, Tjb_Vjb_chunk
+            release_memory()
+
+        return iajb_V
+
+    return iajb_MVP
 
 def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None, dtype=cp.float64):
 
@@ -586,7 +741,7 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None, dtype=cp.float64
 
         eri2c = alpha * eri2c + beta * eri2c_erf
 
-    eri2c = cp.asarray(eri2c, dtype=cp.float64, order='C')
+    eri2c = cp.asarray(eri2c)
 
     try:
         ''' we want lower_inv_eri2c = X
@@ -743,7 +898,7 @@ def gen_ijab_MVP(T_ij, T_ab):
         bytes_per_vir = 2*( n_T_ab_chunk + n_T_ab_V_chunk + n_ijab_V_chunk) * T_ab.itemsize  
         # print('available_gpu_memory', available_gpu_memory)
         # print('bytes_per_vir', bytes_per_vir)
-        vir_chunk_size = max(1, int(available_gpu_memory * 0.8 // bytes_per_vir)) 
+        vir_chunk_size = max(1, int(available_gpu_memory * 0.4 // bytes_per_vir)) 
 
         # print(get_memory_info('  ijab_V before slicing vir')) 
         # print('vir_chunk_size', vir_chunk_size)
@@ -1330,7 +1485,7 @@ class RisBase(lib.StreamObject):
         byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
         log.info(f'T_ia_J will take {byte_T_ia_J / (1024 ** 2):.0f} MB memory') 
 
-        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0, dtype=self.dtype)
+        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
 
         if self.a_x != 0:
             
@@ -1345,51 +1500,28 @@ class RisBase(lib.StreamObject):
             if self._JK_share_aux:
                 self.lower_inv_eri2c_K = self.lower_inv_eri2c_J
             else:
-                self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta, dtype=self.dtype)
+                self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
              
         self.log = log
-
 
     def get_T_J(self):
         log = self.log
         log.info('==================== RIJ ====================')
         cpu0 = log.init_timer()
 
-        T_ia_J_old = compute_Tpq_on_gpu_general(mol=self.mol, auxmol=self.auxmol_J, C_p=self.C_occ_notrunc, 
-                                                C_q=self.C_vir_notrunc, lower_inv_eri2c=self.lower_inv_eri2c_J,
-                                                calc='J', omega=0)
-
-        T_ia_J_bdiv = get_Tpq_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
-                            C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
-                            in_ram=self._in_ram, single=self.single, log=log)
-
         T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
                         group_size = self.group_size, group_size_aux =self.group_size_aux,
                         in_ram=self._in_ram, single=self.single, log=log)
 
-
-        def compareAB(A,B):
-            A = cp.asarray(A)
-            B = cp.asarray(B)
-            return float(cp.linalg.norm(A-B)), float(cp.abs(A-B).max())
- 
-
-        print('T_ia_J_bdiv - T_ia_J', compareAB(T_ia_J_bdiv,T_ia_J))
-        print('T_ia_J_old - T_ia_J', compareAB(T_ia_J_old, T_ia_J))
-        print('T_ia_J_bdiv - T_ia_J_old', compareAB(T_ia_J_bdiv, T_ia_J_old))
-  
-        # assert cp.abs(T_ia_J_bdiv - T_ia_J).max() < 1e-10
-
         log.timer('build T_ia_J', *cpu0)
         log.info(get_memory_info('after T_ia_J'))
-        return T_ia_J_bdiv
+        return T_ia_J
     
     def get_2T_K(self):
         log = self.log
         log.info('==================== RIK ====================')
         cpu1 = log.init_timer()
-
 
         T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K, 
                                 C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='K', 
@@ -1414,6 +1546,19 @@ class RisBase(lib.StreamObject):
         log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
         log.info(get_memory_info('after T_ia_K T_ij_K T_ab_K'))
         return T_ia_K, T_ij_K, T_ab_K
+
+    def get_eri3c(self):
+        log = self.log
+        log.info('==================== eri3c ====================')
+        cpu0 = log.init_timer()
+
+        eri3c, int3c2e_opt = get_eri3c_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
+                            C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
+                            in_ram=self._in_ram, single=self.single, log=log)
+
+        log.timer('build eri3c', *cpu0)
+        log.info(get_memory_info('after eri3c'))
+        return eri3c, int3c2e_opt
 
     def Gradients(self):
         raise NotImplementedError
@@ -1448,14 +1593,19 @@ class TDA(RisBase):
         ''' TDA RKS hybrid '''
         log = self.log
 
-        T_ia_J = self.get_T_J()
-        
+        eri3c, int3c2e_opt = self.get_eri3c()
         T_ij_K, T_ab_K = self.get_2T_K()
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
-        iajb_MVP = gen_iajb_MVP(T_ia=T_ia_J)
+        # iajb_MVP = gen_iajb_MVP(T_ia=T_ia_J)
+        iajb_MVP = gen_iajb_MVP_bdiv(eri3c=eri3c, int3c2e_opt=int3c2e_opt, C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc)
         ijab_MVP = gen_ijab_MVP(T_ij=T_ij_K, T_ab=T_ab_K)
+
+        del self._scf 
+        del self.chkfile 
+        gc.collect()
+        release_memory()
 
         def RKS_TDA_hybrid_MVP(X):
             ''' hybrid or range-sparated hybrid, a_x > 0
