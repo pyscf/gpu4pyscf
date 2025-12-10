@@ -313,7 +313,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     max_N_mv = size_new + max_iter * n_states 
 
     holder_mem = 2*max_N_mv*A_size*hdiag.itemsize/(1024**2)
-    log.info(f'  V and W holder use {holder_mem:.2f} MB memory')
+    log.info(f'  V and W holder use {holder_mem:.2f} MB memory, with {hdiag.dtype}')
 
     # Initialize arrays
     V_holder = cp.empty((max_N_mv, A_size))
