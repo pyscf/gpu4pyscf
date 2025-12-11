@@ -469,30 +469,7 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
-
-        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
-        if self.mol.cart:
-            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
-        else:
-            cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
-        i_spherical_offset = 0
-        i_cartesian_offset = 0
-        for i, l in enumerate(self.uniq_l_ctr[:,0]):
-            cart2sph = cart2sph_per_l[l]
-            ncart, nsph = cart2sph.shape
-            l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
-            cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
-            sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
-            cart_idx = cart_offs[:,None] + np.arange(ncart)
-            sph_idx = sph_offs[:,None] + np.arange(nsph)
-            coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
-            l_ctr_pad_count = self.l_ctr_pad_counts[i]
-            i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
-            i_spherical_offset += l_ctr_count * nsph
-        assert len(self.ao_idx) == self.mol.nao
-        coeff = self.unsort_orbitals(coeff, axis = [1])
-        return asarray(coeff)
+        return self.apply_coeff_C_mat(cp.eye(self.mol.nao))
 
     def get_jk(self, dms, hermi, verbose):
         '''

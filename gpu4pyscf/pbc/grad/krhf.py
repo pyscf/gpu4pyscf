@@ -235,6 +235,10 @@ def _contract_h1e_dm(cell, h1e, dm):
         de_partial = cp.einsum('skxij,skji->ix', h1e, dm).real
     de_partial = de_partial.get()
     de = groupby(atm_id_for_ao, de_partial, op='sum')
+    if len(de) != cell.natm:
+        de_tmp = np.zeros((cell.natm, 3))
+        de_tmp[np.unique(atm_id_for_ao)] = de
+        de = de_tmp
     return de
 
 class GradientsBase(molgrad.GradientsBase):

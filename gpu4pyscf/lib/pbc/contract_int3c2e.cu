@@ -49,19 +49,17 @@ void contract_int3c2e_dm_kernel(double *out, double *dm,
     int ncells = envs.bvk_ncells;
     int nbas = envs.cell0_nbas * ncells;
     int ksh = blockIdx.x + nbas;
-    __shared__ int shl_pair0, shl_pair1;
-    if (thread_id == 0) {
-        shl_pair0 = shl_pair_offsets[sp_block_id];
-        shl_pair1 = shl_pair_offsets[sp_block_id+1];
-    }
     int *bas = envs.bas;
     int *ao_loc = envs.ao_loc;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
+    __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj, lij, nroots;
     __shared__ int lk, kprim;
     __shared__ int nao;
     if (thread_id == 0) {
+        shl_pair0 = shl_pair_offsets[sp_block_id];
+        shl_pair1 = shl_pair_offsets[sp_block_id+1];
         int bas_ij0 = bas_ij_idx[shl_pair0];
         int ish = bas_ij0 / nbas;
         int jsh = bas_ij0 % nbas;

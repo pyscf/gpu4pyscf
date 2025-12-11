@@ -55,12 +55,13 @@ libpbc.conc_img_idx.restype = ctypes.c_int
 libpbc.aopair_fill_triu.restype = ctypes.c_int
 libpbc.PBCsr_int3c2e_latsum23.restype = ctypes.c_int
 libpbc.PBCsr_int3c2e_latsum23_init.restype = ctypes.c_int
+libpbc.PBCsr_int3c2e_latsum23_bdiv.restype = ctypes.c_int
 libpbc.PBCsr_int3c2e_ejk_ip1.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
 THREADS = 256
-PAGES_PER_BLOCK = 131072
+PAGES_PER_BLOCK = 262144
 PAGE_SIZE = 32 * 4 # Bytes
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
@@ -618,11 +619,7 @@ class SRInt3c2eOpt:
             c_pair_mask[reduced_pair_idx] = True
 
             # c_pair_idx indicates the address of the **contracted** pair GTOS
-            # within the (li,lj) sub-block. For each shell-pair, there are
-            # nfij elements. Note, the nfij elements are sorted as [nfj,nfi]
-            # (in F-order) while the shell indices within the c_pair_idx are
-            # composed as i*nbas+j (in C-order). c_pair_idx points to the
-            # address of the first element.
+            # within the (li,lj) sub-block.
             c_pair_idx = cp.where(c_pair_mask)[0]
             n_ctr_pairs = len(c_pair_idx)
 
@@ -746,16 +743,20 @@ class SRInt3c2eOpt:
             for ll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', ll, t)
 
-    def _pair_and_diag_indices(self, img_idx_cache, cart=None):
+    def _pair_and_diag_indices(self, img_idx_cache, for_sorted_cell=False):
         # LR int3c2e from ft_ao would generate more nao_pairs than the SR int3c2e!
         cell = self.cell
         bvk_ncells = np.prod(self.bvk_kmesh)
-        nao = cell.nao
+        if for_sorted_cell:
+            ao_loc = self.sorted_cell.ao_loc
+            nao = ao_loc[-1]
+        else:
+            # Given shell I in sorted_cell, this ao_loc maps shell I to the AO
+            # offset in the original cell
+            sorted_ao_loc = self.sorted_cell.ao_loc_nr(cart=cell.cart)
+            ao_loc = self.ao_idx[sorted_ao_loc[:-1]]
+            nao = cell.nao
         bvk_nao = bvk_ncells * nao
-        # Given shell I in sorted_cell, this ao_loc maps shell I to the AO offset in
-        # the original cell
-        sorted_ao_loc = self.sorted_cell.ao_loc_nr(cart=cell.cart)
-        ao_loc = self.ao_idx[sorted_ao_loc[:-1]]
 
         # ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
         # which allows the decompression for the CUDA kernel generated compressed_eri3c:
@@ -766,9 +767,7 @@ class SRInt3c2eOpt:
         c_l_offsets = np.append(0, np.cumsum(c_shell_counts))
         lmax = cell._bas[:,ANG_OF].max()
         uniq_l = np.arange(lmax+1)
-        if cart is None:
-            cart = cell.cart
-        if cart:
+        if for_sorted_cell or cell.cart:
             nf = (uniq_l + 1) * (uniq_l + 2) // 2
         else:
             nf = uniq_l * 2 + 1
@@ -777,16 +776,16 @@ class SRInt3c2eOpt:
         diag_addresses = [] # addresses wrt the compressed indices
         p0 = p1 = 0
         for i, j in img_idx_cache:
-            pair_idx = img_idx_cache[i, j][4]
-            n_pairs = len(pair_idx)
+            c_pair_idx = img_idx_cache[i, j][4]
+            n_pairs = len(c_pair_idx)
             p0, p1 = p1, p1 + nf[i] * nf[j] * n_pairs
 
             i0, i1 = c_l_offsets[i:i+2]
             j0, j1 = c_l_offsets[j:j+2]
             nctri = c_shell_counts[i]
             nctrj = c_shell_counts[j]
-            pair_idx = cp.asnumpy(pair_idx)
-            ish, J, jsh = np.unravel_index(pair_idx, (nctri, bvk_ncells, nctrj))
+            c_pair_idx = cp.asnumpy(c_pair_idx)
+            ish, J, jsh = np.unravel_index(c_pair_idx, (nctri, bvk_ncells, nctrj))
             ish += i0
             jsh += j0
             # Note: corresponding to the storage order (npairs,nfj,nfi,nGv)
@@ -910,20 +909,17 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             c_pair_mask = cp.zeros(nctri*bvk_nctrj, dtype=bool)
             c_pair_mask[reduced_pair_idx] = True
 
-            # c_pair_idx indicates the address of the **contracted** pair GTOS
-            # within the (li,lj) sub-block. For each shell-pair, there are
-            # nfij elements. Note, the nfij elements are sorted as [nfj,nfi]
-            # (in F-order) while the shell indices within the c_pair_idx are
-            # composed as i*nbas+j (in C-order). c_pair_idx points to the
-            # address of the first element.
+            # c_pair_idx stores the indices of **contracted** pair GTOS within
+            # the (li,lj) sub-block.
             c_pair_idx = cp.asarray(cp.where(c_pair_mask)[0], dtype=np.int32)
 
-            # pair_mapping maps the primitive pair to the contracted pair
+            # p2c_pair_mapping maps the primitive pair to the contracted pair
+            # within each (li,lj) sub-block
             pair_mapping_lookup = cp.empty(nctri*bvk_nctrj, dtype=np.int32)
             pair_mapping_lookup[c_pair_idx] = cp.arange(len(c_pair_idx))
-            pair_mapping = pair_mapping_lookup[reduced_pair_idx]
+            p2c_pair_mapping = pair_mapping_lookup[reduced_pair_idx]
             log.timer_debug1(f'pair_mapping [{li},{lj}]', *t0)
-            return img_idx, img_offsets, bas_ij, pair_mapping, c_pair_idx
+            return img_idx, img_offsets, bas_ij, p2c_pair_mapping, c_pair_idx
         return gen_img_idx
 
     def make_img_idx_cache(self, cutoff=None):
@@ -1052,6 +1048,95 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             for ll, t in timing_collection.items():
                 log.debug1('%s wall time %.2f', ll, t)
 
+    def int3c2e_bdiv(self, img_idx_cache=None, cutoff=None, verbose=None):
+        if self.bvkmesh_Ls is None:
+            self.build(verbose)
+        if cutoff is None:
+            cutoff = self.estimate_cutoff_with_penalty()
+        if img_idx_cache is None:
+            img_idx_cache = self.make_img_idx_cache(cutoff)
+        log_cutoff = math.log(cutoff)
+
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(gout_width=54)
+        lmax = self.uniq_l_ctr[:,0].max()
+        laux = self.uniq_l_ctr_aux[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+        shl_pair_offsets, bas_ij_idx, img_idx, img_offsets = \
+                _aggregate_shl_pairs(img_idx_cache, np.full((lmax+1,lmax+1), 8))
+
+        # For each primitive shell-pair in bas_ij_idx, ao_pair_loc points to the
+        # addresses of first element for the contracted pair-GTOs. In each
+        # shell-pair, there are nfij elements. Note, the nfij elements are
+        # sorted as [nfj,nfi] (in F-order).
+        l = np.arange(L_AUX_MAX+1)
+        nf = (l + 1) * (l + 2) // 2
+        p0 = p1 = 0
+        ao_pair_loc = []
+        for li, lj in img_idx_cache:
+            p2c_pair_mapping, c_pair_idx = img_idx_cache[li,lj][3:5]
+            nfij = nf[li] * nf[lj]
+            p0, p1 = p1, p1 + nfij * len(c_pair_idx)
+            ao_pair_loc.append(p0 + nfij * p2c_pair_mapping)
+        ao_pair_loc = cp.asarray(cp.hstack(ao_pair_loc), dtype=np.int32)
+        nao_pair = p1
+
+        bvk_ncells = np.prod(self.bvk_kmesh)
+        nbas_aux = self.sorted_auxcell.nbas
+        l_ctr_aux_offsets = self.l_ctr_aux_offsets
+        uniq_l_ctr_aux = self.uniq_l_ctr_aux
+        ksh_offsets, ksh_idx, uniq_l_ctr_aux = _aggregate_bas_idx(
+            l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, nbas_aux, 65536)
+        assert len(ksh_offsets) == len(l_ctr_aux_offsets)
+        ksh_idx += self.bvkcell.nbas
+
+        # The auxiliary functions are sorted to
+        # [s,s,s,...,px,px,px,...,py,py,py,...,pz,pz,pz,...] than the
+        # conventional order [s,s,...,px,py,pz,px,py,pz,pz,...].
+        # Like ao_loc that points to the address of first function
+        # (s,px,d-2,f-3,...) for each shell, aux_offset points to the first
+        # function for each shell in this unusual storage.
+        aux0 = aux1 = 0
+        aux_offsets = []
+        nksh = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
+        for k, lk, in enumerate(uniq_l_ctr_aux[:,0]):
+            aux0, aux1 = aux1, aux1 + nf[lk] * nksh[k]
+            aux_offsets.append(cp.arange(aux0, aux0+nksh[k], dtype=np.int32))
+        aux_offsets = cp.asarray(cp.hstack(aux_offsets), dtype=np.int32)
+
+        eri3c = cp.zeros((nao_pair, bvk_naux))
+
+        diffuse_exps = cp.asarray(self.diffuse_exps)
+        diffuse_coefs = cp.asarray(self.diffuse_coefs)
+
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
+        int3c2e_envs = self.int3c2e_envs
+
+        err = libpbc.PBCsr_int3c2e_latsum23_bdiv(
+            ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs),
+            ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
+            ctypes.c_int(len(ksh_offsets) - 1),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(aux_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(bvk_naux),
+            ctypes.c_int(0),
+            ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('fill_int3c2e kernel')
+        return eri3c
+
     def contract_dm(self, dm, kpts=None, img_idx_cache=None, cutoff=None,
                     verbose=None):
         assert dm.shape[1] == self.cell.nao
@@ -1085,7 +1170,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         laux = self.uniq_l_ctr_aux[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
         shl_pair_offsets, bas_ij_idx, img_idx, img_offsets = \
-                _aggregate_shl_pairs(img_idx_cache, nsp_per_block)
+                _aggregate_shl_pairs(img_idx_cache, nsp_per_block[0]*4)
 
         diffuse_exps = cp.asarray(self.diffuse_exps)
         diffuse_coefs = cp.asarray(self.diffuse_coefs)
@@ -1156,9 +1241,9 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         laux = self.uniq_l_ctr_aux[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
         _, bas_ij_idx, img_idx, img_offsets = _aggregate_shl_pairs(
-            img_idx_cache, nsp_per_block)
-        ksh_offsets, ksh_idx = _aggregate_bas_idx(self.l_ctr_aux_offsets,
-                                                  bvk_ncells, nbas_aux)
+            img_idx_cache, nsp_per_block[0]*4)
+        ksh_offsets, ksh_idx, _ = _aggregate_bas_idx(
+            self.l_ctr_aux_offsets, self.uniq_l_ctr_aux, bvk_ncells, nbas_aux)
         ksh_idx += self.bvkcell.nbas
 
         diffuse_exps = cp.asarray(self.diffuse_exps)
@@ -1341,7 +1426,8 @@ def _aggregate_shl_pairs(img_idx_cache, nsp_per_block):
         bas_ij_idx.append(bas_ij)
         sp0, sp1 = sp1, sp1 + len(bas_ij)
         shl_pair_offsets.append(cp.arange(
-            sp0, sp1, nsp_per_block[0,li,lj]*4, dtype=np.int32))
+            sp0, sp1, nsp_per_block[li,lj], dtype=np.int32))
+
     sp_img_idx = cp.asarray(cp.hstack(sp_img_idx), dtype=np.int32)
     sp_img_offsets.append(img_offset_cum)
     sp_img_offsets = cp.asarray(cp.hstack(sp_img_offsets), dtype=np.int32)
@@ -1350,7 +1436,7 @@ def _aggregate_shl_pairs(img_idx_cache, nsp_per_block):
     shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
     return shl_pair_offsets, bas_ij_idx, sp_img_idx, sp_img_offsets
 
-def _aggregate_bas_idx(l_ctr_offsets, bvk_ncells, nbas, batch_size=256):
+def _aggregate_bas_idx(l_ctr_offsets, uniq_l_ctr, bvk_ncells, nbas, batch_size=256):
     ksh_offsets = []
     ksh_idx = []
     k0 = k1 = 0
@@ -1360,7 +1446,10 @@ def _aggregate_bas_idx(l_ctr_offsets, bvk_ncells, nbas, batch_size=256):
         ksh_idx.append(idx)
         k0, k1 = k1, k1 + len(idx)
         ksh_offsets.append(cp.arange(k0, k1, batch_size, dtype=np.int32))
+    repeats = [len(x) for x in ksh_offsets]
+    uniq_l_ctr = np.repeat(uniq_l_ctr, repeats, axis=0)
+
     ksh_offsets.append(np.int32(k1))
     ksh_offsets = cp.asarray(cp.hstack(ksh_offsets), dtype=np.int32)
     ksh_idx = cp.asarray(cp.hstack(ksh_idx), dtype=np.int32)
-    return ksh_offsets, ksh_idx
+    return ksh_offsets, ksh_idx, uniq_l_ctr

@@ -356,6 +356,45 @@ def test_q_cond():
     q_cond[q_cond < thrd] = thrd
     assert abs(qref - q_cond).max() < 1e-3
 
+def test_transform_coeff():
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H   4.      0.    3.
+        H   0.      1.    .6
+        C   -3.2258  -0.1262  2.6126
+        H   -5.7987   0.2177  4.1423
+        H   -5.8042  -1.0067  4.1503
+        ''',
+        basis=('def2-tzvp', [[4, [1, 1]]]),
+    )
+    jkopt = jk._VHFOpt(mol).build()
+
+    coeff = np.zeros((jkopt.sorted_mol.nao, jkopt.mol.nao))
+    l_max = max([l_ctr[0] for l_ctr in jkopt.uniq_l_ctr])
+    if jkopt.mol.cart:
+        cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
+    else:
+        cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
+    i_spherical_offset = 0
+    i_cartesian_offset = 0
+    for i, l in enumerate(jkopt.uniq_l_ctr[:,0]):
+        cart2sph = cart2sph_per_l[l]
+        ncart, nsph = cart2sph.shape
+        l_ctr_count = jkopt.l_ctr_offsets[i + 1] - jkopt.l_ctr_offsets[i]
+        cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
+        sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
+        cart_idx = cart_offs[:,None] + np.arange(ncart)
+        sph_idx = sph_offs[:,None] + np.arange(nsph)
+        coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
+        l_ctr_pad_count = jkopt.l_ctr_pad_counts[i]
+        i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
+        i_spherical_offset += l_ctr_count * nsph
+    ref = jkopt.unsort_orbitals(coeff, axis = [1])
+
+    dat = jkopt.coeff
+    assert abs(dat - ref).max() < 1e-14
+
 def test_jk_energy_per_atom():
     from gpu4pyscf.grad.rhf import _jk_energy_per_atom
     mol = pyscf.M(atom='''

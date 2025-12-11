@@ -25,8 +25,8 @@
 
 #define PAGE_SIZE       30
 #define REMOTE_THRESHOLD 50
-// approximately, 15000 images in each ijk shell triplet for 256 threads
-#define PAGES_PER_BLOCK  131072
+// approximately, 15000*2 images in each ijk shell triplet for 256 threads
+#define PAGES_PER_BLOCK  262144
 
 typedef struct {
     int pair_ij;

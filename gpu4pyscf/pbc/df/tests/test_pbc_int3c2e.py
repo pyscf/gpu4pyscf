@@ -325,3 +325,81 @@ C    D
     vj = opt.contract_auxvec(auxvec, kpts=kpts)
     ref = cp.einsum('kpqr,r->kpq', j3c, auxvec)
     assert abs(vj - ref).max() < 1e-11
+
+def test_int3c2e_bdiv_gamma_point():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+      0.5000000000           1.0000000000
+C    P
+    102.9917624900           1.0000000000
+C    P
+     28.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    omega = -0.2
+    opt = int3c2e.SRInt3c2eOpt_v2(cell, auxcell, omega).build()
+    img_idx_cache = opt.make_img_idx_cache()
+    dat = opt.int3c2e_bdiv(img_idx_cache=img_idx_cache)
+
+    from gpu4pyscf.scf.jk import apply_coeff_C_mat
+    coeff = apply_coeff_C_mat(
+        cp.eye(opt.cell.nao), opt.cell, opt.sorted_cell, opt.uniq_l_ctr,
+        opt.l_ctr_offsets, opt.ao_idx, opt.l_ctr_pad_counts)
+
+    l = np.arange(8)
+    nf = (l + 1) * (l + 2) // 2
+    bvk_ncells = np.prod(opt.bvk_kmesh)
+    nbas_aux = opt.sorted_auxcell.nbas
+    ksh_offsets, ksh_idx = int3c2e._aggregate_bas_idx(
+        opt.l_ctr_aux_offsets, bvk_ncells, nbas_aux, 65536)
+    aux0 = aux1 = 0
+    aux_idx = []
+    nksh = (ksh_offsets[1:] - ksh_offsets[:-1]).get()
+    for k, lk, in enumerate(opt.uniq_l_ctr_aux[:,0]):
+        aux0, aux1 = aux1, aux1 + nf[lk] * nksh[k]
+        aux_idx.append(np.arange(aux0, aux1).reshape(nksh[k], nf[lk]).T.ravel())
+    aux_idx = np.hstack(aux_idx)
+    naux = aux1
+
+    ao_pair_mapping = opt._pair_and_diag_indices(img_idx_cache, for_sorted_cell=True)[0]
+    nao = opt.sorted_cell.nao
+    i, j = divmod(ao_pair_mapping, nao)
+    j3c = cp.zeros((nao, nao, naux))
+    j3c[j[:,None], i[:,None], aux_idx] = dat
+    j3c[i[:,None], j[:,None], aux_idx] = dat
+    j3c = cp.einsum('pqr,pi,qj->ijr', j3c, coeff, coeff)
+    j3c = cp.einsum('ijr,rk->ijk', j3c, opt.aux_coeff).get()
+
+    cell.precision=1e-10
+    cell.build()
+    df = rsdf_builder._RSGDFBuilder(cell, auxcell).build(omega=abs(omega))
+    int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
+    ref = int3c().reshape(j3c.shape)
+    assert abs(j3c - ref).max() < 1e-8
+
+def test_int3c2e_bdiv_k_points():
+    pass

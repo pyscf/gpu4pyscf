@@ -40,28 +40,27 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                             PBCIntEnvVars envs, ImgIdxPage *page_pool,
                             int *ksh_offsets, int *ksh_idx, uint32_t *bas_ij_idx,
                             int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
+                            int *ao_pair_loc, int *aux_offsets, int naux, int aux0_offset,
                             float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     int ksh_block_id = blockIdx.y;
+    int pair_ij = blockIdx.x;
     int thread_id = threadIdx.x;
     int threads = blockDim.x * blockDim.y;
     int ncells = envs.bvk_ncells;
     int nbas = envs.cell0_nbas * ncells;
-    int pair_ij = blockIdx.x;
-    __shared__ int kidx0, kidx1;
-    if (thread_id == 0) {
-        kidx0 = ksh_offsets[ksh_block_id];
-        kidx1 = ksh_offsets[ksh_block_id+1];
-    }
-
     int *bas = envs.bas;
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[envs.cell0_nbas];
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    __shared__ int ish, jsh, li, lj, lij, nroots, i0, j0, k_offset;
+    __shared__ int kidx0, kidx1, nksh;
+    __shared__ int ish, jsh, li, lj, lij, nroots, i0, j0;
     __shared__ int lk, kprim;
     if (thread_id == 0) {
+        kidx0 = ksh_offsets[ksh_block_id];
+        kidx1 = ksh_offsets[ksh_block_id+1];
+        nksh = kidx1 - kidx0;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
         int ksh = ksh_idx[kidx0];
         ish = bas_ij / nbas;
@@ -74,8 +73,6 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
         i0 = ao_loc[ish];
         j0 = ao_loc[jsh];
-        int ksh_batch_beginning = ksh_idx[ksh_offsets[0]];
-        k_offset = ao_loc[ksh_batch_beginning];
     }
     __syncthreads();
     int gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
@@ -157,18 +154,25 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
 
     __shared__ int num_pages, img_max;
 
-    for (int kidx = kidx0+thread_id; kidx < kidx1+thread_id; kidx += THREADS) {
+    while (kidx0 < kidx1) {
         __syncthreads();
         if (thread_id == 0) {
             num_pages = 0;
         }
         __syncthreads();
-        if (kidx < kidx1) {
-            _filter_images(num_pages, page_pool, envs, pair_ij, ksh_idx[kidx], li, lj,
-                           bas_ij_idx, img_idx, img_offsets,
-                           diffuse_exps, diffuse_coefs, log_cutoff);
+        while (kidx0 < kidx1 && num_pages*2 < PAGES_PER_BLOCK) {
+            int kidx = kidx0 + thread_id;
+            if (kidx < kidx1) {
+                _filter_images(num_pages, page_pool, envs, pair_ij, ksh_idx[kidx], li, lj,
+                               bas_ij_idx, img_idx, img_offsets,
+                               diffuse_exps, diffuse_coefs, log_cutoff);
+            }
+            __syncthreads();
+            if (thread_id == 0) {
+                kidx0 += THREADS;
+            }
+            __syncthreads();
         }
-        __syncthreads();
         if (num_pages >= PAGES_PER_BLOCK) {
             __trap();
         }
@@ -194,15 +198,17 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
             }
             __syncthreads();
             int ksh = page->ksh;
-            int k0 = ao_loc[ksh] - k_offset;
+            int k0;
             double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-            size_t dm_stride = (size_t)ncells * nao * nao;
             double *dm_tensor;
             if (density_auxvec == NULL) {
-                dm_tensor = dm + k0 * dm_stride + j0 * nao + i0;
+                k0 = aux_offsets[ksh - nbas] - aux0_offset;
+                size_t pair_offset = ao_pair_loc[page->pair_ij];
+                dm_tensor = dm + pair_offset * naux + k0;
             } else {
+                k0 = ao_loc[ksh] - aux0_offset;
                 dm_tensor = dm + j0 * nao + i0;
             }
 
@@ -358,7 +364,7 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                                 int kz = idx_k[k*3+2];
                                 double dm_ijk;
                                 if (density_auxvec == NULL) {
-                                    dm_ijk = dm_tensor[k*dm_stride + j*nao+i];
+                                    dm_ijk = dm_tensor[ij*naux + k*nksh];
                                 } else {
                                     dm_ijk = dm_tensor[j*nao+i] * density_auxvec[k0+k];
                                 }
@@ -395,9 +401,9 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
             double *reduce = shared_memory + thread_id;
             __syncthreads();
             if (page_id < num_pages) {
-                reduce[0*threads] = v_kx;
-                reduce[1*threads] = v_ky;
-                reduce[2*threads] = v_kz;
+                reduce[0*threads] = v_kx * 2;
+                reduce[1*threads] = v_ky * 2;
+                reduce[2*threads] = v_kz * 2;
             }
             for (int i = gout_stride/2; i > 0; i >>= 1) {
                 __syncthreads();
@@ -409,20 +415,20 @@ void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                 }
             }
             if (gout_id == 0 && page_id < num_pages) {
-                atomicAdd(ejk+ka*3+0, reduce[0*threads] * 2);
-                atomicAdd(ejk+ka*3+1, reduce[1*threads] * 2);
-                atomicAdd(ejk+ka*3+2, reduce[2*threads] * 2);
+                atomicAdd(ejk+ka*3+0, reduce[0*threads]);
+                atomicAdd(ejk+ka*3+1, reduce[1*threads]);
+                atomicAdd(ejk+ka*3+2, reduce[2*threads]);
             }
         }
     }
     int ia = bas[ish*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
     int ja = bas[jsh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
-    atomicAdd(ejk+ia*3+0, v_ix*2);
-    atomicAdd(ejk+ia*3+1, v_iy*2);
-    atomicAdd(ejk+ia*3+2, v_iz*2);
-    atomicAdd(ejk+ja*3+0, v_jx*2);
-    atomicAdd(ejk+ja*3+1, v_jy*2);
-    atomicAdd(ejk+ja*3+2, v_jz*2);
+    atomicAdd(ejk+ia*3+0, v_ix * 2);
+    atomicAdd(ejk+ia*3+1, v_iy * 2);
+    atomicAdd(ejk+ia*3+2, v_iz * 2);
+    atomicAdd(ejk+ja*3+0, v_jx * 2);
+    atomicAdd(ejk+ja*3+1, v_jy * 2);
+    atomicAdd(ejk+ja*3+2, v_jz * 2);
 }
 
 extern "C" {
@@ -431,6 +437,7 @@ int PBCsr_int3c2e_ejk_ip1(double *ejk, double *dm, double *density_auxvec,
                           int npairs, int nbatches_ksh, int *ksh_offsets, int *ksh_idx,
                           uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
                           int *gout_stride_lookup,
+                          int *ao_pair_loc, int *aux_offsets, int naux, int aux0_offset,
                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaFuncSetAttribute(int3c2e_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -438,6 +445,7 @@ int PBCsr_int3c2e_ejk_ip1(double *ejk, double *dm, double *density_auxvec,
     int3c2e_ejk_ip1_kernel<<<blocks, THREADS, shm_size>>>(
             ejk, dm, density_auxvec, *envs, pool, ksh_offsets, ksh_idx,
             bas_ij_idx, img_idx, img_offsets, gout_stride_lookup,
+            ao_pair_loc, aux_offsets, naux, aux0_offset,
             diffuse_exps, diffuse_coefs, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
