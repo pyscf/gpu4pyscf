@@ -30,6 +30,7 @@ from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 from cupyx.scipy.linalg import lu_factor, lu_solve
+from cupyx.scipy.sparse.linalg import LinearOperator, gmres
 
 libdft = lib.load_library('libdft')
 try:
@@ -249,12 +250,63 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
         raise RuntimeError('Failed in generating PCM D and S matrices.')
     return D, S
 
+def left_multiply_S(surface, right_vector, stream=None):
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    switch_fun  = surface['switch_fun']
+    n = charge_exp.shape[0]
+    assert right_vector.size == n
+    S_dot_v = cupy.empty(n)
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_left_multiply_s(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(S_dot_v.data.ptr, ctypes.c_void_p),
+        ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+    )
+    if err != 0:
+        raise RuntimeError('Failed in pcm_left_multiply_s')
+    return S_dot_v
+
+right_multiply_S = left_multiply_S # S is symmetric
+
+def left_solve_S(surface, right_vector, stream=None):
+    charge_exp  = surface['charge_exp']
+    switch_fun  = surface['switch_fun']
+    n = charge_exp.shape[0]
+    assert right_vector.size == n
+
+    def _left_multiply_S(v):
+        return left_multiply_S(surface, v, stream)
+    def _S_preconditioner(v): # Inverse of S diagonal
+        return numpy.sqrt(numpy.pi * 0.5) * switch_fun / charge_exp * v
+
+    solve_S_threshold = 1e-14
+    operator_S = LinearOperator(shape = (n, n),
+                                matvec = _left_multiply_S,
+                                dtype = right_vector.dtype)
+    # Preconditioning is necessary, because the diagonal of S (1/switch_fun) is very large (1e10), and S is ill-conditioned
+    preconditioner_S = LinearOperator(shape = (n, n),
+                                      matvec = _S_preconditioner,
+                                      dtype = right_vector.dtype)
+    solution, info = gmres(operator_S, right_vector, tol = solve_S_threshold, M = preconditioner_S, maxiter = 100)
+    assert info == 0, f"S inversion with GMRES not converged in {info} iterations in PCM!"
+
+    solution = solution.reshape(right_vector.shape)
+    return solution
+
+right_solve_S = left_solve_S # S is symmetric
+
 class PCM(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
 
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
-        'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
+        'mol', 'radii_table', 'lebedev_order', 'lmax', 'eta',
         'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n'
@@ -271,9 +323,9 @@ class PCM(lib.StreamObject):
         self.surface = {}
         self.r_probe = 0.0
         self.radii_table = None
-        self.atom_radii = None
         self.lebedev_order = 29
         self._intermediates = {}
+        self.lowmem_intermediate_storage = False
         self.eps = 78.3553
 
         self.max_cycle = 20
@@ -296,8 +348,8 @@ class PCM(lib.StreamObject):
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
         logger.debug2(self, 'radii_table %s', self.radii_table)
-        if self.atom_radii:
-            logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
+        if getattr(self, "lowmem_intermediate_storage", False):
+            logger.info(self, 'running in lowmem PCM mode, nothing with size O(ngrids**2) is stored')
         return self
 
     def build(self, ng=None):
@@ -310,56 +362,71 @@ class PCM(lib.StreamObject):
 
         self.surface = gen_surface(mol, rad=self.radii_table, ng=ng)
         self._intermediates = {}
-        F, A = get_F_A(self.surface)
-        D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
 
         epsilon = self.eps
         inf = float('inf')
         if self.method.upper() in ['C-PCM', 'CPCM']:
             f_epsilon = (epsilon-1.)/epsilon if epsilon != inf else 1.0
-            K = S
-            S = None
-            # R = -f_epsilon * cupy.eye(K.shape[0])
         elif self.method.upper() == 'COSMO':
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0/2.0) if epsilon != inf else 1.0
-            K = S
-            S = None
-            # R = -f_epsilon * cupy.eye(K.shape[0])
         elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0) if epsilon != inf else 1.0
-            DA = D*A
-            DAS = cupy.dot(DA, S)
-            K = S - f_epsilon/(2.0*PI) * DAS
-            # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
         elif self.method.upper() == 'SS(V)PE':
             f_epsilon = (epsilon - 1.0)/(epsilon + 1.0) if epsilon != inf else 1.0
-            DA = D*A
-            DAS = cupy.dot(DA, S)
-            K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
-            # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
         else:
             raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
 
-        # Warning: lu_factor function requires a work space of the same size as K
-        K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
-        K = None
+        if not getattr(self, "lowmem_intermediate_storage", False):
+            if self.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
+                _, S = get_D_S(self.surface, with_S = True, with_D = False)
+                K = S
+                S = None
+                # R = -f_epsilon * cupy.eye(K.shape[0])
+            elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
+                _, A = get_F_A(self.surface)
+                D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
+                DA = D*A
+                DAS = cupy.dot(DA, S)
+                K = S - f_epsilon/(2.0*PI) * DAS
+                # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
+            elif self.method.upper() == 'SS(V)PE':
+                _, A = get_F_A(self.surface)
+                D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
+                DA = D*A
+                DAS = cupy.dot(DA, S)
+                K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
+                # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
+            else:
+                raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
 
-        if self.if_method_in_CPCM_category:
-            intermediates = {
-                'K_LU': cupy.asarray(K_LU),
-                'K_LU_pivot': cupy.asarray(K_LU_pivot),
-                'f_epsilon': f_epsilon,
-            }
+            # Warning: lu_factor function requires a work space of the same size as K
+            K_LU, K_LU_pivot = lu_factor(K, overwrite_a = True, check_finite = False)
+            K = None
+
+            if self.if_method_in_CPCM_category:
+                intermediates = {
+                    'K_LU': cupy.asarray(K_LU),
+                    'K_LU_pivot': cupy.asarray(K_LU_pivot),
+                    'f_epsilon': f_epsilon,
+                }
+            else:
+                intermediates = {
+                    'S': cupy.asarray(S),
+                    'D': cupy.asarray(D),
+                    'A': cupy.asarray(A),
+                    'K_LU': cupy.asarray(K_LU),
+                    'K_LU_pivot': cupy.asarray(K_LU_pivot),
+                    'f_epsilon': f_epsilon,
+                }
+            self._intermediates.update(intermediates)
+
         else:
-            intermediates = {
-                'S': cupy.asarray(S),
-                'D': cupy.asarray(D),
-                'A': cupy.asarray(A),
-                'K_LU': cupy.asarray(K_LU),
-                'K_LU_pivot': cupy.asarray(K_LU_pivot),
-                'f_epsilon': f_epsilon,
-            }
-        self._intermediates.update(intermediates)
+            self._intermediates['f_epsilon'] = f_epsilon
+            if self.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
+                pass
+            elif self.method.upper() in ['IEF-PCM', 'IEFPCM', 'SS(V)PE']:
+                _, A = get_F_A(self.surface)
+                self._intermediates['A'] = cupy.asarray(A)
 
         charge_exp  = self.surface['charge_exp']
         grid_coords = self.surface['grid_coords']
@@ -541,16 +608,22 @@ class PCM(lib.StreamObject):
             return -f_epsilon * right_vector
         else:
             # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
-            A = self._intermediates['A']
-            D = self._intermediates['D']
-            DA = D*A
-            if R_transpose:
-                DA = DA.T
-            return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
+            if not getattr(self, "lowmem_intermediate_storage", False):
+                A = self._intermediates['A']
+                D = self._intermediates['D']
+                DA = D*A
+                if R_transpose:
+                    DA = DA.T
+                return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
+            else:
+                raise NotImplementedError("IEF series of PCM not supported with lowmem_intermediate_storage yet")
 
     def left_solve_K(self, right_vector, K_transpose = False):
         ''' K^{-1} @ right_vector '''
-        K_LU       = self._intermediates['K_LU']
-        K_LU_pivot = self._intermediates['K_LU_pivot']
-        return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
-
+        if not getattr(self, "lowmem_intermediate_storage", False):
+            K_LU       = self._intermediates['K_LU']
+            K_LU_pivot = self._intermediates['K_LU_pivot']
+            return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
+        else:
+            assert self.if_method_in_CPCM_category, "IEF series of PCM not supported with lowmem_intermediate_storage yet"
+            return left_solve_S(self.surface, right_vector)
