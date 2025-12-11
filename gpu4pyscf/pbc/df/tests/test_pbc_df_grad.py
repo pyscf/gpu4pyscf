@@ -151,3 +151,64 @@ C    D
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
         assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 5e-6
+
+def test_ej_ip1_kpts():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+      0.5000000000           1.0000000000
+C    P
+    102.9917624900           1.0000000000
+C    P
+     28.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2':[[0, [.5, 1.]]],
+    }
+    auxcell.build()
+    omega = -0.2
+
+    kmesh = [3,1,4]
+    kpts = cell.make_kpts(kmesh)
+    nkpts = len(kpts)
+    dm = cp.asarray(np.linalg.inv(cell.pbc_intor('int1e_ovlp', kpts=kpts))*.5)
+    opt = int3c2e.SRInt3c2eOpt_v2(cell, auxcell, omega).build()
+    ej = krhf._j_energy_per_atom(opt, dm, kpts=kpts)
+    assert abs(ej.sum(axis=0)).max() < 1e-12
+
+    disp = 1e-3
+    atom_coords = cell.atom_coords()
+    def eval_j(i, x, disp):
+        atom_coords[i,x] += disp
+        cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+        auxcell1 = auxcell.set_geom_(atom_coords, unit='Bohr')
+        opt = int3c2e.SRInt3c2eOpt_v2(cell1, auxcell1, omega).build()
+        jaux = opt.contract_dm(dm, kpts=kpts)
+        j2c = int3c2e.sr_int2c2e(auxcell1, omega)[0]
+        atom_coords[i,x] -= disp
+        return cp.linalg.solve(j2c, jaux).dot(jaux) * .5
+
+    for i, x in [(0, 0), (0, 1), (0, 2)]:
+        e1 = eval_j(i, x, disp)
+        e2 = eval_j(i, x, -disp)
+        assert abs((e1 - e2)/(2*disp)- ej[i,x]) < 5e-6
