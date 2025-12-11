@@ -274,7 +274,7 @@ def left_multiply_S(surface, right_vector, stream=None):
 
 right_multiply_S = left_multiply_S # S is symmetric
 
-def left_solve_S(surface, right_vector, stream=None):
+def left_solve_S(surface, right_vector, conv_tol = 1e-10, stream=None):
     charge_exp  = surface['charge_exp']
     switch_fun  = surface['switch_fun']
     n = charge_exp.shape[0]
@@ -285,7 +285,6 @@ def left_solve_S(surface, right_vector, stream=None):
     def _S_preconditioner(v): # Inverse of S diagonal
         return numpy.sqrt(numpy.pi * 0.5) * switch_fun / charge_exp * v
 
-    solve_S_threshold = 1e-14
     operator_S = LinearOperator(shape = (n, n),
                                 matvec = _left_multiply_S,
                                 dtype = right_vector.dtype)
@@ -293,7 +292,7 @@ def left_solve_S(surface, right_vector, stream=None):
     preconditioner_S = LinearOperator(shape = (n, n),
                                       matvec = _S_preconditioner,
                                       dtype = right_vector.dtype)
-    solution, info = gmres(operator_S, right_vector, tol = solve_S_threshold, M = preconditioner_S, maxiter = 100)
+    solution, info = gmres(operator_S, right_vector, tol = conv_tol, M = preconditioner_S, maxiter = 100)
     assert info == 0, f"S inversion with GMRES not converged in {info} iterations in PCM!"
 
     solution = solution.reshape(right_vector.shape)
@@ -350,6 +349,7 @@ class PCM(lib.StreamObject):
         logger.debug2(self, 'radii_table %s', self.radii_table)
         if getattr(self, "lowmem_intermediate_storage", False):
             logger.info(self, 'running in lowmem PCM mode, nothing with size O(ngrids**2) is stored')
+            logger.info(self, 'GMRES convergence tolerance for K^-1 = %s', self.conv_tol)
         return self
 
     def build(self, ng=None):
@@ -626,4 +626,4 @@ class PCM(lib.StreamObject):
             return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
         else:
             assert self.if_method_in_CPCM_category, "IEF series of PCM not supported with lowmem_intermediate_storage yet"
-            return left_solve_S(self.surface, right_vector)
+            return left_solve_S(self.surface, right_vector, self.conv_tol)
