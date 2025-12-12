@@ -217,7 +217,7 @@ def test_ejk_ip1_kpts():
                       [[3, [1.1, 1.]],
                        [4, [2., 1.]]]),
                'C2': 'ccpvdz'},
-        precision = 1e-10,
+        precision = 1e-12,
         a=np.diag([2.5, 1.9, 2.2])*3)
 
     auxcell = cell.copy()
@@ -248,17 +248,16 @@ C    D
     mo_coeff = np.linalg.eigh(cell.pbc_intor('int1e_ovlp', kpts=kpts))[1]
     nao = cell.nao
     naux = auxcell.nao
-    nocc = 4
+    nocc = 8
     mo_occ = np.zeros((nkpts, nao))
     mo_occ[:,:nocc] = 2
-    dm = cp.einsum('kpi,kqi->kpq', mo_coeff[:,:,:nocc], mo_coeff[:,:,:nocc].conj()) * 2
+    dm = cp.einsum('kpi,ki,kqi->kpq', mo_coeff, mo_occ, mo_coeff.conj())
     opt = int3c2e.SRInt3c2eOpt_v2(cell, auxcell, omega, kmesh).build()
-    j_factor = 1
+    j_factor = 0
     k_factor = 1
     ejk = krhf._jk_energy_per_atom(opt, mo_coeff, mo_occ, kpts=kpts,
                                    j_factor=j_factor, k_factor=k_factor)
-    #assert abs(ejk.sum(axis=0)).max() < 1e-12
-    print(abs(ejk.sum(axis=0)).max())
+    assert abs(ejk.sum(axis=0)).max() < 1e-12
 
     disp = 1e-3
     atom_coords = cell.atom_coords().copy()
@@ -274,7 +273,6 @@ C    D
         ref = cp.einsum('p,pq,q->', jaux, cp.linalg.inv(j2c[0]), jaux).real.get()
         ref *= .5 / nkpts**2 * j_factor
 
-        j3c = cp.zeros((nkpts, nkpts, nkpts, nao, nao, naux), dtype=np.complex128)
         kk_conserv = krhf.double_translation_indices(kmesh)
         ek = 0
         for ki in range(nkpts):
@@ -291,5 +289,4 @@ C    D
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
-        print((e1 - e2)/(2*disp), ejk[i,x])
-        #assert abs((e1 - e2)/(2*disp)- ej[i,x]) < 5e-6
+        assert abs((e1 - e2)/(2*disp)- ej[i,x]) < 5e-6
