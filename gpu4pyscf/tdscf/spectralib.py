@@ -130,17 +130,17 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_
 
     rotatory_strength = ECD_SCALING_FACTOR * cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
 
+    
+    entry = [eV, nm, cm_1, fosc, rotatory_strength]
+    data = cp.zeros((eV.shape[0],len(entry)))
+    for i in range(len(entry)):
+        data[:,i] = entry[i]
+    log.info('================================================')
+    log.info('#eV       nm      cm^-1    fosc            R')
+    for row in range(data.shape[0]):
+        log.info(f'{data[row,0]:<8.3f} {data[row,1]:<8.0f} {data[row,2]:<8.0f} {data[row,3]:<15.8f} {data[row,4]:8.8f}')
+
     if spectra:
-        entry = [eV, nm, cm_1, fosc, rotatory_strength]
-        data = cp.zeros((eV.shape[0],len(entry)))
-        for i in range(len(entry)):
-            data[:,i] = entry[i]
-        log.info('================================================')
-        log.info('#eV       nm      cm^-1    fosc            R')
-        for row in range(data.shape[0]):
-            log.info(f'{data[row,0]:<8.3f} {data[row,1]:<8.0f} {data[row,2]:<8.0f} {data[row,3]:<15.8f} {data[row,4]:8.8f}')
-
-
         filename = name + '_eV_os_Multiwfn.txt'
         with open(filename, 'w') as f:
             cp.savetxt(f, data[:,(0,3)], fmt='%.5f', header=f'{len(energies)} 1', comments='')
